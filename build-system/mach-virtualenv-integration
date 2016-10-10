@@ -1,0 +1,247 @@
+# HG changeset patch
+# Parent 2360c3c46aca97f1a8f1b91b7260d8c3e1024288
+# User Gregory Szorc <gps@mozilla.com>
+Bug 794506 - Integrate mach with virtualenv; provide shell integration
+
+mach now automatically populates the virtualenv on invocation and
+activates the virtualenv into the current process.
+
+mach also now provides an 'activate' command whose output can be
+evaluated in the current shell. The side-effect of this is that mach can
+be executed from any directory and that the Python virtualenv
+environment is installed on PATH.
+
+diff --git a/activate.sh b/activate.sh
+new file mode 100644
+--- /dev/null
++++ b/activate.sh
+@@ -0,0 +1,68 @@
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++deactivate () {
++  if [ -n "$MOZBUILD_OLD_PATH" ]; then
++    PATH="$MOZBUILD_OLD_PATH"
++    export PATH
++  fi
++
++  # Forget past commands.
++  if [ -n "$BASH" -o -n "$ZSH_VERSION"]; then
++    hash -r 2> /dev/null
++  fi
++
++  unset MOZBUILD_OLD_PATH
++  unset MOZBUILD_ACTIVATED
++  unset -f deactivate
++
++  echo "Your shell environment has been restored to its previous state."
++}
++
++topsrcdir=`pwd`
++
++MOZBUILD_OLD_PATH="$PATH"
++export MOZBUILD_OLD_PATH
++
++# Ensure mach is on the path.
++PATH="$topsrcdir:$PATH"
++export PATH
++
++MOZBUILD_ACTIVATED=1
++export MOZBUILD_ACTIVATED
++
++source {deactivate_script}
++
++echo "Build environment activated. Restore old environment when finished with:"
++echo ""
++echo "  \$ deactivate"
++echo ""
++
++
++
+++    @Command('activate',
+++        help='Generate a shell script used to activate a build environment.')
+++    def activate(self):
+++        if 'MOZBUILD_ACTIVATED' in os.environ:
+++            sys.stderr.write('Environment already activated. Cannot activate ')
+++            sys.stderr.write('twice.\n')
+++            return 1
+++
+++        manager = self.virtualenv_manager
+++        python_path = os.path.dirname(manager.python_path)
+++
+++        shell_env = os.environ.get('SHELL', '/bin/sh')
+++        shell = os.path.basename(shell_env)
+++
+++        if shell in ('sh', 'bash'):
+++            deactivate_script = os.path.join(self.topsrcdir, 'python',
+++                'mozbuild', 'deactivate.sh')
+++
+++            print(ACTIVATE_SH.format(deactivate_script=deactivate_script,
+++                topsrcdir=self.topsrcdir, python_path=python_path))
+++
+++            return 0
+++
+++        print('Do not know how to handle your shell: %s' % shell_env)
+++        return 1
+diff --git a/mach b/mach
+old mode 100755
+new mode 100644
+--- a/mach
++++ b/mach
+@@ -12,55 +12,134 @@
+ # Ensure we are running Python 2.7+. We put this check here so we generate a
+ # user-friendly error message rather than a cryptic stack trace on module
+ # import.
+ if sys.version_info[0] != 2 or sys.version_info[1] < 7:
+     print('Python 2.7 or above (but not Python 3) is required to run mach.')
+     print('You are running Python', platform.python_version())
+     sys.exit(1)
+ 
+-# TODO Bug 794506 Integrate with the in-tree virtualenv configuration.
+-SEARCH_PATHS = [
+-    'python/mach',
+-    'python/mozboot',
+-    'python/mozbuild',
+-    'build',
+-    'build/pymake',
+-    'python/blessings',
+-    'python/psutil',
+-    'python/which',
+-    'other-licenses/ply',
+-    'xpcom/idl-parser',
+-    'testing',
+-    'testing/xpcshell',
+-    'testing/mozbase/mozprocess',
+-    'testing/mozbase/mozfile',
+-    'testing/mozbase/mozinfo',
+-]
+-
+ # Individual files providing mach commands.
+ MACH_MODULES = [
+     'addon-sdk/mach_commands.py',
+     'layout/tools/reftest/mach_commands.py',
+     'python/mozboot/mozboot/mach_commands.py',
+     'python/mozbuild/mozbuild/config.py',
++    'python/mozbuild/mozbuild/frontend/mach_commands.py',
+     'python/mozbuild/mozbuild/mach_commands.py',
+-    'python/mozbuild/mozbuild/frontend/mach_commands.py',
+     'testing/mochitest/mach_commands.py',
+     'testing/xpcshell/mach_commands.py',
+ ]
+ 
++ACTIVATE_HELP = '''
++Consider activating your shell with a mach environment:
++
++    $ eval `./mach activate`
++
++This will allow you to run mach from any directory. It will also install the
++tree's Python environment on your PATH so you can run Python like the build
++system does.
++'''.lstrip()
++
+ our_dir = os.path.dirname(os.path.abspath(__file__))
+ 
++# If we're already in the virtualenv (i.e. sys.executable is the one from the
++# virtualenv) this should just work.
+ try:
+     import mach.main
+ except ImportError:
+-    sys.path[0:0] = [os.path.join(our_dir, path) for path in SEARCH_PATHS]
++    # We were likely invoked using the system Python executable. We need to
++    # bootstrap our Python environment.
++    #
++    # We do this by creating and/or populating a virtualenv and then activating
++    # the virtualenv for the current Python interpreter.
++    #
++    # Before we do any of this, we need to figure out where to put the
++    # virtualenv. Since the virtualenv is part of the objdir, we need to find
++    # out where our objdir is. Fortunately, we have a Python API for that. So,
++    # let's import that Python API and figure out the objdir.
++    #
++    # We could theoretically not share virtualenvs between the object
++    # directory. e.g. we could have a ./.mach/virtualenv or even
++    # ~/.mach/virtualenv. This would certainly make the code here simpler
++    # because we wouldn't need to detect the objdir location. But, it would
++    # introduce an identical virtualenv instance. Perhaps once mach is the only
++    # driver to the build system or once mach's settings file matures, we can
++    # look into changing this (possibly even by pushing virtualenv management
++    # into the mach core itself).
++    old_syspath = [p for p in sys.path]
++
++    # It would be nice if "get the objdir" didn't require so many modules...
++    MINIMUM_PATHS = [
++        'build/pymake',
++        'python/mach',
++        'python/mozbuild',
++        'python/which',
++        'testing/mozbase/mozinfo',
++        'testing/mozbase/mozprocess',
++    ]
++
++    sys.path[0:0] = [os.path.join(our_dir, p) for p in MINIMUM_PATHS]
++    import mozbuild.base
++
++    base_obj = mozbuild.base.MozbuildObject(our_dir, None, None)
++    topobjdir = base_obj.topobjdir
++    del base_obj
++
++    sys.path = [p for p in old_syspath]
++
++    # We could potentially clean up sys.modules as well, but it should be
++    # harmless as long as everything in MINIMUM_PATHS is using .pth files.
++
++    # OK, now we have our objdir. So, we can hook up the virtualenv.
++    virtualenv_path = os.path.join(topobjdir, '_virtualenv')
++    populate_path = os.path.join(our_dir, 'build', 'virtualenv',
++        'populate_virtualenv.py')
++
++    # Instead of wasting a new process to populate the virtualenv, we just
++    # call the script as a native Python API.
++    import imp
++    mod = imp.load_source('mozvenv', populate_path)
++    sys.modules['mozvenv'] = mod
++
++    # We buffer the output by default because it shouldn't be relevant.
++    # We need an actual file object with a fileno() because it is passed into
++    # a child process. The easiest universal way is a temporary file.
++    import tempfile
++    tf = tempfile.TemporaryFile(mode='rw+b')
++
++    try:
++        manager = mod.VirtualenvManager(our_dir, virtualenv_path, tf)
++        manager.ensure()
++    except Exception as e:
++        tf.seek(0)
++        print(tf.read())
++
++        import traceback
++        traceback.print_exc()
++
++        sys.exit(1)
++
++    if 'MACH_VERBOSE' in os.environ:
++        tf.seek(0)
++        output = tf.read()
++        if len(output):
++            sys.stderr.write('Virtualenv population output:\n')
++            sys.stderr.write(output)
++
++    tf.close()
++
++    # Once we do this, it's as if we invoked this script with the python
++    # executable in the virtualenv.
++    manager.activate()
+ 
+     import mach.main
+ 
++    if len(sys.argv) > 1 and sys.argv[1] not in ('activate', 'help'):
++        sys.stderr.write(ACTIVATE_HELP)
++
+ # All of the code is in a module because EVERYTHING IS A LIBRARY.
+ mach = mach.main.Mach(our_dir)
+ 
+ for path in MACH_MODULES:
+     mach.load_commands_from_file(os.path.join(our_dir, path))
+ 
+ sys.exit(mach.run(sys.argv[1:]))

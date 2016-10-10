@@ -1,0 +1,3335 @@
+# HG changeset patch
+# Parent d9b09165917bd77662a48f13409d9d587abcd9c9
+# User Gregory Szorc <gps@mozilla.com>
+Bug XXXXXX - Repositories API
+
+diff --git a/services/sync/Makefile.in b/services/sync/Makefile.in
+--- a/services/sync/Makefile.in
++++ b/services/sync/Makefile.in
+@@ -30,20 +30,22 @@
+   engines.js \
+   identity.js \
+   jpakeclient.js \
+   keys.js \
+   main.js \
+   notifications.js \
+   policies.js \
+   record.js \
++  repository.js \
+   resource.js \
+   rest.js \
+   service.js \
+   status.js \
++  synchronizer.js \
+   util.js \
+   $(NULL)
+ 
+ # The set of JavaScript modules provide engines for Sync. These are
+ # copied as-is.
+ sync_engine_modules := \
+   addons.js \
+   apps.js \
+@@ -51,16 +53,20 @@
+   clients.js \
+   forms.js \
+   history.js \
+   passwords.js \
+   prefs.js \
+   tabs.js \
+   $(NULL)
+ 
++sync_testing_modules := \
++  repository.js \
++  $(NULL)
++
+ DIRS += locales
+ TEST_DIRS += tests
+ 
+ EXTRA_COMPONENTS := \
+   SyncComponents.manifest \
+   Weave.js \
+   $(NULL)
+ 
+@@ -70,9 +76,12 @@
+ SYNC_MAIN_FILES := $(addprefix modules/,$(sync_modules))
+ SYNC_MAIN_DEST = $(FINAL_TARGET)/modules/services-sync
+ INSTALL_TARGETS += SYNC_MAIN
+ 
+ SYNC_ENGINES_FILES := $(addprefix modules/engines/,$(sync_engine_modules))
+ SYNC_ENGINES_DEST = $(FINAL_TARGET)/modules/services-sync/engines
+ INSTALL_TARGETS += SYNC_ENGINES
+ 
++TESTING_JS_MODULE_DIR := services-sync
++TESTING_JS_MODULES := $(addprefix testing-modules/, $(sync_testing_modules))
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/services/sync/modules/repository.js b/services/sync/modules/repository.js
+new file mode 100644
+--- /dev/null
++++ b/services/sync/modules/repository.js
+@@ -0,0 +1,849 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++const EXPORTED_SYMBOLS = [
++  "Repository",
++  "RepositorySession",
++  "TrackingSession",
++  "Server11Repository",
++  "Crypto5Middleware",
++];
++
++const {utils: Cu} = Components;
++
++Cu.import("resource://services-common/log4moz.js");
++Cu.import("resource://services-common/utils.js");
++Cu.import("resource://services-sync/rest.js");
++Cu.import("resource://services-sync/util.js");
++
++const DONE = {toString: function() { return "<DONE>"; }};
++
++/**
++ * Repository abstract base type.
++ *
++ * A repository is an entity that contains syncable information.
++ */
++function Repository() {
++  this._log = Log4Moz.repository.getLogger(this._logName);
++  this._log.level = Log4Moz.Level[Svc.Prefs.get(this._logLevel)];
++}
++Repository.prototype = {
++  _logLevel: "log.logger.repository",
++  _logName: "Sync.Repository",
++
++  /**
++   * Values to pass to and from callbacks.
++   */
++  DONE: DONE,
++
++  /**
++   * Create a new session object.
++   *
++   * @param storeCallback
++   *        Callback with the signature (error). It may be called multiple
++   *        times with error objects. It will be always called with the DONE
++   *        value when the store operation has been completed.
++   *        storeCallback should call session.abort() to signal that the fetch
++   *        should be aborted.
++   *        @param error
++   *               One of two values: DONE, or an error object.
++   *               `error.guids` is an array of GUIDs of records that couldn't
++   *               be stored.
++   *               `error.info` describes the error, e.g. an exception.
++   *
++   * @param sessionCallback
++   *        Callback with the signature (error, session). Invoked once a
++   *        session object has been instantiated.
++   *        Session will be an object which implements the RepositorySession
++   *        interface.
++   *
++   * @return nothing: see `sessionCallback`.
++   */
++  createSession: function createSession(storeCallback, sessionCallback) {
++    throw new Error("Repository must implement 'createSession'");
++  },
++};
++
++/**
++ * A session for working with a `Repository`.
++ *
++ * A session provides an interface for inspecting and manipulating the content
++ * of a `Repository`. They are used by `Synchronizer` instances to perform the
++ * low-level functionality requires to synchronize two `Repository` instances.
++ *
++ * Only one session should be opened for each `Repository` at one time.
++ *
++ * @param repository
++ *        (Repository) The repository we belong to.
++ *
++ * @param storeCallback
++ *        (function) See the constructor for `Repository`.
++ */
++function RepositorySession(repository, storeCallback) {
++  this.repository = repository;
++  this.storeCallback = storeCallback;
++
++  this._log = Log4Moz.repository.getLogger(this._logName);
++  this._log.level = Log4Moz.Level[Svc.Prefs.get(this._logLevel)];
++}
++RepositorySession.prototype = {
++  _logLevel: "log.logger.repositorysession",
++  _logName: "Sync.RepositorySession",
++
++  /**
++   * Has abort() been called on this session?
++   */
++  aborted: false,
++
++  /**
++   * Invoked as part of store().
++   */
++  storeCallback: null,
++
++  /**
++   * Used for tracking changes. The timestamp can be set with an initial value,
++   * and will be reported in the finish callback.
++   */
++  timestamp: 0,
++
++  /**
++   * Used to persist tracking data between sessions.
++   *
++   * The bundle is included in the finish callback.
++   */
++  unbundle: function unbundle(bundle) {
++  },
++
++  /**
++   * Retrieve a sequence of GUIDs corresponding to records that have been
++   * modified since timestamp. The callback is invoked exactly once.
++   *
++   * @param timestamp
++   *        Number of seconds since the epoch (can be a decimal number).
++   * @param guidsCallback
++   *        Callback function with the signature (error, guids_array).
++   *        @param error is null for a successful operation.
++   */
++  guidsSince: function guidsSince(timestamp, guidsCallback) {
++    throw new Error("RepositorySession must implement 'guidsSince'");
++  },
++
++  /**
++   * Interface expected to be used by fetchCallback and storeCallback.
++   * Invoking this method will make an effort to abort the current fetch.
++   *
++   * An aborted session does not cause further callbacks to be invoked.
++   */
++  abort: function abort() {
++    this.aborted = true;
++  },
++
++  /**
++   * Retrieve a sequence of records that have been modified since timestamp.
++   * Invoke the callback once for each retrieved record, then finally with
++   * the DONE value.
++   *
++   * @param timestamp
++   *        Number of seconds since the epoch (can be a decimal number).
++   * @param fetchCallback
++   *        Callback function with the signature (error, record).
++   *        fetchCallback should call session.abort() to signal that the fetch
++   *        should be aborted.
++   *        @param error is null for a successful operation.
++   *        @param record will be the DONE value on the last invocation.
++   */
++  fetchSince: function fetchSince(timestamp, fetchCallback) {
++    throw new Error("RepositorySession must implement 'fetchSince'");
++  },
++
++  /**
++   * Retrieve a sequence of records by GUID. guids should be an iterable.
++   * Invoke the callback once for each retrieved record, then finally with
++   * the DONE value.
++   *
++   * @param guids
++   *        Array of GUIDs to retrieve.
++   * @param fetchCallback
++   *        Callback function with the signature (error, record).
++   *        fetchCallback should call session.abort() to signal that the fetch
++   *        should be aborted.
++   *        @param error is null for a succcessful operation.
++   *        @param record will be the DONE value on the last invocation.
++   */
++  fetch: function fetch(guids, fetchCallback) {
++    throw new Error("RepositorySession must implement 'fetch'");
++  },
++
++  /**
++   * Store an individual record in such a way that it won't be unnecessarily
++   * returned by a fetch operation.
++   *
++   * Implementations may choose to flush records to the data store in batches.
++   * Callers must therefore call store with the DONE value after the last item.
++   *
++   * @param record
++   *        A record to store, or the value DONE.
++   */
++  store: function store(record) {
++    throw new Error("RepositorySession must implement 'store'");
++  },
++
++  /**
++   * Delete all items stored in the repository.
++   *
++   * @param wipeCallback
++   *        Callback function with the signature (error).
++   *        @param error is null for a successful operation.
++   */
++  wipe: function wipe(wipeCallback) {
++    throw new Error("RepositorySession must implement 'wipe'");
++  },
++
++  /**
++   * Perform any necessary startup, such as initializing timestamps, that must
++   * occur before fetching.
++   *
++   * begin is separate from the constructor to allow for delayed
++   * initialization.
++   */
++  begin: function begin(callback) {
++    callback();
++  },
++
++  /**
++   * Perform any necessary cleanup, invoking callback when it's safe to
++   * proceed.
++   * The callback is invoked with the session timestamp and a 'bundle' object,
++   * which can be used for persisting tracking data between sessions.
++   */
++  finish: function finish(callback) {
++    callback({timestamp: this.timestamp});
++  },
++};
++
++//TODO question:
++// how do we deal with http failures, like 400 (e.g. over quota), 401, 503, etc?
++// probably best to decouple them from the synchronizer and notify the service
++// or engine via observer notification directly from SyncStorageRequest.
++// synchronizer probably only needs to know that it failed, not why.
++
++/**
++ * Sync 1.1 server repository
++ *
++ * Retrieves from and stores to a collection on an HTTP server that implements
++ * the Sync 1.1 API.
++ *
++ * @param serverURI
++ *        URI of the Sync 1.1 server (string)
++ * @param username
++ *        Username on the server (string)
++ * @param collection
++ *        Name of the collection (string)
++ */
++function Server11Repository(serverURI, username, collection) {
++  Repository.call(this);
++
++  if (serverURI[serverURI.length - 1] != "/") {
++    serverURI += "/";
++  }
++  this.uri = serverURI + "1.1/" + username + "/storage/" + collection;
++}
++Server11Repository.prototype = {
++
++  __proto__: Repository.prototype,
++
++  /**
++   * The complete URI (string) of the repository
++   */
++  uri: null,
++
++  /**
++   * TODO implement + document this
++   */
++  downloadLimit: null,
++
++  createSession: function createSession(storeCallback, sessionCallback) {
++    let session = new Server11Session(this, storeCallback);
++    sessionCallback(null, session);
++  },
++};
++
++/**
++ * N.B., Server11Session does not currently implement the necessary
++ * transactionality to be the second pair in a sync exchange: that is, if
++ * stores are performed prior to reads, the reads will include records added by
++ * the store operation.
++ *
++ * TODO: change this?
++ * TODO: update Server11Session to track timestamps for records passing through.
++ */
++function Server11Session(repository, storeCallback) {
++  RepositorySession.call(this, repository, storeCallback);
++
++  this.batch         = [];   // Holds items until we have enough for a batch.
++  this.flushQueue    = [];   // Holds completed batches to be flushed.
++}
++Server11Session.prototype = {
++  __proto__: RepositorySession.prototype,
++  _logName: "Sync.Server11Session",
++
++  batch:         null,
++  flushQueue:    null,
++
++  /**
++   * Flushing control.
++   */
++  done: false,
++  flushing: 0,
++
++  /**
++   * Aborting control.
++   */
++  request: null,
++
++  /**
++   * Upload batch size.
++   */
++  batchSize: 100,
++
++  /**
++   * Session API.
++   */
++  guidsSince: function guidsSince(timestamp, guidsCallback) {
++    let request = new SyncStorageRequest(this.repository.uri + "?newer=" + timestamp);
++    request.get(function (error) {
++      // Network error of sorts.
++      if (error) {
++        guidsCallback(error);
++        return;
++      }
++
++      // HTTP error (could be a mis-configured server, wrong password, etc.)
++      let response = request.response;
++      if (response.status != 200) {
++        guidsCallback(response);
++        return;
++      }
++
++      // Convert the result to JSON. Invalid JSON is sadfaces.
++      let result;
++      try {
++        result = JSON.parse(response.body);
++      } catch (ex) {
++        guidsCallback(ex);
++        return;
++      }
++      guidsCallback(null, result);
++    });
++  },
++
++  /**
++   * TODO: this relies on onComplete being called on our behalf...
++   * is that correct?
++   */
++  abort: function abort() {
++    let r = this.request;
++    this.request = null;
++    if (r) {
++      this.aborted = true;
++      r.abort();
++    }
++  },
++
++  fetchSince: function fetchSince(timestamp, fetchCallback) {
++    let uri = this.repository.uri + "?full=1&newer=" + timestamp;
++    if (this.repository.downloadLimit) {
++      uri += "&limit=" + this.repository.downloadLimit + "&sort=index";
++    }
++    this._fetchRecords(uri, fetchCallback);
++  },
++
++  fetch: function fetch(guids, fetchCallback) {
++    let uri = this.repository.uri + "?full=1&ids=" + guids;
++    this._fetchRecords(uri, fetchCallback);
++  },
++
++  wipe: function wipe(wipeCallback) {
++    //TODO this doesn't deal HTTP errors correctly.
++    let request = new SyncStorageRequest(this.repository.uri);
++    request.delete(wipeCallback);
++  },
++
++  store: function store(record) {
++    // Ensure that we can't be finished more than once.
++    if (this.done) {
++      throw new Error("Store session already marked as DONE.");
++    }
++
++    if (record != DONE) {
++      this.batch.push(record);
++      if (this.rollBatch(false)) {
++        this.flush();
++      }
++      return;
++    }
++
++    this.done = true;
++    this.rollBatch(true);
++    this.flush();
++  },
++
++  /**
++   * Private stuff.
++   */
++
++  /**
++   * Perform a fetch and call fetchCallback appropriately.
++   */
++  _fetchRecords: function(uri, fetchCallback) {
++    let request = new SyncStorageRequest(uri);
++
++    // Track this so we can abort.
++    this.request = request;
++    request.setHeader("Accept", "application/newlines");
++
++    request.onProgress = function onProgress() {
++      let response = request.response;
++      if (!response.success) {
++        request.abort();
++        fetchCallback(response, DONE);
++        return;
++      }
++      let newline;
++
++      while (!this.aborted &&
++             (newline = response.body.indexOf("\n")) > 0) {
++        let json = response.body.slice(0, newline);
++        response.body = response.body.slice(newline + 1);
++        let error, record;
++        try {
++          record = JSON.parse(json);
++        } catch(ex) {
++          // Notify the caller of genuine parsing errors.
++          error = ex;
++        }
++        fetchCallback(error, record);
++      }
++    };
++
++    request.onComplete = function onComplete(error) {
++      let response = request.response;
++      // 'response.success' exposes nsIHttpChannel::requestSucceeded.
++      if (error || response.success) {
++        fetchCallback(error, DONE);
++      } else {
++        // We had an HTTP error, pass the HTTP response as the error.
++        fetchCallback(response, DONE);
++      }
++    };
++    request.get();
++  },
++
++  /**
++   * Work through the flush queue, flushing each batch. If an existing
++   * flush is in progress, return. Ensure that if `done` is true, the
++   * storeCallback is invoked once all items have been flushed.
++   *
++   * flush is invoked once per queued batch, and at least once (for DONE).
++   *
++   * Because store is specified to invoke the callback on error, rather than
++   * aborting, we can flush each batch either in parallel or serially.
++   */
++  flush: function flush() {
++    // Don't have more than one flush pending at once.
++    if (this.flushing) {
++      this._log.trace("Already flushing: returning.");
++      return;
++    }
++
++    this.flushing = true;
++
++    /**
++     * Ensure that storeCallback is called with DONE when all of our batch
++     * operations have completed, there are no more batches coming, and we've
++     * been signaled.
++     * This is safe to call repeatedly.
++     */
++    function finalmente() {
++      this._log.trace("finalmente: " + this.flushing + ", " + this.flushQueue.length);
++      this.flushing = false;
++
++      if (this.flushQueue.length) {
++        // There are outstanding batches, but nobody working on them. We should
++        // kick off a flush.
++        this._log.debug("Outstanding batches: scheduling flush.");
++        Utils.nextTick(this.flush, this);
++        return;
++      }
++      if (!this.done) {
++        // We're not done yet, but we have nothing left to work on. Return
++        // quietly; flush will be invoked again when the next batch arrives.
++        this._log.trace("Not done: awaiting more data.");
++        return;
++      }
++      if (!this.storeCallback) {
++        // Uh oh. We're done, but the callback is gone. That should only happen
++        // if we raced to the finish.
++        this._log.warn("No store callback in flush!");
++        return;
++      }
++
++      // Invoke the callback and prevent it being called again.
++      this.storeCallback(DONE);
++      this.storeCallback = null;
++    }
++    finalmente = finalmente.bind(this);
++
++    //TODO should factor this helper out instead of redefining it all the time.
++    function batchGUIDs(batch) {
++      return [record.id for each (record in batch)];
++    }
++
++    this._log.debug("Flush queue length: " + this.flushQueue.length);
++
++    // Finish up if we have an empty batch left.
++    if (!this.flushQueue.length) {
++      finalmente();
++      return;
++    }
++
++    let batch = this.flushQueue.pop();
++    let request;
++    try {
++      request = new SyncStorageRequest(this.repository.uri);
++    } catch (ex) {
++      this.storeCallback({info: ex, guids: batchGUIDs(batch)});
++      finalmente();
++      return;
++    }
++
++    request.post(batch, function onPost(error) {
++      // Network error of sorts.
++      if (error) {
++        this.storeCallback({info: error, guids: batchGUIDs(batch)});
++        return finalmente();
++      }
++
++      // HTTP error (could be a mis-configured server, over quota, etc.)
++      // 'result.success' exposes nsIHttpChannel::requestSucceeded.
++      if (!request.response.success) {
++        this.storeCallback({info: request.response, guids: batchGUIDs(batch)});
++        return finalmente();
++      }
++
++      // Analyze return value for whether some objects couldn't be saved.
++      let resultObj;
++      try {
++        resultObj = JSON.parse(request.response.body);
++      } catch (ex) {
++        this._log.warn("Caught JSON parse exception: " + Utils.exceptionStr(ex));
++        // Server return value did not parse as JSON. We must assume it's not
++        // a valid implementation.
++        this.storeCallback({info: ex, guids: batchGUIDs(batch)});
++        return finalmente();
++      }
++      let failedIDs = Object.keys(resultObj.failed);
++      if (failedIDs.length) {
++        this.storeCallback({info: resultObj, guids: resultObj.failedIDs});
++        return finalmente();
++      }
++
++      // TODO should we also process `resultObj.success` and verify it matches
++      // all items in our batch?
++
++      return finalmente();
++    }.bind(this));
++  },
++
++  /*
++   * Push the current batch into the queue for flushing, and
++   * set us up for more items.
++   * Returns true if a new batch was pushed.
++   */
++  rollBatch: function rollBatch(done) {
++    let batch = this.batch;
++    if (batch.length &&
++        (batch.length == this.batchSize ||
++         done)) {
++      this.batch = [];
++      this.flushQueue.push(batch);
++      this._log.trace("Rolled batch.");
++      return true;
++    }
++    this._log.trace("Not rolling batch.");
++    return false;
++  },
++};
++
++
++/**
++ * Wraps a server repository to implement storage version 5 crypto.
++ *
++ * Transforms a local record to a WBO.
++ */
++function Crypto5Middleware(repository, keyBundle) {
++  Repository.call(this);
++  this.repository = repository;
++  this.keyBundle = keyBundle;
++}
++Crypto5Middleware.prototype = {
++  __proto__: Repository.prototype,
++  _logLevel: "log.logger.crypto5middleware",
++  _logName: "Sync.Crypto5Middleware",
++
++  /**
++   * Repository API
++   */
++
++  createSession: function createSession(storeCallback, sessionCallback) {
++    let cb = function cb(err, session) {
++      if (err) {
++        return sessionCallback(err);
++      }
++      return sessionCallback(null, new Crypto5StoreSession(this, session));
++    }.bind(this);
++
++    this.repository.createSession(storeCallback, cb);
++  },
++
++  /**
++   * Crypto + storage format stuff
++   */
++
++  encrypt: function encrypt(record) {
++    // 'sortindex' and 'ttl' are properties on the outer WBO.
++    let sortindex = record.sortindex;
++    let ttl = record.ttl;
++    delete record.sortindex;
++    delete record.ttl;
++
++    let iv = Svc.Crypto.generateRandomIV();
++    let cleartext = JSON.stringify(record);
++    let ciphertext = Svc.Crypto.encrypt(cleartext,
++                                        this.keyBundle.encryptionKeyB64, iv);
++    let hmac = this.ciphertextHMAC(ciphertext);
++
++    let payload = {
++      IV:         iv,
++      ciphertext: ciphertext,
++      hmac:       hmac,
++    };
++
++    return {
++      id:        record.id,
++      sortindex: sortindex,
++      ttl:       ttl,
++      payload:   JSON.stringify(payload),
++    };
++  },
++
++  //XXX TODO this doesn't handle key refetches yet
++  decrypt: function decrypt(wbo) {
++    let payload = JSON.parse(wbo.payload);
++
++    // Authenticate the encrypted blob with the expected HMAC
++    let computedHMAC = this.ciphertextHMAC(payload.ciphertext);
++    if (computedHMAC != payload.hmac) {
++      Utils.throwHMACMismatch(payload.hmac, computedHMAC);
++    }
++
++    // Handle invalid data here. Elsewhere we assume that cleartext is an object.
++    let cleartext = Svc.Crypto.decrypt(payload.ciphertext,
++                                       this.keyBundle.encryptionKeyB64,
++                                       payload.IV);
++    let record = JSON.parse(cleartext);
++
++    // Verify that the outer WBO's id matches the inner record's id.
++    if (record.id != wbo.id) {
++      throw new Error("Record id mismatch: " + record.id + " != " + wbo.id);
++    }
++
++    // Copy outer WBO attributes to inner record.
++    record.modified = wbo.modified;
++    record.sortindex = wbo.sortindex;
++    record.ttl = wbo.ttl;
++    return record;
++  },
++
++  ciphertextHMAC: function ciphertextHMAC(ciphertext) {
++    let hasher = this.keyBundle.sha256HMACHasher;
++    if (!hasher) {
++      throw new Error("Cannot compute HMAC without an HMAC key.");
++    }
++    return CommonUtils.bytesAsHex(Utils.digestUTF8(ciphertext, hasher));
++  },
++};
++
++function Crypto5StoreSession(repository, innerSession) {
++  RepositorySession.call(this, repository);
++  this.session = innerSession;
++}
++Crypto5StoreSession.prototype = {
++  __proto__: RepositorySession.prototype,
++  _logName: "Sync.Crypto5Middleware",
++  _logLevel: "log.logger.crypto5middleware",
++
++  session: null,
++
++  guidsSince: function guidsSince(timestamp, guidsCallback) {
++    this.session.guidsSince(timestamp, guidsCallback);
++  },
++
++  fetchSince: function fetchSince(timestamp, fetchCallback) {
++    this.session.fetchSince(timestamp, this.makeDecryptCb(fetchCallback));
++  },
++
++  fetch: function fetch(guids, fetchCallback) {
++    this.session.fetch(guids, this.makeDecryptCb(fetchCallback));
++  },
++
++  store: function store(record) {
++    if (record == DONE) {
++      this.session.store(record);
++      return;
++    }
++
++    let wbo;
++    try {
++      wbo = this.repository.encrypt(record);
++    } catch (ex) {
++      //TODO this feels weird and somewhat inefficient.
++      this.storeCallback({exception: ex, guids: [record.id]});
++      return;
++    }
++    this.session.store(wbo);
++  },
++
++  wipe: function wipe(wipeCallback) {
++    this.session.wipe(wipeCallback);
++  },
++
++  begin: function begin(callback) {
++    this.session.begin(callback);
++  },
++
++  finish: function finish(callback) {
++    // Clean up GC hack.
++    if (this.repository.session == this) {
++      this.repository.session = undefined;
++    }
++    RepositorySession.prototype.finish.call(this, callback);
++  },
++
++  //XXX TODO this doesn't handle key refetches yet
++  // Idea: consumers should deal with this. If this passes an HMAC error back
++  // to them, and this was the first time they've encountered one, they can
++  // abort and then restart the fetch.
++  makeDecryptCb: function makeDecryptCb(fetchCallback) {
++    return (function decryptCallback(error, record) {
++      if (!error && record != DONE) {
++        try {
++          record = this.repository.decrypt(record);
++        } catch (ex) {
++          record = null;
++          error = ex;
++        }
++      }
++      return fetchCallback(error, record);
++    }).bind(this);
++  },
++};
++
++/**
++ * A partial repository session that provides tracking services to its
++ * subclasses. TrackingSession is not a complete session class; you cannot use
++ * it in isolation.
++ *
++ * TrackingSession implements `unbundle` and `finish` to persist a set of
++ * stored IDs. These are called for you by Synchronizer.
++ *
++ * Invoke `shouldSkip` to decide whether you should skip an item (e.g., in
++ * fetchSince).
++ *
++ * Invoke `trackStore` once you've stored an item that should be skipped in
++ * future.
++ *
++ * If you implement your own `finish` or `unbundle` methods, don't forget to
++ * call these!
++ */
++function TrackingSession(repository, storeCallback) {
++  RepositorySession.call(this, repository, storeCallback);
++
++  // Track stored GUIDs so we don't reupload.
++  this.stored = {};
++
++  // Track non-uploaded items so that we can later stop tracking them!
++  this.forgotten = {};
++
++}
++TrackingSession.prototype = {
++  __proto__: RepositorySession.prototype,
++
++  forgotten: null,
++  stored:    null,
++
++  /**
++   * Used for cross-session persistence. A bundle is returned in the finish
++   * callback.
++   */
++  unbundle: function unbundle(bundle) {
++    if (bundle && bundle.stored) {
++      this.stored = bundle.stored;
++    }
++  },
++
++  /**
++   * Decide whether to skip an outgoing item based on stored IDs.
++   * Also maintains the 'to forget' list.
++   * MAYBE:
++   * If the timestamp is earlier than our own, don't filter.
++   * timestamp >= this.timestamp &&
++   */
++  shouldSkip: function shouldSkip(guid, timestamp) {
++    if (guid in this.stored) {
++      // One we stored in this session. Skip it.
++      // N.B.: this ignores the possibility of records with times in the
++      // future that we might want to skip more than once! Is that something we
++      // care about?
++      this.forgotten[guid] = true;
++      return true;
++    }
++    return false;
++  },
++
++  /**
++   * Track that an item has been stored. This involves adding to the `stored`
++   * map, and removing the item from `forgotten` if necessary.
++   */
++  trackStore: function trackStore(guid, modified) {
++    this.stored[guid] = modified;
++
++    // We need to ensure that we don't forget records if we store/fetch/store.
++    // Remove from forgotten.
++    if (guid in this.forgotten) {
++      delete this.forgotten[guid];
++    }
++  },
++
++  /**
++   * Clean up. For TrackingSession, this involves removing forgotten items from
++   * `stored`, and invoking the callback with a bundle containing `stored`. The
++   * owner of the session should persist these between sessions.
++   */
++  finish: function finish(finish) {
++    // Forget the items that we've already skipped.
++    for (let [guid, forget] in Iterator(this.forgotten)) {
++      delete this.stored[guid];
++    }
++    delete this.forgotten;
++
++    let cb = function (bundle) {
++      bundle.stored = this.stored;
++      delete this.stored;
++      finish(bundle);
++    }.bind(this);
++
++    RepositorySession.prototype.finish.call(this, cb);
++  },
++};
+diff --git a/services/sync/modules/synchronizer.js b/services/sync/modules/synchronizer.js
+new file mode 100644
+--- /dev/null
++++ b/services/sync/modules/synchronizer.js
+@@ -0,0 +1,393 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++const {utils: Cu} = Components;
++
++Cu.import("resource://services-common/log4moz.js");
++Cu.import("resource://services-common/utils.js");
++Cu.import("resource://services-sync/repository.js");
++Cu.import("resource://services-sync/util.js");
++
++const EXPORTED_SYMBOLS = ["Synchronizer"];
++
++/**
++ * A SynchronizerSession exchanges data between two `RepositorySession`s.
++ * As with other kinds of session, this is a one-shot object.
++ *
++ * SynchronizerSession is an implementation detail of the Synchronizer. It is
++ * not a public class. Synchronizer interacts with SynchronizerSession through
++ * three callbacks:
++ *
++ *   - onInitialized, invoked when the session has been established after calling
++ *     'init';
++ *   - onSynchronized, invoked when synchronization has completed;
++ *   - onFetchError, invoked when a fetch failed (and accepts a return val);
++ *   - onStoreError, when storing an item failed;
++ *   - onSessionError, when beginning a RepositorySession failed.
++ *
++ * and two methods:
++ *
++ *   - init, which will ultimately cause onInitialized to be invoked;
++ *   - synchronize, which will result in onSynchronized being called.
++ *
++ * SynchronizerSession grabs a session for each of our repositories. Once both
++ * sessions are set up, we pair invocations of fetchSince and store callbacks,
++ * switching places once the first stream is done. Then we finish each session
++ * and invoke a callback.
++ *
++ * Example usage:
++ *
++ *   let session = new SynchronizerSession(synchronizer);
++ *   session.onInitialized = function (err) {
++ *     // Add error handling here.
++ *     session.synchronize();
++ *   };
++ *   session.onSynchronized = function (err) {
++ *     // Rock on!
++ *     callback(err);
++ *   };
++ *   session.init();
++ */
++function SynchronizerSession(synchronizer) {
++  this.synchronizer = synchronizer;
++
++  let level = Svc.Prefs.get("log.logger.synchronizer");
++  this._log = Log4Moz.repository.getLogger(this._logName);
++  this._log.level = Log4Moz.Level[level];
++}
++SynchronizerSession.prototype = {
++  _logName: "Sync.Synchronizer",
++
++  sessionA:     null,
++  sessionB:     null,
++  synchronizer: null,
++
++  //
++  // TODO: Need to persist all of these.
++  //
++  bundleA:     null,
++  bundleB:     null,
++
++  /**
++   * Synchronizer interface.
++   * Override these methods!
++   */
++
++  onInitialized: function onInitialized(error) {
++    throw new Error("Override onInitialized.");
++  },
++
++  onSynchronized: function onSynchronized(error) {
++    throw new Error("Override onSynchronized.");
++  },
++
++  /**
++   * Invoked when a fetch of a record has failed. The arguments are the same as
++   * for the callback on `RepositorySession.fetchSince`.
++   *
++   * Override this if you want to terminate fetching, or apply
++   * other recovery/etc. handling, when failure occurs.
++   */
++  onFetchError: function onFetchError(error, record) {
++    // E.g., session.abort();
++  },
++
++  /**
++   * Invoked when storage of a record has failed. This mirrors
++   * `RepositorySession.storeCallback`.
++   *
++   * storeCallback doesn't admit any kind of control flow, so only bother
++   * overriding this if you want to watch what's happening.
++   */
++  onStoreError: function onStoreError(error) {
++  },
++
++  /**
++   * Invoked when a RepositorySession could not be established.
++   */
++  onSessionError: function onSessionError(error) {
++  },
++
++  /**
++   * Initialize the two repository sessions, then invoke onInitialized.
++   * This is a public method.
++   */
++  init: function init() {
++    this.synchronizer
++        .repositoryA.createSession(this.storeCallbackA.bind(this),
++                                   this.sessionCallbackA.bind(this));
++  },
++
++  /**
++   * Creating a session invokes these two callbacks. We chain them to create
++   * both sessions.
++   */
++  sessionCallbackA: function sessionCallbackA(error, session) {
++    if (error) {
++      this.onInitialized(error);
++      return;
++    }
++    this.sessionA = session;
++    session.unbundle(this.bundleA);
++    this.synchronizer.repositoryB.createSession(this.storeCallbackB.bind(this),
++                                                this.sessionCallbackB.bind(this));
++  },
++
++  sessionCallbackB: function sessionCallbackB(error, session) {
++    if (error) {
++      return this.sessionA.finish(function onFinish() {
++        this.onInitialized(error);
++      }.bind(this));
++    }
++    this.sessionB = session;
++    session.unbundle(this.bundleB);
++    return this.onInitialized();
++  },
++
++  /**
++   * Assuming that two sessions have been initialized, sync, then clean up and
++   * invoke onSynchronized.
++   */
++  synchronize: function synchronize() {
++    this._log.trace("Fetching from A into B.");
++    let timestamp = this.synchronizer.bundleA.timestamp;
++    this.synchronizeSessions(this.sessionA, this.sessionB, timestamp);
++  },
++
++  /**
++   * Begin the `from` session, fetching records since `timestamp` into `to`.
++   * We use this method in each direction in turn: once in `synchronize`, and
++   * once in a callback that indicates that the first direction is done.
++   */
++  synchronizeSessions: function synchronizeSessions(from, to, timestamp) {
++    from.begin(function onBegin(err) {
++      if (err) {
++        // Hook for handling. No response channel yet.
++        this.onSessionError(err);
++        return;
++      }
++      from.fetchSince(timestamp, this.fetchCallback.bind(this, to));
++    }.bind(this));
++  },
++
++  /**
++   * Internal callback for fetched records. `bind` is used to curry the value
++   * of `session`, allowing us to use one callback for both directions.
++   */
++  fetchCallback: function fetchCallback(session, error, record) {
++    if (error) {
++      this._log.warn("Got error " + CommonUtils.exceptionStr(error) +
++                     " fetching. Invoking onFetchError for handling.");
++      // Return the handler value, which allows the caller to do useful things
++      // like abort.
++      return this.onFetchError(error, record);
++    }
++    session.store(record);
++    return null;
++  },
++
++  /**
++   * The two storeCallbacks are instrumental in switching sync direction and
++   * actually finishing the sync. This is where the magic happens: each
++   * callback is invoked when storing fails or completes, and so we can flip
++   * directions (for the first) and invoke the output callback (for the
++   * second).
++   */
++  storeCallbackB: function storeCallbackB(error) {
++    if (error != Repository.prototype.DONE) {
++      // Hook for handling. No response channel yet.
++      this.onStoreError(error);
++      return;
++    }
++    this._log.trace("Done with records in storeCallbackB.");
++    this._log.trace("Fetching from B into A.");
++
++    // On to the next!
++    let timestamp = this.synchronizer.bundleB.timestamp;
++    this.synchronizeSessions(this.sessionB, this.sessionA, timestamp);
++  },
++
++  storeCallbackA: function storeCallbackA(error) {
++    this._log.debug("In storeCallbackA().");
++    if (error != Repository.prototype.DONE) {
++      this.onStoreError(error);
++      return;
++    }
++    this._log.trace("Done with records in storeCallbackA.");
++    this.finishSync();
++  },
++
++  /**
++   * Dispose of both sessions and invoke onSynchronized.
++   */
++  finishSync: function finishSync() {
++    this.sessionA.finish(function (bundle) {
++      this.bundleA = bundle;
++      this.sessionB.finish(function (bundle) {
++        this.bundleB = bundle;
++        // Finally invoke the output callback.
++        this.onSynchronized(null);
++      }.bind(this));
++    }.bind(this));
++  },
++};
++
++/**
++ * A Synchronizer exchanges data between two Repositories.
++ *
++ * It tracks whatever information is necessary to reify the syncing
++ * relationship between these two sources/sinks: e.g., last sync time.
++ *
++ * The synchronizer must keep track of the set of IDs that have been stored and
++ * not modified since the session last fetched new records. That is, a record
++ * which has been received from another source should not be re-uploaded to
++ * that source, regardless of timestamp, unless it is changed locally.
++ *
++ * This is to avoid endless uploads of the same record from repository to
++ * repository. It seems fragile to rely on reconciliation and not modifying
++ * timestamps to eliminate a loop.
++ *
++ * There are two situations in which this might occur:
++ *
++ * * In store-first-fetch-second, this could occur inside the same session.
++ * * In fetch-first-store-second, this could occur in a subsequent session.
++ *
++ * Note that one-session memory is not enough: a fetch could easily be aborted
++ * before the new item has been reached, leaving it open for re-upload later.
++ *
++ * This tracking is obviously specific to a synchronizer, not to the
++ * repository, but it is calculated by the session itself, because the set of
++ * tracked IDs for a given sequence of stores depends on the process of
++ * reconciliation.
++ *
++ * - On store, track the ID.
++ * - On fetch, skip items that have been stored.
++ * - TODO: If a subsequent fetch predates our stored timestamp, do not skip records.
++ * - When an item is modified locally, remove it from the tracker.
++ */
++
++function Synchronizer() {
++  let level = Svc.Prefs.get(this._logLevel);
++  this._log = Log4Moz.repository.getLogger(this._logName);
++  this._log.level = Log4Moz.Level[level];
++}
++Synchronizer.prototype = {
++  _logLevel: "log.logger.synchronizer",
++  _logName: "Sync.Synchronizer",
++
++  /**
++   * Keep track of timestamps and other metadata.
++   * TODO: These need to be persisted.
++   */
++  bundleA: {timestamp: 0},
++  bundleB: {timestamp: 0},
++
++  /**
++   * Repositories to sync.
++   *
++   * The synchronizer will first sync from A to B and then from B to A.
++   */
++  repositoryA: null,
++  repositoryB: null,
++
++  /**
++   * Do the stuff to the thing.
++   */
++  synchronize: function synchronize(callback) {
++    this._log.trace("Entering Synchronizer.synchronize().");
++
++    let session = new SynchronizerSession(this);
++    session.onSessionError = function onSessionError(error) {
++      this._log.warn("Error in SynchronizerSession: " +
++                     CommonUtils.exceptionStr(error));
++      return callback(error);
++    };
++    session.onInitialized = function onInitialized(error) {
++      // Invoked with session as `this`.
++      if (error) {
++        this._log.warn("Error initializing SynchronizerSession: " +
++                       CommonUtils.exceptionStr(error));
++        return callback(error);
++      }
++      return session.synchronize();
++    };
++    session.onSynchronized = function onSynchronized(error) {
++      // Invoked with session as `this`.
++      if (error) {
++        this._log.warn("Error during synchronization: " +
++                       CommonUtils.exceptionStr(error));
++        return callback(error);
++      }
++      // Copy across the bundles from within the session.
++      session.synchronizer.bundleA = session.bundleA;
++      session.synchronizer.bundleB = session.bundleB;
++      return callback();
++    };
++    session.init();
++  },
++
++  /**
++   * Synchronize. This method blocks execution of the caller. It is deprecated
++   * and solely kept for backward-compatibility.
++   */
++  sync: function sync() {
++    Async.callSpinningly(this, this.synchronize);
++  }
++};
++
++
++/**
++ * Synchronize a Firefox engine to a Server11Collection.
++ *
++ * N.B., this class layers two accessors -- local and remote -- on top of the
++ * undiscriminated pair of repositories exposed by Synchronizer.
++ */
++function EngineCollectionSynchronizer(name, local, remote) {
++  Synchronizer.call(this);
++
++  this.Name = name;
++  this.name = name.toLowerCase();
++  this.repositoryA = local;
++  this.repositoryB = remote;
++}
++EngineCollectionSynchronizer.prototype = {
++  __proto__: Synchronizer.prototype,
++
++  /**
++   * Convention.
++   */
++  get localRepository() {
++    return this.repositoryA;
++  },
++
++  get serverRepository() {
++    return this.repositoryB;
++  },
++
++  /**
++   * lastSync is a timestamp in server time.
++   */
++  get lastSync() {
++    return parseFloat(Svc.Prefs.get(this.name + ".lastSync", "0"));
++  },
++
++  set lastSync(value) {
++    // Reset the pref in-case it's a number instead of a string
++    Svc.Prefs.reset(this.name + ".lastSync");
++    // Store the value as a string to keep floating point precision
++    Svc.Prefs.set(this.name + ".lastSync", value.toString());
++  },
++
++  /**
++   * lastSyncLocal is a timestamp in local time.
++   */
++  get lastSyncLocal() {
++    return parseInt(Svc.Prefs.get(this.name + ".lastSyncLocal", "0"), 10);
++  },
++
++  set lastSyncLocal(value) {
++    // Store as a string because pref can only store C longs as numbers.
++    Svc.Prefs.set(this.name + ".lastSyncLocal", value.toString());
++  },
++};
+diff --git a/services/sync/services-sync.js b/services/sync/services-sync.js
+--- a/services/sync/services-sync.js
++++ b/services/sync/services-sync.js
+@@ -51,22 +51,26 @@
+ pref("services.sync.log.appender.dump", "Error");
+ pref("services.sync.log.appender.file.level", "Trace");
+ pref("services.sync.log.appender.file.logOnError", true);
+ pref("services.sync.log.appender.file.logOnSuccess", false);
+ pref("services.sync.log.appender.file.maxErrorAge", 864000); // 10 days
+ pref("services.sync.log.rootLogger", "Debug");
+ pref("services.sync.log.logger.addonutils", "Debug");
+ pref("services.sync.log.logger.service.main", "Debug");
++pref("services.sync.log.logger.globalsession", "Debug");
+ pref("services.sync.log.logger.status", "Debug");
+ pref("services.sync.log.logger.authenticator", "Debug");
+ pref("services.sync.log.logger.network.resources", "Debug");
+ pref("services.sync.log.logger.service.jpakeclient", "Debug");
+ pref("services.sync.log.logger.engine.bookmarks", "Debug");
+ pref("services.sync.log.logger.engine.clients", "Debug");
+ pref("services.sync.log.logger.engine.forms", "Debug");
+ pref("services.sync.log.logger.engine.history", "Debug");
+ pref("services.sync.log.logger.engine.passwords", "Debug");
+ pref("services.sync.log.logger.engine.prefs", "Debug");
+ pref("services.sync.log.logger.engine.tabs", "Debug");
+ pref("services.sync.log.logger.engine.addons", "Debug");
+ pref("services.sync.log.logger.engine.apps", "Debug");
++pref("services.sync.log.logger.repositorysession", "Debug");
++pref("services.sync.log.logger.crypto5middleware", "Debug");
++pref("services.sync.log.logger.test.wborepositorysession", "Debug");
+ pref("services.sync.log.cryptoDebug", false);
+diff --git a/services/sync/testing-modules/repository.js b/services/sync/testing-modules/repository.js
+new file mode 100644
+--- /dev/null
++++ b/services/sync/testing-modules/repository.js
+@@ -0,0 +1,181 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++const EXPORTED_SYMBOLS = [
++  "WBORepository",
++  "WBORepositorySession",
++  "FailingSessionWBORepositorySession",
++  "FailingStoreWBORepositorySession",
++];
++
++const {utils: Cu} = Components;
++
++Cu.import("resource://services-sync/repository.js");
++Cu.import("resource://services-sync/util.js");
++Cu.import("resource://testing-common/services-common/utils.js");
++
++/**
++ * A repository based on a simple map of GUID -> WBO.
++ */
++function WBORepository(wbos) {
++  this.wbos = wbos || {};
++  Repository.call(this);
++}
++WBORepository.prototype = {
++  __proto__: Repository.prototype,
++  _logName: "Sync.WBORepository",
++
++  /**
++   * Constructor. This allows you to control which Session class is
++   * instantiated by createSession.
++   */
++  _sessionConstructor: WBORepositorySession,
++
++  /**
++   * Repository API.
++   */
++  createSession: function createSession(storeCallback, sessionCallback) {
++    sessionCallback(null, new (this._sessionConstructor)(this, storeCallback));
++  },
++
++  /**
++   * Helpers.
++   */
++  get count() {
++    return Object.keys(this.wbos).length;
++  }
++};
++
++function WBORepositorySession(repository, storeCallback) {
++  TrackingSession.call(this, repository, storeCallback);
++
++  // Equivalent to modifying lastSyncLocal in Engine._syncStartup.
++  // This starts out as the time of the sync.
++  this._log.debug("WBORepositorySession timestamp: " + this.timestamp);
++}
++WBORepositorySession.prototype = {
++  __proto__: TrackingSession.prototype,
++  _logLevel: "log.logger.test.wborepositorysession",
++  _logName: "Sync.WBORepositorySession",
++
++  toString: function toString() {
++    return "<Session for " + this.repository + ">";
++  },
++
++  guidsSince: function guidsSince(timestamp, guidsCallback) {
++    let guids = [guid for ([guid, wbo] in Iterator(this.repository.wbos))
++                      if (wbo.modified >= timestamp &&
++                          !this.shouldSkip(guid, timestamp))];
++    guidsCallback(null, guids);
++  },
++
++  abort: function abort() {
++    this._log.debug("Called abort on WBORepositorySession.");
++    this.aborted = true;
++  },
++
++  fetchSince: function fetchSince(timestamp, fetchCallback) {
++    for (let [guid, wbo] in Iterator(this.repository.wbos)) {
++      if (this.aborted) {
++        return;
++      }
++
++      // >= covers the case of an immediate store within the same millisecond
++      // as initialization. We want to return that item, even if it's sometimes
++      // redundant.
++      if (wbo.modified >= timestamp) {
++        if (this.shouldSkip(wbo.id, timestamp)) {
++          continue;
++        }
++        fetchCallback(null, wbo);
++      }
++    }
++    fetchCallback(null, Repository.prototype.DONE);
++  },
++
++  fetch: function fetch(guids, fetchCallback) {
++    for (let i = 0; i < guids.length; i++) {
++      if (this.aborted) {
++        return;
++      }
++      let wbo = this.repository.wbos[guids[i]];
++      if (wbo) {
++        fetchCallback(null, wbo);
++      }
++    }
++    fetchCallback(null, Repository.prototype.DONE);
++  },
++
++  store: function store(record) {
++    if (record == Repository.prototype.DONE) {
++      this.storeCallback(Repository.prototype.DONE);
++      return;
++    }
++
++    if (!this.reconcile(record)) {
++      return;
++    }
++
++    // Make a copy and update the modified time of the record.
++    let r = TestingUtils.deepCopy(record);
++    r.modified = Date.now();
++
++    this.repository.wbos[r.id] = r;
++    this.trackStore(r.id, r.modified);
++  },
++
++  reconcile: function reconcile(record) {
++    // Non-trivial implementations should do something smart here; we might
++    // want to upload our local copy regardless, for example, or otherwise
++    // merge changes.
++    this._log.trace("Reconciling: " + JSON.stringify(record));
++    let local = this.repository.wbos[record.id];
++    if (!local) {
++      this._log.trace("No local record. Accepting incoming.");
++      return true;
++    }
++    if (local.modified < record.modified) {
++      this._log.trace("Local modified (" + local.modified + ") earlier than " +
++                      "incoming modified (" + record.modified + "). " +
++                      "Accepting incoming.");
++      return true;
++    }
++    this._log.trace("Rejecting incoming.");
++    return false;
++  },
++
++  begin: function begin(callback) {
++    this._log.debug("Setting timestamp...");
++    this.timestamp = Date.now();
++    this._log.debug("Calling begin callback.");
++    callback();
++  }
++};
++
++function FailingSessionWBORepositorySession(repository, storeCallback) {
++  WBORepositorySession.call(this, repository, storeCallback);
++}
++FailingSessionWBORepositorySession.prototype = {
++  __proto__: WBORepositorySession.prototype,
++  begin: function begin(callback) {
++    callback(new Error("Oh no!"));
++  }
++};
++
++function FailingStoreWBORepositorySession(repository, storeCallback) {
++  WBORepositorySession.call(this, repository, storeCallback);
++}
++FailingStoreWBORepositorySession.prototype = {
++  __proto__: WBORepositorySession.prototype,
++  store: function store(record) {
++    this._log.debug("Store: " + JSON.stringify(record));
++    let cb = this.storeCallback;
++    Utils.nextTick(function () {
++      cb({info: new Error("Oh no!")});
++      Utils.nextTick(function () {
++        cb(Repository.prototype.DONE);
++      });
++    });
++  }
++};
+diff --git a/services/sync/tests/unit/test_crypto5middleware_crypto.js b/services/sync/tests/unit/test_crypto5middleware_crypto.js
+new file mode 100644
+--- /dev/null
++++ b/services/sync/tests/unit/test_crypto5middleware_crypto.js
+@@ -0,0 +1,85 @@
++/* Any copyright is dedicated to the Public Domain.
++   http://creativecommons.org/publicdomain/zero/1.0/ */
++
++Cu.import("resource://services-sync/keys.js");
++Cu.import("resource://services-sync/repository.js");
++Cu.import("resource://services-sync/util.js");
++Cu.import("resource://testing-common/services-common/utils.js");
++Cu.import("resource://testing-common/services-sync/repository.js");
++
++const DONE = Repository.prototype.DONE;
++
++function run_test() {
++  run_next_test();
++}
++
++function setup_fixtures() {
++  let repo = new WBORepository();
++  let keyBundle = new BulkKeyBundle("testing");
++  keyBundle.generateRandom();
++
++  return new Crypto5Middleware(repo, keyBundle);
++}
++
++add_test(function test_roundtrip() {
++  let crypto5 = setup_fixtures();
++  let record = {id: "0000deadbeef",
++                sortindex: 25,
++                ttl: 42,
++                payload: {id: "0000deadbeef",
++                          title: "Dead Beef!"}};
++
++  // Pass a copy because encrypt() will modify the object.
++  let wbo = crypto5.encrypt(TestingUtils.deepCopy(record));
++  do_check_true(Utils.deepEquals(record, crypto5.decrypt(wbo)));
++  run_next_test();
++});
++
++add_test(function test_encrypt() {
++  let crypto5 = setup_fixtures();
++  let record = {id: "0000deadbeef",
++                sortindex: 25,
++                ttl: 42,
++                payload: {id: "0000deadbeef",
++                          title: "Dead Beef!"}};
++
++  let wbo = crypto5.encrypt(record);
++  do_check_eq(wbo.id, record.id);
++
++  // 'ttl' and 'sortindex' have moved to the WBO.
++  do_check_false("ttl" in record);
++  do_check_false("sortindex" in record);
++  do_check_eq(wbo.sortindex, 25);
++  do_check_eq(wbo.ttl, 42);
++
++  // Verify HMAC.
++  let payload = JSON.parse(wbo.payload);
++  let keyBundle = crypto5.keyBundle;
++  let expectedHMAC = Utils.bytesAsHex(
++    Utils.digestUTF8(payload.ciphertext, keyBundle.sha256HMACHasher));
++  do_check_eq(payload.hmac, expectedHMAC);
++
++  // Verify IV.
++  do_check_eq(Utils.safeAtoB(payload.IV).length, 16);
++
++  // Verify ciphertext.
++  let cleartext = Svc.Crypto.decrypt(payload.ciphertext,
++                                     keyBundle.encryptionKeyB64,
++                                     payload.IV);
++  let data = JSON.parse(cleartext);
++  do_check_true(Utils.deepEquals(data, record));
++
++  run_next_test();
++});
++
++add_test(function test_decrypt() {
++  run_next_test(); //TODO
++});
++
++add_test(function test_decrypt_hmac_mismatch() {
++  run_next_test(); //TODO
++});
++
++add_test(function test_decrypt_id_mismatch() {
++  run_next_test(); //TODO
++});
+diff --git a/services/sync/tests/unit/test_crypto5middleware_repository.js b/services/sync/tests/unit/test_crypto5middleware_repository.js
+new file mode 100644
+--- /dev/null
++++ b/services/sync/tests/unit/test_crypto5middleware_repository.js
+@@ -0,0 +1,268 @@
++/* Any copyright is dedicated to the Public Domain.
++   http://creativecommons.org/publicdomain/zero/1.0/ */
++
++Cu.import("resource://services-sync/keys.js");
++Cu.import("resource://services-sync/repository.js");
++Cu.import("resource://testing-common/services-common/utils.js");
++Cu.import("resource://testing-common/services-sync/repository.js");
++
++const DONE = Repository.prototype.DONE;
++
++function run_test() {
++  initTestLogging();
++  // Monkey-patch fake crypto in place.
++  let fakeCrypto = new FakeCryptoService(); // Installs itself as Svc.Crypto.
++  Crypto5Middleware.prototype.ciphertextHMAC = fakeSHA256HMAC;
++  run_next_test();
++}
++
++let payloads = {
++  "0000deadbeef": {id: "0000deadbeef",
++                   title: "Dead Beef!"},
++  "abcdefghijkl": {id: "abcdefghijkl",
++                   title: "Now I know my ABCs!"},
++  "charliesheen": {id: "charliesheen",
++                   title: "Winning!"},
++  "trololololol": {id: "trololololol",
++                   title: "Trol ol ol ol!"},
++  "123456789012": {id: "123456789012",
++                   title: "One two three many!"}
++};
++function getPayload(id) {
++  return JSON.stringify(encryptPayload(payloads[id]));
++}
++
++function setup_fixtures() {
++  let repo = new WBORepository();
++  repo.wbos = {
++    "0000deadbeef": {id: "0000deadbeef",
++                     modified: 1000,
++                     sortindex: 1,
++                     ttl: 10,
++                     payload: getPayload("0000deadbeef")},
++    "abcdefghijkl": {id: "abcdefghijkl",
++                     modified: 2000,
++                     sortindex: 2,
++                     ttl: 20,
++                     payload: getPayload("abcdefghijkl")},
++    "charliesheen": {id: "charliesheen",
++                     modified: 3000,
++                     sortindex: 3,
++                     ttl: 30,
++                     payload: getPayload("charliesheen")},
++    "trololololol": {id: "trololololol",
++                     modified: 4000,
++                     sortindex: 4,
++                     ttl: 40,
++                     payload: getPayload("trololololol")},
++    "123456789012": {id: "123456789012",
++                     modified: 5000,
++                     sortindex: 5,
++                     ttl: 50,
++                     payload: getPayload("123456789012")}
++  };
++  let keyBundle = new BulkKeyBundle(null, "testing");
++  keyBundle.generateRandom();
++  let crypto5 = new Crypto5Middleware(repo, keyBundle);
++  return crypto5;
++}
++
++function setup_session(sessionCallback, storeCallback) {
++  let repo = setup_fixtures();
++  repo.createSession(storeCallback, sessionCallback);
++}
++
++add_test(function test_setup_session() {
++  function sessionCallback(err, session) {
++    _("Session is " + session);
++    do_check_true(!err);
++    do_check_true(!!session);
++    run_next_test();
++  }
++  setup_session(sessionCallback);
++});
++
++add_test(function test_guidsSince() {
++  let expected = ["123456789012", "abcdefghijkl", "charliesheen", "trololololol"];
++  function sessionCallback(err, session) {
++    session.begin(function (error) {
++      session.guidsSince(2000, function guidsCallback(error, guids) {
++        do_check_eq(error, null);
++        do_check_eq(expected + "", guids.sort());
++        session.finish(run_next_test);
++      });
++    });
++  }
++  setup_session(sessionCallback);
++});
++
++add_test(function test_fetchSince() {
++  let expected = ["123456789012", "charliesheen", "trololololol"];
++  let calledDone = false;
++  function sessionCallback(err, session) {
++    _("Session callback. err is " + err + ", session is " + session);
++    session.begin(function (error) {
++      do_check_true(!error);
++      session.fetchSince(2001, function fetchCallback(error, record) {
++        _("Invoked fetchCallback: " + error + ", " + record);
++        if (calledDone) {
++          do_throw("Did not expect any more items after DONE!");
++        }
++
++        do_check_eq(error, null);
++        // Verify that the record is one of the ones we expect.
++        if (expected.length) {
++          let index = expected.indexOf(record.id);
++          do_check_neq(index, -1);
++          expected.splice(index, 1);
++
++          // Verify that it has the data we expect.
++          let wbo = session.repository.repository.wbos[record.id];
++          do_check_eq(record.modified, wbo.modified);
++          do_check_eq(record.sortindex, wbo.sortindex);
++          do_check_eq(record.ttl, wbo.ttl);
++          let payload = payloads[record.id];
++          do_check_eq(record.title, payload.title);
++          return;
++        }
++
++        // We've reached the end of the list, so we must be done.
++        do_check_eq(record, DONE);
++        calledDone = true;
++        session.finish(run_next_test);
++      });
++    });
++  }
++  setup_session(sessionCallback);
++});
++
++add_test(function test_fetch() {
++  let guids = ["123456789012", "non-existent", "charliesheen", "trololololol"];
++  let expected = ["123456789012", "charliesheen", "trololololol"];
++  let calledDone = false;
++  function sessionCallback(err, session) {
++    session.begin(function (error) {
++      do_check_true(!error);
++      session.fetch(guids, function fetchCallback(error, record) {
++        if (calledDone) {
++          do_throw("Did not expect any more items after DONE!");
++        }
++
++        do_check_eq(error, null);
++        // Verify that the record is one of the ones we expect.
++        if (expected.length) {
++          let index = expected.indexOf(record.id);
++          do_check_neq(index, -1);
++          expected.splice(index, 1);
++
++          // Verify that it has the data we expect.
++          let wbo = session.repository.repository.wbos[record.id];
++          do_check_eq(record.modified, wbo.modified);
++          do_check_eq(record.sortindex, wbo.sortindex);
++          do_check_eq(record.ttl, wbo.ttl);
++          let payload = payloads[record.id];
++          do_check_eq(record.title, payload.title);
++          return;
++        }
++
++        // We've reached the end of the list, so we must be done.
++        do_check_eq(record, DONE);
++        calledDone = true;
++        session.finish(run_next_test);
++      });
++    });
++  }
++  setup_session(sessionCallback);
++});
++
++add_test(function test_store_empty() {
++  _("Test adding no items to an empty WBORepository.");
++  let repo = new WBORepository();
++  let keyBundle = new BulkKeyBundle(null, "testing");
++  keyBundle.generateRandom();
++  let crypto5 = new Crypto5Middleware(repo, keyBundle);
++
++  let calledDone = false;
++  let session;
++  function sessionCallback(err, sess) {
++    session = sess;
++    session.store(DONE);
++  }
++  function storeCallback(error) {
++    if (calledDone) {
++      do_throw("Did not expect any more items after DONE!");
++    }
++    do_check_eq(error, DONE);
++    calledDone = true;
++    do_check_eq(0, repo.count);
++    session.finish(run_next_test);
++  }
++  crypto5.createSession(storeCallback, sessionCallback);
++});
++
++add_test(function test_store() {
++  _("Test adding items to WBORepository.");
++  let repo = new WBORepository();
++  let keyBundle = new BulkKeyBundle(null, "testing");
++  keyBundle.generateRandom();
++  let crypto5 = new Crypto5Middleware(repo, keyBundle);
++
++  let records = {
++    "0000deadbeef": {id: "0000deadbeef",
++                     title: "Dead Beef!",
++                     ttl: 10,
++                     sortindex: 1},
++    "abcdefghijkl": {id: "abcdefghijkl",
++                     title: "Now I know my ABCs!",
++                     ttl: 20,
++                     sortindex: 2},
++    "charliesheen": {id: "charliesheen",
++                     title: "Winning!",
++                     ttl: 30,
++                     sortindex: 3}
++  };
++  let ids = Object.keys(records);
++  let records_backup = TestingUtils.deepCopy(records);
++
++  let calledDone = false;
++  let session;
++  function sessionCallback(err, sess) {
++    session = sess;
++    for each (id in ids) {
++      session.store(records[id]);
++    }
++    session.store(DONE);
++  }
++  function storeCallback(error) {
++    if (calledDone) {
++      do_throw("Did not expect any more items after DONE!");
++    }
++    do_check_eq(error, DONE);
++    calledDone = true;
++
++    // Verify that the data has been written to the repository.
++    do_check_eq(repo.count, ids.length);
++    for each (id in ids) {
++      let record = records[id];
++      let wbo = repo.wbos[id];
++      do_check_neq(wbo, undefined);
++      do_check_eq(wbo.id, record.id);
++
++      // 'ttl' and 'sortindex' were removed from the record object,
++      // since they're attributes on the WBO.
++      do_check_eq(record.ttl, undefined);
++      do_check_eq(record.sortindex, undefined);
++      do_check_eq(wbo.ttl, records_backup[id].ttl);
++      do_check_eq(wbo.sortindex, records_backup[id].sortindex);
++
++      // We can easily compare payloads since we'e using fake crypto.
++      let wbo_payload = JSON.parse(wbo.payload);
++      let expected_payload = encryptPayload(records[record.id]);
++      do_check_eq(wbo_payload.ciphertext, expected_payload.ciphertext);
++      do_check_eq(wbo_payload.hmac, expected_payload.hmac);
++    }
++
++    session.finish(run_next_test);
++  }
++  crypto5.createSession(storeCallback, sessionCallback);
++});
+diff --git a/services/sync/tests/unit/test_crypto5middleware_synchronizer.js b/services/sync/tests/unit/test_crypto5middleware_synchronizer.js
+new file mode 100644
+--- /dev/null
++++ b/services/sync/tests/unit/test_crypto5middleware_synchronizer.js
+@@ -0,0 +1,61 @@
++/* Any copyright is dedicated to the Public Domain.
++   http://creativecommons.org/publicdomain/zero/1.0/ */
++
++Cu.import("resource://services-common/log4moz.js");
++Cu.import("resource://services-sync/keys.js");
++Cu.import("resource://services-sync/repository.js");
++Cu.import("resource://services-sync/synchronizer.js");
++Cu.import("resource://testing-common/services-sync/repository.js");
++
++const DONE = Repository.prototype.DONE;
++
++function run_test() {
++  // Monkey-patch fake crypto in place.
++  let fakeCrypto = new FakeCryptoService(); // Installs itself as Svc.Crypto.
++  Crypto5Middleware.prototype.ciphertextHMAC = fakeSHA256HMAC;
++
++  run_next_test();
++}
++
++add_test(function test_sync_through_crypto_middleware() {
++  _("Make sure that items end up passing through crypto middleware during sync.");
++  let r1 = new WBORepository();
++  let r2 = new WBORepository();
++
++  let k1 = new BulkKeyBundle(null, "testing");
++  k1.generateRandom();
++  let c1 = new Crypto5Middleware(r1, k1);
++  r1.toString = function () "<CryptoRepository>";
++  r2.toString = function () "<WBORepository>";
++
++  let now = Date.now();
++  r2.wbos = {
++    "123412341234": {id: "123412341234",
++                     modified: now - 1,
++                     payload: "Bar4"},
++    "123412341235": {id: "123412341235",
++                     modified: now - 2,
++                     payload: "Bar5"}
++  };
++
++  let s1 = new Synchronizer();
++  s1.repositoryA = c1;
++  s1.repositoryB = r2;
++
++  function firstSyncCallback(error) {
++    do_check_true(!error);
++    do_check_true("123412341234" in r1.wbos);
++    do_check_true("123412341235" in r1.wbos);
++    let item1 = r1.wbos["123412341234"];
++    let item2 = r1.wbos["123412341235"];
++    let payload1 = JSON.parse(item1.payload);
++    let payload2 = JSON.parse(item2.payload);
++    do_check_eq(JSON.parse(payload1.ciphertext).id, "123412341234");
++    do_check_eq(JSON.parse(payload2.ciphertext).id, "123412341235");
++    do_check_eq(JSON.parse(payload1.ciphertext).payload, "Bar4");
++    do_check_eq(JSON.parse(payload2.ciphertext).payload, "Bar5");
++    run_next_test();
++  }
++
++  s1.synchronize(firstSyncCallback);
++});
+diff --git a/services/sync/tests/unit/test_load_modules.js b/services/sync/tests/unit/test_load_modules.js
+--- a/services/sync/tests/unit/test_load_modules.js
++++ b/services/sync/tests/unit/test_load_modules.js
+@@ -13,20 +13,22 @@
+   "engines.js",
+   "identity.js",
+   "jpakeclient.js",
+   "keys.js",
+   "main.js",
+   "notifications.js",
+   "policies.js",
+   "record.js",
++  "repository.js",
+   "resource.js",
+   "rest.js",
+   "service.js",
+   "status.js",
++  "synchronizer.js",
+   "util.js",
+ ];
+ 
+ function run_test() {
+   for each (let m in modules) {
+     _("Attempting to load resource://services-sync/" + m);
+     Cu.import("resource://services-sync/" + m, {});
+   }
+diff --git a/services/sync/tests/unit/test_repository.js b/services/sync/tests/unit/test_repository.js
+new file mode 100644
+--- /dev/null
++++ b/services/sync/tests/unit/test_repository.js
+@@ -0,0 +1,301 @@
++/* Any copyright is dedicated to the Public Domain.
++   http://creativecommons.org/publicdomain/zero/1.0/ */
++
++Cu.import("resource://services-sync/repository.js");
++Cu.import("resource://testing-common/services-sync/repository.js");
++
++const DONE = Repository.prototype.DONE;
++
++function setup_fixtures() {
++  let repo = new WBORepository();
++  repo.wbos = {
++    "0000deadbeef": {id: "0000deadbeef",
++                     modified: 1000},
++    "abcdefghijkl": {id: "abcdefghijkl",
++                     modified: 2000},
++    "charliesheen": {id: "charliesheen",
++                     modified: 3000},
++    "trololololol": {id: "trololololol",
++                     modified: 4000},
++    "123456789012": {id: "123456789012",
++                     modified: 5000}
++  };
++  return repo;
++}
++
++function run_test() {
++  initTestLogging();
++  run_next_test();
++}
++
++add_test(function wbo_repository_stop() {
++  _("Test aborting from a fetchCallback.");
++  let repo = setup_fixtures();
++  let counter = 0;
++  let stopped = false;
++  repo.createSession(null, function (err, session) {
++    session.begin(function (err) {
++      do_check_true(!err);
++      function fetchCallback(error, record) {
++        if (stopped) {
++          do_throw("fetchCallback should not be invoked after aborting!");
++        }
++        counter++;
++        if (counter == 2) {
++          stopped = true;
++          Utils.nextTick(function () {
++            do_check_eq(2, counter);
++            session.finish(function () {
++              run_next_test();
++            });
++          });
++          session.abort();
++        }
++      }
++      do_check_true(!err);
++      // Note the use of 2001 here. In order to correctly return items that were
++      // modified in the same instant as a sync began, sessions return items
++      // within an inclusive range. To simplify our comparisons, we deliberately
++      // exclude the earlier modification time.
++      session.fetchSince(2001, fetchCallback);
++    });
++  });
++});
++
++// ... and here we verify that results with the same timestamp are successfully
++// returned.
++add_test(function test_guidsSince() {
++  let repo = setup_fixtures();
++  let expected = ["123456789012", "abcdefghijkl", "charliesheen", "trololololol"];
++  function sessionCallback(err, session) {
++    session.begin(function (err) {
++      function guidsCallback(error, guids) {
++        do_check_eq(error, null);
++        do_check_eq(expected + "", guids.sort());
++        session.finish(function () {
++          run_next_test();
++        });
++      }
++
++      do_check_true(!err);
++      session.guidsSince(2000, guidsCallback);
++    });
++  }
++  repo.createSession(null, sessionCallback);
++});
++
++add_test(function test_guidsSinceIsInclusive() {
++  let repo = setup_fixtures();
++  let expected = ["123456789012", "charliesheen", "trololololol"];
++  function sessionCallback(err, session) {
++    do_check_true(!err);
++    session.begin(function (err) {
++      function guidsCallback(error, guids) {
++        do_check_eq(error, null);
++        do_check_eq(expected + "", guids.sort());
++        session.finish(function () {
++          run_next_test();
++        });
++      }
++
++      do_check_true(!err);
++      session.guidsSince(2001, guidsCallback);
++    });
++  }
++  repo.createSession(null, sessionCallback);
++});
++
++add_test(function test_fetchSince() {
++  let repo = setup_fixtures();
++  let expected = ["123456789012", "charliesheen", "trololololol"];
++  let calledDone = false;
++  repo.createSession(null, function (err, session) {
++    do_check_true(!err);
++    session.begin(function (err) {
++      session.fetchSince(2001, function fetchCallback(error, record) {
++        if (calledDone) {
++          do_throw("Did not expect any more items after DONE!");
++        }
++
++        do_check_eq(error, null);
++        // Verify that the record is one of the ones we expect.
++        if (expected.length) {
++          let index = expected.indexOf(record.id);
++          do_check_neq(index, -1);
++          expected.splice(index, 1);
++          return;
++        }
++
++        // We've reached the end of the list, so we must be done.
++        do_check_eq(record, DONE);
++        calledDone = true;
++        session.finish(function () {
++          run_next_test();
++        });
++      });
++    });
++  });
++});
++
++add_test(function test_timestamp() {
++  let repo = setup_fixtures();
++  function sessionCallback(error, session) {
++    do_check_true(!error);
++    session.begin(function (err) {
++      do_check_true(!err);
++      session.timestamp = 12345;
++      session.finish(function (bundle) {
++        do_check_eq(bundle.timestamp, 12345);
++        run_next_test();
++      });
++    });
++  }
++  repo.createSession(null, sessionCallback);
++});
++
++add_test(function test_fetch() {
++  let repo = setup_fixtures();
++  let guids = ["123456789012", "non-existent", "charliesheen", "trololololol"];
++  let expected = ["123456789012", "charliesheen", "trololololol"];
++  let calledDone = false;
++
++  function sessionCallback(error, session) {
++    do_check_true(!error);
++    session.begin(function (err) {
++      do_check_true(!err);
++      session.fetch(guids, function fetchCallback(error, record) {
++        if (calledDone) {
++          do_throw("Did not expect any more items after DONE!");
++        }
++
++        do_check_false(!!error);
++        // Verify that the record is one of the ones we expect.
++        if (expected.length) {
++          let index = expected.indexOf(record.id);
++          do_check_neq(index, -1);
++          expected.splice(index, 1);
++          return;
++        }
++
++        // We've reached the end of the list, so we must be done.
++        do_check_eq(record, DONE);
++        calledDone = true;
++        session.finish(function () {
++          run_next_test();
++        });
++      });
++    });
++  }
++
++  repo.createSession(null, sessionCallback);
++});
++
++add_test(function test_store_empty() {
++  _("Test adding no items to an empty WBORepository.");
++  let repo = new WBORepository();
++  let calledDone = false;
++  let session;
++
++  function sessionCallback(error, sess) {
++    do_check_true(!error);
++    session = sess;
++    session.begin(function (err) {
++      do_check_true(!err);
++      sess.store(DONE);
++    });
++  }
++
++  function storeCallback(error) {
++    if (calledDone) {
++      do_throw("Did not expect any more items after DONE!");
++    }
++    do_check_eq(error, DONE);
++    calledDone = true;
++    do_check_eq(0, repo.count);
++    session.finish(function () {
++      run_next_test();
++    });
++  }
++
++  repo.createSession(storeCallback, sessionCallback);
++});
++
++add_test(function test_store() {
++  _("Test adding items to WBORepository.");
++  let items = [{id: "123412341234", payload: "Bar4"},
++               {id: "123412341235", payload: "Bar5"}];
++  let repo = new WBORepository();
++  let calledDone = false;
++  let session;
++
++  function sessionCallback(error, sess) {
++    do_check_true(!error);
++    session = sess;
++    session.begin(function (err) {
++      for each (record in items) {
++        sess.store(record);
++      }
++      sess.store(DONE);
++    });
++  }
++
++  function storeCallback(error) {
++    if (calledDone) {
++      do_throw("Did not expect any more items after DONE!");
++    }
++    do_check_eq(error, DONE);
++    calledDone = true;
++    do_check_eq(2, repo.count);
++    do_check_eq("Bar4", repo.wbos["123412341234"].payload);
++    do_check_eq("Bar5", repo.wbos["123412341235"].payload);
++    do_check_eq(undefined, repo.wbos["123412341230"]);
++    session.finish(function () {
++      run_next_test();
++    });
++  }
++
++  repo.createSession(storeCallback, sessionCallback);
++});
++
++add_test(function test_session_store_refetching() {
++  _("Ensure that session fetches don't include items we just stored.");
++  let repo = new WBORepository();
++  let session;
++  function sessionCallback(error, sess) {
++    do_check_true(!error);
++    session = sess;
++    session.begin(function (err) {
++      sess.store({id: "abcdabcdabc1", payload: "one"});
++      sess.store({id: "abcdabcdabc2", payload: "two"});
++      sess.store(DONE);
++    });
++  }
++
++  function storeCallback(error) {
++    do_check_eq(error, DONE);
++    do_check_eq(2, repo.count);
++    session.fetchSince(0, fetchCallback);
++  }
++
++  function fetchCallback(error, record) {
++    do_check_eq(record, DONE);
++    session.finish(function () {
++      run_next_test();
++    });
++  }
++  repo.createSession(storeCallback, sessionCallback);
++});
++
++// TODO: need a test for storeCallback aborting.
++add_test(function test_storeCallback_abort() {
++  _("Test aborting from a storeCallback.");
++  let repo = setup_fixtures();
++  let counter = 0;
++  let stopped = false;
++  repo.createSession(null, function (err, session) {
++    session.begin(function (err) {
++      do_check_true(!err);
++      run_next_test();
++    });
++  });
++});
+diff --git a/services/sync/tests/unit/test_server11repository.js b/services/sync/tests/unit/test_server11repository.js
+new file mode 100644
+--- /dev/null
++++ b/services/sync/tests/unit/test_server11repository.js
+@@ -0,0 +1,676 @@
++/* Any copyright is dedicated to the Public Domain.
++   http://creativecommons.org/publicdomain/zero/1.0/ */
++
++Cu.import("resource://services-common/log4moz.js");
++Cu.import("resource://services-sync/repository.js");
++
++const DONE = Repository.prototype.DONE;
++
++/**
++ * Create five fake records on the server with timestamps 1000, ..., 5000
++ * in a collection that can be accessed at http://localhost:8080/collection.
++ *
++ * @return [nsHttpServer obj, Server11Repository obj, ServerCollection obj]
++ */
++function setup_fixtures() {
++  let guids = ["0000deadbeef", "abcdefghijkl", "charliesheen",
++               "trololololol", "123456789012"];
++  let server = new SyncServer();
++  let john   = server.registerUser("john", "password");
++
++  let marbles = john.createCollection("marbles");
++  let i = 0;
++  for each (let guid in guids) {
++    marbles.insert(guid, {}, ++i * 1000);
++  }
++  server.start();
++  let repo = new Server11Repository("http://localhost:8080", "john", "marbles");
++  return [repo, server, marbles];
++}
++
++function run_test() {
++  initTestLogging();
++  Log4Moz.repository.getLogger("Sync.StorageRequest").level = Log4Moz.Trace;
++  run_next_test();
++}
++
++function withSession(repo, f) {
++  repo.createSession(null, function (err, session) {
++    do_check_true(!err);
++    session.begin(function (err) {
++      do_check_true(!err);
++      f(session);
++    });
++  });
++}
++
++function finish(session, server) {
++  session.finish(function () {
++    if (server) {
++      server.stop(run_next_test);
++    } else {
++      run_next_test();
++    }
++  });
++}
++
++add_test(function test_uri() {
++  let repo = new Server11Repository("http://localhost:8080", "john", "marbles");
++  do_check_eq(repo.uri, "http://localhost:8080/1.1/john/storage/marbles");
++
++  // Trailing slash in the server URL is OK.
++  repo = new Server11Repository("http://localhost:8080/", "john", "marbles");
++  do_check_eq(repo.uri, "http://localhost:8080/1.1/john/storage/marbles");
++
++  run_next_test();
++});
++
++add_test(function test_guidsSince() {
++  let [repo, server] = setup_fixtures();
++  let expected = ["123456789012", "charliesheen", "trololololol"];
++  withSession(repo, function (session) {
++    session.guidsSince(2000, function guidsCallback(error, guids) {
++      do_check_eq(error, null);
++      do_check_eq(expected + "", guids.sort());
++      finish(session, server);
++    });
++  });
++});
++
++add_test(function test_guidsSince_networkError() {
++  let repo = new Server11Repository("http://localhost:8080", "john", "marbles");
++  withSession(repo, function (session) {
++    session.guidsSince(2000, function guidsCallback(error, guids) {
++      do_check_eq(guids, null);
++      do_check_neq(error, null);
++      do_check_eq(error.result, Cr.NS_ERROR_CONNECTION_REFUSED);
++      finish(session);
++    });
++  });
++});
++
++add_test(function test_guidsSince_httpError() {
++  let server = httpd_setup({
++    "/1.1/john/storage/marbles": httpd_handler(404, "Not Found", "Cannae\nfind\nit")
++  });
++  let repo = new Server11Repository("http://localhost:8080", "john", "marbles");
++  withSession(repo, function (session) {
++    session.guidsSince(2000, function guidsCallback(error, guids) {
++      do_check_eq(guids, null);
++      do_check_neq(error, null);
++      do_check_eq(error.status, 404);
++      do_check_eq(error.body, "Cannae\nfind\nit");
++      finish(session, server);
++    });
++  });
++});
++
++add_test(function test_guidsSince_invalidJSON() {
++  let server = httpd_setup({
++    "/1.1/john/storage/marbles": httpd_handler(200, "OK", "this is invalid JSON")
++  });
++  let repo = new Server11Repository("http://localhost:8080", "john", "marbles");
++  withSession(repo, function (session) {
++    session.guidsSince(2000, function guidsCallback(error, guids) {
++      do_check_eq(guids, null);
++      do_check_neq(error, null);
++      do_check_eq(error.name, "SyntaxError");
++      do_check_eq(error.message, "JSON.parse: unexpected keyword");
++      finish(session, server);
++    });
++  });
++});
++
++add_test(function test_fetchSince() {
++  let [repo, server] = setup_fixtures();
++  let expected = ["123456789012", "charliesheen", "trololololol"];
++  let calledDone = false;
++  withSession(repo, function (session) {
++    session.fetchSince(2000, function fetchCallback(error, record) {
++      if (calledDone) {
++        do_throw("Did not expect any more items after DONE!");
++      }
++
++      do_check_eq(error, null);
++      // Verify that the record is one of the ones we expect.
++      if (expected.length) {
++        let index = expected.indexOf(record.id);
++        do_check_neq(index, -1);
++        expected.splice(index, 1);
++        return;
++      }
++
++      // We've reached the end of the list, so we must be done.
++      do_check_eq(record, DONE);
++      calledDone = true;
++      finish(session, server);
++    });
++  });
++});
++
++add_test(function test_fetchSince_networkError() {
++  let repo = new Server11Repository("http://localhost:8080", "john", "marbles");
++  withSession(repo, function (session) {
++    session.fetchSince(2000, function fetchCallback(error, record) {
++      do_check_eq(record, DONE);
++      do_check_neq(error, null);
++      do_check_eq(error.result, Cr.NS_ERROR_CONNECTION_REFUSED);
++      finish(session);
++    });
++  });
++});
++
++add_test(function test_fetchSince_httpError() {
++  let server = httpd_setup({
++    "/1.1/john/storage/marbles": httpd_handler(404, "Not Found", "Cannae\nfind\nit")
++  });
++  let repo = new Server11Repository("http://localhost:8080", "john", "marbles");
++  let calledDone = false;
++  withSession(repo, function (session) {
++    session.fetchSince(2000, function fetchCallback(error, record) {
++      if (calledDone) {
++        do_throw("Did not expect any more items after DONE!");
++      }
++
++      do_check_eq(record, DONE);
++      calledDone = true;
++      do_check_neq(error, null);
++      do_check_eq(error.status, 404);
++      do_check_eq(error.body, "Cannae\nfind\nit");
++      finish(session, server);
++    });
++  });
++});
++
++add_test(function test_fetchSince_invalidJSON() {
++  let server = httpd_setup({
++    "/1.1/john/storage/marbles": httpd_handler(200, "OK", "this is invalid JSON")
++  });
++  let repo = new Server11Repository("http://localhost:8080", "john", "marbles");
++  let calledDone = false;
++  withSession(repo, function (session) {
++    session.fetchSince(2000, function fetchCallback(error, record) {
++      if (calledDone) {
++        do_throw("Did not expect any more items after DONE!");
++      }
++
++      // We're going to first be called for the invalid JSON error.
++      if (record != DONE) {
++        do_check_eq(record, null);
++        do_check_neq(error, null);
++        do_check_eq(error.name, "SyntaxError");
++        do_check_eq(error.message, "JSON.parse: unexpected keyword");
++        return;
++      }
++
++      // Finally we're called with DONE.
++      calledDone = true;
++      do_check_eq(record, DONE);
++      do_check_eq(error, null);
++      finish(session, server);
++    });
++  });
++});
++
++add_test(function test_fetchSince_STOP() {
++  run_next_test(); //TODO
++});
++
++add_test(function test_fetch() {
++  let [repo, server] = setup_fixtures();
++  let guids = ["123456789012", "non-existent", "charliesheen", "trololololol"];
++  let expected = ["123456789012", "charliesheen", "trololololol"];
++  let calledDone = false;
++  withSession(repo, function (session) {
++    session.fetch(guids, function fetchCallback(error, record) {
++      if (calledDone) {
++        do_throw("Did not expect any more items after DONE!");
++      }
++
++      do_check_eq(error, null);
++      // Verify that the record is one of the ones we expect.
++      if (expected.length) {
++        let index = expected.indexOf(record.id);
++        do_check_neq(index, -1);
++        expected.splice(index, 1);
++        return;
++      }
++
++      // We've reached the end of the list, so we must be done.
++      do_check_eq(record, DONE);
++      calledDone = true;
++      finish(session, server);
++    });
++  });
++});
++
++add_test(function test_fetch_networkError() {
++  let repo = new Server11Repository("http://localhost:8080", "john", "marbles");
++  withSession(repo, function (session) {
++    session.fetch(["trololololol"], function fetchCallback(error, record) {
++      do_check_eq(record, DONE);
++      do_check_neq(error, null);
++      do_check_eq(error.result, Cr.NS_ERROR_CONNECTION_REFUSED);
++      finish(session);
++    });
++  });
++});
++
++add_test(function test_fetch_httpError() {
++  let server = httpd_setup({
++    "/1.1/john/storage/marbles": httpd_handler(404, "Not Found", "Cannae\nfind\nit")
++  });
++  let repo = new Server11Repository("http://localhost:8080", "john", "marbles");
++  let calledDone = false;
++  withSession(repo, function (session) {
++    session.fetch(["trololololol"], function fetchCallback(error, record) {
++      if (calledDone) {
++        do_throw("Did not expect any more items after DONE!");
++      }
++
++      do_check_eq(record, DONE);
++      calledDone = true;
++      do_check_neq(error, null);
++      do_check_eq(error.status, 404);
++      do_check_eq(error.body, "Cannae\nfind\nit");
++      finish(session, server);
++    });
++  });
++});
++
++add_test(function test_fetch_invalidJSON() {
++  let server = httpd_setup({
++    "/1.1/john/storage/marbles": httpd_handler(200, "OK", "this is invalid JSON")
++  });
++  let repo = new Server11Repository("http://localhost:8080", "john", "marbles");
++  let calledDone = false;
++  withSession(repo, function (session) {
++    session.fetch(["trololololol"], function fetchCallback(error, record) {
++      if (calledDone) {
++        do_throw("Did not expect any more items after DONE!");
++      }
++
++      // We're going to first be called for the invalid JSON error.
++      if (record != DONE) {
++        do_check_eq(record, null);
++        do_check_neq(error, null);
++        do_check_eq(error.name, "SyntaxError");
++        do_check_eq(error.message, "JSON.parse: unexpected keyword");
++        return;
++      }
++
++      // Finally we're called with DONE.
++      calledDone = true;
++      do_check_eq(record, DONE);
++      do_check_eq(error, null);
++      finish(session, server);
++    });
++  });
++});
++
++add_test(function test_fetch_STOP() {
++  run_next_test(); //TODO
++});
++
++add_test(function test_store_empty() {
++  _("Test adding no items to an empty repository.");
++  let collection = new ServerCollection({}, true);
++  let server = httpd_setup({
++    "/1.1/john/storage/marbles": collection.handler()
++  });
++  let repo = new Server11Repository("http://localhost:8080", "john", "marbles");
++  let calledDone = false;
++  let session;
++  function storeCallback(error) {
++    if (calledDone) {
++      do_throw("Did not expect any more items after DONE!");
++    }
++    do_check_eq(error, DONE);
++    calledDone = true;
++    do_check_eq(0, collection.count());
++    finish(session, server);
++  }
++  function sessionCallback(err, sess) {
++    do_check_true(!err);
++    session = sess;
++    session.begin(function (err) {
++      do_check_true(!err);
++      session.store(DONE);
++    });
++  }
++  repo.createSession(storeCallback, sessionCallback);
++});
++
++add_test(function test_store() {
++  _("Test adding items to repository.");
++  let collection = new ServerCollection({}, true);
++  let server = httpd_setup({
++    "/1.1/john/storage/marbles": collection.handler()
++  });
++  let repo = new Server11Repository("http://localhost:8080", "john", "marbles");
++  let items = [{id: "123412341234", payload: "Bar4"},
++               {id: "123412341235", payload: "Bar5"}];
++
++  let calledDone = false;
++  let session;
++  function storeCallback(error) {
++    if (calledDone) {
++      do_throw("Did not expect any more items after DONE!");
++    }
++    do_check_eq(error, DONE);
++    calledDone = true;
++    do_check_eq(2, collection.count());
++    do_check_eq("Bar4", collection.payload("123412341234"));
++    do_check_eq("Bar5", collection.payload("123412341235"));
++    do_check_eq(undefined, collection.wbo("123412341230"));
++    finish(session, server);
++  }
++  function sessionCallback(err, sess) {
++    do_check_false(!!err);
++    session = sess;
++    session.begin(function (err) {
++      do_check_true(!err);
++      for each (record in items) {
++        session.store(record);
++      }
++      session.store(DONE);
++    });
++  }
++  repo.createSession(storeCallback, sessionCallback);
++});
++
++add_test(function test_store_finish_once_only() {
++  _("Test that calling store after a DONE will raise an error.");
++
++  let repo = new Server11Repository("http://localhost:8080", "john", "marbles");
++  let session;
++  function storeCallback(error) {
++    let threw;
++    try {
++      session.store(DONE);
++    } catch (ex) {
++      threw = ex;
++    }
++    do_check_eq("Store session already marked as DONE.", threw.message);
++    threw = undefined;
++    try {
++      session.store({id: "1234567890ab"});
++    } catch (ex) {
++      threw = ex;
++    }
++    do_check_eq("Store session already marked as DONE.", threw.message);
++    finish(session);
++  }
++  function sessionCallback(err, sess) {
++    do_check_true(!err);
++    session = sess;
++    session.begin(function (err) {
++      do_check_true(!err);
++      session.store(DONE);
++    });
++  }
++  repo.createSession(storeCallback, sessionCallback);
++});
++
++add_test(function test_store_batching_completeLastBatch() {
++  _("Test batching within a store session.");
++
++  let invoked = 0;
++  let repo = new Server11Repository("http://localhost:8080", "john", "marbles");
++  let session;
++  function storeCallback(error) {
++    do_check_eq(invoked, 3);
++    do_check_eq(session.flushQueue.length, 2);
++    do_check_true(session.done);
++    finish(session);
++  }
++  function sessionCallback(err, sess) {
++    session = sess;
++    do_check_false(!!err);
++    do_check_eq(session.flushQueue.length, 0);
++
++    session.flush = function () {
++      invoked++;
++      let batchCount = session.flushQueue.length;
++      let lastBatchSize = session.flushQueue[batchCount - 1].length;
++
++      if (session.done) {
++        session.storeCallback();
++        return;
++      }
++      do_check_eq(batchCount, invoked);
++      do_check_eq(lastBatchSize, session.batchSize);
++    };
++
++    session.batchSize = 2;
++    do_check_false(session.done);
++    session.store({id: "123412341234", payload: "Bar4"});
++    do_check_eq(invoked, 0);
++    session.store({id: "123412341235", payload: "Bar5"});
++    do_check_eq(invoked, 1);
++    session.store({id: "123412341236", payload: "Bar6"});
++    do_check_eq(invoked, 1);
++    session.store({id: "123412341237", payload: "Bar7"});
++    do_check_eq(invoked, 2);
++    session.store(DONE);
++  }
++  repo.createSession(storeCallback, sessionCallback);
++});
++
++add_test(function test_store_batching_incompleteLastBatch() {
++  _("Test batching within a store session, where the last batch is incomplete.");
++
++  let invoked = 0;
++  let repo = new Server11Repository("http://localhost:8080", "john", "marbles");
++  let session;
++  function storeCallback(error) {
++    do_check_eq(invoked, 2);
++    do_check_eq(session.flushQueue.length, 2);
++    do_check_eq(session.flushQueue[0].length, 2);
++    do_check_eq(session.flushQueue[1].length, 1);
++    do_check_true(session.done);
++    finish(session);
++  }
++  function sessionCallback(err, sess) {
++    session = sess;
++    do_check_false(!!err);
++    do_check_eq(session.flushQueue.length, 0);
++
++    session.flush = function () {
++      invoked++;
++      let batchCount = session.flushQueue.length;
++      let lastBatchSize = session.flushQueue[batchCount - 1].length;
++
++      if (session.done) {
++        session.storeCallback();
++        return;
++      }
++      do_check_eq(batchCount, invoked);
++      do_check_eq(lastBatchSize, session.batchSize);
++    };
++
++    session.batchSize = 2;
++    do_check_false(session.done);
++    session.store({id: "123412341234", payload: "Bar4"});
++    do_check_eq(invoked, 0);
++    session.store({id: "123412341235", payload: "Bar5"});
++    do_check_eq(invoked, 1);
++    session.store({id: "123412341236", payload: "Bar6"});
++    do_check_eq(invoked, 1);
++    session.store(DONE);
++  }
++  repo.createSession(storeCallback, sessionCallback);
++});
++
++add_test(function test_store_networkError() {
++  let repo = new Server11Repository("http://localhost:8080/collection");
++  let items = [{id: "123412341234", payload: "Bar4"},
++               {id: "123412341235", payload: "Bar5"}];
++
++  let calledDone = false;
++  let session;
++  function storeCallback(error) {
++    if (calledDone) {
++      do_throw("Did not expect any more items after DONE!");
++    }
++
++    if (error != DONE) {
++      do_check_eq(error.info.result, Cr.NS_ERROR_CONNECTION_REFUSED);
++      do_check_eq(error.guids, "123412341234,123412341235");
++      return;
++    }
++
++    calledDone = true;
++    do_check_eq(error, DONE);
++    finish(session);
++  }
++  function sessionCallback(err, sess) {
++    do_check_false(!!err);
++    session = sess;
++    for each (record in items) {
++      session.store(record);
++    }
++    session.store(DONE);
++  }
++  repo.createSession(storeCallback, sessionCallback);
++});
++
++add_test(function test_store_httpError() {
++  let server = httpd_setup({
++    "/1.1/john/storage/marbles": httpd_handler(404, "Not Found", "Cannae\nfind\nit")
++  });
++  let repo = new Server11Repository("http://localhost:8080", "john", "marbles");
++
++  let items = [{id: "123412341234", payload: "Bar4"},
++               {id: "123412341235", payload: "Bar5"}];
++  let calledDone = false;
++  let session;
++  function storeCallback(error) {
++    if (calledDone) {
++      do_throw("Did not expect any more items after DONE!");
++    }
++
++    if (error != DONE) {
++      do_check_eq(error.info.body, "Cannae\nfind\nit");
++      do_check_eq(error.info.status, 404);
++      do_check_eq(error.guids, "123412341234,123412341235");
++      return;
++    }
++
++    calledDone = true;
++    do_check_eq(error, DONE);
++    finish(session, server);
++  }
++  function sessionCallback(err, sess) {
++    do_check_false(!!err);
++    session = sess;
++    for each (record in items) {
++      session.store(record);
++    }
++    session.store(DONE);
++  }
++  repo.createSession(storeCallback, sessionCallback);
++});
++
++add_test(function test_store_invalidResponse() {
++  let server = httpd_setup({
++    "/1.1/john/storage/marbles": httpd_handler(200, "OK", "this is invalid JSON")
++  });
++  let repo = new Server11Repository("http://localhost:8080", "john", "marbles");
++
++  let items = [{id: "123412341234", payload: "Bar4"},
++               {id: "123412341235", payload: "Bar5"}];
++  let calledDone = false;
++  let session;
++  function storeCallback(error) {
++    if (calledDone) {
++      do_throw("Did not expect any more items after DONE!");
++    }
++
++    if (error != DONE) {
++      do_check_eq(error.info.name, "SyntaxError");
++      do_check_eq(error.info.message, "JSON.parse: unexpected keyword");
++      do_check_eq(error.guids, "123412341234,123412341235");
++      return;
++    }
++
++    calledDone = true;
++    do_check_eq(error, DONE);
++    finish(session, server);
++  }
++  function sessionCallback(err, sess) {
++    do_check_false(!!err);
++    session = sess;
++    for each (record in items) {
++      session.store(record);
++    }
++    session.store(DONE);
++  }
++  repo.createSession(storeCallback, sessionCallback);
++});
++
++add_test(function test_wipe() {
++  _("Test wiping a server repository.");
++  let items = [{id: "123412341234", payload: "Bar4"},
++               {id: "123412341235", payload: "Bar5"}];
++  let collection = new ServerCollection({}, true);
++  collection.post(JSON.stringify(items));
++  let server = httpd_setup({
++    "/1.1/john/storage/marbles": collection.handler()
++  });
++  let repo = new Server11Repository("http://localhost:8080", "john", "marbles");
++
++  withSession(repo, function (session) {
++    session.guidsSince(0, function (error, guids) {
++      _("Check preconditions: 2 GUIDs.");
++      do_check_false(!!error);
++      do_check_eq(2, guids.length);
++
++      _("Wiping removes items.");
++      session.wipe(function (error) {
++        do_check_false(!!error);
++        session.guidsSince(0, function (error, guids) {
++          _("Check postconditions: 0 GUIDs.");
++          do_check_false(!!error);
++          do_check_eq(0, guids.length);
++          finish(session, server);
++        });
++      });
++    });
++  });
++});
++
++add_test(function test_wipe_empty() {
++  _("Test wiping an empty server repository.");
++  let collection = new ServerCollection({}, true);
++  let server = httpd_setup({
++    "/1.1/john/storage/marbles": collection.handler()
++  });
++  let repo = new Server11Repository("http://localhost:8080", "john", "marbles");
++
++  withSession(repo, function (session) {
++    session.guidsSince(0, function (error, guids) {
++      _("Check preconditions: 0 GUIDs.");
++      do_check_false(!!error);
++      do_check_eq(0, guids.length);
++
++      session.wipe(function (error) {
++        do_check_false(!!error);
++        session.guidsSince(0, function (error, guids) {
++          _("Check postconditions: 0 GUIDs.");
++          do_check_false(!!error);
++          do_check_eq(0, guids.length);
++          finish(session, server);
++        });
++      });
++    });
++  });
++});
++
++add_test(function test_wipe_httpError() {
++  run_next_test(); //TODO
++});
++
++add_test(function test_wipe_networkError() {
++  run_next_test(); //TODO
++});
+diff --git a/services/sync/tests/unit/test_synchronizer.js b/services/sync/tests/unit/test_synchronizer.js
+new file mode 100644
+--- /dev/null
++++ b/services/sync/tests/unit/test_synchronizer.js
+@@ -0,0 +1,328 @@
++/* Any copyright is dedicated to the Public Domain.
++   http://creativecommons.org/publicdomain/zero/1.0/ */
++
++Cu.import("resource://services-common/log4moz.js");
++Cu.import("resource://services-sync/repository.js");
++Cu.import("resource://services-sync/synchronizer.js");
++Cu.import("resource://testing-common/services-common/utils.js");
++Cu.import("resource://testing-common/services-sync/repository.js");
++
++/**
++ * Hook for performing actions mid-sync.
++ */
++function onStore() {
++}
++
++/**
++ * Instrument calls to WBORepositorySession.store.
++ */
++let storeCalls = [];
++WBORepositorySession.prototype.store = (function wrap(f) {
++  return function (record) {
++    _("Calling store: " + JSON.stringify(record));
++    if (record != Repository.prototype.DONE) {
++      storeCalls.push([TestingUtils.deepCopy(this.repository.wbos), record]);
++    }
++    f.call(this, record);
++    onStore();
++  };
++})(WBORepositorySession.prototype.store);
++
++
++
++function run_test() {
++  initTestLogging();
++  run_next_test();
++}
++
++/**
++ * Doesn't check modification time.
++ */
++function wbo_eq(a, b) {
++  _("Comparing " + a.id + " to " + b.id + "…");
++  do_check_true(!!a);
++  do_check_true(!!b);
++  do_check_eq(a.id, b.id);
++  do_check_eq(a.payload, b.payload);
++}
++
++/**
++ * Ensure that the WBOs in each repository are the same according to wbo_eq.
++ */
++function wbos_eq(r1, r2) {
++  _("Comparing repositories…");
++  do_check_eq(r1.count, r2.count);
++  for (let [guid, wbo] in Iterator(r1.wbos)) {
++    wbo_eq(wbo, r2.wbos[guid]);
++  }
++}
++
++add_test(function test_empty_repositories() {
++  _("Test syncing two empty repositories.");
++  let r1 = new WBORepository();
++  let r2 = new WBORepository();
++  let s1 = new Synchronizer();
++  s1.repositoryA = r1;
++  s1.repositoryB = r2;
++  function synchronizeCallback(error) {
++    do_check_true(!error);
++    do_check_eq(0, Object.keys(r1.wbos).length);
++    do_check_eq(0, Object.keys(r2.wbos).length);
++    _("bundleA.timestamp: " + s1.bundleA.timestamp);
++    _("bundleB.timestamp: " + s1.bundleB.timestamp);
++    do_check_true(s1.bundleA.timestamp > 0);
++    do_check_true(s1.bundleB.timestamp > 0);
++    wbos_eq(r1, r2);
++    run_next_test();
++  }
++  s1.synchronize(synchronizeCallback);
++});
++
++function setup_repositories() {
++  let r1 = new WBORepository();
++  let r2 = new WBORepository();
++  r1.toString = function () "<Repository 1>";
++  r2.toString = function () "<Repository 2>";
++
++  let now = Date.now();
++  // Create items slightly in the past, so we don't end up with our faked items
++  // sometimes having the same timestamp as an immediate sync, throwing off our
++  // counts.
++  r1.wbos = {
++    "123412341234": {id: "123412341234",
++                     modified: now - 1,
++                     payload: "Bar4"},
++    "123412341235": {id: "123412341235",
++                     modified: now - 2,
++                     payload: "Bar5"}
++  };
++
++  let s1 = new Synchronizer();
++  s1.repositoryA = r1;
++  s1.repositoryB = r2;
++  return [s1, r1, r2];
++}
++
++add_test(function test_empty_to_full() {
++  _("Test syncing an empty repository to a full repository.");
++  let [s1, r1, r2] = setup_repositories();
++  function synchronizeCallback(error) {
++    do_check_true(!error);
++    do_check_eq(2, r1.count);
++    do_check_eq(2, r2.count);
++    _("bundleA.timestamp: " + s1.bundleA.timestamp);
++    _("bundleB.timestamp: " + s1.bundleB.timestamp);
++    do_check_true(s1.bundleA.timestamp > 0);
++    do_check_true(s1.bundleB.timestamp > 0);
++    wbos_eq(r1, r2);
++    run_next_test();
++  }
++  s1.synchronize(synchronizeCallback);
++});
++
++add_test(function test_full_to_empty() {
++  _("Test syncing a full repository to an empty repository.");
++  let [s1, r1, r2] = setup_repositories();
++  // Swap them around.
++  s1.repositoryA = r2;
++  s1.repositoryB = r1;
++
++  function synchronizeCallback(error) {
++    do_check_true(!error);
++    do_check_eq(2, r1.count);
++    do_check_eq(2, r2.count);
++    _("bundleA.timestamp: " + s1.bundleA.timestamp);
++    _("bundleB.timestamp: " + s1.bundleB.timestamp);
++    do_check_true(s1.bundleA.timestamp > 0);
++    do_check_true(s1.bundleB.timestamp > 0);
++    wbos_eq(r1, r2);
++    run_next_test();
++  }
++  s1.synchronize(synchronizeCallback);
++});
++
++add_test(function test_modify() {
++  _("Test syncing a full repository to an empty repository, modifying items, " +
++    "then syncing back.");
++  let [s1, r1, r2] = setup_repositories();
++  function checkResult(error) {
++    do_check_true(!error);
++    do_check_eq(2, r1.count);
++    do_check_eq(2, r2.count);
++    _("bundleA.timestamp: " + s1.bundleA.timestamp);
++    _("bundleB.timestamp: " + s1.bundleB.timestamp);
++    do_check_true(s1.bundleA.timestamp > 0);
++    do_check_true(s1.bundleB.timestamp > 0);
++    wbos_eq(r1, r2);
++  }
++
++  function firstSyncCallback(error) {
++    checkResult(error);
++
++    // Modify an item in each.
++    // Deliberately do this immediately, which will exercise handling of very
++    // close timestamps.
++    let item1 = r1.wbos["123412341234"];
++    let item2 = r2.wbos["123412341235"];
++    _("Item 1: " + JSON.stringify(item1));
++    _("Item 2: " + JSON.stringify(item2));
++    let old1  = item1.modified;
++    let old2  = item2.modified;
++    item1.modified = Date.now() + 1;
++    item1.payload  = "BarChanged1";
++    _("Modified item 1: was " + old1 + ", now " + item1.modified);
++    item2.modified = Date.now() + 2;
++    item2.payload  = "BarChanged2";
++    _("Modified item 2: was " + old2 + ", now " + item2.modified);
++
++    Utils.nextTick(function () {
++      storeCalls = [];
++      s1.synchronize(secondSyncCallback);
++    });
++  }
++
++  function secondSyncCallback(error) {
++    checkResult(error);
++    // Modifying items results in store() being called only once per modified
++    // item, and no more.
++    _("Store calls: " + JSON.stringify(storeCalls));
++    do_check_eq(storeCalls.length, 2);
++
++    // Check that each item made it across.
++    do_check_eq(r2.wbos["123412341234"].payload, "BarChanged1");
++    do_check_eq(r1.wbos["123412341235"].payload, "BarChanged2");
++
++    run_next_test();
++  }
++
++  s1.synchronize(firstSyncCallback);
++});
++
++/**
++ * Scenario:
++ *
++ *   * Create sessions.
++ *   * Begin fetching from A.
++ *   * Add item to A.
++ *   * Complete sync.
++ *   * Sync again.
++ *
++ * This test verifies that an item added during a sync will arrive at its
++ * destination by the end of the subsequent sync.
++ */
++add_test(function test_addition_during_sync() {
++  let [s1, r1, r2] = setup_repositories();
++  onStore = function() {
++    r1.wbos["123412346666"] = {id: "123412346666",
++                               modified: Date.now(),
++                               payload: "AddedMidStream"};
++    onStore = function () {};
++  };
++
++  function firstSyncCallback(error) {
++    do_check_true(!error);
++    _("Record in r2? " + ("123412346666" in r2.wbos));
++    do_check_eq(r1.wbos["123412346666"].payload, "AddedMidStream");
++    s1.synchronize(secondSyncCallback);
++  }
++
++  function secondSyncCallback(error) {
++    do_check_true(!error);
++    _("Record in r2? " + ("123412346666" in r2.wbos));
++    do_check_eq(r1.wbos["123412346666"].payload, "AddedMidStream");
++    do_check_eq(r2.wbos["123412346666"].payload, "AddedMidStream");
++    wbos_eq(r1, r2);
++
++    run_next_test();
++  }
++
++  s1.synchronize(firstSyncCallback);
++});
++
++add_test(function test_threeway_sync() {
++  _("Make sure that items end up passing through crypto middleware during sync.");
++  let r1 = new WBORepository();
++  let r2 = new WBORepository();
++  let rs = new WBORepository();
++  let s1 = new Synchronizer();
++  let s2 = new Synchronizer();
++
++  let now = Date.now();
++  r1.wbos = {
++    "123412341234": {id: "123412341234",
++                     modified: now - 1,
++                     payload: "Bar4"},
++    "123412341235": {id: "123412341235",
++                     modified: now - 2,
++                     payload: "Bar5"}
++  };
++
++  s1.repositoryA = r1;
++  s1.repositoryB = rs;
++  s2.repositoryA = r2;
++  s2.repositoryB = rs;
++
++  s1.synchronize(function (err) {
++    do_check_true(!err);
++    wbos_eq(r1, rs);
++    s2.synchronize(function (err) {
++      do_check_true(!err);
++      wbos_eq(r1, rs);
++      wbos_eq(r1, r2);
++      wbos_eq(r2, rs);
++      run_next_test();
++    })
++  });
++});
++
++add_test(function test_failing_session() {
++  _("Fail session creation during sync.");
++  let r1 = new WBORepository();
++  let r2 = new WBORepository();
++  let s1 = new Synchronizer();
++  r1._sessionConstructor = FailingSessionWBORepositorySession;
++  s1.repositoryA = r1;
++  s1.repositoryB = r2;
++  let called = false;
++  s1.synchronize(function (error) {
++    do_check_true(!!error);
++    called = true;
++    run_next_test();
++  });
++
++  if (!called) {
++    do_throw("I reached here!");
++  }
++});
++
++// This test -- and Synchronizer -- need to be amended to reflect abort().
++// Behavior during store failures should match up to existing engine behavior.
++// TODO
++/*
++add_test(function test_failing_store() {
++  _("Fail store during sync.");
++  let r1 = new WBORepository();
++  let r2 = new WBORepository();
++  let s1 = new Synchronizer();
++  r1._sessionConstructor = FailingStoreWBORepositorySession;
++  s1.repositoryA = r1;
++  s1.repositoryB = r2;
++  let called = false;
++  s1.synchronize(function (error) {
++    called = true;
++    run_next_test();
++  });
++
++  if (!called) {
++    do_throw("I reached here!");
++  }
++});
++*/
++
++
++// TODO:
++// * Implement and verify store/time in-session tracking, verifying that store
++//   isn't being called for items that we just uploaded
++// * Error handling
++// * Multiple synchronize() calls, both with and without new items, and
++//   modifying one or both ends
+diff --git a/services/sync/tests/unit/xpcshell.ini b/services/sync/tests/unit/xpcshell.ini
+--- a/services/sync/tests/unit/xpcshell.ini
++++ b/services/sync/tests/unit/xpcshell.ini
+@@ -40,16 +40,23 @@
+ # Generic Sync types.
+ [test_collection_inc_get.js]
+ [test_collections_recovery.js]
+ [test_identity_manager.js]
+ [test_keys.js]
+ [test_records_crypto.js]
+ [test_records_wbo.js]
+ 
++[test_repository.js]
++[test_server11repository.js]
++[test_crypto5middleware_crypto.js]
++[test_crypto5middleware_repository.js]
++[test_crypto5middleware_synchronizer.js]
++[test_synchronizer.js]
++
+ # Engine APIs.
+ [test_engine.js]
+ [test_engine_abort.js]
+ [test_enginemanager.js]
+ [test_syncengine.js]
+ [test_syncengine_sync.js]
+ # Bug 676978: test hangs on Android (see also testing/xpcshell/xpcshell.ini)
+ skip-if = os == "android"

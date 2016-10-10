@@ -1,0 +1,66 @@
+# HG changeset patch
+# Parent 67b19b94a5facc8d955613cb127584e70a0a88a7
+# User Gregory Szorc <gps@mozilla.com>
+Bug 798528 - Improve messaging around requiring Xcode upgrade
+
+diff --git a/python/mozboot/mozboot/osx.py b/python/mozboot/mozboot/osx.py
+--- a/python/mozboot/mozboot/osx.py
++++ b/python/mozboot/mozboot/osx.py
+@@ -30,16 +30,21 @@
+ '''
+ 
+ XCODE_REQUIRED_LEGACY = '''
+ You will need to download and install Xcode to build Firefox.
+ 
+ Please complete the Xcode download and then relaunch this script.
+ '''
+ 
++XCODE_UPGRADE_REQUIRED = '''
++The version of Xcode installed on your machine is too old. Please complete
++the install of a newer version of Xcode through the App Store.
++'''
++
+ XCODE_COMMAND_LINE_TOOLS_MISSING = '''
+ The Xcode command line tools are required to build Firefox.
+ '''
+ 
+ INSTALL_XCODE_COMMAND_LINE_TOOLS_STEPS = '''
+ Perform the following steps to install the Xcode command line tools:
+ 
+     1) Open Xcode.app
+@@ -95,26 +100,32 @@
+         self.os_version = minor
+ 
+     def install_system_packages(self):
+         self.ensure_xcode()
+         self.ensure_homebrew()
+         self.ensure_homebrew_packages()
+ 
+     def ensure_xcode(self):
++        legacy_path = '/Developer/Applications/Xcode.app'
++        modern_path = '/Applications/Xcode.app'
++
+         if self.os_version < 7:
+-            if not os.path.exists('/Developer/Applications/Xcode.app'):
++            if not os.path.exists(legacy_path):
+                 print(XCODE_REQUIRED_LEGACY)
+ 
+                 subprocess.check_call(['open', XCODE_LEGACY])
+                 sys.exit(1)
+ 
+         elif self.os_version >= 7:
+-            if not os.path.exists('/Applications/Xcode.app'):
+-                print(XCODE_REQUIRED)
++            if not os.path.exists(modern_path):
++                if os.path.exists(legacy_path):
++                    print(XCODE_UPGRADE_REQUIRED)
++                else:
++                    print(XCODE_REQUIRED)
+ 
+                 subprocess.check_call(['open', XCODE_APP_STORE])
+ 
+                 print('Once the install has finished, please relaunch this script.')
+                 sys.exit(1)
+ 
+         # Once Xcode is installed, you need to agree to the license before you can
+         # use it.

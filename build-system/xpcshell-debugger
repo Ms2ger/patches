@@ -1,0 +1,339 @@
+# HG changeset patch
+# Parent 34a80b4e0acdaeb9c4d5c6e7741df0eadde874c6
+# User Gregory Szorc <gps@mozilla.com>
+
+diff --git a/testing/xpcshell/head.js b/testing/xpcshell/head.js
+--- a/testing/xpcshell/head.js
++++ b/testing/xpcshell/head.js
+@@ -41,19 +41,26 @@
+ try {
+   runningInParent = Components.classes["@mozilla.org/xre/runtime;1"].
+                     getService(Components.interfaces.nsIXULRuntime).processType
+                     == Components.interfaces.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
+ } 
+ catch (e) { }
+ 
+ try {
++  let prefs = Components.classes["@mozilla.org/preferences-service;1"]
++              .getService(Components.interfaces.nsIPrefBranch);
++
++  // Always allow remote debugging.
++  prefs.setBoolPref("devtools.debugger.remote-enabled", true);
++
++  // TODO remove before commit. For debugging only.
++  prefs.setBoolPref("devtools.debugger.log", true);
++
+   if (runningInParent) {
+-    let prefs = Components.classes["@mozilla.org/preferences-service;1"]
+-                .getService(Components.interfaces.nsIPrefBranch);
+ 
+     // disable necko IPC security checks for xpcshell, as they lack the
+     // docshells needed to pass them
+     prefs.setBoolPref("network.disable.ipc.security", true);
+ 
+     // Disable IPv6 lookups for 'localhost' on windows.
+     if ("@mozilla.org/windows-registry-key;1" in Components.classes) {
+       prefs.setCharPref("network.dns.ipv4OnlyDomains", "localhost");
+@@ -300,33 +307,58 @@
+         throw new Error("Specified modules directory is not a directory: " +
+                         _TESTING_MODULES_DIR);
+       }
+ 
+       let modulesURI = ios.newFileURI(modulesFile);
+ 
+       protocolHandler.setSubstitution("testing-common", modulesURI);
+     }
++
+   }
+ }
+ 
++let gServerStarted = false;
++
++function _startDebugServer(port) {
++  Components.utils.import("resource://gre/modules/devtools/dbg-server.jsm");
++  if (!DebuggerServer.initialized) {
++    DebuggerServer.init(function allowConnection() { return true; });
++    DebuggerServer.addXpcshellActors(function onAttach() {
++      dump("onAttach called!\n");
++      _execute_test();
++    });
++  }
++
++  // For an nsIServerSocket we do this:
++  DebuggerServer.openListener(port);
++}
++
+ function _execute_test() {
++  if (!gServerStarted) {
++    do_test_pending();
++    _startDebugServer(6000);
++
++    return;
++  }
++
++  dump("Main test function\n");
++  debugger;
+   _register_protocol_handlers();
+ 
+   // Override idle service by default.
+   // Call do_get_idle() to restore the factory and get the service.
+   _fakeIdleService.activate();
+ 
+   // _HEAD_FILES is dynamically defined by <runxpcshelltests.py>.
+   _load_files(_HEAD_FILES);
+   // _TEST_FILE is dynamically defined by <runxpcshelltests.py>.
+   _load_files(_TEST_FILE);
+ 
+   try {
+-    do_test_pending();
+     run_test();
+     do_test_finished();
+     _do_main();
+   } catch (e) {
+     _passed = false;
+     // do_check failures are already logged and set _quit to true and throw
+     // NS_ERROR_ABORT. If both of those are true it is likely this exception
+     // has already been logged so there is no need to log it again. It's
+diff --git a/toolkit/devtools/debugger/dbg-transport.js b/toolkit/devtools/debugger/dbg-transport.js
+--- a/toolkit/devtools/debugger/dbg-transport.js
++++ b/toolkit/devtools/debugger/dbg-transport.js
+@@ -63,16 +63,17 @@
+    * transmit the entire packet. Packets are transmitted in the order
+    * they are passed to this method.
+    */
+   send: function DT_send(aPacket) {
+     // TODO (bug 709088): remove pretty printing when the protocol is done.
+     let data = JSON.stringify(aPacket, null, 2);
+     data = this._converter.ConvertFromUnicode(data);
+     data = data.length + ':' + data;
++    dumpn("Sending: " + data);
+     this._outgoing += data;
+     this._flushOutgoing();
+   },
+ 
+   /**
+    * Close the transport.
+    */
+   close: function DT_close() {
+diff --git a/toolkit/devtools/debugger/server/dbg-script-actors.js b/toolkit/devtools/debugger/server/dbg-script-actors.js
+--- a/toolkit/devtools/debugger/server/dbg-script-actors.js
++++ b/toolkit/devtools/debugger/server/dbg-script-actors.js
+@@ -226,16 +226,21 @@
+       // Send the response to the attach request now (rather than
+       // returning it), because we're going to start a nested event loop
+       // here.
+       this.conn.send(packet);
+ 
+       // Start a nested event loop.
+       this._nest();
+ 
++      if (DebuggerServer.onAttachHandler) {
++        dump("Calling onAttachHandler");
++        DebuggerServer.onAttachHandler();
++      }
++
+       // We already sent a response to this request, don't send one
+       // now.
+       return null;
+     } catch(e) {
+       Cu.reportError(e);
+       return { error: "notAttached", message: e.toString() };
+     }
+   },
+diff --git a/toolkit/devtools/debugger/server/dbg-server.js b/toolkit/devtools/debugger/server/dbg-server.js
+--- a/toolkit/devtools/debugger/server/dbg-server.js
++++ b/toolkit/devtools/debugger/server/dbg-server.js
+@@ -190,16 +190,21 @@
+     this.addActors("chrome://global/content/devtools/dbg-webconsole-actors.js");
+     this.addTabActor(this.WebConsoleActor, "consoleActor");
+     this.addGlobalActor(this.WebConsoleActor, "consoleActor");
+ #endif
+     if ("nsIProfiler" in Ci)
+       this.addActors("chrome://global/content/devtools/dbg-profiler-actors.js");
+   },
+ 
++  addXpcshellActors: function (onAttach) {
++    this.addActors("chrome://global/content/devtools/dbg-xpcshell-actors.js");
++    this.onAttachHandler = onAttach;
++  },
++
+   /**
+    * Listens on the given port for remote debugger connections.
+    *
+    * @param aPort int
+    *        The port to listen on.
+    */
+   openListener: function DS_openListener(aPort) {
+     if (!Services.prefs.getBoolPref("devtools.debugger.remote-enabled")) {
+diff --git a/toolkit/devtools/debugger/server/dbg-xpcshell-actors.js b/toolkit/devtools/debugger/server/dbg-xpcshell-actors.js
+new file mode 100644
+--- /dev/null
++++ b/toolkit/devtools/debugger/server/dbg-xpcshell-actors.js
+@@ -0,0 +1,154 @@
++/* -*- Mode: javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++"use strict";
++
++function createRootActor(aConnection)
++{
++  return new XpcshellRootActor(aConnection);
++}
++
++/**
++ * Creates the root actor that client-server communications always start with.
++ * The root actor is responsible for the initial 'hello' packet and for
++ * responding to a 'listTabs' request that produces the list of currently open
++ * tabs.
++ *
++ * @param aConnection DebuggerServerConnection
++ *        The conection to the client.
++ */
++function XpcshellRootActor(aConnection)
++{
++  this.conn = aConnection;
++  // A map of actor names to actor instances provided by extensions.
++  this._extraActors = {};
++}
++
++XpcshellRootActor.prototype = {
++
++  /**
++   * Return a 'hello' packet as specified by the Remote Debugging Protocol.
++   */
++  sayHello: function BRA_sayHello() {
++    return {
++      from: "root",
++      applicationType: "xpcshell",
++      traits: {}
++    };
++  },
++
++  /**
++   * Disconnects the actor from the browser window.
++   */
++  disconnect: function BRA_disconnect() {
++    this._extraActors = null;
++  },
++
++  /**
++   * Handles the listTabs request.  Builds a list of actors for the tabs running
++   * in the process.  The actors will survive until at least the next listTabs
++   * request.
++   */
++  onListTabs: function BRA_onListTabs() {
++    // Get actors for all the currently-running tabs (reusing existing actors
++    // where applicable), and store them in an ActorPool.
++
++    let actorPool = new ActorPool(this.conn);
++
++    this.conn.addActorPool(actorPool);
++
++    // Get the chrome debugger actor.
++    let actor = this._chromeDebugger;
++    if (!actor) {
++      actor = new ChromeDebuggerActor(this);
++      actor.parentID = this.actorID;
++      this._chromeDebugger = actor;
++      actorPool.addActor(actor);
++    }
++
++    //this._createExtraActors(DebuggerServer.globalActorFactories, actorPool);
++
++    let response = {
++      "from": "root",
++      "tabs": [],
++      "chromeDebugger": this._chromeDebugger.actorID
++    };
++    //this._appendExtraActors(response);
++    return response;
++  },
++
++  /**
++   * Adds dynamically-added actors from add-ons to the provided pool.
++   */
++  _createExtraActors: function BRA_createExtraActors(aFactories, aPool) {
++    // Walk over global actors added by extensions.
++    for (let name in aFactories) {
++      let actor = this._extraActors[name];
++      if (!actor) {
++        actor = aFactories[name].bind(null, this.conn, this);
++        actor.prototype = aFactories[name].prototype;
++        actor.parentID = this.actorID;
++        this._extraActors[name] = actor;
++      }
++      aPool.addActor(actor);
++    }
++  },
++
++  /**
++   * Appends the extra actors to the specified object.
++   */
++  _appendExtraActors: function BRA_appendExtraActors(aObject) {
++    for (let name in this._extraActors) {
++      let actor = this._extraActors[name];
++      aObject[name] = actor.actorID;
++    }
++  },
++
++  // ChromeDebuggerActor hooks.
++
++  /**
++   * Add the specified actor to the default actor pool connection, in order to
++   * keep it alive as long as the server is. This is used by breakpoints in the
++   * thread and chrome debugger actors.
++   *
++   * @param actor aActor
++   *        The actor object.
++   */
++  addToParentPool: function BRA_addToParentPool(aActor) {
++    this.conn.addActor(aActor);
++  },
++
++  /**
++   * Remove the specified actor from the default actor pool.
++   *
++   * @param BreakpointActor aActor
++   *        The actor object.
++   */
++  removeFromParentPool: function BRA_removeFromParentPool(aActor) {
++    this.conn.removeActor(aActor);
++  },
++
++  /**
++   * Prepare to enter a nested event loop by disabling debuggee events.
++   */
++  preNest: function BRA_preNest() {
++  },
++
++  /**
++   * Prepare to exit a nested event loop by enabling debuggee events.
++   */
++  postNest: function BRA_postNest(aNestData) {
++  },
++
++}
++
++/**
++ * The request types this actor can handle.
++ */
++XpcshellRootActor.prototype.requestTypes = {
++  "listTabs": XpcshellRootActor.prototype.onListTabs
++};
++
+diff --git a/toolkit/devtools/jar.mn b/toolkit/devtools/jar.mn
+--- a/toolkit/devtools/jar.mn
++++ b/toolkit/devtools/jar.mn
+@@ -4,8 +4,9 @@
+ 
+ toolkit.jar:
+   content/global/devtools/dbg-transport.js        (debugger/dbg-transport.js)
+ * content/global/devtools/dbg-server.js           (debugger/server/dbg-server.js)
+   content/global/devtools/dbg-script-actors.js    (debugger/server/dbg-script-actors.js)
+   content/global/devtools/dbg-browser-actors.js   (debugger/server/dbg-browser-actors.js)
+   content/global/devtools/dbg-webconsole-actors.js (webconsole/dbg-webconsole-actors.js)
+   content/global/devtools/dbg-profiler-actors.js  (debugger/server/dbg-profiler-actors.js)
++  content/global/devtools/dbg-xpcshell-actors.js  (debugger/server/dbg-xpcshell-actors.js)

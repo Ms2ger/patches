@@ -1,0 +1,432 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/xul/content/src/Makefile.in b/content/xul/content/src/Makefile.in
+--- a/content/xul/content/src/Makefile.in
++++ b/content/xul/content/src/Makefile.in
+@@ -7,17 +7,16 @@
+ topsrcdir	= @top_srcdir@
+ srcdir		= @srcdir@
+ VPATH		= @srcdir@
+ include $(DEPTH)/config/autoconf.mk
+ 
+ ifdef MOZ_XUL
+ LIBRARY_NAME	= gkconxulcon_s
+ MSVC_ENABLE_PGO := 1
+-LIBXUL_LIBRARY	= 1
+ endif
+ 
+ # we don't want the shared lib, but we want to force the creation of a
+ # static lib.
+ FORCE_STATIC_LIB = 1
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+diff --git a/content/xul/content/src/moz.build b/content/xul/content/src/moz.build
+--- a/content/xul/content/src/moz.build
++++ b/content/xul/content/src/moz.build
+@@ -2,16 +2,18 @@
+ # vim: set filetype=python:
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ MODULE = 'xul'
+ 
+ if CONFIG['MOZ_XUL']:
++    LIBXUL_LIBRARY = True
++
+     CPP_SOURCES += [
+         'nsXULElement.cpp',
+         'nsXULPopupListener.cpp',
+         'nsXULContextMenuBuilder.cpp',
+     ]
+ 
+ FAIL_ON_WARNINGS = True
+ 
+diff --git a/dom/bluetooth/Makefile.in b/dom/bluetooth/Makefile.in
+--- a/dom/bluetooth/Makefile.in
++++ b/dom/bluetooth/Makefile.in
+@@ -19,17 +19,16 @@
+ include $(DEPTH)/config/autoconf.mk
+ include $(topsrcdir)/dom/dom-config.mk
+ 
+ VPATH += $(srcdir)/ipc
+ 
+ ifneq (,$(MOZ_B2G_BT))
+ 
+ LIBRARY_NAME     = dombluetooth_s
+-LIBXUL_LIBRARY   = 1
+ FORCE_STATIC_LIB = 1
+ 
+ ifeq (gonk,$(MOZ_WIDGET_TOOLKIT))
+ VPATH += \
+   $(srcdir)/linux \
+   $(srcdir)/gonk \
+   $(NULL)
+ LOCAL_INCLUDES += $(MOZ_DBUS_CFLAGS)
+diff --git a/dom/bluetooth/moz.build b/dom/bluetooth/moz.build
+--- a/dom/bluetooth/moz.build
++++ b/dom/bluetooth/moz.build
+@@ -10,16 +10,17 @@
+ #
+ # Unless required by applicable law or agreed to in writing, software
+ # distributed under the License is distributed on an "AS IS" BASIS,
+ # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+ 
+ if CONFIG['MOZ_B2G_BT']:
++    LIBXUL_LIBRARY = True
+     MODULE = 'dom'
+     XPIDL_MODULE = 'dom_bluetooth'
+     XPIDL_SOURCES += [
+         'nsIDOMBluetoothAdapter.idl',
+         'nsIDOMBluetoothDevice.idl',
+         'nsIDOMBluetoothDeviceEvent.idl',
+         'nsIDOMBluetoothManager.idl',
+         'nsIDOMNavigatorBluetooth.idl',
+diff --git a/dom/system/moz.build b/dom/system/moz.build
+--- a/dom/system/moz.build
++++ b/dom/system/moz.build
+@@ -46,10 +46,8 @@
+     'OSFileConstants.cpp',
+     'nsDeviceSensors.cpp',
+ ]
+ 
+ FAIL_ON_WARNINGS = True
+ 
+ LIBXUL_LIBRARY = True
+ 
+-LIBXUL_LIBRARY = True
+-
+diff --git a/gfx/graphite2/src/Makefile.in b/gfx/graphite2/src/Makefile.in
+--- a/gfx/graphite2/src/Makefile.in
++++ b/gfx/graphite2/src/Makefile.in
+@@ -22,18 +22,16 @@
+ include $(srcdir)/files.mk
+ 
+ LIBRARY_NAME   = mozgraphite2
+ MSVC_ENABLE_PGO := 1
+ 
+ # on Windows, we're going to link graphite with gkmedias instead of libxul
+ ifeq (WINNT,$(OS_TARGET))
+ VISIBILITY_FLAGS =
+-else
+-LIBXUL_LIBRARY = 1
+ endif
+ 
+ # MSVC doesn't like the paths in _SOURCES, so strip off the prefix
+ # and leave bare filenames
+ FORCE_STATIC_LIB = 1
+ FORCE_USE_PIC = 1
+ 
+ ifeq (WINNT,$(OS_TARGET))
+diff --git a/gfx/graphite2/src/moz.build b/gfx/graphite2/src/moz.build
+--- a/gfx/graphite2/src/moz.build
++++ b/gfx/graphite2/src/moz.build
+@@ -52,8 +52,11 @@
+     'Segment.cpp',
+     'Silf.cpp',
+     'Slot.cpp',
+     'Sparse.cpp',
+     'TtfUtil.cpp',
+     'UtfCodec.cpp',
+ ]
+ 
++if CONFIG['OS_ARCH'] != 'WINNT':
++    LIBXUL_LIBRARY = True
++
+diff --git a/gfx/harfbuzz/src/Makefile.in b/gfx/harfbuzz/src/Makefile.in
+--- a/gfx/harfbuzz/src/Makefile.in
++++ b/gfx/harfbuzz/src/Makefile.in
+@@ -29,19 +29,16 @@
+ topsrcdir = @top_srcdir@
+ srcdir    = @srcdir@
+ VPATH     = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ LIBRARY_NAME   = mozharfbuzz
+ MSVC_ENABLE_PGO := 1
+-ifneq ($(OS_ARCH),WINNT)
+-LIBXUL_LIBRARY = 1
+-endif
+ 
+ LOCAL_INCLUDES  += -I$(srcdir) 
+ 
+ FORCE_STATIC_LIB = 1
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+ DEFINES += -DPACKAGE_VERSION="\"moz\""
+diff --git a/gfx/harfbuzz/src/moz.build b/gfx/harfbuzz/src/moz.build
+--- a/gfx/harfbuzz/src/moz.build
++++ b/gfx/harfbuzz/src/moz.build
+@@ -44,8 +44,11 @@
+     'hb-set.cc',
+     'hb-shape-plan.cc',
+     'hb-shape.cc',
+     'hb-shaper.cc',
+     'hb-unicode.cc',
+     'hb-warning.cc',
+ ]
+ 
++if CONFIG['OS_ARCH'] != 'WINNT':
++    LIBXUL_LIBRARY = True
++
+diff --git a/gfx/ots/src/Makefile.in b/gfx/ots/src/Makefile.in
+--- a/gfx/ots/src/Makefile.in
++++ b/gfx/ots/src/Makefile.in
+@@ -33,18 +33,16 @@
+ include $(DEPTH)/config/autoconf.mk
+ 
+ LIBRARY_NAME   = mozots
+ MSVC_ENABLE_PGO := 1
+ FORCE_STATIC_LIB = 1
+ 
+ ifeq (WINNT,$(OS_TARGET))
+ VISIBILITY_FLAGS =
+-else
+-LIBXUL_LIBRARY = 1
+ endif
+ 
+ CSRCS =   \
+   $(NULL)
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+ DEFINES += -DPACKAGE_VERSION="\"moz\""
+diff --git a/gfx/ots/src/moz.build b/gfx/ots/src/moz.build
+--- a/gfx/ots/src/moz.build
++++ b/gfx/ots/src/moz.build
+@@ -40,8 +40,11 @@
+     'prep.cc',
+     'svg.cc',
+     'vdmx.cc',
+     'vhea.cc',
+     'vmtx.cc',
+     'vorg.cc',
+ ]
+ 
++if CONFIG['OS_ARCH'] != 'WINNT':
++    LIBXUL_LIBRARY = True
++
+diff --git a/netwerk/cookie/Makefile.in b/netwerk/cookie/Makefile.in
+--- a/netwerk/cookie/Makefile.in
++++ b/netwerk/cookie/Makefile.in
+@@ -10,17 +10,16 @@
+ relativesrcdir = @relativesrcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ # export required interfaces, even if --disable-cookies has been given
+ ifdef NECKO_COOKIES
+ LIBRARY_NAME     = neckocookie_s
+ MSVC_ENABLE_PGO := 1
+-LIBXUL_LIBRARY   = 1
+ FORCE_STATIC_LIB = 1
+ 
+ LOCAL_INCLUDES	= \
+ 		-I$(topsrcdir)/intl/uconv/src \
+ 		$(NULL)
+ 
+ endif
+ 
+diff --git a/netwerk/cookie/moz.build b/netwerk/cookie/moz.build
+--- a/netwerk/cookie/moz.build
++++ b/netwerk/cookie/moz.build
+@@ -13,16 +13,18 @@
+     'nsICookieService.idl',
+ ]
+ 
+ XPIDL_MODULE = 'necko_cookie'
+ 
+ MODULE = 'necko'
+ 
+ if CONFIG['NECKO_COOKIES']:
++    LIBXUL_LIBRARY = True
++
+     EXPORTS.mozilla.net = [
+         'CookieServiceParent.h',
+         'CookieServiceChild.h',
+     ]
+     CPP_SOURCES += [
+         'nsCookie.cpp',
+         'nsCookieService.cpp',
+         'CookieServiceParent.cpp',
+diff --git a/toolkit/components/filepicker/Makefile.in b/toolkit/components/filepicker/Makefile.in
+--- a/toolkit/components/filepicker/Makefile.in
++++ b/toolkit/components/filepicker/Makefile.in
+@@ -12,15 +12,14 @@
+ include $(DEPTH)/config/autoconf.mk
+ 
+ ifdef MOZ_XUL
+ ifeq (,$(filter android qt os2 cocoa windows,$(MOZ_WIDGET_TOOLKIT)))
+ LIBRARY_NAME = fileview
+ EXPORT_LIBRARY = 1
+ IS_COMPONENT = 1
+ MODULE_NAME = nsFileViewModule
+-LIBXUL_LIBRARY = 1
+ DISABLED_EXTRA_COMPONENTS = nsFilePicker.js
+ EXTRA_PP_COMPONENTS = nsFilePicker.manifest
+ endif
+ endif
+ 
+ include $(topsrcdir)/config/rules.mk
+diff --git a/toolkit/components/filepicker/moz.build b/toolkit/components/filepicker/moz.build
+--- a/toolkit/components/filepicker/moz.build
++++ b/toolkit/components/filepicker/moz.build
+@@ -1,18 +1,19 @@
+ # -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+ # vim: set filetype=python:
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ if CONFIG['MOZ_XUL'] and \
+     CONFIG['MOZ_WIDGET_TOOLKIT'] not in ('android', 'qt', 'os2', 'cocoa', 'windows'):
+-        MODULE = 'filepicker'
+-        XPIDL_SOURCES += [
+-            'nsIFileView.idl',
+-        ]
+-        CPP_SOURCES += [
+-            'nsFileView.cpp',
+-        ]
+-        EXTRA_COMPONENTS += [
+-            'nsFilePicker.js',
+-        ]
++    LIBXUL_LIBRARY = True
++    MODULE = 'filepicker'
++    XPIDL_SOURCES += [
++        'nsIFileView.idl',
++    ]
++    CPP_SOURCES += [
++        'nsFileView.cpp',
++    ]
++    EXTRA_COMPONENTS += [
++        'nsFilePicker.js',
++    ]
+diff --git a/toolkit/components/parentalcontrols/Makefile.in b/toolkit/components/parentalcontrols/Makefile.in
+--- a/toolkit/components/parentalcontrols/Makefile.in
++++ b/toolkit/components/parentalcontrols/Makefile.in
+@@ -9,13 +9,12 @@
+ VPATH     = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ ifndef MOZ_DISABLE_PARENTAL_CONTROLS
+ ifeq (WINNT,$(OS_ARCH))
+ LIBRARY_NAME = parentalcontrols_s
+ FORCE_STATIC_LIB = 1
+-LIBXUL_LIBRARY = 1
+ endif
+ endif
+ 
+ include $(topsrcdir)/config/rules.mk
+diff --git a/toolkit/components/parentalcontrols/moz.build b/toolkit/components/parentalcontrols/moz.build
+--- a/toolkit/components/parentalcontrols/moz.build
++++ b/toolkit/components/parentalcontrols/moz.build
+@@ -5,13 +5,14 @@
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ XPIDL_SOURCES += [
+     'nsIParentalControlsService.idl',
+ ]
+ 
+ MODULE = 'parentalcontrols'
+ 
+-if not CONFIG['MOZ_DISABLE_PARENTAL_CONTROLS']:
+-    if CONFIG['OS_ARCH'] == 'WINNT':
+-        CPP_SOURCES += [
+-            'nsParentalControlsServiceWin.cpp',
+-        ]
++if not CONFIG['MOZ_DISABLE_PARENTAL_CONTROLS'] and CONFIG['OS_ARCH'] == 'WINNT':
++    LIBXUL_LIBRARY = True
++
++    CPP_SOURCES += [
++        'nsParentalControlsServiceWin.cpp',
++    ]
+diff --git a/toolkit/components/places/Makefile.in b/toolkit/components/places/Makefile.in
+--- a/toolkit/components/places/Makefile.in
++++ b/toolkit/components/places/Makefile.in
+@@ -7,17 +7,16 @@
+ srcdir = @srcdir@
+ VPATH = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ ifdef MOZ_PLACES
+ LIBRARY_NAME  = places
+ MSVC_ENABLE_PGO := 1
+-LIBXUL_LIBRARY = 1
+ EXPORT_LIBRARY = 1
+ MODULE_NAME = nsPlacesModule
+ IS_COMPONENT = 1
+ 
+ LOCAL_INCLUDES += -I$(srcdir)/../build
+ 
+ DISABLED_EXTRA_COMPONENTS = \
+   toolkitplaces.manifest \
+diff --git a/toolkit/components/places/moz.build b/toolkit/components/places/moz.build
+--- a/toolkit/components/places/moz.build
++++ b/toolkit/components/places/moz.build
+@@ -7,16 +7,18 @@
+ if CONFIG['MOZ_PLACES']:
+     TEST_DIRS += ['tests']
+ 
+ XPIDL_SOURCES += [
+     'nsINavHistoryService.idl',
+ ]
+ 
+ if CONFIG['MOZ_PLACES']:
++    LIBXUL_LIBRARY = True
++
+     XPIDL_SOURCES += [
+         'mozIAsyncFavicons.idl',
+         'mozIAsyncHistory.idl',
+         'mozIAsyncLivemarks.idl',
+         'mozIColorAnalyzer.idl',
+         'mozIPlacesAutoComplete.idl',
+         'nsIAnnotationService.idl',
+         'nsIBrowserHistory.idl',
+diff --git a/tools/profiler/Makefile.in b/tools/profiler/Makefile.in
+--- a/tools/profiler/Makefile.in
++++ b/tools/profiler/Makefile.in
+@@ -21,17 +21,16 @@
+ 
+ ifneq (,$(filter armeabi,$(ANDROID_CPU_ARCH)))
+ DEFINES += -DARCH_ARMV6
+ endif
+ 
+ MODULE_NAME     = nsProfilerModule
+ LIBRARY_NAME    = profiler
+ EXPORT_LIBRARY  = 1
+-LIBXUL_LIBRARY  = 1
+ IS_COMPONENT    = 1
+ 
+ # Uncomment for better debugging in opt builds
+ #MOZ_OPTIMIZE_FLAGS += -O0 -g
+ 
+ EXTRA_JS_MODULES = \
+   Profiler.jsm \
+   $(NULL)
+diff --git a/tools/profiler/moz.build b/tools/profiler/moz.build
+--- a/tools/profiler/moz.build
++++ b/tools/profiler/moz.build
+@@ -1,15 +1,16 @@
+ # -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+ # vim: set filetype=python:
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ if CONFIG['MOZ_ENABLE_PROFILER_SPS']:
++    LIBXUL_LIBRARY = True
+     MODULE = 'profiler'
+     XPIDL_SOURCES += [
+         'nsIProfileSaveEvent.idl',
+         'nsIProfiler.idl',
+     ]
+     EXPORTS += [
+         'GeckoProfilerFunc.h',
+         'GeckoProfilerImpl.h',

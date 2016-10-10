@@ -1,0 +1,130 @@
+# HG changeset patch
+# Parent c684c7714b77b1fea3b15fff07695dadf9d2ddf5
+# User Gregory Szorc <gps@mozilla.com>
+diff --git a/python/mozbuild/mozbuild/backend/base.py b/python/mozbuild/mozbuild/backend/base.py
+--- a/python/mozbuild/mozbuild/backend/base.py
++++ b/python/mozbuild/mozbuild/backend/base.py
+@@ -17,16 +17,42 @@
+ 
+ from ..frontend.data import (
+     ReaderSummary,
+     SandboxDerived,
+ )
+ from .configenvironment import ConfigEnvironment
+ 
+ 
++EFFICIENCY_GREAT = '''
++This is a terrific efficiency result! Your machine is keeping up with a lot of
++small file I/O! This is a good sign that your storage system is up to the task
++to build optimally.
++'''.strip()
++
++EFFICIENCY_MEDIOCRE = '''
++This is only a so-so efficiency result. It means that we spent a lot of time
++waiting for your system to allow us to run. But, the result isn't that bad, so
++you don't need to worry just yet.
++'''.strip()
++
++EFFICIENCY_BAD = '''
++This is a somewhat alarming result. It means that we spent more than half of
++our execution time waiting on your system to allow us to continue! If your
++system was busy doing other things, this is probably OK to ignore. However, it
++is wasn't, you should keep an eye on this value. If it never goes up, it may be
++time to upgrade your system. An SSD and 8+ GB of memory will go a long way
++towards improving build performance.
++'''
++
++EFFICIENCY_HORRIBLE = '''
++We need to talk. Your machine spent 
++'''
++
++
+ class BackendConsumeSummary(object):
+     """Holds state about what a backend did.
+ 
+     This is used primarily to print a summary of what the backend did
+     so people know what's going on.
+     """
+     def __init__(self):
+         # How many moz.build files were read. This includes included files.
+@@ -50,41 +76,60 @@
+         # The total wall time spent in the backend. This counts the time the
+         # backend writes out files, etc.
+         self.backend_execution_time = 0.0
+ 
+         # How much wall time the system spent doing other things. This is
+         # wall_time - mozbuild_execution_time - backend_execution_time.
+         self.other_time = 0.0
+ 
++        # Ratio of CPU time to wall time. This should ideally be greater than
++        # 0.95.
++        self.efficiency = 0.0
++
+     def reader_summary(self):
+         return 'Finished reading {:d} moz.build files into {:d} descriptors in {:.2f}s'.format(
+             self.mozbuild_count, self.object_count,
+             self.mozbuild_execution_time)
+ 
+     def backend_summary(self):
+         return 'Backend executed in {:.2f}s'.format(self.backend_execution_time)
+ 
+     def backend_detailed_summary(self):
+         """Backend summary to be supplied by BuildBackend implementations."""
+         return None
+ 
+     def total_summary(self):
+         return 'Total wall time: {:.2f}s; CPU time: {:.2f}s; Efficiency: {:.0%}'.format(
+-            self.wall_time, self.cpu_time, self.cpu_time / self.wall_time)
++            self.wall_time, self.cpu_time, self.efficiency)
++
++    def efficiency_summary(self):
++        if self.efficiency > 0.8:
++            s = EFFICIENCY_GREAT
++        elif self.efficiency > 0.5:
++            s = EFFICIENCY_MEDIOCRE
++        elif self.efficiency > 0.20:
++            s = EFFICIENCY_BAD
++        elif self.efficiency > 0:
++            s = EFFICIENCY_HORRIBLE
++
++        return s
+ 
+     def summaries(self):
+         yield self.reader_summary()
+         yield self.backend_summary()
+ 
+         detailed = self.backend_detailed_summary()
+         if detailed:
+             yield detailed
+ 
+         yield self.total_summary()
++        yield self.efficiency_summary()
++
++        efficiency = self.cpu_time / self.wall_time
+ 
+ 
+ class BuildBackend(LoggingMixin):
+     """Abstract base class for build backends.
+ 
+     A build backend is merely a consumer of the build configuration (the output
+     of the frontend processing). It does something with said data. What exactly
+     is the discretion of the specific implementation.
+@@ -164,16 +209,18 @@
+         backend_time += time.time() - finished_start
+ 
+         self.summary.cpu_time = time.clock() - cpu_start
+         self.summary.wall_time = time.time() - time_start
+         self.summary.backend_execution_time = backend_time
+         self.summary.other_time = self.summary.wall_time - \
+             self.summary.mozbuild_execution_time - \
+             self.summary.backend_execution_time
++        self.summary.efficiency = self.summary.cpu_time / \
++            self.summary.wall_time
+ 
+         return self.summary
+ 
+     @abstractmethod
+     def consume_object(self, obj):
+         """Consumes an individual TreeMetadata instance.
+ 
+         This is the main method used by child classes to react to build

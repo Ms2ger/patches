@@ -1,0 +1,248 @@
+# HG changeset patch
+# Parent 627a8d6207f24cdf9f4a1d19b3b9fabec529f2a7
+# User Gregory Szorc <gps@mozilla.com>
+
+diff --git a/testing/xpcshell/checks.jsm b/testing/xpcshell/checks.jsm
+new file mode 100644
+--- /dev/null
++++ b/testing/xpcshell/checks.jsm
+@@ -0,0 +1,171 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++/**
++ * This file holds test checks/comparisons used by the xpcshell test
++ * runner.
++ */
++
++"use strict";
++
++this.EXPORTED_SYMBOLS = [
++  "do_check_eq",
++  "todo_check_eq",
++  "do_check_true",
++  "todo_check_true",
++  "do_check_false",
++  "todo_check_false",
++  "do_check_null",
++  "todo_check_null",
++  "do_check_matches",
++  "todo_check_matches",
++];
++
++const {utils: Cu} = Components;
++
++
++this.do_check_eq = function (left, right, stack) {
++  if (!stack) {
++    stack = Components.stack.caller;
++  }
++
++  _do_check_eq(left, right, stack, false);
++};
++
++this.todo_check_eq = function (left, right, stack) {
++  if (!stack) {
++    stack = Components.stack.caller;
++  }
++
++  _do_check_eq(left, right, stack, true);
++};
++
++this.do_check_true = function (condition, stack) {
++  if (!stack) {
++    stack = Components.stack.caller;
++  }
++
++  do_check_eq(condition, true, stack);
++};
++
++this.todo_check_true = function (condition, stack) {
++  if (!stack) {
++    stack = Components.stack.caller;
++  }
++
++  todo_check_eq(condition, true, stack);
++};
++
++this.do_check_false = function (condition, stack) {
++  if (!stack) {
++    stack = Components.stack.caller;
++  }
++
++  do_check_eq(condition, false, stack);
++};
++
++this.todo_check_false = function (condition, stack) {
++  if (!stack) {
++    stack = Components.stack.caller;
++  }
++
++  todo_check_eq(condition, false, stack);
++};
++
++this.do_check_null = function (condition, stack=Components.stack.caller) {
++  do_check_eq(condition, null, stack);
++};
++
++this.todo_check_null = function (condition, stack=Components.stack.caller) {
++  todo_check_eq(condition, null, stack);
++};
++
++/**
++ * Check that |value| matches |pattern|.
++ *
++ * A |value| matches a pattern |pattern| if any one of the following is true:
++ *
++ * - |value| and |pattern| are both objects; |pattern|'s enumerable
++ *   properties' values are valid patterns; and for each enumerable
++ *   property |p| of |pattern|, plus 'length' if present at all, |value|
++ *   has a property |p| whose value matches |pattern.p|. Note that if |j|
++ *   has other properties not present in |p|, |j| may still match |p|.
++ *
++ * - |value| and |pattern| are equal string, numeric, or boolean literals
++ *
++ * - |pattern| is |undefined| (this is a wildcard pattern)
++ *
++ * - typeof |pattern| == "function", and |pattern(value)| is true.
++ *
++ * For example:
++ *
++ * do_check_matches({x:1}, {x:1})       // pass
++ * do_check_matches({x:1}, {})          // fail: all pattern props required
++ * do_check_matches({x:1}, {x:2})       // fail: values must match
++ * do_check_matches({x:1}, {x:1, y:2})  // pass: extra props tolerated
++ *
++ * // Property order is irrelevant.
++ * do_check_matches({x:"foo", y:"bar"}, {y:"bar", x:"foo"}) // pass
++ *
++ * do_check_matches({x:undefined}, {x:1}) // pass: 'undefined' is wildcard
++ * do_check_matches({x:undefined}, {x:2})
++ * do_check_matches({x:undefined}, {y:2}) // fail: 'x' must still be there
++ *
++ * // Patterns nest.
++ * do_check_matches({a:1, b:{c:2,d:undefined}}, {a:1, b:{c:2,d:3}})
++ *
++ * // 'length' property counts, even if non-enumerable.
++ * do_check_matches([3,4,5], [3,4,5])     // pass
++ * do_check_matches([3,4,5], [3,5,5])     // fail; value doesn't match
++ * do_check_matches([3,4,5], [3,4,5,6])   // fail; length doesn't match
++ *
++ * // functions in patterns get applied.
++ * do_check_matches({foo:function (v) v.length == 2}, {foo:"hi"}) // pass
++ * do_check_matches({foo:function (v) v.length == 2}, {bar:"hi"}) // fail
++ * do_check_matches({foo:function (v) v.length == 2}, {foo:"hello"}) // fail
++ *
++ * // We don't check constructors, prototypes, or classes. However, if
++ * // pattern has a 'length' property, we require values to match that as
++ * // well, even if 'length' is non-enumerable in the pattern. So arrays
++ * // are useful as patterns.
++ * do_check_matches({0:0, 1:1, length:2}, [0,1])  // pass
++ * do_check_matches({0:1}, [1,2])                 // pass
++ * do_check_matches([0], {0:0, length:1})         // pass
++ *
++ * Notes:
++ *
++ * The 'length' hack gives us reasonably intuitive handling of arrays.
++ *
++ * This is not a tight pattern-matcher; it's only good for checking data
++ * from well-behaved sources. For example:
++ * - By default, we don't mind values having extra properties.
++ * - We don't check for proxies or getters.
++ * - We don't check the prototype chain.
++ * However, if you know the values are, say, JSON, which is pretty
++ * well-behaved, and if you want to tolerate additional properties
++ * appearing on the JSON for backward-compatibility, then do_check_matches
++ * is ideal. If you do want to be more careful, you can use function
++ * patterns to implement more stringent checks.
++ */
++this.do_check_matches = function (pattern, value, stack=Components.stack.caller,
++                                  todo=false) {
++  let matcher = pattern_matcher(pattern);
++  let text = "VALUE: " + uneval(value) + "\nPATTERN: " + uneval(pattern) + "\n";
++  let diagnosis = []
++  if (matcher(value, diagnosis)) {
++    do_report_result(true, "value matches pattern:\n" + text, stack, todo);
++  } else {
++    text = ("value doesn't match pattern:\n" +
++            text +
++            "DIAGNOSIS: " +
++            format_pattern_match_failure(diagnosis[0]) + "\n");
++    do_report_result(false, text, stack, todo);
++  }
++};
++
++this.todo_check_matches = function (pattern, value,
++                                    stack=Components.stack.caller) {
++  do_check_matches(pattern, value, stack, true);
++};
++
+diff --git a/testing/xpcshell/head.js b/testing/xpcshell/head.js
+--- a/testing/xpcshell/head.js
++++ b/testing/xpcshell/head.js
+@@ -575,64 +575,16 @@
+   if (!stack) {
+     stack = Components.stack.caller;
+   }
+ 
+   let text = left + " == " + right;
+   do_report_result(left == right, text, stack, todo);
+ }
+ 
+-function do_check_eq(left, right, stack) {
+-  if (!stack) {
+-    stack = Components.stack.caller;
+-  }
+-
+-  _do_check_eq(left, right, stack, false);
+-}
+-
+-function todo_check_eq(left, right, stack) {
+-  if (!stack) {
+-    stack = Components.stack.caller;
+-  }
+-
+-  _do_check_eq(left, right, stack, true);
+-}
+-
+-function do_check_true(condition, stack) {
+-  if (!stack) {
+-    stack = Components.stack.caller;
+-  }
+-
+-  do_check_eq(condition, true, stack);
+-}
+-
+-function todo_check_true(condition, stack) {
+-  if (!stack) {
+-    stack = Components.stack.caller;
+-  }
+-
+-  todo_check_eq(condition, true, stack);
+-}
+-
+-function do_check_false(condition, stack) {
+-  if (!stack) {
+-    stack = Components.stack.caller;
+-  }
+-
+-  do_check_eq(condition, false, stack);
+-}
+-
+-function todo_check_false(condition, stack) {
+-  if (!stack) {
+-    stack = Components.stack.caller;
+-  }
+-
+-  todo_check_eq(condition, false, stack);
+-}
+-
+ function do_check_null(condition, stack=Components.stack.caller) {
+   do_check_eq(condition, null, stack);
+ }
+ 
+ function todo_check_null(condition, stack=Components.stack.caller) {
+   todo_check_eq(condition, null, stack);
+ }
+ 

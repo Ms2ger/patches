@@ -1,0 +1,216 @@
+# HG changeset patch
+# Parent 9661cae428928734d5b14889c2baccf9fb6b32bc
+# User Gregory Szorc <gps@mozilla.com>
+Bug 862563 - Part 2: Display data reporting notification on first run
+
+diff --git a/browser/base/content/browser-data-submission-info-bar.js b/browser/base/content/browser-data-submission-info-bar.js
+--- a/browser/base/content/browser-data-submission-info-bar.js
++++ b/browser/base/content/browser-data-submission-info-bar.js
+@@ -2,17 +2,17 @@
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ /**
+  * Represents an info bar that shows a data submission notification.
+  */
+ let gDataNotificationInfoBar = {
+   _OBSERVERS: [
+-    "datareporting:notify-data-policy:request",
++    "datareporting:notify-data-policy:show",
+     "datareporting:notify-data-policy:close",
+   ],
+ 
+   _DATA_REPORTING_NOTIFICATION: "data-reporting",
+ 
+   get _notificationBox() {
+     delete this._notificationBox;
+     return this._notificationBox = document.getElementById("global-notificationbox");
+@@ -37,88 +37,90 @@
+       Services.obs.addObserver(this, o, true);
+     }
+   },
+ 
+   _getDataReportingNotification: function (name=this._DATA_REPORTING_NOTIFICATION) {
+     return this._notificationBox.getNotificationWithValue(name);
+   },
+ 
+-  _displayDataPolicyInfoBar: function (request) {
++  _displayDataPolicyInfoBar: function () {
+     if (this._getDataReportingNotification()) {
+       return;
+     }
+ 
++    // We delay this because we don't want to incur the memory hit until
++    // the functionality is required.
++    let ns = {};
++    Cu.import("resource://gre/modules/Preferences.jsm", ns);
++    Cu.import("resource://services-common/utils.j", ns);
++    let prefs = new ns.Preferences("datareporting.policy.");
++    this._prefs = prefs;
++
++    this._setDatePref = function setDatePref(pref, value) {
++      return ns.CommonUtils.setDatePref(prefs, pref, value, 2013);
++    };
++
+     let brandBundle = document.getElementById("bundle_brand");
+     let appName = brandBundle.getString("brandShortName");
+     let vendorName = brandBundle.getString("vendorShortName");
+ 
+     let message = gNavigatorBundle.getFormattedString(
+       "dataReportingNotification.message",
+       [appName, vendorName]);
+ 
+     this._actionTaken = false;
+ 
+     let buttons = [{
+       label: gNavigatorBundle.getString("dataReportingNotification.button.label"),
+       accessKey: gNavigatorBundle.getString("dataReportingNotification.button.accessKey"),
+       popup: null,
+       callback: function () {
+-        // Clicking the button to go to the preferences tab constitutes
+-        // acceptance of the data upload policy for Firefox Health Report.
+-        // This will ensure the checkbox is checked. The user has the option of
+-        // unchecking it.
+-        request.onUserAccept("info-bar-button-pressed");
++        this._setDatePref("responseTime", new Date());
++        this._prefs.set("responseType", "learn-more");
+         this._actionTaken = true;
+         window.openAdvancedPreferences("dataChoicesTab");
+       }.bind(this),
+     }];
+ 
+     this._log.info("Creating data reporting policy notification.");
+     let notification = this._notificationBox.appendNotification(
+       message,
+       this._DATA_REPORTING_NOTIFICATION,
+       null,
+       this._notificationBox.PRIORITY_INFO_HIGH,
+       buttons,
+       function onEvent(event) {
+         if (event == "removed") {
+           if (!this._actionTaken) {
+-            request.onUserAccept("info-bar-dismissed");
++            this._setDatePref("responseTime", new Date());
++            this._prefs.set("responseType", "notification-dismissed");
+           }
+ 
+           Services.obs.notifyObservers(null, "datareporting:notify-data-policy:close", null);
+         }
+       }.bind(this)
+     );
+ 
+-    // Tell the notification request we have displayed the notification.
+-    request.onUserNotifyComplete();
++    this._setDatePref("notifyTime", new Date());
++    this._prefs.set("promptedVersion", 1);
+   },
+ 
+   _clearPolicyNotification: function () {
+     let notification = this._getDataReportingNotification();
+     if (notification) {
+       this._log.debug("Closing notification.");
+       notification.close();
+     }
+   },
+ 
+-  onNotifyDataPolicy: function (request) {
+-    try {
+-      this._displayDataPolicyInfoBar(request);
+-    } catch (ex) {
+-      request.onUserNotifyFailed(ex);
+-    }
+-  },
+-
+   observe: function(subject, topic, data) {
+     switch (topic) {
+-      case "datareporting:notify-data-policy:request":
+-        this.onNotifyDataPolicy(subject.wrappedJSObject.object);
++      case "datareporting:notify-data-policy:show":
++        this._displayDataPolicyInfoBar();
+         break;
+ 
+       case "datareporting:notify-data-policy:close":
+         // If this observer fires, it means something else took care of
+         // responding. Therefore, we don't need to do anything. So, we
+         // act like we took action and clear state.
+         this._actionTaken = true;
+         this._clearPolicyNotification();
+diff --git a/browser/base/content/browser.js b/browser/base/content/browser.js
+--- a/browser/base/content/browser.js
++++ b/browser/base/content/browser.js
+@@ -942,16 +942,20 @@
+     // Misc. inits.
+     CombinedStopReload.init();
+     TabsOnTop.init();
+     BookmarksMenuButton.init();
+     gPrivateBrowsingUI.init();
+     TabsInTitlebar.init();
+     retrieveToolbarIconsizesFromTheme();
+ 
++#ifdef MOZ_DATA_REPORTING
++    gDataNotificationInfoBar.init();
++#endif
++
+     // Wait until chrome is painted before executing code not critical to making the window visible
+     this._boundDelayedStartup = this._delayedStartup.bind(this, uriToLoad, mustLoadSidebar);
+     window.addEventListener("MozAfterPaint", this._boundDelayedStartup);
+ 
+     this._loadHandled = true;
+   },
+ 
+   _cancelDelayedStartup: function () {
+@@ -1152,20 +1156,16 @@
+     if (document.mozFullScreen)
+       onMozEnteredDomFullscreen();
+ 
+ #ifdef MOZ_SERVICES_SYNC
+     // initialize the sync UI
+     gSyncUI.init();
+ #endif
+ 
+-#ifdef MOZ_DATA_REPORTING
+-    gDataNotificationInfoBar.init();
+-#endif
+-
+     gBrowserThumbnails.init();
+     TabView.init();
+ 
+     setUrlAndSearchBarWidthForConditionalForwardButton();
+     window.addEventListener("resize", function resizeHandler(event) {
+       if (event.target == window)
+         setUrlAndSearchBarWidthForConditionalForwardButton();
+     });
+diff --git a/browser/components/nsBrowserGlue.js b/browser/components/nsBrowserGlue.js
+--- a/browser/components/nsBrowserGlue.js
++++ b/browser/components/nsBrowserGlue.js
+@@ -527,16 +527,30 @@
+   },
+ 
+   // All initial windows have opened.
+   _onWindowsRestored: function BG__onWindowsRestored() {
+     // Show update notification, if needed.
+     if (Services.prefs.prefHasUserValue("app.update.postupdate"))
+       this._showUpdateNotification();
+ 
++    // Show notification about data reporting policies if needed.
++    // The observer handler will take care of setting the pref to indicate
++    // it was displayed. This has the nice attribute that if for some reason
++    // no receiver was listening, we'll keep reprompting until one is.
++    let dataReportingVersion = 0;
++    try {
++      dataReportingVersion = Services.prefs.getIntPref(
++        "datareporting.policy.prompedVersion");
++    } catch (ex) {}
++
++    if (dataReportingVersion < 1) {
++      Services.obs.notifyObservers(null, "datareporting:notify-data-policy:show", "");
++    }
++
+     // Load the "more info" page for a locked places.sqlite
+     // This property is set earlier by places-database-locked topic.
+     if (this._isPlacesDatabaseLocked) {
+       this._showPlacesLockedNotificationBox();
+     }
+ 
+     // If there are plugins installed that are outdated, and the user hasn't
+     // been warned about them yet, open the plugins update page.

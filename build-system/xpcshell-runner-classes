@@ -1,0 +1,87 @@
+# HG changeset patch
+# Parent 5f930312ef858c4e4958a24af1d0cf3b759744a5
+# User Gregory Szorc <gps@mozilla.com>
+Bug 771578 - Part 3: Abstract environment-specific logic into standalone class
+
+diff --git a/testing/xpcshell/base.py b/testing/xpcshell/base.py
+new file mode 100644
+--- /dev/null
++++ b/testing/xpcshell/base.py
+@@ -0,0 +1,77 @@
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++from abc import (
++    ABCMeta,
++    abstractmethod
++)
++
++from automationutils import wrapCommand
++
++
++class XPCShellEnvironment(object):
++    """Abstract base class for an environment used to run xpcshell tests."""
++    __metaclass__ = ABCMeta
++
++    @abstractmethod
++    def launch_process(self, cmd, stdout, stderr, env, cwd):
++        """Launch an xpcshell process."""
++
++    @abstractmethod
++    def communicate(self, proc):
++        """Communicate with a running process."""
++
++    @abstractmethod
++    def poll(self, proc):
++        """Check if a process has terminated."""
++
++    @abstractmethod
++    def kill(self, proc):
++        """Kill a process."""
++
++    @abstractmethod
++    def remove_dir(self, path):
++        """Recursively remove a given directory."""
++
++    @abstractmethod
++    def verify_dir_path(self, path):
++        """Get the absolute path for a directory name."""
++
++    @abstractmethod
++    def get_return_code(self, proc):
++        """Get the return code for a given process."""
++
++    @abstractmethod
++    def create_log_file(self, test, stdout, leak_logs):
++        """Create a log file for a given test and stdout buffer."""
++
++    @abstractmethod
++    def build_command_head(self, head_files, tail_files, xpcshell_command):
++        """Build the command line arguments for the head and tail files."""
++
++    @abstractmethod
++    def build_command_test_file(self, name):
++        
++
++
++class LocalEnvironment(XPCShellEnvironment):
++    """Environment to run xpcshell tests on the local machine."""
++
++    def launch_process(self, cmd, stdout, stderr, env, cwd):
++        cmd = wrapCommand(cmd)
++
++        return subprocess.Popen(cmd, stdout=stdout, stderr=stderr, env=env,
++            cwd=cwd)
++
++    def communicate(self, proc):
++        return proc.communicate()
++
++    def poll(self, proc):
++        return proc.poll()
++
++    def kill(self, proc):
++        return proc.kill()
++
++
++

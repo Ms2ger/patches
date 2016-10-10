@@ -1,0 +1,56 @@
+# HG changeset patch
+# Parent 97a8eb1234b9e44faa0c3467209d3f968da4837d
+# User Gregory Szorc <gps@mozilla.com>
+Hack up client.mk to call mach
+
+This is for testing on Try
+
+diff --git a/client.mk b/client.mk
+--- a/client.mk
++++ b/client.mk
+@@ -144,17 +144,19 @@
+ # Make targets that are going to be passed to the real build system
+ OBJDIR_TARGETS = install export libs clean realclean distclean alldep maybe_clobber_profiledbuild upload sdk installer package fast-package package-compare stage-package source-package l10n-check
+ 
+ #######################################################################
+ # Rules
+ 
+ # The default rule is build
+ build::
+-	$(MAKE) -f $(TOPSRCDIR)/client.mk $(if $(MOZ_PGO),profiledbuild,realbuild)
++	$(MAKE) -f $(TOPSRCDIR)/client.mk configure
++	$(PYTHON) ./mach build
++	time /usr/local/bin/python2.7 ./mach build
+ 
+ # Define mkdir
+ include $(TOPSRCDIR)/config/makefiles/makeutils.mk
+ include $(TOPSRCDIR)/config/makefiles/autotargets.mk
+ 
+ # Print out any options loaded from mozconfig.
+ all realbuild clean depend distclean export libs install realclean::
+ 	@if test -f .mozconfig.out; then \
+diff --git a/python/mozbuild/mozbuild/mach_commands.py b/python/mozbuild/mozbuild/mach_commands.py
+--- a/python/mozbuild/mozbuild/mach_commands.py
++++ b/python/mozbuild/mozbuild/mach_commands.py
+@@ -48,17 +48,20 @@
+                 pass
+ 
+             self.log(logging.INFO, 'build_output', {'line': line}, '{line}')
+ 
+         from mozsysteminfo.resourcemonitor import SystemResourceMonitor
+         monitor = SystemResourceMonitor(poll_interval=1.0)
+         monitor.start()
+ 
+-        status = self._run_make(srcdir=True, filename='client.mk',
++        #path = '/builds/slave/try-lnx64/build/obj-firefox'
++        path = '/builds/slave/try-osx64/build/obj-firefox/x86_64'
++
++        status = self._run_make(directory=path,
+             line_handler=on_line, log=False, print_directory=False,
+             ensure_exit_code=False)
+ 
+         monitor.stop()
+ 
+         self.log(logging.WARNING, 'warning_summary',
+             {'count': len(warnings_collector.database)},
+             '{count} compiler warnings present.')

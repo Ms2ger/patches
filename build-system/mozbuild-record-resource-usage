@@ -1,0 +1,150 @@
+# HG changeset patch
+# Parent b40ad0b9050ee7a8a979f494416bd1ad9ab3e872
+# User Gregory Szorc <gps@mozilla.com>
+
+diff --git a/python/mozbuild/mozbuild/mach_commands.py b/python/mozbuild/mozbuild/mach_commands.py
+--- a/python/mozbuild/mozbuild/mach_commands.py
++++ b/python/mozbuild/mozbuild/mach_commands.py
+@@ -99,16 +99,20 @@
+                 if os.path.exists(make_path):
+                     return (reldir, target)
+ 
+                 target = os.path.join(os.path.basename(reldir), target)
+                 reldir = os.path.dirname(reldir)
+ 
+         # End of resolve_target_to_make.
+ 
++        from mozsysteminfo.resourcemonitor import SystemResourceMonitor
++        monitor = SystemResourceMonitor(poll_interval=1.0)
++        monitor.start()
++
+         if what:
+             top_make = os.path.join(self.topobjdir, 'Makefile')
+             if not os.path.exists(top_make):
+                 print('Your tree has not been configured yet. Please run '
+                     '|mach build| with no arguments.')
+                 return 1
+ 
+             for target in what:
+@@ -127,28 +131,74 @@
+             status = self._run_make(srcdir=True, filename='client.mk',
+                 line_handler=on_line, log=False, print_directory=False,
+                 allow_parallel=False, ensure_exit_code=False)
+ 
+             self.log(logging.WARNING, 'warning_summary',
+                 {'count': len(warnings_collector.database)},
+                 '{count} compiler warnings present.')
+ 
++        monitor.stop()
++
+         warnings_database.prune()
+         warnings_database.save_to_file(warnings_path)
+ 
++        def record_io(name, io):
++            if io is None:
++                return
++
++            self.log(logging.INFO, 'io_usage', {
++                'name': name,
++                'read_count': io.read_count,
++                'write_count': io.write_count,
++                'read_bytes': io.read_bytes,
++                'write_bytes': io.write_bytes,
++                'read_time': io.read_time,
++                'write_time': io.write_time,
++            }, '{name} I/O - Reads: {read_count}; Writes: {write_count}; '
++               'Read Bytes: {read_bytes}; Write Bytes: {write_bytes}; '
++               'Read Time (ms): {read_time}; Write time (ms): {write_time}')
++
++        def record_cpu(name, cpu):
++            if cpu is None:
++                return
++
++            self.log(logging.INFO, 'cpu_usage', {
++                'name': name,
++                'percent': cpu,
++            }, '{name} CPU Utilization: {percent}')
++
++        with open(self._get_state_filename('build-resources.tsv'), 'wt') as fh:
++            self._write_resource_monitor_usage(monitor, fh)
++
++        record_cpu('total', monitor.aggregate_cpu(per_cpu=False))
++        record_io('total', monitor.aggregate_io())
++
+         print('Finished building. Built files are in %s' % self.topobjdir)
+ 
+         return status
+ 
+     @Command('clobber', help='Clobber the tree (delete the object directory).')
+     def clobber(self):
+         self.remove_objdir()
+         return 0
+ 
++    def _write_resource_monitor_usage(self, monitor, fh):
++        t0 = monitor.start_time
++
++        fh.write('time\tcpu\tread_count\twrite_count\tread_bytes\twrite_bytes\tread_time\twrite_time\n')
++
++        for usage in monitor.range_usage():
++            delta = usage.end - t0
++            cpu = sum(usage.cpu) / len(usage.cpu)
++            io = usage.io
++            fh.write('%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n' % (
++                delta, cpu, io.read_count, io.write_count, io.read_bytes,
++                io.write_bytes, io.read_time, io.write_time))
++
+ 
+ @CommandProvider
+ class Warnings(MachCommandBase):
+     """Provide commands for inspecting warnings."""
+ 
+     @property
+     def database_path(self):
+         return self._get_state_filename('warnings.json')
+diff --git a/testing/mozbase/mozsysteminfo/mozsysteminfo/resourcemonitor.py b/testing/mozbase/mozsysteminfo/mozsysteminfo/resourcemonitor.py
+--- a/testing/mozbase/mozsysteminfo/mozsysteminfo/resourcemonitor.py
++++ b/testing/mozbase/mozsysteminfo/mozsysteminfo/resourcemonitor.py
+@@ -152,31 +152,32 @@
+         self.cpu = []
+         self.io = []
+         self.virt = []
+         self.swap = []
+         self.time = []
+ 
+         done = False
+ 
+-        while self._rx_pipe.poll(1):
++        while self._rx_pipe.poll(10):
+             k, entry = self._rx_pipe.recv()
+ 
+             if k == 'time':
+                 self.time.append(entry)
+             elif k == 'io':
+                 self.io.append(self._io_type(*entry))
+             elif k == 'virt':
+                 self.virt.append(self._virt_type(*entry))
+             elif k == 'swap':
+                 self.swap.append(self._swap_type(*entry))
+             elif k == 'cpu':
+                 self.cpu.append(entry)
+             elif k == 'done':
+                 done = True
++                break
+             else:
+                 raise Exception('Unknown entry type: %s' % k)
+ 
+         self._process.join()
+         assert done
+ 
+         # It's possible for the child process to be terminated in the middle of
+         # a run. If this happens, we may not have agreement between the lengths
+@@ -364,9 +365,8 @@
+                 data.append(('virt', list(psutil.virtual_memory())))
+                 data.append(('swap', list(psutil.swap_memory())))
+                 data.append(('cpu', psutil.cpu_percent(poll_interval, True)))
+         finally:
+             for entry in data:
+                 pipe.send(entry)
+ 
+             pipe.send(('done', None))
+-            pipe.close()

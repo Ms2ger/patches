@@ -1,0 +1,182 @@
+# HG changeset patch
+# Parent 0d373cf880fde56ed9c61a5422b13a09462344df
+# User Gregory Szorc <gps@mozilla.com>
+Bug 451283 - Logging component for Toolkit
+
+diff --git a/toolkit/logging/README.rst b/toolkit/logging/README.rst
+new file mode 100644
+--- /dev/null
++++ b/toolkit/logging/README.rst
+@@ -0,0 +1,172 @@
++============================
++JavaScript Logging Framework
++============================
++
++This directory contains a logging framework for JavaScript. There are
++essentially two components:
++
++1. A generic logging API in the spirit of log4j
++2. An XPCOM service that provides a unified logging framework for Gecko
++   applications
++
++Concepts
++========
++
++Log **messages** are entities containing data to be recorded. A log message
++consists of basic metadata (time of event, where the message came from,
++importance of the message, etc) and a user-supplied payload. The payload
++of a log message can either be a string or a set of fields (an object in
++JavaScript terminology).
++
++Log messages are written to **loggers**. Each logger has a name. The
++logger's name corresponds to its place in a tree-based hierarchy. A
++Java-style naming convention is used. e.g. **A** is the parent of
++**A.B** is the parent of **A.B.C**. By convention, the first letter of
++every component in the hierarchy is capitalized. This isn't enforced,
++but weird things may happen if you break convention.
++
++An **appender** is an entity that receives log **messages**. An
++appender's role is to do something with received messages. For example,
++an appender may print the message to the Error Console, write it to a
++file, or even ignore it.
++
++**Appenders** are attached to **loggers**. When a message is written to
++a logger, that message is sent to all the appenders attached to not only
++the logger it was written to, but also all appenders attached to loggers
++in the parent chain. In other words, appenders are inherited by child
++loggers. For example, if you attach an appender to *A.B*, messages
++written to *A.B*, *A.B.C*, and *A.B.C.D* will be written to that
++appender. However, messages written to *A* will not.
++
++Structured vs Unstructured Logging
++----------------------------------
++
++The payload of a log message can either be a string or a 2-tuple of
++(action, fields).
++
++The latter payload is also known as *structured* logging. Instead of
++decomposing discrete fields into a string (which may then need to be
++parsed back into its discrete fields later), we preserve the original
++fields in the message by recording a JavaScript object (map). This
++facilitates easier downstream machine consumption since it eliminates
++the problem of parsing.
++
++String/unstructured logging should be used when the audience is humans
++(debugging, etc). Object/structured logging should be used when the
++audience is machines.
++
++Writing Log Events
++==================
++
++Most consumers of this API will be interested in writing log messages.
++To do so, they just need to obtain a named **logger** and then write
++messages to it:
++
++    Cu.import("resource://gre/modules/logging.jsm");
++
++    let logger = getLogger("Toolkit.MyComponent");
++
++    // Write a simple string.
++    logger.info("My first logged message!");
++
++    // Write a structured log message.
++    logger.debug("page_view", {url: currentURL});
++
++
++XPCOM Service
++=============
++
++This component also provides an XPCOM service that provides a logging
++framework for Gecko applications. The service is pre-configured with
++preferences integration and commonly-used appenders so components within
++Gecko easily have a robust logging facility available to them.
++
++Preference Integration
++----------------------
++
++Logging is integrated with preferences to allow easy manipulation of
++logging settings.
++
++All preferences are stored under the **logging.** top-level branch.
++
++The XPCOM service listens for preference changes and adjusts the logging
++system on the fly.
++
++Logger Preferences
++^^^^^^^^^^^^^^^^^^
++
++Settings for individual loggers are stored under the **logging.logger.**
++branch.
++
++The settings for an individual logger are stored under the pref
++**logging.logger.<logger name>.**. For example, the **Foo.Bar** logger will
++have its settings stored under **logging.logger.Foo.Bar.**.
++
++Each logger looks at the following preferences:
++
++level
++  String or integer log level/threshold at which this logger records
++  messages. Messages not meeting this threshold are ignored.
++
++appenders.
++  Branch holding the appenders that are added to this logger. The values
++  of prefs under this are strings holding the name of the pref branch
++  under **logging.appender.** that defines an appender configuration.
++  The names of the preferences are ignored.
++
++Appender Preferences
++^^^^^^^^^^^^^^^^^^^^
++
++Settings for individual appenders are stored under the
++**logging.appender.** branch.
++
++The settings for an individual appender are stored under the pref
++**logging.appender.<appender name>.**. The appender name is meaningless
++and is only used to identify different appender configurations.
++
++Each appender has the following preferences:
++
++level
++  String or integer log level/threshold at which this appender appends
++  messages. Messages not meeting this threshold are ignored by the
++  appender.
++
++type
++  String name of the JS constructor function.
++
++moduleURI
++  URI that will be Cu.import()'d to find the JS constructor function.
++  This is only needed for appenders not provided by the XPCOM service
++  itself.
++
++*
++  All other preferences define per-appender settings and vary depending
++  on the appender.
++
++Built-in Appenders
++------------------
++
++This component defines a number of commonly-used appenders. Appenders
++are typically designed to be generic to facilitate reuse among multiple
++components.
++
++ConsoleAppender
++^^^^^^^^^^^^^^^^^^^^
++
++This appender writes events to the *Error Console*.
++
++DumpAppender
++^^^^^^^^^^^^
++
++Logs to stdout using the *dump()* function.
++
++FileAppender
++^^^^^^^^^^^^
++
++Writes to a single named file on disk.
++
++RotatingFileAppender
++^^^^^^^^^^^^^^^^^^^^
++
++Writes to files on disk but rotates (creates new files) at specific time
++intervals or when individual log files become too large.

@@ -1,0 +1,82 @@
+# HG changeset patch
+# Parent 097d8bc68c99a7a136b097409fee8983fbb392d0
+# User Gregory Szorc <gps@mozilla.com>
+Bug XXXXXX - mach command to extract dependency counts for pp files
+
+diff --git a/python/mozbuild/mozbuild/mach_commands.py b/python/mozbuild/mozbuild/mach_commands.py
+--- a/python/mozbuild/mozbuild/mach_commands.py
++++ b/python/mozbuild/mozbuild/mach_commands.py
+@@ -119,8 +119,73 @@
+ 
+             if warning['column'] is not None:
+                 print('%s:%d:%d [%s] %s' % (filename, warning['line'],
+                     warning['column'], warning['flag'], warning['message']))
+             else:
+                 print('%s:%d [%s] %s' % (filename, warning['line'],
+                     warning['flag'], warning['message']))
+ 
++
++@CommandProvider
++class DependencyAnalyzer(MachCommandBase):
++
++    @Command('build-dependencies', help='Show actual build dependencies')
++    @CommandArgument('--ignore-system', action='store_true', default=False,
++        help='Ignore dependencies outside the source tree.')
++    def build_dependencies(self, ignore_system=False):
++        counts = {}
++
++        for target, deps in self.parse_dependencies():
++            for dep in deps:
++                count = counts.get(dep, 0)
++                counts[dep] = count + 1
++
++        for k in sorted(counts, key=counts.get, reverse=True):
++            if ignore_system and not k.startswith(self.topsrcdir):
++                continue
++
++            normalized = k
++
++            if k.startswith(self.topobjdir):
++                normalized = '%OBJDIR%' + k[len(self.topobjdir):]
++            elif k.startswith(self.topsrcdir):
++                normalized = '%SRCDIR%' + k[len(self.topsrcdir):]
++
++            print('%d\t%s' % (counts[k], normalized))
++
++    def parse_dependencies(self):
++        for root, dirs, files in os.walk(self.topobjdir):
++            if not root.endswith('.deps'):
++                continue
++
++            for f in files:
++                if not f.endswith('.pp'):
++                    continue
++
++                for t in self.parse_dependency_file(root, f): yield t
++
++    def parse_dependency_file(self, root, filename):
++        import pymake.parser
++        import pymake.parserdata
++
++        parent = os.path.dirname(root)
++
++        path = os.path.join(root, filename)
++
++        for statement in pymake.parser.parsefile(path):
++            if not isinstance(statement, pymake.parserdata.Rule):
++                continue
++
++            target = os.path.normpath(os.path.join(parent,
++                statement.targetexp.s))
++            assert statement.depexp.is_static_string
++
++            deps = set()
++
++            for dep in statement.depexp.s.split():
++                if os.path.isabs(dep):
++                    deps.add(os.path.normpath(dep))
++                    continue
++
++                deps.add(os.path.normpath(os.path.join(parent, dep)))
++
++            yield (target, deps)

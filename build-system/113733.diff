@@ -1,0 +1,229 @@
+# HG changeset patch
+# User Gregory Szorc <gps@mozilla.com>
+# Date 1353359910 28800
+# Branch healthreport-rebase
+# Node ID 5435b56bfcbbb3584cb1ec1085bdf985602b5922
+# Parent  a9162bef5a542845bf0f5e8a5c3531a140ef3ba9
+Bug 812377 - Health report provider for collecting system info; r=rnewman
+
+diff --git a/services/healthreport/HealthReportComponents.manifest b/services/healthreport/HealthReportComponents.manifest
+--- a/services/healthreport/HealthReportComponents.manifest
++++ b/services/healthreport/HealthReportComponents.manifest
+@@ -5,9 +5,10 @@
+ #   suite (comm):   {92650c4d-4b8e-4d2a-b7eb-24ecf4f6b63a}
+ #   metro browser:  {99bceaaa-e3c6-48c1-b981-ef9b46b67d60}
+ 
+ component {e354c59b-b252-4040-b6dd-b71864e3e35c} HealthReportService.js
+ contract @mozilla.org/healthreport/service;1 {e354c59b-b252-4040-b6dd-b71864e3e35c}
+ category app-startup HealthReportService service,@mozilla.org/healthreport/service;1 application={3c2e2abc-06d4-11e1-ac3b-374f68613e61} application={ec8030f7-c20a-464f-9b0e-13a3a9e97384} application={aa3c5121-dab2-40e2-81ca-7ea25febc110} application={a23983c0-fd0e-11dc-95ff-0800200c9a66}
+ 
+ category healthreport-js-provider AppInfoProvider resource://gre/modules/services/healthreport/providers.jsm
++category healthreport-js-provider SysInfoProvider resource://gre/modules/services/healthreport/providers.jsm
+ 
+diff --git a/services/healthreport/providers.jsm b/services/healthreport/providers.jsm
+--- a/services/healthreport/providers.jsm
++++ b/services/healthreport/providers.jsm
+@@ -10,29 +10,32 @@
+  * currently have all the code in one file. When the overhead of
+  * compartments reaches a reasonable level, this file should be split
+  * up.
+  */
+ 
+ "use strict";
+ 
+ this.EXPORTED_SYMBOLS = [
+-  "AppInfoProvider"
++  "AppInfoProvider",
++  "SysInfoProvider",
+ ];
+ 
+ const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
+ 
+ Cu.import("resource://gre/modules/Services.jsm");
+ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ Cu.import("resource://gre/modules/services/metrics/dataprovider.jsm");
+ Cu.import("resource://services-common/preferences.js");
+ Cu.import("resource://services-common/utils.js");
+ 
+ 
+ const REQUIRED_STRING_TYPE = {type: "TYPE_STRING"};
++const OPTIONAL_STRING_TYPE = {type: "TYPE_STRING", optional: true};
++const REQUIRED_UINT32_TYPE = {type: "TYPE_UINT32"};
+ 
+ XPCOMUtils.defineLazyModuleGetter(this, "UpdateChannel",
+                                   "resource://gre/modules/UpdateChannel.jsm");
+ 
+ /**
+  * Represents basic application state.
+  *
+  * This is roughly a union of nsIXULAppInfo, nsIXULRuntime, with a few extra
+@@ -147,8 +150,105 @@
+     }
+ 
+     result.finish();
+   },
+ };
+ 
+ Object.freeze(AppInfoProvider.prototype);
+ 
++
++function SysInfoMeasurement() {
++  MetricsMeasurement.call(this, "sysinfo", 1);
++}
++
++SysInfoMeasurement.prototype = {
++  __proto__: MetricsMeasurement.prototype,
++
++  fields: {
++    cpuCount: REQUIRED_UINT32_TYPE,
++    memoryMB: REQUIRED_UINT32_TYPE,
++    manufacturer: OPTIONAL_STRING_TYPE,
++    device: OPTIONAL_STRING_TYPE,
++    hardware: OPTIONAL_STRING_TYPE,
++    name: OPTIONAL_STRING_TYPE,
++    version: OPTIONAL_STRING_TYPE,
++    architecture: OPTIONAL_STRING_TYPE,
++  },
++},
++
++Object.freeze(SysInfoMeasurement.prototype);
++
++
++this.SysInfoProvider = function SysInfoProvider() {
++  MetricsProvider.call(this, "sys-info");
++};
++
++SysInfoProvider.prototype = {
++  __proto__: MetricsProvider.prototype,
++
++  sysInfoFields: {
++    cpucount: "cpuCount",
++    memsize: "memoryMB",
++    manufacturer: "manufacturer",
++    device: "device",
++    hardware: "hardware",
++    name: "name",
++    version: "version",
++    arch: "architecture",
++  },
++
++  INT_FIELDS: new Set("cpucount", "memsize"),
++
++  collectConstantMeasurements: function collectConstantMeasurements() {
++    let result = this.createResult();
++    result.expectMeasurement("sysinfo");
++
++    result.populate = this._populateConstants.bind(this);
++
++    return result;
++  },
++
++  _populateConstants: function _populateConstants(result) {
++    result.addMeasurement(new SysInfoMeasurement());
++
++    let si = Cc["@mozilla.org/system-info;1"]
++               .getService(Ci.nsIPropertyBag2);
++
++    for (let [k, v] in Iterator(this.sysInfoFields)) {
++      try {
++        if (!si.hasKey(k)) {
++          this._log.debug("Property not available: " + k);
++          continue;
++        }
++
++        let value = si.getProperty(k);
++
++        if (this.INT_FIELDS.has(k)) {
++          let converted = parseInt(value, 10);
++          if (Number.isNaN(converted)) {
++            result.addError(new Error("Value is not an integer: " + k + "=" +
++                                      value));
++            continue;
++          }
++
++          value = converted;
++        }
++
++        // Round memory to mebibytes.
++        if (k == "memsize") {
++          value = Math.round(value / 1048576);
++        }
++
++        result.setValue("sysinfo", v, value);
++      } catch (ex) {
++        this._log.warn("Error obtaining system info field: " + k + " " +
++                       CommonUtils.exceptionStr(ex));
++        result.addError(ex);
++      }
++    }
++
++    result.finish();
++  },
++};
++
++Object.freeze(SysInfoProvider.prototype);
++
+diff --git a/services/healthreport/tests/xpcshell/test_provider_sysinfo.js b/services/healthreport/tests/xpcshell/test_provider_sysinfo.js
+new file mode 100644
+--- /dev/null
++++ b/services/healthreport/tests/xpcshell/test_provider_sysinfo.js
+@@ -0,0 +1,45 @@
++/* Any copyright is dedicated to the Public Domain.
++ * http://creativecommons.org/publicdomain/zero/1.0/ */
++
++"use strict";
++
++const {interfaces: Ci, results: Cr, utils: Cu} = Components;
++
++Cu.import("resource://gre/modules/XPCOMUtils.jsm");
++Cu.import("resource://gre/modules/services/healthreport/providers.jsm");
++Cu.import("resource://gre/modules/services/metrics/dataprovider.jsm");
++
++
++function run_test() {
++  run_next_test();
++}
++
++add_test(function test_constructor() {
++  let provider = new SysInfoProvider();
++
++  run_next_test();
++});
++
++add_test(function test_collect_smoketest() {
++  let provider = new SysInfoProvider();
++
++  let result = provider.collectConstantMeasurements();
++  do_check_true(result instanceof MetricsCollectionResult);
++
++  result.onFinished(function onFinished() {
++    do_check_eq(result.expectedMeasurements.size, 1);
++    do_check_true(result.expectedMeasurements.has("sysinfo"));
++    do_check_eq(result.measurements.size, 1);
++    do_check_true(result.measurements.has("sysinfo"));
++    do_check_eq(result.errors.length, 0);
++
++    let si = result.measurements.get("sysinfo");
++    do_check_true(si.getValue("cpuCount") > 0);
++    do_check_neq(si.getValue("name"), null);
++
++    run_next_test();
++  });
++
++  result.populate(result);
++});
++
+diff --git a/services/healthreport/tests/xpcshell/xpcshell.ini b/services/healthreport/tests/xpcshell/xpcshell.ini
+--- a/services/healthreport/tests/xpcshell/xpcshell.ini
++++ b/services/healthreport/tests/xpcshell/xpcshell.ini
+@@ -1,8 +1,10 @@
+ [DEFAULT]
+ head = head.js
+ tail =
+ 
+ [test_load_modules.js]
+ [test_policy.js]
+ [test_healthreporter.js]
+ [test_provider_appinfo.js]
++[test_provider_sysinfo.js]
++

@@ -1,0 +1,308 @@
+# HG changeset patch
+# Parent 632f21df7be14b26688adeb73634e8cfde685c1b
+# User Gregory Szorc <gps@mozilla.com>
+Bug 784841 - Part 20: Fixes to support building external projects
+
+diff --git a/b2g/app.mozbuild b/b2g/app.mozbuild
+--- a/b2g/app.mozbuild
++++ b/b2g/app.mozbuild
+@@ -1,15 +1,17 @@
+ # vim: set filetype=python:
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ if not CONFIG['LIBXUL_SDK']:
+     app_libxul_dirs = []
++    app_libxul_static_dirs = []
++
+     include('/toolkit/toolkit.mozbuild')
+ elif CONFIG['ENABLE_TESTS']:
+     add_tier_dir('testharness', 'testing/mochitest')
+ 
+ if CONFIG['MOZ_EXTENSIONS']:
+     add_tier_dir('app', 'extensions')
+ 
+ add_tier_dir('app', CONFIG['MOZ_BRANDING_DIRECTORY'])
+diff --git a/browser/app.mozbuild b/browser/app.mozbuild
+--- a/browser/app.mozbuild
++++ b/browser/app.mozbuild
+@@ -1,15 +1,16 @@
+ # vim: set filetype=python:
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ if not CONFIG['LIBXUL_SDK']:
+     app_libxul_dirs = []
++    app_libxul_static_dirs = []
+     include('/toolkit/toolkit.mozbuild')
+ 
+ if CONFIG['MOZ_EXTENSIONS']:
+     add_tier_dir('app', 'extensions')
+ 
+ add_tier_dir('app', [CONFIG['MOZ_BRANDING_DIRECTORY']])
+ 
+ if CONFIG['MOZ_WEBAPP_RUNTIME']:
+diff --git a/configure.in b/configure.in
+--- a/configure.in
++++ b/configure.in
+@@ -4290,16 +4290,22 @@
+         MOZ_THEME_FASTSTRIPE=1
+         MOZ_TREE_FREETYPE=1
+         MOZ_MEMORY=1
+         MOZ_RAW=1
+         ;;
+ 
+ esac
+ 
++MOZ_ARG_WITH_STRING(external-source-dir,
++[  --with-external-source-dir=dir
++                          External directory containing additional build files.],
++[ EXTERNAL_SOURCE_DIR=$withval])
++AC_SUBST(EXTERNAL_SOURCE_DIR)
++
+ MOZ_ARG_ENABLE_STRING(application,
+ [  --enable-application=APP
+                           Options include:
+                             browser (Firefox)
+                             xulrunner
+                             tools/update-packaging (AUS-related packaging tools)],
+ [ MOZ_BUILD_APP=$enableval ] )
+ 
+diff --git a/mobile/android/app.mozbuild b/mobile/android/app.mozbuild
+--- a/mobile/android/app.mozbuild
++++ b/mobile/android/app.mozbuild
+@@ -1,15 +1,16 @@
+ # vim: set filetype=python:
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ if not CONFIG['LIBXUL_SDK']:
+     app_libxul_dirs = ['mobile/android/components/build']
++    app_libxul_static_dirs = []
+ 
+     include('/toolkit/toolkit.mozbuild')
+ 
+ elif CONFIG['ENABLE_TESTS']:
+     add_tier_dir('testharness', 'testing/mochitest')
+ 
+ if CONFIG['MOZ_EXTENSIONS']:
+     add_tier_dir('app', 'extensions')
+diff --git a/mobile/xul/app.mozbuild b/mobile/xul/app.mozbuild
+--- a/mobile/xul/app.mozbuild
++++ b/mobile/xul/app.mozbuild
+@@ -1,15 +1,16 @@
+ # vim: set filetype=python:
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ if not CONFIG['LIBXUL_SDK']:
+     app_libxul_dirs = ['mobile/xul/components/build']
++    app_libxul_static_dirs = []
+     include('/toolkit/toolkit.mozbuild')
+ 
+ elif CONFIG['ENABLE_TESTS']:
+     add_tier_dir('testharness', 'testing/mochitest')
+ 
+ if CONFIG['MOZ_EXTENSIONS']:
+     add_tier_dir('app', 'extensions')
+ 
+diff --git a/python/mozbuild/mozbuild/frontend/reader.py b/python/mozbuild/mozbuild/frontend/reader.py
+--- a/python/mozbuild/mozbuild/frontend/reader.py
++++ b/python/mozbuild/mozbuild/frontend/reader.py
+@@ -51,20 +51,50 @@
+ 
+ if sys.version_info.major == 2:
+     text_type = unicode
+     type_type = types.TypeType
+ else:
+     text_type = str
+     type_type = type
+ 
++
+ def log(logger, level, action, params, formatter):
+     logger.log(level, formatter, extra={'action': action, 'params': params})
+ 
+ 
++def allowed_read_paths(config):
++    """Obtain a tuple of path prefixes we are allowed to read from.
++
++    This is used as cheap security to ensure the build is isolated to known
++    source directories.
++
++    We are allowed to read from the main source directory and the source
++    directory of the application being built. The latter is to allow 3rd party
++    applications to hook into our build system.
++    """
++    allowed = set([os.path.normpath(config.topsrcdir)])
++
++    if 'MOZ_BUILD_APP' in config.substs:
++        app_dir = config.substs['MOZ_BUILD_APP']
++        if not os.path.isabs(app_dir):
++            app_dir = os.path.join(config.topsrcdir, app_dir)
++
++        allowed.add(os.path.normpath(app_dir))
++
++    if 'EXTERNAL_SOURCE_DIR' in config.substs:
++        ext = config.substs['EXTERNAL_SOURCE_DIR'].strip()
++        if not os.path.isabs(ext):
++            ext = os.path.join(config.topsrcdir, ex)
++
++        allowed.add(os.path.normpath(ext))
++
++    return tuple(allowed)
++
++
+ class SandboxCalledError(SandboxError):
+     """Represents an error resulting from calling the error() function."""
+ 
+     def __init__(self, file_stack, message):
+         SandboxError.__init__(self, file_stack)
+         self.message = message
+ 
+ 
+@@ -82,19 +112,21 @@
+         to compute encountered relative paths.
+         """
+         Sandbox.__init__(self, allowed_variables=VARIABLES)
+ 
+         self.config = config
+ 
+         topobjdir = os.path.abspath(config.topobjdir)
+ 
++        self._allowed_read_paths = allowed_read_paths(config)
++
+         # This may not always hold true. If we ever have autogenerated mozbuild
+         # files in topobjdir, we'll need to change this.
+-        assert os.path.normpath(path).startswith(os.path.normpath(config.topsrcdir))
++        assert os.path.normpath(path).startswith(self._allowed_read_paths)
+         assert not os.path.normpath(path).startswith(os.path.normpath(topobjdir))
+ 
+         relpath = os.path.relpath(path, config.topsrcdir).replace(os.sep, '/')
+         reldir = os.path.dirname(relpath)
+ 
+         with self._globals.allow_all_writes() as d:
+             d['TOPSRCDIR'] = config.topsrcdir
+             d['TOPOBJDIR'] = topobjdir
+@@ -113,18 +145,16 @@
+                 substs[k] = v
+ 
+             d['CONFIG'] = ReadOnlyDefaultDict(substs, global_default=None)
+ 
+             # Register functions.
+             for name, func in FUNCTIONS.items():
+                 d[name] = getattr(self, func[0])
+ 
+-        self._normalized_topsrcdir = os.path.normpath(config.topsrcdir)
+-
+     def exec_file(self, path, filesystem_absolute=False):
+         """Override exec_file to normalize paths and restrict file loading.
+ 
+         If the path is absolute, behavior is governed by filesystem_absolute.
+         If filesystem_absolute is True, the path is interpreted as absolute on
+         the actual filesystem. If it is false, the path is treated as absolute
+         within the current topsrcdir.
+ 
+@@ -146,17 +176,17 @@
+                     path))
+             else:
+                 path = os.path.normpath(os.path.join(
+                     self.config.topsrcdir, path))
+ 
+         # realpath() is needed for true security. But, this isn't for security
+         # protection, so it is omitted.
+         normalized_path = os.path.normpath(path)
+-        if not normalized_path.startswith(self._normalized_topsrcdir):
++        if not normalized_path.startswith(self._allowed_read_paths):
+             raise SandboxLoadError(list(self._execution_stack),
+                 sys.exc_info()[2], illegal_path=path)
+ 
+         Sandbox.exec_file(self, path)
+ 
+     def _add_tier_directory(self, tier, reldir, static=False):
+         """Register a tier directory with the build."""
+         if isinstance(reldir, text_type):
+@@ -479,17 +509,17 @@
+     """
+ 
+     def __init__(self, config):
+         self.config = config
+         self.topsrcdir = config.topsrcdir
+ 
+         self._log = logging.getLogger(__name__)
+         self._read_files = set()
+-        self._normalized_topsrcdir = os.path.normpath(config.topsrcdir)
++        self._allowed_read_paths = allowed_read_paths(config)
+         self._execution_stack = []
+ 
+     def read_topsrcdir(self):
+         """Read the tree of mozconfig files into a data structure.
+ 
+         This starts with the tree's top-most mozbuild file and descends into
+         all linked mozbuild files until all relevant files have been evaluated.
+ 
+@@ -610,19 +640,19 @@
+         for relpath in dirs:
+             child_path = os.path.join(curdir, relpath, 'moz.build')
+ 
+             # Ensure we don't break out of the topsrcdir. We don't do realpath
+             # because it isn't necessary. If there are symlinks in the srcdir,
+             # that's not our problem. We're not a hosted application: we don't
+             # need to worry about security too much.
+             child_path = os.path.normpath(child_path)
+-            if not child_path.startswith(self._normalized_topsrcdir):
++            if not child_path.startswith(self._allowed_read_paths):
+                 raise SandboxValidationError(
+-                    'Attempting to process file outside of topsrcdir: %s' %
++                    'Attempting to process file outside of allowed paths: %s' %
+                         child_path)
+ 
+             if not descend:
+                 continue
+ 
+             for res in self.read_mozbuild(child_path, read_tiers=False,
+                 filesystem_absolute=True):
+                 yield res
+diff --git a/toolkit/toolkit.mozbuild b/toolkit/toolkit.mozbuild
+--- a/toolkit/toolkit.mozbuild
++++ b/toolkit/toolkit.mozbuild
+@@ -204,16 +204,17 @@
+ add_tier_dir('platform', 'other-licenses/snappy')
+ 
+ if CONFIG['MOZ_GIO_COMPONENT']:
+     add_tier_dir('platform', 'extensions/gio')
+ 
+ # Applications can cheat and ask for code to be
+ # built before libxul so it can be linked into libxul.
+ add_tier_dir('platform', app_libxul_dirs)
++add_tier_dir('platform', app_libxul_static_dirs, static=True)
+ 
+ add_tier_dir('platform', 'toolkit/library')
+ add_tier_dir('platform', 'xpcom/stub')
+ 
+ if CONFIG['MOZ_REPLACE_MALLOC']:
+     add_tier_dir('platform', 'memory/replace')
+ 
+ if CONFIG['NS_TRACE_MALLOC']:
+diff --git a/xulrunner/app.mozbuild b/xulrunner/app.mozbuild
+--- a/xulrunner/app.mozbuild
++++ b/xulrunner/app.mozbuild
+@@ -1,14 +1,15 @@
+ # vim: set filetype=python:
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ app_libxul_dirs = []
++app_libxul_static_dirs = []
+ include('/toolkit/toolkit.mozbuild')
+ 
+ if CONFIG['MOZ_EXTENSIONS']:
+     add_tier_dir('app', 'extensions')
+ 
+ if CONFIG['OS_ARCH'] == 'WINNT' and (CONFIG['ENABLE_TESTS'] or
+         CONFIG['MOZILLA_OFFICIAL']):
+     add_tier_dir('app', 'embedding/tests/winEmbed')

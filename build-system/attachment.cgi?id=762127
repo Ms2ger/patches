@@ -1,0 +1,214 @@
+# HG changeset patch
+# User Gregory Szorc <gps@mozilla.com>
+# Date 1362694560 21600
+# Node ID 21fdbcb29f9ddfec0b26e2c5be99262e6403bb7e
+# Parent c07adb149ba6272ddcf651c7ee4c63cba3a0ea35
+Bug 847066 - Mach command to move variables from Makefile.in to moz.build
+* * *
+[mq]: mozbuild-supermigrate
+
+diff --git a/python/mozbuild/mozbuild/mach_commands.py b/python/mozbuild/mozbuild/mach_commands.py
+--- a/python/mozbuild/mozbuild/mach_commands.py
++++ b/python/mozbuild/mozbuild/mach_commands.py
+@@ -862,22 +862,201 @@
+                 statements = [s for s in pymake.parser.parsefile(path)
+                     if is_statement_relevant(s)]
+ 
+                 if not statements:
+                     print(os.path.relpath(path, self.topsrcdir))
+             except pymake.parser.SyntaxError:
+                 pass
+ 
++    @Command('mozbuild-migrate', category='build-dev',
++        description='Migrate Makefile.in variables to moz.build files.')
++    @CommandArgument('--list', dest='is_list', action='store_true',
++        help='Whether the variable is a list. Defaults to string.')
++    @CommandArgument('makefile-variable', nargs='+',
++        help='The Makefile variable(s) to move.')
++    @CommandArgument('mozbuild-variable',
++        help='The name of the moz.build variable to create.')
++    def mozbuild_migrate(self, is_list=False, **kwargs):
++        import pymake.parser
++        import pymake.parserdata
++
++        # For some reason argparse doesn't like dest= specified on positional
++        # arguments. And, it's passing in these options without normalization.
++        # So, we have to use **kwargs. Weird.
++        makefile_variables = kwargs['makefile-variable']
++        mozbuild_variable = kwargs['mozbuild-variable']
++
++        for path in self._makefile_ins():
++            relpath = os.path.relpath(path, self.topsrcdir)
++
++            try:
++                statements = \
++                    list(self._iterstatements(pymake.parser.parsefile(path)))
++            except Exception as e:
++                print(e)
++                continue
++
++            source_lines = open(path, 'rt').readlines()
++            strip_lines = set()
++            values = set()
++            string_value = None
++
++            for i, (conds, s) in enumerate(statements):
++                if not isinstance(s, pymake.parserdata.SetVariable):
++                    continue
++
++                exp = s.vnameexp
++                if not exp.is_static_string:
++                    continue
++
++                if exp.s not in makefile_variables:
++                    continue
++
++                if conds:
++                    print('%s found under conditional in %s' % (exp.s, relpath))
++                    indent = ''
++                    for s in conds:
++                        print(indent + self._mozbuild_condition(s))
++                        indent += '    '
++                    continue
++
++                if is_list:
++                    values |= set(s.value.split())
++                else:
++                    if string_value is not None:
++                        print('Multiple assignments to %s in %s' % (exp.s, relpath))
++                        continue
++
++                    string_value = s.value
++
++                # We found the beginning of a variable to move. Find the last
++                # line of this variable.
++
++                line = len(source_lines) + 1
++                if len(statements) > i + 1:
++                    _conds, s2 = statements[i + 1]
++                    if hasattr(s2, 'loc'):
++                        line = s2.loc.line
++                    elif hasattr(s2, 'exp'):
++                        line = s2.exp.loc.line
++                    elif hasattr(s2, 'vnameexp'):
++                        line = s2.vnameexp.loc.line
++                    elif hasattr(s2, 'depexp'):
++                        line = s2.depexp.loc.line
++                    else:
++                        raise Exception('Could not find statement location!')
++
++
++                strip_lines |= set(range(exp.loc.line - 1, line - 1))
++
++            values -= set(['$(NULL)'])
++            newlines = []
++
++            if is_list:
++                if not values:
++                    continue
++
++                newlines.extend(['', '%s += [' % mozbuild_variable])
++                for value in sorted(values):
++                    newlines.append("    '%s'," % value)
++                newlines.append(']')
++                newlines.append('')
++            else:
++                if not string_value:
++                    continue
++
++                newlines.extend([
++                    '',
++                    "%s = '%s'" % (mozbuild_variable, string_value),
++                    '',
++                ])
++
++            mozbuild = os.path.join(os.path.dirname(path), 'moz.build')
++            if not os.path.exists(mozbuild):
++                print('Corresponding moz.build does not exist: %s' % mozbuild)
++                continue
++
++            lines = None
++            with open(mozbuild, 'rt') as fh:
++                lines = [line.rstrip('\n') for line in fh.readlines()]
++
++            lines.extend(newlines)
++
++            remove_lines = set()
++            for i, line in enumerate(lines):
++                if i == 0:
++                    continue
++
++                if not line.strip() and not lines[i-1].strip():
++                    remove_lines.add(i)
++
++            lines = [line for i, line in enumerate(lines) if i not in remove_lines]
++
++            with open(mozbuild, 'wt') as fh:
++                for line in lines:
++                    fh.write(line)
++                    fh.write('\n')
++
++            with open(path, 'rt') as fh:
++                lines = fh.readlines()
++
++            with open(path, 'wt') as fh:
++                for i, line in enumerate(lines):
++                    if i in strip_lines:
++                        continue
++
++                    fh.write(line)
++
++            print('Moved variables from %s' % relpath)
++
++    def _mozbuild_condition(self, condition):
++        import pymake.parserdata
++        if isinstance(condition, pymake.parserdata.EqCondition):
++            return "if %s %s %s" % (
++                condition.exp1.to_source(),
++                "==" if condition.expected else "!=",
++                condition.exp2.to_source())
++        elif isinstance(condition, pymake.parserdata.IfdefCondition):
++            return "if %sCONFIG['%s']:" % (
++                "" if condition.expected else "not ",
++                condition.exp.s)
++        elif isinstance(condition, pymake.parserdata.ElseCondition):
++            return "else [sorry, not helpful]"
++        else:
++            raise Exception("Unknown condition " + str(condition))
++
+     def _makefile_ins(self):
+         for root, dirs, files in os.walk(self.topsrcdir):
+             for f in files:
+                 if f == 'Makefile.in':
+                     yield os.path.join(root, f)
+ 
++    def _iterstatements(self, statements):
++        import pymake.parserdata
++
++        cond_stack = []
++
++        def flatten(stmts):
++            for s in stmts:
++                if isinstance(s, pymake.parserdata.ConditionBlock):
++                    for cond, sl in s:
++                        yield list(cond_stack), cond
++                        cond_stack.append(cond)
++
++                        for t in flatten(sl):
++                            yield t
++
++                        cond_stack.pop()
++                else:
++                    # Need to make a copy else we have a reference.
++                    yield list(cond_stack), s
++
++        return flatten(statements)
++
+ @CommandProvider
+ class MachDebug(MachCommandBase):
+     @Command('environment', category='build-dev',
+         description='Show info about the mach and build environment.')
+     @CommandArgument('--verbose', '-v', action='store_true',
+         help='Print verbose output.')
+     def environment(self, verbose=False):
+         import platform

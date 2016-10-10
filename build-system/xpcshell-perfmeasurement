@@ -1,0 +1,83 @@
+# HG changeset patch
+# Parent a205b93931513b8d4a2f90af7e71e1c347fc9a7e
+# User Gregory Szorc <gps@mozilla.com>
+Add PerfMeasurement to xpcshell tests
+
+diff --git a/testing/xpcshell/head.js b/testing/xpcshell/head.js
+--- a/testing/xpcshell/head.js
++++ b/testing/xpcshell/head.js
+@@ -316,16 +316,26 @@
+   // Call do_get_idle() to restore the factory and get the service.
+   _fakeIdleService.activate();
+ 
+   // _HEAD_FILES is dynamically defined by <runxpcshelltests.py>.
+   _load_files(_HEAD_FILES);
+   // _TEST_FILE is dynamically defined by <runxpcshelltests.py>.
+   _load_files(_TEST_FILE);
+ 
++  Components.utils.import("resource://gre/modules/PerfMeasurement.jsm", this);
++  let perfMask = this.PerfMeasurement.CPU_CYCLES |
++                 this.PerfMeasurement.INSTRUCTIONS;
++  let perfMonitor = new this.PerfMeasurement(perfMask);
++  _dump("PerfMeasurement Mask: " + perfMask);
++  let havePerf = perfMonitor.canMeasureSomething();
++  if (havePerf) {
++    perfMonitor.start();
++  }
++
+   try {
+     do_test_pending();
+     run_test();
+     do_test_finished();
+     _do_main();
+   } catch (e) {
+     _passed = false;
+     // do_check failures are already logged and set _quit to true and throw
+@@ -349,16 +359,22 @@
+         _dump_exception_stack(e.stack);
+       }
+       else {
+         _dump(msg + "\n");
+       }
+     }
+   }
+ 
++  if (havePerf) {
++    perfMonitor.stop();
++    _dump("TEST-STAT | CPU_CYCLES | " + perfMonitor.cpu_cycles);
++    _dump("TEST-STAT | INSTRUCTIONS | " + perfMonitor.instructions);
++  }
++
+   // _TAIL_FILES is dynamically defined by <runxpcshelltests.py>.
+   _load_files(_TAIL_FILES);
+ 
+   // Execute all of our cleanup functions.
+   var func;
+   while ((func = _cleanupFunctions.pop()))
+     func();
+ 
+diff --git a/testing/xpcshell/runxpcshelltests.py b/testing/xpcshell/runxpcshelltests.py
+--- a/testing/xpcshell/runxpcshelltests.py
++++ b/testing/xpcshell/runxpcshelltests.py
+@@ -708,16 +708,21 @@
+         else:
+           now = time.time()
+           timeTaken = (now - startTime) * 1000
+           xunitResult["time"] = now - startTime
+           self.log.info("TEST-%s | %s | test passed (time: %.3fms)" % ("PASS" if expected else "KNOWN-FAIL", name, timeTaken))
+           if verbose:
+             print_stdout(stdout)
+ 
++          if stdout:
++            for line in stdout.splitlines():
++              if line[0:9] == 'TEST-STAT':
++                self.log.info(line)
++
+           xunitResult["passed"] = True
+ 
+           if expected:
+             self.passCount += 1
+           else:
+             self.todoCount += 1
+ 
+         checkForCrashes(testdir, self.symbolsPath, testName=name)

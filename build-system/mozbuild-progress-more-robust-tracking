@@ -1,0 +1,238 @@
+# HG changeset patch
+# Parent 304a98b53d49ee1960c27a10ebec44ae4363212f
+# User Gregory Szorc <gps@mozilla.com>
+
+diff --git a/python/mozbuild/mozbuild/controller/building.py b/python/mozbuild/mozbuild/controller/building.py
+--- a/python/mozbuild/mozbuild/controller/building.py
++++ b/python/mozbuild/mozbuild/controller/building.py
+@@ -4,52 +4,93 @@
+ 
+ from __future__ import unicode_literals
+ 
+ import getpass
+ import os
+ import sys
+ import time
+ 
+-from collections import namedtuple
++from collections import (
++    OrderedDict,
++    namedtuple,
++)
+ 
+ try:
+     import psutil
+ except ImportError:
+     psutil = None
+ 
+ from ..compilation.warnings import (
+     WarningsCollector,
+     WarningsDatabase,
+ )
+ 
+ 
+ BuildOutputResult = namedtuple('BuildOutputResult',
+     ('warning', 'state_changed', 'for_display'))
+ 
+ 
++class TierStatus(object):
++    """Represents the execution status of an individual tier."""
++    def __init__(self, name):
++        self.name = name
++        self.state = 'inactive'
++        self.subtiers = OrderedDict()
++        self._current = None
++
++    @property
++    def current_subtier(self):
++        if self.state == 'inactive':
++            return None
++
++        return self.subtiers[self.current]
++
++    def __getitem__(self, k):
++        return self.subtiers[k]
++
++    def __iter__(self):
++        return self.subtiers.values()
++
++
++class SubtierStatus(object):
++    """Represents the execution status of a sub tier."""
++
++    def __init__(self):
++        self.static_dirs = None
++        self.dirs = None
++        self.state = 'inactive'
++        self.current_index = 0
++
++    @property
++    def current_dir(self):
++        if self.state == 'dirs':
++            return self.dirs[self.current_index]
++        elif self.state == 'staticdirs':
++            return self.static_dirs[self.current_index]
++        else:
++            return None
++
++
+ class BuildMonitor(object):
+     """Monitors the output of the build."""
+ 
+     def __init__(self, topobjdir, warnings_path):
+         """Create a new monitor.
+ 
+         warnings_path is a path of a warnings database to use.
+         """
+         self._warnings_path = warnings_path
+ 
+-        self.tiers = []
+-        self.subtiers = []
+-        self.current_tier = None
+-        self.current_subtier = None
+-        self.current_tier_dirs = []
+-        self.current_tier_static_dirs = []
+-        self.current_subtier_dirs = []
+-        self.current_tier_dir = None
+-        self.current_tier_dir_index = 0
++        self.tiers = None
++
++        self._current_tier = None
++        self._current_subtier = None
++        self._current_tier_dir = None
++        self._current_tier_dir_index = 0
+ 
+         self.warnings_database = WarningsDatabase()
+         if os.path.exists(warnings_path):
+             try:
+                 self.warnings_database.load_from_file(warnings_path)
+             except ValueError:
+                 os.remove(warnings_path)
+ 
+@@ -82,58 +123,79 @@
+         """
+         if line.startswith('BUILDSTATUS'):
+             args = line.split()[1:]
+ 
+             action = args.pop(0)
+             update_needed = True
+ 
+             if action == 'TIERS':
+-                self.tiers = args
++                self.tiers = OrderedDict()
++                for arg in args:
++                    self.tiers[arg] = TierStatus(arg)
++
+                 update_needed = False
+             elif action == 'SUBTIERS':
+-                self.subtiers = args
++                assert self._current_tier
++                for subtier in args:
++                    st = SubtierStatus(self._current_tier)
++                    self.current_tier.subtiers[subtier] = st
++
+                 update_needed = False
+             elif action == 'STATICDIRS':
+-                self.current_tier_static_dirs = args
++                assert self._current_tier
++
++                # Currently directories are shared among each subtier. But,
++                # it's easier if we just store a reference on the subtier.
++                for subtier in self.current_tier:
++                    subtier.static_dirs = args
++
+                 update_needed = False
+             elif action == 'DIRS':
+-                self.current_tier_dirs = args
++                assert self._current_tier
++
++                for subtier in self.current_tier:
++                    subtier.dirs = args
++
+                 update_needed = False
+             elif action == 'TIER_START':
+                 assert len(args) == 1
+-                self.current_tier = args[0]
+-                self.current_subtier = None
+-                self.current_tier_dirs = []
+-                self.current_tier_dir = None
++                self._current_tier = args[0]
++                self.current_tier.state = 'started'
+             elif action == 'TIER_FINISH':
+                 assert len(args) == 1
+-                assert args[0] == self.current_tier
++                assert args[0] == self._current_tier
++                self.current_tier.state = 'finished'
+             elif action == 'SUBTIER_START':
+                 assert len(args) == 2
+                 tier, subtier = args
+-                assert tier == self.current_tier
+-                self.current_subtier = subtier
++                assert tier == self._current_tier
++                self._current_subtier = subtier
++
++                st = self.current_subtier
++                st.current_index = 0
++
+                 if subtier == 'static':
+-                    self.current_subtier_dirs = self.current_tier_static_dirs
++                    st.state = 'staticdirs'
+                 else:
+-                    self.current_subtier_dirs = self.current_tier_dirs
+-                self.current_tier_dir_index = 0
++                    st.state = 'dirs'
+             elif action == 'SUBTIER_FINISH':
+                 assert len(args) == 2
+                 tier, subtier = args
+-                assert tier == self.current_tier
+-                assert subtier == self.current_subtier
++                assert tier == self._current_tier
++                assert subtier == self._current_subtier
++                self.current_subtier.state = 'finished'
+             elif action == 'TIERDIR_START':
+                 assert len(args) == 1
+-                self.current_tier_dir = args[0]
+-                self.current_tier_dir_index += 1
++                st = self.current_tier
++                st.current_index += 1
+             elif action == 'TIERDIR_FINISH':
+                 assert len(args) == 1
+-                assert self.current_tier_dir == args[0]
++                st = self.current_tier
++                assert st.current_dirs[st.current_index] == args[0]
+             else:
+                 raise Exception('Unknown build status: %s' % action)
+ 
+             return BuildOutputResult(None, update_needed, False)
+ 
+         warning = None
+ 
+         try:
+@@ -147,16 +209,27 @@
+         """Record the end of the build."""
+         self.end_time = time.time()
+         self._finder_end_cpu = self._get_finder_cpu_usage()
+         self.elapsed = self.end_time - self.start_time
+ 
+         self.warnings_database.prune()
+         self.warnings_database.save_to_file(self._warnings_path)
+ 
++    @property
++    def current_tier(self):
++        return self.tiers.get(self._current_tier, None)
++
++    @property
++    def current_subtier(self):
++        if not self._current_subtier:
++            return None
++
++        return self.tiers[self._current_tier][self._current_subtier]
++
+     def _get_finder_cpu_usage(self):
+         """Obtain the CPU usage of the Finder app on OS X.
+ 
+         This is used to detect high CPU usage.
+         """
+         if not sys.platform.startswith('darwin'):
+             return None
+ 

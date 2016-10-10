@@ -1,0 +1,247 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/browser/app/Makefile.in b/browser/app/Makefile.in
+--- a/browser/app/Makefile.in
++++ b/browser/app/Makefile.in
+@@ -27,20 +27,16 @@
+   -DAPP_VERSION="$(MOZ_APP_VERSION)" \
+   -DFIREFOX_ICO=\"$(DIST)/branding/firefox.ico\" \
+   -DDOCUMENT_ICO=\"$(DIST)/branding/document.ico\" \
+   -DNEWWINDOW_ICO=\"$(DIST)/branding/newwindow.ico\" \
+   -DNEWTAB_ICO=\"$(DIST)/branding/newtab.ico\" \
+   -DPBMODE_ICO=\"$(DIST)/branding/pbmode.ico\" \
+   $(NULL)
+ 
+-ifdef MOZILLA_OFFICIAL
+-DEFINES += -DMOZILLA_OFFICIAL
+-endif
+-
+ ifdef LIBXUL_SDK #{
+ PREF_JS_EXPORTS += $(srcdir)/profile/channel-prefs.js
+ DEFINES += -DLIBXUL_SDK
+ endif #} LIBXUL_SDK
+ 
+ # Build a binary bootstrapping with XRE_main
+ 
+ LOCAL_INCLUDES += \
+diff --git a/browser/metro/Makefile.in b/browser/metro/Makefile.in
+--- a/browser/metro/Makefile.in
++++ b/browser/metro/Makefile.in
+@@ -9,20 +9,16 @@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+ #########################################
+ # application.ini
+ 
+-ifdef MOZILLA_OFFICIAL
+-DEFINES += -DMOZILLA_OFFICIAL
+-endif
+-
+ GRE_MILESTONE := $(shell tail -n 1 $(topsrcdir)/config/milestone.txt 2>/dev/null || tail -1 $(topsrcdir)/config/milestone.txt)
+ GRE_BUILDID := $(shell cat $(DEPTH)/config/buildid)
+ DEFINES += -DGRE_MILESTONE=$(GRE_MILESTONE) -DGRE_BUILDID=$(GRE_BUILDID)
+ 
+ # 'application.ini' breaks firefox build config. So we use something different.
+ metroapp.ini: metroapp.ini.in $(DEPTH)/config/buildid $(topsrcdir)/config/milestone.txt
+ 	$(RM) "metroapp.ini"
+ 	$(PYTHON) $(topsrcdir)/config/Preprocessor.py $(DEFINES) $< > $@
+diff --git a/browser/modules/Makefile.in b/browser/modules/Makefile.in
+deleted file mode 100644
+--- a/browser/modules/Makefile.in
++++ /dev/null
+@@ -1,18 +0,0 @@
+-# This Source Code Form is subject to the terms of the Mozilla Public
+-# License, v. 2.0. If a copy of the MPL was not distributed with this
+-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+-
+-DEPTH   = @DEPTH@
+-topsrcdir = @top_srcdir@
+-srcdir    = @srcdir@
+-VPATH   = @srcdir@
+-
+-include $(DEPTH)/config/autoconf.mk
+-
+-include $(topsrcdir)/config/config.mk
+-
+-ifdef MOZILLA_OFFICIAL
+-DEFINES += -DMOZILLA_OFFICIAL=1
+-endif
+-
+-include $(topsrcdir)/config/rules.mk
+diff --git a/build/Makefile.in b/build/Makefile.in
+--- a/build/Makefile.in
++++ b/build/Makefile.in
+@@ -52,20 +52,16 @@
+   -DMAR_CHANNEL_ID="$(MAR_CHANNEL_ID)" \
+   -DACCEPTED_MAR_CHANNEL_IDS="$(ACCEPTED_MAR_CHANNEL_IDS)" \
+   $(NULL)
+ 
+ ifdef MOZ_APP_PROFILE
+ DEFINES += -DMOZ_APP_PROFILE="$(MOZ_APP_PROFILE)"
+ endif
+ 
+-ifdef MOZILLA_OFFICIAL
+-DEFINES += -DMOZILLA_OFFICIAL
+-endif
+-
+ ifdef MOZ_PROFILE_MIGRATOR
+ DEFINES += -DMOZ_PROFILE_MIGRATOR
+ endif
+ 
+ ifdef MOZ_EXTENSION_MANAGER
+ DEFINES += -DMOZ_EXTENSION_MANAGER
+ endif
+ 
+diff --git a/configure.in b/configure.in
+--- a/configure.in
++++ b/configure.in
+@@ -8754,16 +8754,19 @@
+   AC_DEFINE(MOZ_UA_OS_AGNOSTIC)
+ fi
+ 
+ AC_SUBST(MOZ_APP_STATIC_INI)
+ 
+ AC_SUBST(MOZ_PKG_SPECIAL)
+ 
+ AC_SUBST(MOZILLA_OFFICIAL)
++if test -n "$MOZILLA_OFFICIAL"; then
++  AC_DEFINE(MOZILLA_OFFICIAL)
++fi
+ 
+ AC_DEFINE_UNQUOTED(MOZ_TELEMETRY_DISPLAY_REV, 2)
+ AC_SUBST(MOZ_TELEMETRY_DISPLAY_REV)
+ 
+ if test "$MOZ_TELEMETRY_REPORTING"; then
+     AC_DEFINE(MOZ_TELEMETRY_REPORTING)
+ 
+     # Enable Telemetry by default for nightly and aurora channels
+diff --git a/js/src/configure.in b/js/src/configure.in
+--- a/js/src/configure.in
++++ b/js/src/configure.in
+@@ -4069,16 +4069,19 @@
+ 
+ AC_SUBST(MOZ_APP_NAME)
+ AC_SUBST(MOZ_APP_DISPLAYNAME)
+ AC_SUBST(MOZ_APP_VERSION)
+ 
+ AC_SUBST(MOZ_PKG_SPECIAL)
+ 
+ AC_SUBST(MOZILLA_OFFICIAL)
++if test -n "$MOZILLA_OFFICIAL"; then
++  AC_DEFINE(MOZILLA_OFFICIAL)
++fi
+ 
+ dnl win32 options
+ AC_SUBST(MOZ_BROWSE_INFO)
+ AC_SUBST(MOZ_TOOLS_DIR)
+ 
+ dnl Echo the CFLAGS to remove extra whitespace.
+ CFLAGS=`echo \
+ 	$_WARNINGS_CFLAGS \
+diff --git a/mobile/android/base/Makefile.in b/mobile/android/base/Makefile.in
+--- a/mobile/android/base/Makefile.in
++++ b/mobile/android/base/Makefile.in
+@@ -348,17 +348,16 @@
+ # Mangle our package name to avoid Bug 750548.
+ DEFINES += \
+   -DMANGLED_ANDROID_PACKAGE_NAME=$(subst fennec,f3nn3c,$(ANDROID_PACKAGE_NAME)) \
+   -DANDROID_PACKAGE_NAME=$(ANDROID_PACKAGE_NAME) \
+   -DANDROID_CPU_ARCH=$(ANDROID_CPU_ARCH) \
+   -DANDROID_VERSION_CODE=$(ANDROID_VERSION_CODE) \
+   -DCPU_ARCH=$(CPU_ARCH) \
+   -DGRE_MILESTONE=$(GRE_MILESTONE) \
+-  -DMOZILLA_OFFICIAL=$(MOZILLA_OFFICIAL) \
+   -DMOZ_APP_ABI=$(TARGET_XPCOM_ABI) \
+   -DMOZ_APP_BASENAME=$(MOZ_APP_BASENAME) \
+   -DMOZ_APP_BUILDID=$(MOZ_APP_BUILDID) \
+   -DMOZ_APP_DISPLAYNAME="$(MOZ_APP_DISPLAYNAME)" \
+   -DMOZ_APP_ID=$(MOZ_APP_ID) \
+   -DMOZ_APP_NAME=$(MOZ_APP_NAME) \
+   -DMOZ_APP_VENDOR=$(MOZ_APP_VENDOR) \
+   -DMOZ_APP_VERSION=$(MOZ_APP_VERSION) \
+diff --git a/toolkit/components/telemetry/Makefile.in b/toolkit/components/telemetry/Makefile.in
+--- a/toolkit/components/telemetry/Makefile.in
++++ b/toolkit/components/telemetry/Makefile.in
+@@ -23,20 +23,16 @@
+ LOCAL_INCLUDES += -I$(topsrcdir)/xpcom/build
+ LOCAL_INCLUDES += -I$(topsrcdir)/xpcom/threads
+ 
+ EXTRA_DSO_LDOPTS += \
+   $(MOZ_COMPONENT_LIBS) \
+   $(MOZ_JS_LIBS) \
+   $(NULL)
+ 
+-ifdef MOZILLA_OFFICIAL
+-DEFINES += -DMOZILLA_OFFICIAL
+-endif
+-
+ MOZ_HISTOGRAMS_VERSION ?= $(call getSourceRepo)/rev/$(firstword $(shell hg -R $(topsrcdir) parent --template="{node|short}\n" 2>/dev/null))
+ ifdef MOZ_HISTOGRAMS_VERSION
+ DEFINES += -DHISTOGRAMS_FILE_VERSION="$(MOZ_HISTOGRAMS_VERSION)"
+ endif
+ 
+ include $(topsrcdir)/config/rules.mk
+ include $(topsrcdir)/ipc/chromium/chromium-config.mk
+ 
+diff --git a/toolkit/xre/Makefile.in b/toolkit/xre/Makefile.in
+--- a/toolkit/xre/Makefile.in
++++ b/toolkit/xre/Makefile.in
+@@ -188,25 +188,22 @@
+   endif
+ 
+ endif # MOZ_SOURCE_STAMP
+ 
+ GRE_MILESTONE := $(strip $(lastword $(shell cat $(milestone_txt) 2>/dev/null)))
+ GRE_BUILDID   := $(strip $(firstword $(shell cat $(DEPTH)/config/buildid 2>/dev/null)))
+ $(call errorIfEmpty,GRE_MILESTONE GRE_BUILDID)
+ 
+-DEFINES += -DGRE_MILESTONE=$(GRE_MILESTONE) -DGRE_BUILDID=$(GRE_BUILDID)
+-
+-ifdef MOZILLA_OFFICIAL
+-DEFINES += -DMOZILLA_OFFICIAL
+-endif
+-
+-DEFINES += -DAPP_VERSION=$(MOZ_APP_VERSION)
+-
+-DEFINES += -DAPP_ID="$(MOZ_APP_ID)"
++DEFINES += \
++  -DGRE_MILESTONE=$(GRE_MILESTONE) \
++  -DGRE_BUILDID=$(GRE_BUILDID) \
++  -DAPP_VERSION=$(MOZ_APP_VERSION) \
++  -DAPP_ID="$(MOZ_APP_ID)" \
++  $(NULL)
+ 
+ $(srcdir)/nsAppRunner.cpp: $(DEPTH)/config/buildid $(milestone_txt)
+ 
+ platform.ini: FORCE
+ 	$(PYTHON) $(srcdir)/make-platformini.py --buildid=$(GRE_BUILDID) $(INIARGS) $(milestone_txt) > $@
+ 
+ GARBAGE += platform.ini
+ 
+diff --git a/webapprt/Makefile.in b/webapprt/Makefile.in
+--- a/webapprt/Makefile.in
++++ b/webapprt/Makefile.in
+@@ -19,20 +19,16 @@
+                   $(NULL)
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+ ifdef MOZ_DEBUG
+ DEFINES += -DMOZ_DEBUG=1
+ endif
+ 
+-ifdef MOZILLA_OFFICIAL
+-DEFINES += -DMOZILLA_OFFICIAL
+-endif
+-
+ libs:: $(call mkdir_deps,$(FINAL_TARGET))
+ 	$(PYTHON) $(MOZILLA_DIR)/config/buildlist.py $(FINAL_TARGET)/chrome.manifest "resource webapprt ./"
+ 
+ GRE_MILESTONE := $(shell tail -n 1 $(topsrcdir)/config/milestone.txt 2>/dev/null || tail -1 $(topsrcdir)/config/milestone.txt)
+ GRE_BUILDID := $(shell cat $(DEPTH)/config/buildid)
+ DEFINES += -DGRE_MILESTONE=$(GRE_MILESTONE) \
+            -DGRE_BUILDID=$(GRE_BUILDID) \
+            -DMOZ_APP_BASENAME=$(MOZ_APP_BASENAME) \

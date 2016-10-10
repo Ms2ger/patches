@@ -1,0 +1,148 @@
+# HG changeset patch
+# Parent 265a82223f7eba7ee5e8c63dd72394a659b98b52
+# User Gregory Szorc <gps@mozilla.com>
+
+diff --git a/services/sync/modules/manager.js b/services/sync/modules/manager.js
+--- a/services/sync/modules/manager.js
++++ b/services/sync/modules/manager.js
+@@ -28,18 +28,68 @@
+  * TODO Consider a better API to support both 1.1 and 2.0 clients that doesn't
+  * feel awkward.
+  *
+  * Inside the parent application (e.g. Firefox), an instance of this type is
+  * exposed through the SyncManager singleton. See main.js. The public API is
+  * through that instance. Advanced users can construct additional instances
+  * if they so choose.
+  *
++ * Usage
++ * =====
++ *
++ * New instances must be initialized before they can be used. This
++ * initialization is the responsibility of the caller. So, to obtain a
++ * ready instance:
++ *
++ *   let sync = new SyncServiceManager("foo.");
++ *   sync.init(function onInitialized() {
++ *     // ...
++ *   });
++ *
+  * @param prefsPrefix
+  *        (string) Preferences prefix to use for preference reading.
+  */
+ function SyncServiceManager(prefsPrefix) {
+   this._prefs = new Preferences(prefsPrefix);
+ }
+ SyncServiceManager.prototype = {
++  init: function init(cb) {
++    this._migratePrefs();
++  },
+ 
++  /**
++   * Migrate preferences from earlier versions of the client.
++   */
++  _migratePrefs: function _migratePrefs() {
++    // Migrate old debugLog prefs.
++    let logLevel = this._prefs.get("log.appender.debugLog");
++    if (logLevel) {
++      this._prefs.set("log.appender.file.level", logLevel);
++      this._prefs.reset("log.appender.debugLog");
++    }
++    if (this._prefs.get("log.appender.debugLog.enabled")) {
++      this._prefs.set("log.appender.file.logOnSuccess", true);
++      this._prefs.reset("log.appender.debugLog.enabled");
++    }
++
++    // Migrate old extensions.weave.* prefs if we haven't already tried.
++    if (!this._prefs.get("migrated", false)) {
++      // Grab the list of old pref names
++      let oldPrefBranch = "extensions.weave.";
++      let oldPrefNames = Cc["@mozilla.org/preferences-service;1"]
++                           .getService(Ci.nsIPrefService)
++                           .getBranch(oldPrefBranch)
++                           .getChildList("", {});
++
++      // Map each old pref to the current pref branch
++      let oldPref = new Preferences(oldPrefBranch);
++      for each (let pref in oldPrefNames) {
++        this._prefs.set(pref, oldPref.get(pref));
++      }
++
++      // Remove all the old prefs and remember that we've migrated
++      oldPref.resetBranch("");
++      this._prefs.set("migrated", true);
++    }
++  },
+ };
+ Object.freeze(SyncServiceManager.prototype);
+diff --git a/services/sync/modules/service.js b/services/sync/modules/service.js
+--- a/services/sync/modules/service.js
++++ b/services/sync/modules/service.js
+@@ -299,18 +299,16 @@
+     }
+     return false;
+   },
+ 
+   /**
+    * Prepare to initialize the rest of Weave after waiting a little bit
+    */
+   onStartup: function onStartup() {
+-    this._migratePrefs();
+-
+     // Status is instantiated before us and is the first to grab an instance of
+     // the IdentityManager. We use that instance because IdentityManager really
+     // needs to be a singleton. Ideally, the longer-lived object would spawn
+     // this service instance.
+     this.status = Status;
+     this.identity = Status._authManager;
+     this.collectionKeys = new CollectionKeyManager();
+ 
+@@ -366,49 +364,16 @@
+ 
+   _checkSetup: function _checkSetup() {
+     if (!this.enabled) {
+       return this.status.service = STATUS_DISABLED;
+     }
+     return this.status.checkSetup();
+   },
+ 
+-  _migratePrefs: function _migratePrefs() {
+-    // Migrate old debugLog prefs.
+-    let logLevel = Svc.Prefs.get("log.appender.debugLog");
+-    if (logLevel) {
+-      Svc.Prefs.set("log.appender.file.level", logLevel);
+-      Svc.Prefs.reset("log.appender.debugLog");
+-    }
+-    if (Svc.Prefs.get("log.appender.debugLog.enabled")) {
+-      Svc.Prefs.set("log.appender.file.logOnSuccess", true);
+-      Svc.Prefs.reset("log.appender.debugLog.enabled");
+-    }
+-
+-    // Migrate old extensions.weave.* prefs if we haven't already tried.
+-    if (Svc.Prefs.get("migrated", false))
+-      return;
+-
+-    // Grab the list of old pref names
+-    let oldPrefBranch = "extensions.weave.";
+-    let oldPrefNames = Cc["@mozilla.org/preferences-service;1"].
+-                       getService(Ci.nsIPrefService).
+-                       getBranch(oldPrefBranch).
+-                       getChildList("", {});
+-
+-    // Map each old pref to the current pref branch
+-    let oldPref = new Preferences(oldPrefBranch);
+-    for each (let pref in oldPrefNames)
+-      Svc.Prefs.set(pref, oldPref.get(pref));
+-
+-    // Remove all the old prefs and remember that we've migrated
+-    oldPref.resetBranch("");
+-    Svc.Prefs.set("migrated", true);
+-  },
+-
+   /**
+    * Register the built-in engines for certain applications
+    */
+   _registerEngines: function _registerEngines() {
+     this.engineManager = new EngineManager(this);
+ 
+     let engines = [];
+     // Applications can provide this preference (comma-separated list)

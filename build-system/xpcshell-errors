@@ -1,0 +1,38 @@
+# HG changeset patch
+# Parent 6270ac0e7f96d848060090efc2ba3a310606e370
+# User Gregory Szorc <gps@mozilla.com>
+Bug 657507 - Output Console Service messages when running xpcshell test harness
+
+diff --git a/testing/xpcshell/head.js b/testing/xpcshell/head.js
+--- a/testing/xpcshell/head.js
++++ b/testing/xpcshell/head.js
+@@ -103,16 +103,29 @@
+           .getService(Components.interfaces.nsICrashReporter)) {
+       crashReporter.enabled = true;
+       crashReporter.minidumpPath = do_get_cwd();
+     }
+   }
+ }
+ catch (e) { }
+ 
++// Log all console service messages.
++let consoleService = Components.classes["@mozilla.org/consoleservice;1"]
++                     .getService(Components.interfaces.nsIConsoleService);
++let consoleListener = {
++  // We hold on to a reference in case we get called during process cleanup.
++  dump: dump,
++
++  observe: function(message) {
++    this.dump("CONSOLE: " + message.message);
++  }
++};
++consoleService.registerListener(consoleListener);
++
+ /**
+  * Date.now() is not necessarily monotonically increasing (insert sob story
+  * about times not being the right tool to use for measuring intervals of time,
+  * robarnold can tell all), so be wary of error by erring by at least
+  * _timerFuzz ms.
+  */
+ const _timerFuzz = 15;
+ 

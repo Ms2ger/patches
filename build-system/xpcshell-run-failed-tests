@@ -1,0 +1,737 @@
+# HG changeset patch
+# Parent 32ed0c04a15396e8e5d161c49834a7a62845ec92
+# User Gregory Szorc <gps@mozilla.com>
+Bug 729098 - Part 2/2 - Add xpcshell-tests-rerun-failed make target
+
+diff --git a/build/automationutils.py b/build/automationutils.py
+--- a/build/automationutils.py
++++ b/build/automationutils.py
+@@ -34,31 +34,34 @@
+ # the provisions above, a recipient may use your version of this file under
+ # the terms of any one of the MPL, the GPL or the LGPL.
+ #
+ # ***** END LICENSE BLOCK ***** */
+ 
+ from __future__ import with_statement
+ import glob, logging, os, platform, shutil, subprocess, sys, tempfile, urllib2, zipfile
+ import re
++import xml.dom.minidom
+ from urlparse import urlparse
+ from operator import itemgetter
+ 
+ __all__ = [
+   "ZipFileReader",
+   "addCommonOptions",
+   "checkForCrashes",
+   "dumpLeakLog",
+   "isURL",
+   "processLeakLog",
+   "getDebuggerInfo",
+   "DEBUGGER_INFO",
+   "replaceBackSlashes",
+   "wrapCommand",
+-  "ShutdownLeakLogger"
++  "ShutdownLeakLogger",
++  "readXunitResults",
++  "writeXunitResults",
+   ]
+ 
+ # Map of debugging programs to information about them, like default arguments
+ # and whether or not they are interactive.
+ DEBUGGER_INFO = {
+   # gdb requires that you supply the '--args' flag in order to pass arguments
+   # after the executable name to the executable.
+   "gdb": {
+@@ -550,8 +553,194 @@
+     counted = set()
+ 
+     for url in leakedWindows:
+       if not url in counted:
+         counts.append((url, leakedWindows.count(url)))
+         counted.add(url)
+ 
+     return sorted(counts, key=itemgetter(1), reverse=True)
++
++def createXunitDocument(results, name):
++    """
++    Write Xunit XML from results.
++
++    The function receives an iterable of results dicts. Each dict must have
++    the following keys:
++
++        classname - The "class" name of the test.
++        name - The simple name of the test.
++
++    In addition, it must have one of the following saying how the test
++    executed:
++
++        passed - Boolean indicating whether the test passed. False if it
++            failed.
++        skipped - True if the test was skipped.
++
++    The following keys are optional:
++
++        time - Execution time of the test in decimal seconds.
++        failure - Dict describing test failure. Requires keys:
++            type - String type of failure.
++            message - String describing basic failure.
++            text - Verbose string describing failure.
++
++    Arguments:
++
++    results -- Iterable of dicts describing the results.
++    name -- Name of the test suite. Many tools expect Java class dot notation
++        e.g. dom.simple.foo. A directory with '/' converted to '.' is a good
++        choice.
++    """
++    if not isinstance(name, str):
++        raise Exception("name argument must be a str.")
++
++    doc = xml.dom.minidom.Document()
++    testsuite = doc.createElement("testsuite")
++    testsuite.setAttribute("name", name)
++    doc.appendChild(testsuite)
++
++    total = 0
++    passed = 0
++    failed = 0
++    skipped = 0
++
++    for result in results:
++        total += 1
++
++        if result.get("skipped", None):
++            skipped += 1
++        elif result["passed"]:
++            passed += 1
++        else:
++            failed += 1
++
++        testcase = doc.createElement("testcase")
++        testcase.setAttribute("classname", result["classname"])
++        testcase.setAttribute("name", result["name"])
++
++        if "time" in result:
++            testcase.setAttribute("time", str(result["time"]))
++        else:
++            # It appears most tools expect the time attribute to be present.
++            testcase.setAttribute("time", "0")
++
++        if "failure" in result:
++            failure = doc.createElement("failure")
++            failure.setAttribute("type", str(result["failure"]["type"]))
++            failure.setAttribute("message", result["failure"]["message"])
++
++            # Lossy translation but required to not break CDATA. Also, text could
++            # be None and Python 2.5's minidom doesn't accept None. Later versions
++            # do, however.
++            cdata = result["failure"]["text"]
++            if not isinstance(cdata, str):
++                cdata = ""
++
++            cdata = cdata.replace("]]>", "]] >")
++            text = doc.createCDATASection(cdata)
++            failure.appendChild(text)
++            testcase.appendChild(failure)
++
++        if result.get("skipped", None):
++            e = doc.createElement("skipped")
++            testcase.appendChild(e)
++
++        testsuite.appendChild(testcase)
++
++    testsuite.setAttribute("tests", str(total))
++    testsuite.setAttribute("failures", str(failed))
++    testsuite.setAttribute("skip", str(skipped))
++
++    return doc
++
++def writeXunitResults( results, name, fh):
++    """
++    Write Xunit XML results to a file object.
++
++    This is the same as createXunitDocument() except it additionally
++    writes the XML to the file object specified.
++    """
++    if not hasattr(fh, "write"):
++        raise Exception("fh argument not a file object.")
++
++    doc = createXunitDocument(results, name)
++    doc.writexml(fh, addindent="  ", newl="\n", encoding="utf-8")
++
++def readXunitResults(filename):
++    """Read an xUnit XML results file back into a data structure.
++
++    The filename argument can be either a filename or file handle object.
++
++    The returned dict is very similar to the input to writeXunitResults. It
++    contains the following keys:
++
++        testsuite -- Name of the testsuite to which this file belongs.
++        skipped -- Integer number of tests that were skipped.
++        failed -- Integer number of tests that failed.
++        total -- Integer number of tests that were executed.
++        results -- List of dicts describing individual results.
++
++    Each element in the results list is a dict with the following keys:
++
++        classname -- "class" the test belonged to.
++        name -- The name of the test. This typically corresponds to the
++            filename of the individual test.
++        time -- Float number of seconds that it took the test to execute.
++        passed -- Bool indicating whether the test passed.
++        skipped -- Bool indicating whether the test was skipped.
++
++    If passed is False, an addition key, failure, will be present. This key
++    will have a dict with the following keys:
++
++        type -- The type of failure.
++        message -- A brief message describing the failure.
++        text -- Raw text describing the failure.
++
++    """
++    doc = xml.dom.minidom.parse(filename)
++    suite = doc.documentElement
++    if suite.nodeName != "testsuite":
++        raise Exception("Parsed XML file does not appear to be an xUnit file!")
++
++    r = {
++        "testsuite": suite.getAttribute("name"),
++        "skipped": int(suite.getAttribute("skip")),
++        "failed": int(suite.getAttribute("failures")),
++        "total": int(suite.getAttribute("tests")),
++        "results": []
++    }
++
++    for testcase in suite.childNodes:
++        if testcase.nodeName != "testcase":
++            continue
++
++        result = {
++            "classname": testcase.getAttribute("classname"),
++            "name": testcase.getAttribute("name"),
++            "time": float(testcase.getAttribute("time")),
++            "passed": True,
++            "skipped": False,
++        }
++
++        for child in testcase.childNodes:
++            if child.nodeName == "skipped":
++                result["skipped"] = True
++                continue
++            elif child.nodeName == "failure":
++                result["passed"] = False
++
++                failure = {
++                    "type": child.getAttribute("type"),
++                    "message": child.getAttribute("message"),
++                    "text": None,
++                }
++
++                for cdata in child.childNodes:
++                    if cdata.nodeType != xml.dom.minidom.Node.CDATA_SECTION_NODE:
++                        continue
++
++                    failure["text"] = cdata.data.replace("]] >", "]]>")
++
++        r["results"].append(result)
++
++    return r
+diff --git a/config/rules.mk b/config/rules.mk
+--- a/config/rules.mk
++++ b/config/rules.mk
+@@ -105,28 +105,34 @@
+ 	  $(topsrcdir)/testing/xpcshell/xpcshell.ini \
+ 	  $(addprefix $(MOZILLA_DIR)/$(relativesrcdir)/,$(XPCSHELL_TESTS))
+ endif
+ 
+ testxpcsrcdir = $(topsrcdir)/testing/xpcshell
+ 
+ # Execute all tests in the $(XPCSHELL_TESTS) directories.
+ # See also testsuite-targets.mk 'xpcshell-tests' target for global execution.
++run_xpcshell = $(PYTHON) \
++  -u $(topsrcdir)/config/pythonpath.py \
++  -I$(topsrcdir)/build \
++  $(testxpcsrcdir)/runxpcshelltests.py \
++  --symbols-path=$(DIST)/crashreporter-symbols \
++  --build-info-json=$(DEPTH)/mozinfo.json \
++  --tests-root-dir=$(testxpcobjdir) \
++  --xunit-file=$(testxpcobjdir)/$(relativesrcdir)/results.xml \
++  --xunit-suite-name=xpcshell \
++  $(EXTRA_TEST_ARGS) \
++  $(LIBXUL_DIST)/bin/xpcshell \
++  $(foreach dir,$(XPCSHELL_TESTS),$(testxpcobjdir)/$(relativesrcdir)/$(dir))
++
+ xpcshell-tests:
+-	$(PYTHON) -u $(topsrcdir)/config/pythonpath.py \
+-	  -I$(topsrcdir)/build \
+-	  $(testxpcsrcdir)/runxpcshelltests.py \
+-	  --symbols-path=$(DIST)/crashreporter-symbols \
+-	  --build-info-json=$(DEPTH)/mozinfo.json \
+-	  --tests-root-dir=$(testxpcobjdir) \
+-	  --xunit-file=$(testxpcobjdir)/$(relativesrcdir)/results.xml \
+-	  --xunit-suite-name=xpcshell \
+-	  $(EXTRA_TEST_ARGS) \
+-	  $(LIBXUL_DIST)/bin/xpcshell \
+-	  $(foreach dir,$(XPCSHELL_TESTS),$(testxpcobjdir)/$(relativesrcdir)/$(dir))
++	$(run_xpcshell)
++
++xpcshell-tests-rerun-failures:
++	$(run_xpcshell) --failed-only
+ 
+ xpcshell-tests-remote: DM_TRANS?=adb
+ xpcshell-tests-remote:
+ 	$(PYTHON) -u $(topsrcdir)/config/pythonpath.py \
+ 	  -I$(topsrcdir)/build \
+ 	  -I$(topsrcdir)/build/mobile \
+ 	  $(topsrcdir)/testing/xpcshell/remotexpcshelltests.py \
+ 	  --symbols-path=$(DIST)/crashreporter-symbols \
+diff --git a/js/src/config/rules.mk b/js/src/config/rules.mk
+--- a/js/src/config/rules.mk
++++ b/js/src/config/rules.mk
+@@ -105,28 +105,34 @@
+ 	  $(topsrcdir)/testing/xpcshell/xpcshell.ini \
+ 	  $(addprefix $(MOZILLA_DIR)/$(relativesrcdir)/,$(XPCSHELL_TESTS))
+ endif
+ 
+ testxpcsrcdir = $(topsrcdir)/testing/xpcshell
+ 
+ # Execute all tests in the $(XPCSHELL_TESTS) directories.
+ # See also testsuite-targets.mk 'xpcshell-tests' target for global execution.
++run_xpcshell = $(PYTHON) \
++  -u $(topsrcdir)/config/pythonpath.py \
++  -I$(topsrcdir)/build \
++  $(testxpcsrcdir)/runxpcshelltests.py \
++  --symbols-path=$(DIST)/crashreporter-symbols \
++  --build-info-json=$(DEPTH)/mozinfo.json \
++  --tests-root-dir=$(testxpcobjdir) \
++  --xunit-file=$(testxpcobjdir)/$(relativesrcdir)/results.xml \
++  --xunit-suite-name=xpcshell \
++  $(EXTRA_TEST_ARGS) \
++  $(LIBXUL_DIST)/bin/xpcshell \
++  $(foreach dir,$(XPCSHELL_TESTS),$(testxpcobjdir)/$(relativesrcdir)/$(dir))
++
+ xpcshell-tests:
+-	$(PYTHON) -u $(topsrcdir)/config/pythonpath.py \
+-	  -I$(topsrcdir)/build \
+-	  $(testxpcsrcdir)/runxpcshelltests.py \
+-	  --symbols-path=$(DIST)/crashreporter-symbols \
+-	  --build-info-json=$(DEPTH)/mozinfo.json \
+-	  --tests-root-dir=$(testxpcobjdir) \
+-	  --xunit-file=$(testxpcobjdir)/$(relativesrcdir)/results.xml \
+-	  --xunit-suite-name=xpcshell \
+-	  $(EXTRA_TEST_ARGS) \
+-	  $(LIBXUL_DIST)/bin/xpcshell \
+-	  $(foreach dir,$(XPCSHELL_TESTS),$(testxpcobjdir)/$(relativesrcdir)/$(dir))
++	$(run_xpcshell)
++
++xpcshell-tests-rerun-failures:
++	$(run_xpcshell) --failed-only
+ 
+ xpcshell-tests-remote: DM_TRANS?=adb
+ xpcshell-tests-remote:
+ 	$(PYTHON) -u $(topsrcdir)/config/pythonpath.py \
+ 	  -I$(topsrcdir)/build \
+ 	  -I$(topsrcdir)/build/mobile \
+ 	  $(topsrcdir)/testing/xpcshell/remotexpcshelltests.py \
+ 	  --symbols-path=$(DIST)/crashreporter-symbols \
+diff --git a/testing/testsuite-targets.mk b/testing/testsuite-targets.mk
+--- a/testing/testsuite-targets.mk
++++ b/testing/testsuite-targets.mk
+@@ -229,29 +229,35 @@
+ 	$(call RUN_REFTEST,$(topsrcdir)/$(TEST_PATH) --extra-profile-file=$(topsrcdir)/js/src/tests/user.js)
+ 	$(CHECK_TEST_ERROR)
+ 
+ GARBAGE += $(addsuffix .log,$(MOCHITESTS) reftest crashtest jstestbrowser)
+ 
+ # Execute all xpcshell tests in the directories listed in the manifest.
+ # See also config/rules.mk 'xpcshell-tests' target for local execution.
+ # Usage: |make [TEST_PATH=...] [EXTRA_TEST_ARGS=...] xpcshell-tests|.
++xpcshell_command = $(PYTHON) \
++  -u $(topsrcdir)/config/pythonpath.py \
++  -I$(topsrcdir)/build \
++  $(topsrcdir)/testing/xpcshell/runxpcshelltests.py \
++  --manifest=$(DEPTH)/_tests/xpcshell/xpcshell.ini \
++  --build-info-json=$(DEPTH)/mozinfo.json \
++  --no-logfiles \
++  --tests-root-dir=$(call core_abspath,_tests/xpcshell) \
++  --xunit-file=$(call core_abspath,_tests/xpcshell/results.xml) \
++  --xunit-suite-name=xpcshell \
++  $(SYMBOLS_PATH) \
++  $(TEST_PATH_ARG) $(EXTRA_TEST_ARGS) \
++  $(LIBXUL_DIST)/bin/xpcshell
++
+ xpcshell-tests:
+-	$(PYTHON) -u $(topsrcdir)/config/pythonpath.py \
+-	  -I$(topsrcdir)/build \
+-	  $(topsrcdir)/testing/xpcshell/runxpcshelltests.py \
+-	  --manifest=$(DEPTH)/_tests/xpcshell/xpcshell.ini \
+-	  --build-info-json=$(DEPTH)/mozinfo.json \
+-	  --no-logfiles \
+-	  --tests-root-dir=$(call core_abspath,_tests/xpcshell) \
+-	  --xunit-file=$(call core_abspath,_tests/xpcshell/results.xml) \
+-	  --xunit-suite-name=xpcshell \
+-          $(SYMBOLS_PATH) \
+-	  $(TEST_PATH_ARG) $(EXTRA_TEST_ARGS) \
+-	  $(LIBXUL_DIST)/bin/xpcshell
++	$(xpcshell_command)
++
++xpcshell-tests-rerun-failures:
++	$(xpcshell_command) --failed-only
+ 
+ REMOTE_XPCSHELL = \
+ 	rm -f ./$@.log && \
+ 	$(PYTHON) -u $(topsrcdir)/config/pythonpath.py \
+ 	  -I$(topsrcdir)/build \
+ 	  -I$(topsrcdir)/build/mobile \
+ 	  $(topsrcdir)/testing/xpcshell/remotexpcshelltests.py \
+ 	  --manifest=$(DEPTH)/_tests/xpcshell/xpcshell.ini \
+diff --git a/testing/xpcshell/runxpcshelltests.py b/testing/xpcshell/runxpcshelltests.py
+--- a/testing/xpcshell/runxpcshelltests.py
++++ b/testing/xpcshell/runxpcshelltests.py
+@@ -34,21 +34,21 @@
+ # decision by deleting the provisions above and replace them with the notice
+ # and other provisions required by the GPL or the LGPL. If you do not delete
+ # the provisions above, a recipient may use your version of this file under
+ # the terms of any one of the MPL, the GPL or the LGPL.
+ #
+ # ***** END LICENSE BLOCK ***** */
+ 
+ import re, sys, os, os.path, logging, shutil, signal, math, time
+-import xml.dom.minidom
+ from glob import glob
+ from optparse import OptionParser
+ from subprocess import Popen, PIPE, STDOUT
+ from tempfile import mkdtemp, gettempdir
++import automationutils
+ import manifestparser
+ import mozinfo
+ import random
+ 
+ from automationutils import *
+ 
+ #TODO: replace this with json.loads when Python 2.6 is required.
+ def parse_json(j):
+@@ -388,126 +388,22 @@
+   def buildCmdTestFile(self, name):
+     """
+       Build the command line arguments for the test file.
+       On a remote system, this may be overloaded to use a remote path structure.
+     """
+     return ['-e', 'const _TEST_FILE = ["%s"];' %
+               replaceBackSlashes(name)]
+ 
+-  def writeXunitResults(self, results, name=None, filename=None, fh=None):
+-    """
+-      Write Xunit XML from results.
+-
+-      The function receives an iterable of results dicts. Each dict must have
+-      the following keys:
+-
+-        classname - The "class" name of the test.
+-        name - The simple name of the test.
+-
+-      In addition, it must have one of the following saying how the test
+-      executed:
+-
+-        passed - Boolean indicating whether the test passed. False if it
+-          failed.
+-        skipped - True if the test was skipped.
+-
+-      The following keys are optional:
+-
+-        time - Execution time of the test in decimal seconds.
+-        failure - Dict describing test failure. Requires keys:
+-          type - String type of failure.
+-          message - String describing basic failure.
+-          text - Verbose string describing failure.
+-
+-      Arguments:
+-
+-      |name|, Name of the test suite. Many tools expect Java class dot notation
+-        e.g. dom.simple.foo. A directory with '/' converted to '.' is a good
+-        choice.
+-      |fh|, File handle to write XML to.
+-      |filename|, File name to write XML to.
+-      |results|, Iterable of tuples describing the results.
+-    """
+-    if filename is None and fh is None:
+-      raise Exception("One of filename or fh must be defined.")
+-
+-    if name is None:
+-      name = "xpcshell"
+-    else:
+-      assert isinstance(name, str)
+-
+-    if filename is not None:
+-      fh = open(filename, 'wb')
+-
+-    doc = xml.dom.minidom.Document()
+-    testsuite = doc.createElement("testsuite")
+-    testsuite.setAttribute("name", name)
+-    doc.appendChild(testsuite)
+-
+-    total = 0
+-    passed = 0
+-    failed = 0
+-    skipped = 0
+-
+-    for result in results:
+-      total += 1
+-
+-      if result.get("skipped", None):
+-        skipped += 1
+-      elif result["passed"]:
+-        passed += 1
+-      else:
+-        failed += 1
+-
+-      testcase = doc.createElement("testcase")
+-      testcase.setAttribute("classname", result["classname"])
+-      testcase.setAttribute("name", result["name"])
+-
+-      if "time" in result:
+-        testcase.setAttribute("time", str(result["time"]))
+-      else:
+-        # It appears most tools expect the time attribute to be present.
+-        testcase.setAttribute("time", "0")
+-
+-      if "failure" in result:
+-        failure = doc.createElement("failure")
+-        failure.setAttribute("type", str(result["failure"]["type"]))
+-        failure.setAttribute("message", result["failure"]["message"])
+-
+-        # Lossy translation but required to not break CDATA. Also, text could
+-        # be None and Python 2.5's minidom doesn't accept None. Later versions
+-        # do, however.
+-        cdata = result["failure"]["text"]
+-        if not isinstance(cdata, str):
+-            cdata = ""
+-
+-        cdata = cdata.replace("]]>", "]] >")
+-        text = doc.createCDATASection(cdata)
+-        failure.appendChild(text)
+-        testcase.appendChild(failure)
+-
+-      if result.get("skipped", None):
+-        e = doc.createElement("skipped")
+-        testcase.appendChild(e)
+-
+-      testsuite.appendChild(testcase)
+-
+-    testsuite.setAttribute("tests", str(total))
+-    testsuite.setAttribute("failures", str(failed))
+-    testsuite.setAttribute("skip", str(skipped))
+-
+-    doc.writexml(fh, addindent="  ", newl="\n", encoding="utf-8")
+-
+   def runTests(self, xpcshell, xrePath=None, appPath=None, symbolsPath=None,
+                manifest=None, testdirs=None, testPath=None,
+                interactive=False, verbose=False, keepGoing=False, logfiles=True,
+                thisChunk=1, totalChunks=1, debugger=None,
+                debuggerArgs=None, debuggerInteractive=False,
+-               profileName=None, mozInfo=None, shuffle=False,
++               profileName=None, mozInfo=None, shuffle=False, failedOnly=False,
+                testsRootDir=None, xunitFilename=None, xunitName=None,
+                **otherOptions):
+     """Run xpcshell tests.
+ 
+     |xpcshell|, is the xpcshell executable to use to run the tests.
+     |xrePath|, if provided, is the path to the XRE to use.
+     |appPath|, if provided, is the path to an application directory.
+     |symbolsPath|, if provided is the path to a directory containing
+@@ -524,16 +420,18 @@
+     |logfiles|, if set to False, indicates not to save output to log files.
+       Non-interactive only option.
+     |debuggerInfo|, if set, specifies the debugger and debugger arguments
+       that will be used to launch xpcshell.
+     |profileName|, if set, specifies the name of the application for the profile
+       directory if running only a subset of tests.
+     |mozInfo|, if set, specifies specifies build configuration information, either as a filename containing JSON, or a dict.
+     |shuffle|, if True, execute tests in random order.
++    |failedOnly|, if True, only execute the tests that failed from the last
++      run. Requires xunitFilename so previous results can be read.
+     |testsRootDir|, absolute path to root directory of all tests. This is used
+       by xUnit generation to determine the package name of the tests.
+     |xunitFilename|, if set, specifies the filename to which to write xUnit XML
+       results.
+     |xunitName|, if outputting an xUnit XML file, the str value to use for the
+       testsuite name.
+     |otherOptions| may be present for the convenience of subclasses
+     """
+@@ -597,16 +495,43 @@
+         return False
+       self.mozInfo = parse_json(open(mozInfoFile).read())
+     mozinfo.update(self.mozInfo)
+     
+     pStdout, pStderr = self.getPipes()
+ 
+     self.buildTestList()
+ 
++    # Prune successful tests from last run if we are only running failed.
++    if failedOnly:
++      lastResults = automationutils.readXunitResults(xunitFilename)
++
++      # We could do more error checking here. For now, we just assume things
++      # line up.
++
++      failed_paths = set()
++
++      for result in lastResults["results"]:
++        if result["passed"]:
++          continue
++
++        path_parts = [testsRootDir]
++        if len(result["classname"]) > 0:
++            path_parts.append(result["classname"].replace(".", "/"))
++
++        path_parts.append(result["name"])
++        failed_paths.add("/".join(path_parts))
++
++      newtests = []
++      for test in self.alltests:
++        if test["path"] in failed_paths:
++          newtests.append(test)
++
++      self.alltests = newtests
++
+     if shuffle:
+       random.shuffle(self.alltests)
+ 
+     xunitResults = []
+ 
+     for test in self.alltests:
+       name = test['path']
+       if self.singleFile and not name.endswith(self.singleFile):
+@@ -764,28 +689,34 @@
+         if (keepGoing):
+           gotSIGINT = False
+         else:
+           xunitResults.append(xunitResult)
+           break
+ 
+       xunitResults.append(xunitResult)
+ 
+-    if self.testCount == 0:
++    if self.testCount == 0 and not failedOnly:
+       self.log.error("TEST-UNEXPECTED-FAIL | runxpcshelltests.py | No tests run. Did you pass an invalid --test-path?")
+       self.failCount = 1
+ 
+     self.log.info("""INFO | Result summary:
+ INFO | Passed: %d
+ INFO | Failed: %d
+ INFO | Todo: %d""" % (self.passCount, self.failCount, self.todoCount))
+ 
++    if self.failCount > 0:
++        self.log.info("To re-run failed tests, run 'make xpcshell-tests-rerun-failures'")
++
+     if xunitFilename is not None:
+-        self.writeXunitResults(filename=xunitFilename, results=xunitResults,
+-                               name=xunitName)
++        fh = open(xunitFilename, 'wb')
++        automationutils.writeXunitResults(fh=fh,
++                                          results=xunitResults,
++                                          name=xunitName)
++        fh.close()
+ 
+     if gotSIGINT and not keepGoing:
+       self.log.error("TEST-UNEXPECTED-FAIL | Received SIGINT (control-C), so stopped run. " \
+                      "(Use --keep-going to keep running tests after killing one with SIGINT)")
+       return False
+ 
+     return self.failCount == 0
+ 
+@@ -817,16 +748,19 @@
+                     action="store_false", dest="logfiles",
+                     help="don't create log files")
+     self.add_option("--test-path",
+                     type="string", dest="testPath", default=None,
+                     help="single path and/or test filename to test")
+     self.add_option("--tests-root-dir",
+                     type="string", dest="testsRootDir", default=None,
+                     help="absolute path to directory where all tests are located. this is typically $(objdir)/_tests")
++    self.add_option("--failed-only", dest="failedOnly", default=False,
++                    action="store_true",
++                    help="only run the failed tests from the last run. requires --xunit-file for input")
+     self.add_option("--total-chunks",
+                     type = "int", dest = "totalChunks", default=1,
+                     help = "how many chunks to split the tests up into")
+     self.add_option("--this-chunk",
+                     type = "int", dest = "thisChunk", default=1,
+                     help = "which chunk to run between 1 and --total-chunks")
+     self.add_option("--profile-name",
+                     type = "string", dest="profileName", default=None,
+diff --git a/testing/xpcshell/selftest.py b/testing/xpcshell/selftest.py
+--- a/testing/xpcshell/selftest.py
++++ b/testing/xpcshell/selftest.py
+@@ -57,28 +57,31 @@
+                 testlines.extend(t[1:])
+         self.manifest = self.writeFile("xpcshell.ini", """
+ [DEFAULT]
+ head =
+ tail =
+ 
+ """ + "\n".join(testlines))
+ 
+-    def assertTestResult(self, expected, shuffle=False, xunitFilename=None):
++    def assertTestResult(self, expected, shuffle=False, xunitFilename=None,
++                         failedOnly=False):
+         """
+         Assert that self.x.runTests with manifest=self.manifest
+         returns |expected|.
+         """
+         self.assertEquals(expected,
+                           self.x.runTests(xpcshellBin,
+                                           manifest=self.manifest,
+                                           mozInfo={},
+                                           shuffle=shuffle,
+                                           testsRootDir=self.tempdir,
+-                                          xunitFilename=xunitFilename),
++                                          xunitFilename=xunitFilename,
++                                          xunitName="testing",
++                                          failedOnly=failedOnly),
+                           msg="""Tests should have %s, log:
+ ========
+ %s
+ ========
+ """ % ("passed" if expected else "failed", self.log.getvalue()))
+ 
+     def _assertLog(self, s, expected):
+         l = self.log.getvalue()
+@@ -301,10 +304,36 @@
+             attributes = testcase.keys()
+             self.assertTrue("classname" in attributes)
+             self.assertTrue("name" in attributes)
+             self.assertTrue("time" in attributes)
+ 
+         self.assertTrue(testcases[1].find("failure") is not None)
+         self.assertTrue(testcases[2].find("skipped") is not None)
+ 
++    def testFailedOnly(self):
++        """
++        Check that running failed only tests works.
++        """
++        self.writeFile("test_00.js", SIMPLE_PASSING_TEST)
++        self.writeFile("test_01.js", SIMPLE_FAILING_TEST)
++
++        manifest = ["test_00.js", "test_01.js"]
++        self.writeManifest(manifest)
++
++        initialFilename = os.path.join(self.tempdir, "xunitInitial.xml")
++        failedFilename = os.path.join(self.tempdir, "xunitFailed.xml")
++        self.assertTestResult(False, xunitFilename=initialFilename)
++
++        shutil.copyfile(initialFilename, failedFilename)
++        self.assertTestResult(False, xunitFilename=failedFilename,
++                             failedOnly=True)
++
++        tree = ElementTree()
++        tree.parse(failedFilename)
++        suite = tree.getroot()
++
++        self.assertTrue(suite is not None)
++        self.assertEqual(suite.get("tests"), "1")
++        self.assertEqual(suite.get("failures"), "1")
++
+ if __name__ == "__main__":
+     unittest.main()

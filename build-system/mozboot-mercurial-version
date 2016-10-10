@@ -1,0 +1,480 @@
+# HG changeset patch
+# Parent eeb89381c7a3b3b2f5e56d4cb5c547ad99100554
+# User Gregory Szorc <gps@mozilla.com>
+Bug 872231 - Bootstrapper ensures Python 2.7.3 and Mercurial 2.5 are installed
+
+diff --git a/python/mozboot/mozboot/base.py b/python/mozboot/mozboot/base.py
+--- a/python/mozboot/mozboot/base.py
++++ b/python/mozboot/mozboot/base.py
+@@ -1,21 +1,88 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ # You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ from __future__ import print_function, unicode_literals
+ 
+ import os
++import re
+ import subprocess
+ import sys
+ 
++from distutils.version import StrictVersion
++
++
++NO_MERCURIAL = '''
++Could not find Mercurial (hg) in the current shell's path. Try starting a new
++shell and running the bootstrapper again.
++'''
++
++MERCURIAL_UNABLE_UPGRADE = '''
++You are currently running Mercurial %s. Running %s or newer is
++recommended for performance and stability reasons.
++
++Unfortunately, this bootstrapper currently does not know how to automatically
++upgrade Mercurial on your machine.
++
++You can usually install Mercurial through your package manager or by
++downloading a package from http://mercurial.selenic.com/.
++'''
++
++MERCURIAL_UPGRADE_FAILED = '''
++We attempted to upgrade Mercurial to a modern version (%s or newer).
++However, you appear to have version %s still.
++
++It's possible your package manager doesn't support a modern version of
++Mercurial. It's also possible Mercurial is not being installed in the search
++path for this shell. Try creating a new shell and run this bootstrapper again.
++
++If it continues to fail, consider installing Mercurial by following the
++instructions at http://mercurial.selenic.com/.
++'''
++
++PYTHON_UNABLE_UPGRADE = '''
++You are currently running Python %s. Running %s or newer (but
++not 3.x) is required.
++
++Unfortunately, this bootstrapper does not currently know how to automatically
++upgrade Python on your machine.
++
++Please search the Internet for how to upgrade your Python and try running this
++bootstrapper again to ensure your machine is up to date.
++'''
++
++PYTHON_UPGRADE_FAILED = '''
++We attempted to upgrade Python to a modern version (%s or newer).
++However, you appear to still have version %s.
++
++It's possible your package manager doesn't yet expose a modern version of
++Python. It's also possible Python is not being installed in the search path for
++this shell. Try creating a new shell and run this bootstrapper again.
++
++If this continues to fail and you are sure you have a modern Python on your
++system, ensure it is on the $PATH and try again. If that fails, you'll need to
++install Python manually. See http://www.python.org/.
++'''
++
++
++# Upgrade Mercurial older than this.
++MODERN_MERCURIAL_VERSION = StrictVersion('2.5')
++
++# Upgrade Python older than this.
++MODERN_PYTHON_VERSION = StrictVersion('2.7.3')
++
++
+ class BaseBootstrapper(object):
+     """Base class for system bootstrappers."""
+ 
++    def __init__(self):
++        self.package_manager_updated = False
++
+     def install_system_packages(self):
+         raise NotImplemented('%s must implement install_system_packages()' %
+             __name__)
+ 
+     def which(self, name):
+         """Python implementation of which.
+ 
+         It returns the path of an executable or None if it couldn't be found.
+@@ -42,16 +109,22 @@
+         self.run_as_root(command)
+ 
+     def yum_groupinstall(self, *packages):
+         command = ['yum', 'groupinstall']
+         command.extend(packages)
+ 
+         self.run_as_root(command)
+ 
++    def yum_update(self, *packages):
++        command = ['yum', 'update']
++        command.extend(packages)
++
++        self.run_as_root(command)
++
+     def apt_install(self, *packages):
+         command = ['apt-get', 'install']
+         command.extend(packages)
+ 
+         self.run_as_root(command)
+ 
+     def check_output(self, *args, **kwargs):
+         """Run subprocess.check_output even if Python doesn't provide it."""
+@@ -88,8 +161,103 @@
+                 print("ERROR! Please enter a valid option!")
+                 limit -= 1
+ 
+         if limit > 0:
+             return choice
+         else:
+             raise Exception("Error! Reached max attempts of entering option.")
+ 
++    def _ensure_package_manager_updated(self):
++        if self.package_manager_updated:
++            return
++
++        self._update_package_manager()
++        self.package_manager_updated = True
++
++    def _update_package_manager(self):
++        """Updates the package manager's manifests/package list.
++
++        This should be defined in child classes.
++        """
++
++    def is_mercurial_modern(self):
++        hg = self.which('hg')
++        if not hg:
++            print(NO_MERCURIAL)
++            return False, False, None
++
++        info = self.check_output([hg, '--version']).splitlines()[0]
++
++        match = re.search('version ([^\)]+)', info)
++        if not match:
++            print('ERROR: Unable to identify Mercurial version.')
++            return True, False, None
++
++        our = StrictVersion(match.group(1))
++
++        return True, our >= MODERN_MERCURIAL_VERSION, our
++
++    def ensure_mercurial_modern(self):
++        installed, modern, version = self.is_mercurial_modern()
++
++        if not installed or modern:
++            print('Your version of Mercurial (%s) is sufficiently modern.' %
++                version)
++            return
++
++        self._ensure_package_manager_updated()
++        self.upgrade_mercurial(version)
++
++        installed, modern, after = self.is_mercurial_modern()
++
++        if installed and not modern:
++            print(MERCURIAL_UPGRADE_FAILED % (MODERN_MERCURIAL_VERSION, after))
++
++    def upgrade_mercurial(self, current):
++        """Upgrade Mercurial.
++
++        Child classes should reimplement this.
++        """
++        print(MERCURIAL_UNABLE_UPGRADE % (current, MODERN_MERCURIAL_VERSION))
++
++    def is_python_modern(self):
++        python = None
++
++        for test in ['python2.7', 'python']:
++            python = self.which(test)
++            if python:
++                break
++
++        assert python
++
++        info = self.check_output([python, '--version'],
++            stderr=subprocess.STDOUT)
++        match = re.search('Python ([a-z0-9\.]+)', info)
++        if not match:
++            print('ERROR Unable to identify Python version.')
++            return False, None
++
++        our = StrictVersion(match.group(1))
++
++        return our >= MODERN_PYTHON_VERSION, our
++
++    def ensure_python_modern(self):
++        modern, version = self.is_python_modern()
++
++        if modern:
++            print('Your version of Python (%s) is new enough.' % version)
++            return
++
++        self._ensure_package_manager_updated()
++        self.upgrade_python(version)
++
++        modern, after = self.is_python_modern()
++
++        if not modern:
++            print(PYTHON_UPGRADE_FAILED % (MODERN_PYTHON_VERSION, after))
++
++    def upgrade_python(self, current):
++        """Upgrade Python.
++
++        Child classes should reimplement this.
++        """
++        print(PYTHON_UNABLE_UPGRADE % (current, MODERN_PYTHON_VERSION))
+diff --git a/python/mozboot/mozboot/bootstrap.py b/python/mozboot/mozboot/bootstrap.py
+--- a/python/mozboot/mozboot/bootstrap.py
++++ b/python/mozboot/mozboot/bootstrap.py
+@@ -68,10 +68,12 @@
+             args['version'] = platform.uname()[2]
+ 
+         if cls is None:
+             raise NotImplementedError('Bootstrap support is not yet available '
+                                       'for your OS.')
+ 
+         instance = cls(**args)
+         instance.install_system_packages()
++        instance.ensure_mercurial_modern()
++        instance.ensure_python_modern()
+ 
+         print(FINISHED)
+diff --git a/python/mozboot/mozboot/centos.py b/python/mozboot/mozboot/centos.py
+--- a/python/mozboot/mozboot/centos.py
++++ b/python/mozboot/mozboot/centos.py
+@@ -35,8 +35,12 @@
+             'wireless-tools-devel',
+             'yasm')
+ 
+         yasm = 'http://pkgs.repoforge.org/yasm/yasm-1.1.0-1.el6.rf.i686.rpm'
+         if 'x86_64' in kern[2]:
+             yasm = 'http://pkgs.repoforge.org/yasm/yasm-1.1.0-1.el6.rf.x86_64.rpm'
+ 
+         self.run_as_root(['rpm', '-ivh', yasm])
++
++    def upgrade_mercurial(self):
++        self.yum_update('mercurial')
++
+diff --git a/python/mozboot/mozboot/fedora.py b/python/mozboot/mozboot/fedora.py
+--- a/python/mozboot/mozboot/fedora.py
++++ b/python/mozboot/mozboot/fedora.py
+@@ -24,8 +24,11 @@
+             'autoconf213',
+             'glibc-static',
+             'libstdc++-static',
+             'libXt-devel',
+             'mercurial',
+             'mesa-libGL-devel',
+             'wireless-tools-devel',
+             'yasm')
++
++    def upgrade_mercurial(self):
++        self.yum_update('mercurial')
+diff --git a/python/mozboot/mozboot/gentoo.py b/python/mozboot/mozboot/gentoo.py
+--- a/python/mozboot/mozboot/gentoo.py
++++ b/python/mozboot/mozboot/gentoo.py
+@@ -12,8 +12,14 @@
+ 
+         self.version = version
+         self.dist_id = dist_id
+ 
+     def install_system_packages(self):
+         self.run_as_root(['emerge', '--onlydeps', '--quiet', 'firefox'])
+ 
+         self.run_as_root(['emerge', '--quiet', 'git', 'mercurial'])
++
++    def _update_package_manager(self):
++        self.run_as_root(['emerge', '--sync'])
++
++    def upgrade_mercurial(self):
++        self.run_as_root(['emerge', '--update', 'mercurial'])
+diff --git a/python/mozboot/mozboot/mint.py b/python/mozboot/mozboot/mint.py
+--- a/python/mozboot/mozboot/mint.py
++++ b/python/mozboot/mozboot/mint.py
+@@ -22,8 +22,11 @@
+             'libasound2-dev',
+             'libcurl4-openssl-dev',
+             'libnotify-dev',
+             'libiw-dev',
+             'libxt-dev',
+             'mesa-common-dev',
+             'uuid',
+             'yasm')
++
++    def upgrade_mercurial(self):
++        self.apt_install('mercurial')
+diff --git a/python/mozboot/mozboot/openbsd.py b/python/mozboot/mozboot/openbsd.py
+--- a/python/mozboot/mozboot/openbsd.py
++++ b/python/mozboot/mozboot/openbsd.py
+@@ -19,8 +19,15 @@
+             'yasm',
+             'gtk+2',
+             'libIDL',
+             'gmake',
+             'gtar',
+             'wget',
+             'unzip',
+             'zip'])
++
++    def _update_package_manager(self):
++        self.run_as_root(['port', 'sync'])
++
++    def upgrade_mercurial(self):
++        self.run_as_root(['pkg_add', '-u', 'mercurial'])
++
+diff --git a/python/mozboot/mozboot/osx.py b/python/mozboot/mozboot/osx.py
+--- a/python/mozboot/mozboot/osx.py
++++ b/python/mozboot/mozboot/osx.py
+@@ -127,16 +127,17 @@
+             raise Exception('OS X 10.6 or above is required.')
+ 
+         self.minor_version = version.split('.')[1]
+ 
+     def install_system_packages(self):
+         self.ensure_xcode()
+ 
+         choice = self.ensure_package_manager()
++        self.package_manager = choice
+         getattr(self, 'ensure_%s_packages' % choice)()
+ 
+     def ensure_xcode(self):
+         if self.os_version < StrictVersion('10.7'):
+             if not os.path.exists('/Developer/Applications/Xcode.app'):
+                 print(XCODE_REQUIRED_LEGACY)
+ 
+                 subprocess.check_call(['open', XCODE_LEGACY])
+@@ -178,20 +179,20 @@
+             version = StrictVersion(match.group(1))
+ 
+             if version < APPLE_CLANG_MINIMUM_VERSION:
+                 print(UPGRADE_XCODE_COMMAND_LINE_TOOLS)
+                 print(INSTALL_XCODE_COMMAND_LINE_TOOLS_STEPS)
+                 sys.exit(1)
+ 
+     def ensure_homebrew_packages(self):
+-        brew = self.which('brew')
+-        assert brew is not None
++        self.brew = self.which('brew')
++        assert self.brew is not None
+ 
+-        installed = self.check_output([brew, 'list']).split()
++        installed = self.check_output([self.brew, 'list']).split()
+ 
+         packages = [
+             # We need to install Python because Mercurial requires the Python
+             # development headers which are missing from OS X (at least on
+             # 10.8).
+             ('python', 'python'),
+             ('mercurial', 'mercurial'),
+             ('git', 'git'),
+@@ -204,47 +205,47 @@
+         for name, package in packages:
+             if name in installed:
+                 continue
+ 
+             if not printed:
+                 print(PACKAGE_MANAGER_PACKAGES % ('Homebrew',))
+                 printed = True
+ 
+-            subprocess.check_call([brew, '-v', 'install', package])
++            subprocess.check_call([self.brew, '-v', 'install', package])
+ 
+         if self.os_version < StrictVersion('10.7') and 'llvm' not in installed:
+             print(PACKAGE_MANAGER_OLD_CLANG % ('Homebrew',))
+ 
+-            subprocess.check_call([brew, '-v', 'install', 'llvm',
++            subprocess.check_call([self.brew, '-v', 'install', 'llvm',
+                 '--with-clang', '--all-targets'])
+ 
+     def ensure_macports_packages(self):
+-        port = self.which('port')
+-        assert port is not None
++        self.port = self.which('port')
++        assert self.port is not None
+ 
+-        installed = set(self.check_output([port, 'installed']).split())
++        installed = set(self.check_output([self.port, 'installed']).split())
+ 
+         packages = ['python27',
+                     'mercurial',
+                     'yasm',
+                     'libidl',
+                     'autoconf213']
+ 
+         missing = [package for package in packages if package not in installed]
+         if missing:
+             print(PACKAGE_MANAGER_PACKAGES % ('MacPorts',))
+-            self.run_as_root([port, '-v', 'install'] + missing)
++            self.run_as_root([self.port, '-v', 'install'] + missing)
+ 
+         if self.os_version < StrictVersion('10.7') and MACPORTS_CLANG_PACKAGE not in installed:
+             print(PACKAGE_MANAGER_OLD_CLANG % ('MacPorts',))
+-            self.run_as_root([port, '-v', 'install', MACPORTS_CLANG_PACKAGE])
++            self.run_as_root([self.port, '-v', 'install', MACPORTS_CLANG_PACKAGE])
+ 
+-        self.run_as_root([port, 'select', '--set', 'python', 'python27'])
+-        self.run_as_root([port, 'select', '--set', 'clang', 'mp-' + MACPORTS_CLANG_PACKAGE])
++        self.run_as_root([self.port, 'select', '--set', 'python', 'python27'])
++        self.run_as_root([self.port, 'select', '--set', 'clang', 'mp-' + MACPORTS_CLANG_PACKAGE])
+ 
+     def ensure_package_manager(self):
+         '''
+         Search package mgr in sys.path, if none is found, prompt the user to install one.
+         If only one is found, use that one. If both are found, prompt the user to choose
+         one.
+         '''
+         installed = []
+@@ -289,8 +290,34 @@
+             self.run_as_root(['installer', '-pkg', tf.name, '-target', '/'])
+ 
+         # MacPorts installs itself into a location likely not on the PATH. If
+         # we can't find it, prompt to restart.
+         if self.which('port') is None:
+             print(MACPORTS_POSTINSTALL_RESTART_REQUIRED)
+             sys.exit(1)
+ 
++    def _update_package_manager(self):
++        if self.package_manager == 'homebrew':
++            subprocess.check_call([self.brew, '-v', 'update'])
++        else:
++            assert self.package_manager == 'macports'
++            self.run_as_root([self.port, 'selfupdate'])
++
++    def _upgrade_package(self, package):
++        self._ensure_package_manager_updated()
++
++        if self.package_manager == 'homebrew':
++            subprocess.check_call([self.brew, '-v', 'upgrade', package])
++        else:
++            assert self.package_manager == 'macports'
++
++            self.run_as_root([self.port, 'upgrade', package])
++
++    def upgrade_mercurial(self, current):
++        self._upgrade_package('mercurial')
++
++    def upgrade_python(self, current):
++        if self.package_manager == 'homebrew':
++            self._upgrade_package('python')
++        else:
++            self._upgrade_package('python27')
++
+diff --git a/python/mozboot/mozboot/ubuntu.py b/python/mozboot/mozboot/ubuntu.py
+--- a/python/mozboot/mozboot/ubuntu.py
++++ b/python/mozboot/mozboot/ubuntu.py
+@@ -22,8 +22,16 @@
+             'libcurl4-openssl-dev',
+             'libiw-dev',
+             'libnotify-dev',
+             'libxt-dev',
+             'mercurial',
+             'mesa-common-dev',
+             'uuid',
+             'yasm')
++
++    def _update_package_manager(self):
++        self.run_as_root(['apt-get', 'update'])
++
++    def upgrade_mercurial(self):
++        self._ensure_package_manager_updated()
++        self.apt_install('mercurial')
++

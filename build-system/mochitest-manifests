@@ -1,0 +1,543 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/test/chrome/Makefile.in b/content/base/test/chrome/Makefile.in
+--- a/content/base/test/chrome/Makefile.in
++++ b/content/base/test/chrome/Makefile.in
+@@ -3,16 +3,8 @@
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ MOCHITEST_FILES = \
+     bug421622-referer.sjs \
+     nochrome_bug765993.html \
+     nochrome_bug765993.js \
+     nochrome_bug765993.js^headers^ \
+     $(NULL)
+-
+-ifneq ($(MOZ_WIDGET_TOOLKIT),cocoa)
+-MOCHITEST_CHROME_FILES += \
+-    test_cpows.xul \
+-    cpows_parent.xul \
+-    cpows_child.js \
+-    $(NULL)
+-endif
+diff --git a/content/base/test/chrome/chrome.ini b/content/base/test/chrome/chrome.ini
+--- a/content/base/test/chrome/chrome.ini
++++ b/content/base/test/chrome/chrome.ini
+@@ -1,12 +1,14 @@
+ [DEFAULT]
+ support-files =
+   blockNoPlugins.xml
+   blockPluginHard.xml
++  cpows_child.js
++  cpows_parent.xul
+   file_bug391728.html
+   file_bug391728_2.html
+   file_bug549682.xul
+   file_bug616841.xul
+   file_bug816340.xul
+   fileconstructor_file.png
+   frame_bug814638.xul
+   host_bug814638.xul
+@@ -38,12 +40,14 @@
+ [test_bug752226-4.xul]
+ [test_bug765993.html]
+ [test_bug780199.xul]
+ [test_bug780529.xul]
+ [test_bug800386.xul]
+ [test_bug814638.xul]
+ [test_bug816340.xul]
+ [test_bug914381.html]
++[test_cpows.xul]
++skip-if = toolkit == "cocoa"
+ [test_document_register.xul]
+ [test_domparsing.xul]
+ [test_fileconstructor.xul]
+ [test_title.xul]
+diff --git a/content/events/moz.build b/content/events/moz.build
+--- a/content/events/moz.build
++++ b/content/events/moz.build
+@@ -1,8 +1,10 @@
+ # -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+ # vim: set filetype=python:
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ PARALLEL_DIRS += ['public', 'src']
+-TEST_DIRS += ['test']
++
++MOCHITEST_MANIFESTS += ['test/mochitest.ini']
++MOCHITEST_CHROME_MANIFESTS += ['test/chrome.ini']
+diff --git a/content/events/test/Makefile.in b/content/events/test/Makefile.in
+deleted file mode 100644
+--- a/content/events/test/Makefile.in
++++ /dev/null
+@@ -1,15 +0,0 @@
+-#
+-# This Source Code Form is subject to the terms of the Mozilla Public
+-# License, v. 2.0. If a copy of the MPL was not distributed with this
+-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+-
+-# Disabled due to timeouts.
+-# 		test_bug563329.html
+-ifeq (,$(filter gonk,$(MOZ_WIDGET_TOOLKIT)))
+-# THESE TESTS (BELOW) DO NOT RUN ON B2G
+-MOCHITEST_FILES += \
+-		test_bug864040.html \
+-		$(NULL)
+-# THESE TESTS (ABOVE) DO NOT RUN ON B2G
+-endif
+-
+diff --git a/content/events/test/mochitest.ini b/content/events/test/mochitest.ini
+--- a/content/events/test/mochitest.ini
++++ b/content/events/test/mochitest.ini
+@@ -46,16 +46,18 @@
+ [test_bug502818.html]
+ [test_bug508479.html]
+ [test_bug517851.html]
+ [test_bug534833.html]
+ [test_bug545268.html]
+ [test_bug547996-1.html]
+ [test_bug547996-2.xhtml]
+ [test_bug556493.html]
++[test_bug563329.html]
++skip-if = true # Disabled due to timeouts.
+ [test_bug574663.html]
+ [test_bug591815.html]
+ [test_bug593959.html]
+ [test_bug603008.html]
+ [test_bug605242.html]
+ [test_bug607464.html]
+ [test_bug613634.html]
+ [test_bug615597.html]
+@@ -74,16 +76,18 @@
+ [test_bug667919-1.html]
+ [test_bug689564.html]
+ [test_bug698929.html]
+ [test_bug741666.html]
+ [test_bug742376.html]
+ [test_bug812744.html]
+ [test_bug847597.html]
+ [test_bug855741.html]
++[test_bug864040.html]
++skip-if = toolkit == "gonk"
+ [test_clickevent_on_input.html]
+ [test_continuous_wheel_events.html]
+ [test_dblclick_explicit_original_target.html]
+ [test_dom_keyboard_event.html]
+ [test_dom_mouse_event.html]
+ [test_dom_wheel_event.html]
+ [test_draggableprop.html]
+ [test_dragstart.html]
+diff --git a/content/events/test/moz.build b/content/events/test/moz.build
+deleted file mode 100644
+--- a/content/events/test/moz.build
++++ /dev/null
+@@ -1,10 +0,0 @@
+-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+-# vim: set filetype=python:
+-# This Source Code Form is subject to the terms of the Mozilla Public
+-# License, v. 2.0. If a copy of the MPL was not distributed with this
+-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+-
+-MOCHITEST_MANIFESTS += ['mochitest.ini']
+-
+-MOCHITEST_CHROME_MANIFESTS += ['chrome.ini']
+-
+diff --git a/content/html/document/moz.build b/content/html/document/moz.build
+--- a/content/html/document/moz.build
++++ b/content/html/document/moz.build
+@@ -1,8 +1,10 @@
+ # -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+ # vim: set filetype=python:
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ PARALLEL_DIRS += ['public', 'src']
+-TEST_DIRS += ['test']
++
++MOCHITEST_MANIFESTS += ['test/mochitest.ini']
++BROWSER_CHROME_MANIFESTS += ['test/browser.ini']
+diff --git a/content/html/document/test/Makefile.in b/content/html/document/test/Makefile.in
+deleted file mode 100644
+--- a/content/html/document/test/Makefile.in
++++ /dev/null
+@@ -1,73 +0,0 @@
+-#
+-# This Source Code Form is subject to the terms of the Mozilla Public
+-# License, v. 2.0. If a copy of the MPL was not distributed with this
+-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+-
+-MOCHITEST_FILES = 	test_bug1682.html \
+-		test_bug1823.html \
+-		test_bug57600.html \
+-		test_bug196523.html \
+-		bug196523-subframe.html \
+-		test_bug199692.html \
+-		bug199692-nested.html \
+-		bug199692-nested-d2.html \
+-		bug199692-popup.html \
+-		bug199692-scrolled.html \
+-		test_bug172261.html \
+-		test_bug255820.html \
+-		test_bug259332.html \
+-		test_bug311681.html \
+-		test_bug311681.xhtml \
+-		test_bug324378.html \
+-		test_bug332848.xhtml \
+-		test_bug340017.xhtml \
+-		test_bug359657.html \
+-		test_bug369370.html \
+-		bug369370-popup.png \
+-		test_bug380383.html \
+-		test_bug391777.html \
+-		test_bug402680.html \
+-		test_bug403868.html \
+-		test_bug403868.xhtml \
+-		$(filter disabled-for-timeouts, test_bug435128.html) \
+-		test_bug463104.html \
+-		test_form-parsing.html \
+-		test_viewport.html \
+-		test_documentAll.html \
+-		test_document-element-inserted.html \
+-		$(filter disabled-temporarily--bug-559932, test_bug445004.html) \
+-		bug445004-inner.js \
+-		bug445004-outer-rel.html \
+-		bug445004-outer-abs.html \
+-		bug445004-outer-write.html \
+-		bug445004-inner.html \
+-		test_bug446483.html \
+-		bug446483-iframe.html \
+-		test_bug448564.html \
+-		bug448564-iframe-1.html \
+-		bug448564-iframe-2.html \
+-		bug448564-iframe-3.html \
+-		bug448564-echo.sjs \
+-		bug448564-submit.js \
+-		test_bug478251.html \
+-		test_bug481440.html \
+-		test_bug481647.html \
+-		test_bug482659.html \
+-		test_bug486741.html \
+-		test_bug489532.html \
+-		test_bug497242.xhtml \
+-		test_bug499092.html \
+-		bug499092.xml \
+-		bug499092.html \
+-		test_bug512367.html \
+-		test_bug677495.html \
+-		test_bug677495-1.html \
+-		test_bug741266.html \
+-		test_non-ascii-cookie.html \
+-		test_non-ascii-cookie.html^headers^ \
+-		test_bug765780.html \
+-		test_bug871161.html \
+-		file_bug871161-1.html \
+-		file_bug871161-2.html \
+-		$(NULL)
+-
+diff --git a/content/html/document/test/mochitest.ini b/content/html/document/test/mochitest.ini
+new file mode 100644
+--- /dev/null
++++ b/content/html/document/test/mochitest.ini
+@@ -0,0 +1,70 @@
++[DEFAULT]
++support-files =
++  bug196523-subframe.html
++  bug199692-nested.html
++  bug199692-nested-d2.html
++  bug199692-popup.html
++  bug199692-scrolled.html
++  bug369370-popup.png
++  bug445004-inner.js
++  bug445004-outer-rel.html
++  bug445004-outer-abs.html
++  bug445004-outer-write.html
++  bug445004-inner.html
++  bug446483-iframe.html
++  bug448564-iframe-1.html
++  bug448564-iframe-2.html
++  bug448564-iframe-3.html
++  bug448564-echo.sjs
++  bug448564-submit.js
++  bug499092.xml
++  bug499092.html
++  test_non-ascii-cookie.html^headers^
++
++[test_bug1682.html]
++[test_bug1823.html]
++[test_bug57600.html]
++[test_bug196523.html]
++[test_bug199692.html]
++[test_bug172261.html]
++[test_bug255820.html]
++[test_bug259332.html]
++[test_bug311681.html]
++[test_bug311681.xhtml]
++[test_bug324378.html]
++[test_bug332848.xhtml]
++[test_bug340017.xhtml]
++[test_bug359657.html]
++[test_bug369370.html]
++[test_bug380383.html]
++[test_bug391777.html]
++[test_bug402680.html]
++[test_bug403868.html]
++[test_bug403868.xhtml]
++[test_bug435128.html]
++skip-if = true # Disabled for timeouts.
++[test_bug463104.html]
++[test_form-parsing.html]
++[test_viewport.html]
++[test_documentAll.html]
++[test_document-element-inserted.html]
++[test_bug445004.html]
++skip-if = true # Disabled permanently (bug 559932).
++[test_bug446483.html]
++[test_bug448564.html]
++[test_bug478251.html]
++[test_bug481440.html]
++[test_bug481647.html]
++[test_bug482659.html]
++[test_bug486741.html]
++[test_bug489532.html]
++[test_bug497242.xhtml]
++[test_bug499092.html]
++[test_bug512367.html]
++[test_bug677495.html]
++[test_bug677495-1.html]
++[test_bug741266.html]
++[test_non-ascii-cookie.html]
++[test_bug765780.html]
++[test_bug871161.html]
++support = file_bug871161-1.html file_bug871161-2.html
+diff --git a/content/html/document/test/moz.build b/content/html/document/test/moz.build
+deleted file mode 100644
+--- a/content/html/document/test/moz.build
++++ /dev/null
+@@ -1,8 +0,0 @@
+-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+-# vim: set filetype=python:
+-# This Source Code Form is subject to the terms of the Mozilla Public
+-# License, v. 2.0. If a copy of the MPL was not distributed with this
+-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+-
+-BROWSER_CHROME_MANIFESTS += ['browser.ini']
+-
+diff --git a/content/svg/content/moz.build b/content/svg/content/moz.build
+--- a/content/svg/content/moz.build
++++ b/content/svg/content/moz.build
+@@ -1,8 +1,9 @@
+ # -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+ # vim: set filetype=python:
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ PARALLEL_DIRS += ['src']
+-TEST_DIRS += ['test']
++
++MOCHITEST_MANIFESTS += ['test/mochitest.ini']
+diff --git a/content/svg/content/test/Makefile.in b/content/svg/content/test/Makefile.in
+deleted file mode 100644
+--- a/content/svg/content/test/Makefile.in
++++ /dev/null
+@@ -1,92 +0,0 @@
+-#
+-# This Source Code Form is subject to the terms of the Mozilla Public
+-# License, v. 2.0. If a copy of the MPL was not distributed with this
+-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+-
+-# Disabled:
+-#		bbox-helper.svg \
+-#		test_length.xhtml \
+-
+-MOCHITEST_FILES = \
+-		matrixUtils.js \
+-		MutationEventChecker.js \
+-		test_a_href_01.xhtml \
+-		test_a_href_02.xhtml \
+-		a_href_destination.svg \
+-		a_href_helper_01.svg \
+-		a_href_helper_02_03.svg \
+-		a_href_helper_04.svg \
+-		test_animLengthObjectIdentity.xhtml \
+-		test_animLengthReadonly.xhtml \
+-		test_animLengthUnits.xhtml \
+-		test_bbox.xhtml \
+-		test_bbox-with-invalid-viewBox.xhtml \
+-		test_bounds.html \
+-		bbox-helper.svg \
+-		bounds-helper.svg \
+-		test_dataTypes.html \
+-		test_dataTypesModEvents.html \
+-		dataTypes-helper.svg \
+-		test_fragments.html \
+-		fragments-helper.svg \
+-		getCTM-helper.svg \
+-		test_getCTM.html \
+-		test_getElementById.xhtml \
+-		test_getSubStringLength.xhtml \
+-		getSubStringLength-helper.svg \
+-		test_hasFeature.xhtml \
+-		$(filter disabled-for-intermittent-failures--bug-701060, test_lang.xhtml) \
+-		test_nonAnimStrings.xhtml \
+-		test_non-scaling-stroke.html \
+-		test_pathAnimInterpolation.xhtml \
+-		test_pathSeg.xhtml \
+-		test_pointAtLength.xhtml \
+-		test_pointer-events-1a.xhtml \
+-		test_pointer-events-1b.xhtml \
+-		pointer-events.js \
+-		test_pointer-events-2.xhtml \
+-		test_pointer-events-3.xhtml \
+-		test_pointer-events-4.xhtml \
+-		test_scientific.html \
+-		scientific-helper.svg \
+-		test_selectSubString.xhtml \
+-		test_selectSubString2.xhtml \
+-		selectSubString-helper.svg \
+-		animated-svg-image-helper.html \
+-		animated-svg-image-helper.svg \
+-		test_stroke-linecap-hit-testing.xhtml \
+-		test_SVG_namespace_ids.html \
+-		test_SVGLengthList.xhtml \
+-		test_SVGLengthList-2.xhtml \
+-		test_SVGMatrix.xhtml \
+-		test_SVGNumberList.xhtml \
+-		test_SVGPathSegList.xhtml \
+-		test_SVGPointList.xhtml \
+-		test_SVGStyleElement.xhtml \
+-		test_SVGStringList.xhtml \
+-		test_SVGTransformList.xhtml \
+-		test_SVGTransformListAddition.xhtml \
+-		test_SVGUnitTypes.html \
+-		test_SVGxxxList.xhtml \
+-		test_SVGxxxListIndexing.xhtml \
+-		test_switch.xhtml \
+-		switch-helper.svg \
+-		test_text.html \
+-		test_text_2.html \
+-		test_text_dirty.html \
+-		test_text_lengthAdjust.html \
+-		test_text_scaled.html \
+-		test_text_selection.html \
+-		test_text_update.html \
+-		text-helper.svg \
+-		text-helper-scaled.svg \
+-		text-helper-selection.svg \
+-		test_transform.xhtml \
+-		test_valueAsString.xhtml \
+-		test_valueLeaks.xhtml \
+-		viewport-helper.svg \
+-		test_viewport.html \
+-		zoom-helper.svg \
+-		test_zoom.xhtml \
+-                test_bug872812.html \
+-		$(NULL)
+diff --git a/content/svg/content/test/mochitest.ini b/content/svg/content/test/mochitest.ini
+new file mode 100644
+--- /dev/null
++++ b/content/svg/content/test/mochitest.ini
+@@ -0,0 +1,89 @@
++[DEFAULT]
++support-files =
++  bbox-helper.svg
++  a_href_destination.svg
++  a_href_helper_01.svg
++  a_href_helper_02_03.svg
++  a_href_helper_04.svg
++  animated-svg-image-helper.html
++  animated-svg-image-helper.svg
++  bbox-helper.svg
++  bounds-helper.svg
++  dataTypes-helper.svg
++  fragments-helper.svg
++  getCTM-helper.svg
++  getSubStringLength-helper.svg
++  matrixUtils.js
++  MutationEventChecker.js
++  pointer-events.js
++  scientific-helper.svg
++  selectSubString-helper.svg
++  switch-helper.svg
++  text-helper-scaled.svg
++  text-helper-selection.svg
++  text-helper.svg
++  viewport-helper.svg
++  zoom-helper.svg
++
++[test_a_href_01.xhtml]
++[test_a_href_02.xhtml]
++[test_animLengthObjectIdentity.xhtml]
++[test_animLengthReadonly.xhtml]
++[test_animLengthUnits.xhtml]
++[test_bbox-with-invalid-viewBox.xhtml]
++[test_bbox.xhtml]
++[test_bounds.html]
++[test_bug872812.html]
++[test_dataTypes.html]
++[test_dataTypesModEvents.html]
++[test_fragments.html]
++[test_getCTM.html]
++[test_getElementById.xhtml]
++[test_getSubStringLength.xhtml]
++[test_hasFeature.xhtml]
++[test_lang.xhtml]
++skip-if = true # disabled-for-intermittent-failures--bug-701060
++[test_length.xhtml]
++skip-if = true
++[test_nonAnimStrings.xhtml]
++[test_non-scaling-stroke.html]
++[test_pathAnimInterpolation.xhtml]
++[test_pathSeg.xhtml]
++[test_pointAtLength.xhtml]
++[test_pointer-events-1a.xhtml]
++[test_pointer-events-1b.xhtml]
++[test_pointer-events-2.xhtml]
++[test_pointer-events-3.xhtml]
++[test_pointer-events-4.xhtml]
++[test_scientific.html]
++[test_selectSubString2.xhtml]
++[test_selectSubString.xhtml]
++[test_stroke-linecap-hit-testing.xhtml]
++[test_SVGLengthList-2.xhtml]
++[test_SVGLengthList.xhtml]
++[test_SVGMatrix.xhtml]
++[test_SVG_namespace_ids.html]
++[test_SVGNumberList.xhtml]
++[test_SVGPathSegList.xhtml]
++[test_SVGPointList.xhtml]
++[test_SVGStringList.xhtml]
++[test_SVGStyleElement.xhtml]
++[test_SVGTransformListAddition.xhtml]
++[test_SVGTransformList.xhtml]
++[test_SVGUnitTypes.html]
++[test_SVGxxxListIndexing.xhtml]
++[test_SVGxxxList.xhtml]
++[test_switch.xhtml]
++[test_text_2.html]
++[test_text_dirty.html]
++[test_text.html]
++[test_text_lengthAdjust.html]
++[test_text_scaled.html]
++[test_text_selection.html]
++[test_text_update.html]
++[test_transform.xhtml]
++[test_valueAsString.xhtml]
++[test_valueLeaks.xhtml]
++[test_viewport.html]
++[test_zoom.xhtml]
++
+diff --git a/content/svg/content/test/moz.build b/content/svg/content/test/moz.build
+deleted file mode 100644
+--- a/content/svg/content/test/moz.build
++++ /dev/null
+@@ -1,6 +0,0 @@
+-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+-# vim: set filetype=python:
+-# This Source Code Form is subject to the terms of the Mozilla Public
+-# License, v. 2.0. If a copy of the MPL was not distributed with this
+-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+-

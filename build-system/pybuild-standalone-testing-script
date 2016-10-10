@@ -1,0 +1,142 @@
+# HG changeset patch
+# Parent d262d390529917631013be109b3b11c9809f901c
+# User Gregory Szorc <gps@mozilla.com>
+Bug 784841 - Part 13: Mach commands to interact with moz.build files
+
+diff --git a/mach b/mach
+--- a/mach
++++ b/mach
+@@ -38,16 +38,17 @@
+ 
+ # Individual files providing mach commands.
+ MACH_MODULES = [
+     'addon-sdk/mach_commands.py',
+     'layout/tools/reftest/mach_commands.py',
+     'python/mozboot/mozboot/mach_commands.py',
+     'python/mozbuild/mozbuild/config.py',
+     'python/mozbuild/mozbuild/mach_commands.py',
++    'python/mozbuild/mozbuild/backend/mach_commands.py',
+     'python/mozbuild/mozbuild/frontend/mach_commands.py',
+     'testing/mochitest/mach_commands.py',
+     'testing/xpcshell/mach_commands.py',
+ ]
+ 
+ our_dir = os.path.dirname(os.path.abspath(__file__))
+ 
+ try:
+diff --git a/python/mozbuild/mozbuild/backend/mach_commands.py b/python/mozbuild/mozbuild/backend/mach_commands.py
+new file mode 100644
+--- /dev/null
++++ b/python/mozbuild/mozbuild/backend/mach_commands.py
+@@ -0,0 +1,33 @@
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++from __future__ import unicode_literals
++
++from mach.decorators import (
++    CommandArgument,
++    CommandProvider,
++    Command
++)
++
++from mozbuild.base import MachCommandBase
++
++
++@CommandProvider
++class BackendCommands(MachCommandBase):
++    @Command('generate-build-backend',
++        help='Generate files for a build backend.')
++    def build_backend(self):
++        from mozbuild.backend.recursivemake import RecursiveMakeBackend
++        from mozbuild.frontend.emitter import TreeMetadataEmitter
++        from mozbuild.frontend.reader import BuildReader
++
++        buildconfig = self.buildconfig
++
++        reader = BuildReader(buildconfig)
++        emitter = TreeMetadataEmitter(buildconfig)
++        backend = RecursiveMakeBackend()
++
++        definitions = emitter.emit(reader.read_topsrcdir())
++        backend.consume(definitions)
++
+diff --git a/python/mozbuild/mozbuild/frontend/mach_commands.py b/python/mozbuild/mozbuild/frontend/mach_commands.py
+--- a/python/mozbuild/mozbuild/frontend/mach_commands.py
++++ b/python/mozbuild/mozbuild/frontend/mach_commands.py
+@@ -1,29 +1,32 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ from __future__ import print_function, unicode_literals
+ 
++import os
+ import textwrap
+ 
+ from mach.decorators import (
+     CommandArgument,
+     CommandProvider,
+     Command
+ )
+ 
+ from mozbuild.frontend.sandbox_symbols import (
+     FUNCTIONS,
+     SPECIAL_VARIABLES,
+     VARIABLES,
+     doc_to_paragraphs,
+ )
+ 
++from mozbuild.base import MachCommandBase
++
+ 
+ def get_doc(doc):
+     """Split documentation into summary line and everything else."""
+     paragraphs = doc_to_paragraphs(doc)
+ 
+     summary = paragraphs[0]
+     extra = paragraphs[1:]
+ 
+@@ -37,17 +40,40 @@
+ 
+         print('')
+ 
+     if not len(extra):
+         print('')
+ 
+ 
+ @CommandProvider
+-class MozbuildFileCommands(object):
++class MozbuildFileCommands(MachCommandBase):
++    @Command('mozbuild-read',
++        help='Process moz.build files.')
++    @CommandArgument('--allow-tiers', action='store_true', default=False,
++        help='Allow tiers in moz.build files.')
++    @CommandArgument('path', nargs='*', help='Path to process')
++    def mozbuild_process(self, allow_tiers=False, path=None):
++        from mozbuild.frontend.reader import BuildReader
++
++        reader = BuildReader(self.buildconfig)
++
++        if path:
++            sandboxes = []
++            for p in path:
++                normalized = os.path.join(reader.topsrcdir, p)
++                sandboxes.extend(reader.read_mozbuild(normalized,
++                    read_tiers=allow_tiers, filesystem_absolute=True,
++                    descend=False))
++        else:
++            sandboxes = reader.read_topsrcdir()
++
++        for sandbox in sandboxes:
++            print(sandbox['SRCDIR'])
++
+     @Command('mozbuild-reference',
+         help='View reference documentation on mozbuild files.')
+     @CommandArgument('symbol', default=None, nargs='*',
+         help='Symbol to view help on. If not specified, all will be shown.')
+     @CommandArgument('--name-only', '-n', default=False, action='store_true',
+         help='Print symbol names only.')
+     def reference(self, symbol, name_only=False):
+         if name_only:

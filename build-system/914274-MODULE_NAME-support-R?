@@ -1,0 +1,127 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/python/mozbuild/mozbuild/frontend/emitter.py b/python/mozbuild/mozbuild/frontend/emitter.py
+--- a/python/mozbuild/mozbuild/frontend/emitter.py
++++ b/python/mozbuild/mozbuild/frontend/emitter.py
+@@ -159,16 +159,17 @@
+             HOST_CSRCS='HOST_CSRCS',
+             HOST_LIBRARY_NAME='HOST_LIBRARY_NAME',
+             IS_COMPONENT='IS_COMPONENT',
+             JS_MODULES_PATH='JS_MODULES_PATH',
+             LIBRARY_NAME='LIBRARY_NAME',
+             LIBS='LIBS',
+             LIBXUL_LIBRARY='LIBXUL_LIBRARY',
+             MODULE='MODULE',
++            MODULE_NAME='MODULE_NAME',
+             MSVC_ENABLE_PGO='MSVC_ENABLE_PGO',
+             NO_DIST_INSTALL='NO_DIST_INSTALL',
+             OS_LIBS='OS_LIBS',
+             SDK_LIBRARY='SDK_LIBRARY',
+             SHARED_LIBRARY_LIBS='SHARED_LIBRARY_LIBS',
+             SIMPLE_PROGRAMS='SIMPLE_PROGRAMS',
+             SSRCS='SSRCS',
+         )
+diff --git a/python/mozbuild/mozbuild/frontend/sandbox_symbols.py b/python/mozbuild/mozbuild/frontend/sandbox_symbols.py
+--- a/python/mozbuild/mozbuild/frontend/sandbox_symbols.py
++++ b/python/mozbuild/mozbuild/frontend/sandbox_symbols.py
+@@ -346,16 +346,20 @@
+     'MODULE': (unicode, unicode, "",
+         """Module name.
+ 
+         Historically, this variable was used to describe where to install header
+         files, but that feature is now handled by ``EXPORTS_NAMESPACES``.
+         ``MODULE`` will likely be removed in the future.
+         """, None),
+ 
++    'MODULE_NAME': (unicode, unicode, "",
++        """Module name for static libraries.
++        """, None),
++
+     'EXPORTS': (HierarchicalStringList, list, HierarchicalStringList(),
+         """List of files to be exported, and in which subdirectories.
+ 
+         ``EXPORTS`` is generally used to list the include files to be exported to
+         ``dist/include``, but it can be used for other files as well. This variable
+         behaves as a list when appending filenames for export in the top-level
+         directory. Files can also be appended to a field to indicate which
+         subdirectory they should be exported to. For example, to export
+diff --git a/python/mozbuild/mozbuild/test/backend/data/variable_passthru/moz.build b/python/mozbuild/mozbuild/test/backend/data/variable_passthru/moz.build
+--- a/python/mozbuild/mozbuild/test/backend/data/variable_passthru/moz.build
++++ b/python/mozbuild/mozbuild/test/backend/data/variable_passthru/moz.build
+@@ -1,13 +1,14 @@
+ # -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+ # Any copyright is dedicated to the Public Domain.
+ # http://creativecommons.org/publicdomain/zero/1.0/
+ 
+ MODULE = 'module_name'
++MODULE_NAME = 'module_name'
+ 
+ ASFILES = ['bar.s', 'foo.asm']
+ 
+ EXTRA_COMPONENTS = ['bar.js', 'foo.js']
+ EXTRA_PP_COMPONENTS = ['bar.pp.js', 'foo.pp.js']
+ 
+ EXTRA_JS_MODULES = ['bar.jsm', 'foo.jsm']
+ EXTRA_PP_JS_MODULES = ['bar.pp.jsm', 'foo.pp.jsm']
+diff --git a/python/mozbuild/mozbuild/test/backend/test_recursivemake.py b/python/mozbuild/mozbuild/test/backend/test_recursivemake.py
+--- a/python/mozbuild/mozbuild/test/backend/test_recursivemake.py
++++ b/python/mozbuild/mozbuild/test/backend/test_recursivemake.py
+@@ -328,16 +328,19 @@
+                 'HOST_LIBRARY_NAME := host_bar',
+             ],
+             'LIBRARY_NAME': [
+                 'LIBRARY_NAME := lib_name',
+             ],
+             'LIBXUL_LIBRARY': [
+                 'LIBXUL_LIBRARY := 1',
+             ],
++            'MODULE_NAME': [
++                'MODULE_NAME := module_name',
++            ],
+             'MSVC_ENABLE_PGO': [
+                 'MSVC_ENABLE_PGO := 1',
+             ],
+             'OS_LIBS': [
+                 'OS_LIBS += foo.so',
+                 'OS_LIBS += -l123',
+                 'OS_LIBS += bar.a',
+             ],
+diff --git a/python/mozbuild/mozbuild/test/frontend/data/variable-passthru/moz.build b/python/mozbuild/mozbuild/test/frontend/data/variable-passthru/moz.build
+--- a/python/mozbuild/mozbuild/test/frontend/data/variable-passthru/moz.build
++++ b/python/mozbuild/mozbuild/test/frontend/data/variable-passthru/moz.build
+@@ -1,13 +1,14 @@
+ # -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+ # Any copyright is dedicated to the Public Domain.
+ # http://creativecommons.org/publicdomain/zero/1.0/
+ 
+ MODULE = 'module_name'
++MODULE_NAME = 'module_name'
+ 
+ ASFILES += ['fans.asm', 'tans.s']
+ 
+ EXTRA_COMPONENTS=['fans.js', 'tans.js']
+ EXTRA_PP_COMPONENTS=['fans.pp.js', 'tans.pp.js']
+ 
+ EXTRA_JS_MODULES = ['bar.jsm', 'foo.jsm']
+ EXTRA_PP_JS_MODULES = ['bar.pp.jsm', 'foo.pp.jsm']
+diff --git a/python/mozbuild/mozbuild/test/frontend/test_emitter.py b/python/mozbuild/mozbuild/test/frontend/test_emitter.py
+--- a/python/mozbuild/mozbuild/test/frontend/test_emitter.py
++++ b/python/mozbuild/mozbuild/test/frontend/test_emitter.py
+@@ -152,16 +152,17 @@
+             HOST_LIBRARY_NAME='host_fans',
+             IS_COMPONENT=True,
+             LIBRARY_NAME='lib_name',
+             LIBS=['fans.lib', 'tans.lib'],
+             LIBXUL_LIBRARY=True,
+             MSVC_ENABLE_PGO=True,
+             NO_DIST_INSTALL=True,
+             MODULE='module_name',
++            MODULE_NAME='module_name',
+             OS_LIBS=['foo.so', '-l123', 'aaa.a'],
+             SDK_LIBRARY=['fans.sdk', 'tans.sdk'],
+             SHARED_LIBRARY_LIBS=['fans.sll', 'tans.sll'],
+             SIMPLE_PROGRAMS=['fans.x', 'tans.x'],
+             SSRCS=['fans.S', 'tans.S'],
+         )
+ 
+         variables = objs[1].variables

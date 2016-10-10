@@ -1,0 +1,76 @@
+# HG changeset patch
+# Parent 704394f3f60f314d4ed5601ba74614516c640005
+# User Gregory Szorc <gps@mozilla.com>
+
+diff --git a/python/mozbuild/mozbuild/mach_commands.py b/python/mozbuild/mozbuild/mach_commands.py
+--- a/python/mozbuild/mozbuild/mach_commands.py
++++ b/python/mozbuild/mozbuild/mach_commands.py
+@@ -669,23 +669,63 @@
+                 return s.value not in IGNORE_VARIABLES[exp.s]
+ 
+             if isinstance(s, pymake.parserdata.Include):
+                 if s.to_source() in IGNORE_INCLUDES:
+                     return False
+ 
+             return True
+ 
++        for path, statements in self._parsed_makefile_ins():
++            statements = [s for s in statements if is_statement_relevant(s)]
++
++            if not statements:
++                print(os.path.relpath(path, self.topsrcdir))
++
++    @Command('empty-vpath', category='build-dev', description='Bob loblaw.')
++    def unused_vpath(self):
++        import pymake.parserdata
++        for path, statements in self._parsed_makefile_ins():
++            vpath_count = 0
++            vpath_srcdir = False
++            line = None
++
++            for statement in statements:
++                if not isinstance(statement, pymake.parserdata.SetVariable):
++                    continue
++
++                exp = statement.vnameexp
++                if not exp.is_static_string:
++                    continue
++
++                if exp.s != 'VPATH':
++                    continue
++
++                vpath_count += 1
++
++                if statement.value != '@srcdir@':
++                    continue
++
++                vpath_srcdir = True
++                line = statement.valueloc.line
++
++            if vpath_count != 1 or not vpath_srcdir:
++                continue
++
++            lines = open(path, 'rt').readlines()
++            lines = [l for i, l in enumerate(lines) if i != line - 1]
++
++            with open(path, 'wt') as fh:
++                fh.write(''.join(lines))
++
++    def _parsed_makefile_ins(self):
++        import pymake.parser
+         for path in self._makefile_ins():
+             try:
+-                statements = [s for s in pymake.parser.parsefile(path)
+-                    if is_statement_relevant(s)]
+-
+-                if not statements:
+-                    print(os.path.relpath(path, self.topsrcdir))
++                yield path, pymake.parser.parsefile(path)
+             except pymake.parser.SyntaxError:
+                 pass
+ 
+     def _makefile_ins(self):
+         for root, dirs, files in os.walk(self.topsrcdir):
+             for f in files:
+                 if f == 'Makefile.in':
+                     yield os.path.join(root, f)

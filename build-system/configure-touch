@@ -1,0 +1,48 @@
+# HG changeset patch
+# Parent 2912073936087029874748e744c7a55278dc07cf
+# User Gregory Szorc <gps@mozilla.com>
+Bug 875090 - Ensure configure has completed before building
+
+diff --git a/client.mk b/client.mk
+--- a/client.mk
++++ b/client.mk
+@@ -326,17 +326,19 @@
+ 	-cp $(FOUND_MOZCONFIG) $(OBJDIR)/.mozconfig
+ 
+ configure:: $(configure-preqs)
+ 	@echo cd $(OBJDIR);
+ 	@echo $(CONFIGURE) $(CONFIGURE_ARGS)
+ 	@cd $(OBJDIR) && $(BUILD_PROJECT_ARG) $(CONFIGURE_ENV_ARGS) $(CONFIGURE) $(CONFIGURE_ARGS) \
+ 	  || ( echo "*** Fix above errors and then restart with\
+                \"$(MAKE) -f client.mk build\"" && exit 1 )
+-	@touch $(OBJDIR)/Makefile
++	@touch $(OBJDIR)/Makefile $(OBJDIR)/configure.done
++
++$(OBJDIR)/configure.done: configure
+ 
+ ifneq (,$(MAKEFILE))
+ $(OBJDIR)/Makefile: $(OBJDIR)/config.status
+ 
+ $(OBJDIR)/config.status: $(CONFIG_STATUS_DEPS)
+ else
+ $(OBJDIR)/Makefile: $(CONFIG_STATUS_DEPS)
+ endif
+@@ -363,17 +365,17 @@
+ 	for mkfile in $(MOZ_PREFLIGHT); do \
+ 	  $(MAKE) -f $(TOPSRCDIR)/$$mkfile preflight TOPSRCDIR=$(TOPSRCDIR) OBJDIR=$(OBJDIR) MOZ_OBJDIR=$(MOZ_OBJDIR); \
+ 	done
+ endif
+ 
+ ####################################
+ # Build it
+ 
+-realbuild::  $(OBJDIR)/Makefile $(OBJDIR)/config.status check-sync-dirs-config
++realbuild:: $(OBJDIR)/configure.done $(OBJDIR)/Makefile $(OBJDIR)/config.status check-sync-dirs-config
+ 	$(MOZ_MAKE)
+ 
+ ####################################
+ # Other targets
+ 
+ # Pass these target onto the real build system
+ $(OBJDIR_TARGETS):: $(OBJDIR)/Makefile $(OBJDIR)/config.status
+ 	$(MOZ_MAKE) $@

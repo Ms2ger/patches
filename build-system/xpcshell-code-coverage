@@ -1,0 +1,787 @@
+# HG changeset patch
+# Parent 95ef3e9cdd6fb98879232e76219d7c3d4237d26b
+# User Gregory Szorc <gps@mozilla.com>
+Bug 750364 - Code coverage of xpcshell tests
+
+diff --git a/build/mbs/__init__.py b/build/mbs/__init__.py
+new file mode 100644
+diff --git a/build/mbs/coverage.py b/build/mbs/coverage.py
+new file mode 100644
+--- /dev/null
++++ b/build/mbs/coverage.py
+@@ -0,0 +1,263 @@
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this file,
++# You can obtain one at http://mozilla.org/MPL/2.0/.
++
++import re
++
++from json import loads
++from time import time
++from xml.dom.minidom import getDOMImplementation
++
++class CoverageData(object):
++    """Holds results of code coverage execution."""
++    def __init__(self):
++        self.lines = {}
++        self.code_lines = {}
++        self.stats = None
++
++    @property
++    def line_rate(self):
++        self._calculate_stats()
++        return 0
++
++    @property
++    def branch_rate(self):
++        self._calculate_stats()
++        return 0
++
++    @property
++    def lines_covered(self):
++        self._calculate_stats()
++        return 0
++
++    @property
++    def lines_valid(self):
++        self._calculate_stats()
++        return 0
++
++    @property
++    def branches_covered(self):
++        self._calculate_stats()
++        return 0
++
++    @property
++    def branches_valid(self):
++        self._calculate_stats()
++        return 0
++
++    @property
++    def complexity(self):
++        self._calculate_stats()
++        return 0
++
++    def record_line(self, path, lineno):
++        """Record coverage of a specific line."""
++        record = self.lines.setdefault(path, set())
++        record.add(lineno)
++
++        self.stats = None
++
++    def record_code_line(self, path, lineno):
++        record = self.code_lines.setdefault(path, set())
++        record.add(lineno)
++
++        self.stats = None
++
++    def file_paths(self, package=None):
++        """Returns an iterator of file paths measured."""
++        return iter(sorted(self.lines.keys()))
++
++    def packages(self):
++        """Returns an iterator of packages in this data."""
++
++        # TODO do something more constructive.
++        yield {
++            "name": "main",
++            "line_rate": 0,
++            "branch_rate": 0,
++            "complexity": 0,
++        }
++
++    def classes(self, package):
++        self._calculate_stats()
++        for filename in self.file_paths():
++            yield {
++                "name": "__file__",
++                "filename": filename,
++                "line_rate": self.stats["filename_line_rates"][filename],
++                "branch_rate": 0,
++                "complexity": 0,
++            }
++
++    def lines_for_file(self, filename):
++        self._calculate_stats()
++
++        lines = {}
++        for line in self.code_lines[filename]:
++            lines[line] = {
++                "no": line,
++                "hits": 0,
++            }
++
++        for line in self.lines[filename]:
++            lines[line] = {
++                "no": line,
++                "hits": 1,
++                "branch": False,
++                "condition_coverage": 0,
++            }
++
++
++        return [lines[k] for k in sorted(lines.keys())]
++
++    def merge(self, other):
++        """Merge another CoverageData instance into this one."""
++        assert isinstance(other, CoverageData)
++
++        self.stats = None
++        for k, v in other.lines.iteritems():
++            for line in v:
++                self.record_line(k, line)
++
++        for k, v in other.code_lines.iteritems():
++            for line in v:
++                self.record_code_line(k, line)
++
++    def _calculate_stats(self):
++        if self.stats is not None:
++            return
++
++        self.stats = {
++            "filename_line_rates": {},
++        }
++
++        for filename in self.file_paths():
++            i, j = 0, 0
++            for line in self.lines_for_file(filename):
++                j += 1
++                if line["hits"] > 0:
++                    i += 1
++
++            rate = float(i) / j
++            self.stats["filename_line_rates"][filename] = rate
++
++class CoverageReporter(object):
++    """Base class for code coverage reporters."""
++    def __init__(self, data):
++        assert isinstance(data, CoverageData)
++        self.data = data
++
++    def write(self, fh):
++        """Write the report to the specified file object."""
++        raise Exception("Method must be implemented in child class.")
++
++class XMLReporter(CoverageReporter):
++    def __init__(self, data):
++        CoverageReporter.__init__(self, data)
++
++    def write(self, fh):
++        imp = getDOMImplementation()
++        docType = imp.createDocumentType("coverage", None,
++            "http://cobertura.sourceforce.net/xml/coverage-04.dtd")
++
++        doc = imp.createDocument(None, "coverage", docType)
++        root = doc.documentElement
++        root.setAttribute("version", "1")
++        root.setAttribute("timestamp", str(int(time() * 1000)))
++
++        mapping = {
++            "line-rate": "line_rate",
++            "branch-rate": "branch_rate",
++            "lines-covered": "lines_covered",
++            "lines-valid": "lines_valid",
++            "branches-covered": "branches_covered",
++            "branches-valid": "branches_valid",
++            "complexity": "complexity"
++        }
++        for k, v in mapping.iteritems():
++            root.setAttribute(k, str(getattr(self.data, v)))
++
++        xpackages = doc.createElement("packages")
++        root.appendChild(xpackages)
++
++        for package in self.data.packages():
++            xpackage = doc.createElement("package")
++            xpackages.appendChild(xpackage)
++
++            xpackage.setAttribute("name", package["name"])
++            xpackage.setAttribute("line_rate", str(package["line_rate"]))
++            xpackage.setAttribute("branch_rate", str(package["branch_rate"]))
++            xpackage.setAttribute("complexity", str(package["complexity"]))
++
++            for cls in self.data.classes(package["name"]):
++                xclass = doc.createElement("class")
++                xpackage.appendChild(xclass)
++
++                xclass.setAttribute("name", cls["name"])
++                xclass.setAttribute("filename", cls["filename"])
++                xclass.setAttribute("line-rate", str(cls["line_rate"]))
++                xclass.setAttribute("branch-rate", str(cls["branch_rate"]))
++                xclass.setAttribute("complexity", str(cls["complexity"]))
++
++                XMLReporter._populate_class(self.data, doc, xclass, cls)
++
++        doc.writexml(fh, addindent="  ", newl="\n")
++
++    @staticmethod
++    def _populate_class(data, doc, xclass, cls):
++        xmethods = doc.createElement("methods")
++        xclass.appendChild(xmethods)
++
++        xlines = doc.createElement("lines")
++        xclass.appendChild(xlines)
++
++        for line in data.lines_for_file(cls["filename"]):
++            xline = doc.createElement("line")
++            xlines.appendChild(xline)
++
++            xline.setAttribute("number", str(line["no"]))
++            xline.setAttribute("hits", str(line["hits"]))
++
++            if hasattr(line, "branch"):
++                xline.setAttribute("branch", str(line["branch"]))
++
++            if hasattr(line, "condition_coverage"):
++                xline.setAttribute("condition-coverage",
++                    str(line["condition_coverage"]))
++
++class JSParser(object):
++    @staticmethod
++    def parse_file(fh):
++        """Parse a JavaScript coverage file into a CoverageData instance.
++
++        This takes a file handle for a JavaScript code coverage file (which
++        consists of JSON-encoded arrays on each line).
++        """
++        data = CoverageData()
++
++        for line in fh:
++            e = loads(line)
++            if e[0] == "line":
++                path = JSParser.parse_file_string(e[1])
++                data.record_line(path, e[2])
++            elif e[0] == "code_line":
++                path = JSParser.parse_file_string(e[1])
++                data.record_code_line(path, e[2])
++
++        return data
++
++    @staticmethod
++    def parse_file_string(s):
++        """Parse a file string into a path."""
++        if s[0:7] == 'file://':
++            return s[7:]
++
++        # XPCOM filenames look like "%s -> %s"
++        arrow = s.find(' -> ')
++        if arrow != -1:
++            right = s[arrow+4:]
++            return JSParser.parse_file_string(right)
++
++        return s
++
++
+diff --git a/testing/xpcshell/debugger.js b/testing/xpcshell/debugger.js
+new file mode 100644
+--- /dev/null
++++ b/testing/xpcshell/debugger.js
+@@ -0,0 +1,100 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++"use strict";
++
++const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
++
++Cu.import("resource://gre/modules/jsdebugger.jsm");
++Cu.import("resource://gre/modules/FileUtils.jsm");
++
++addDebuggerToGlobal(this);
++
++function DebuggerHelper() {
++  Debugger.prototype.constructor.call(this);
++
++  this.coverage = null;
++}
++DebuggerHelper.prototype = {
++  /**
++   * Set up code coverage on this instance.
++   */
++  captureCoverage: function captureCoverage() {
++    this.coverage = {
++      lines: {},
++      codeLines: {},
++    };
++
++    this.onEnterFrame = this._coverageOnEnterFrame;
++  },
++
++  _coverageOnEnterFrame: function _coverageOnEnterFrame(frame) {
++    let coverage = this.coverage;
++    frame.onStep = function onStep() {
++      let url = this.script.url;
++      let line = this.script.getOffsetLine(this.offset);
++
++      if (!(url in coverage.lines)) {
++        coverage.lines[line] = 0;
++      }
++
++      coverage.lines[line]++;
++    };
++  },
++
++  _coverageOnScriptLoad: function _coverageOnScriptLoad() {
++
++  },
++};
++
++let frames = [];
++
++function captureFrames(global) {
++  this.debugger = new Debugger(global);
++
++  this.debugger.onEnterFrame = onEnterFrame;
++  this.debugger.onNewScript = onNewScript;
++
++  this.debugger.enabled = true;
++}
++
++function onEnterFrame(frame) {
++  frame.onStep = function onStep() {
++    frames.push(["line", this.script.url, this.script.getOffsetLine(this.offset)]);
++  }
++}
++
++function onNewScript(script, global) {
++  captureCodeLines(script);
++}
++
++function captureCodeLines(script) {
++  let offsets = script.getAllOffsets();
++  for (let lineno in offsets) {
++    let v = offsets[lineno];
++
++    if (v) {
++      frames.push(["code_line", script.url, parseInt(lineno, 10)]);
++    }
++  }
++
++  for each (let child in script.getChildScripts()) {
++    captureCodeLines(child);
++  }
++}
++
++/**
++ * Produces a file with code coverage information.
++ */
++function writeCoverageOutput(frames, outputPath) {
++  let file = new FileUtils.File(outputPath);
++  let os = FileUtils.openFileOutputStream(file);
++
++  for each (let frame in frames) {
++    let s = JSON.stringify(frame) + "\n";
++    let written = os.write(s, s.length);
++  }
++
++  os.close();
++}
+diff --git a/testing/xpcshell/head.js b/testing/xpcshell/head.js
+--- a/testing/xpcshell/head.js
++++ b/testing/xpcshell/head.js
+@@ -58,61 +58,16 @@
+   let start = /^TEST-/.test(str) ? "\n" : "";
+   if (typeof _XPCSHELL_PROCESS == "undefined") {
+     dump(start + str);
+   } else {
+     dump(start + _XPCSHELL_PROCESS + ": " + str);
+   }
+ }
+ 
+-// Disable automatic network detection, so tests work correctly when
+-// not connected to a network.
+-let (ios = Components.classes["@mozilla.org/network/io-service;1"]
+-           .getService(Components.interfaces.nsIIOService2)) {
+-  ios.manageOfflineStatus = false;
+-  ios.offline = false;
+-}
+-
+-// Disable IPv6 lookups for 'localhost' on windows.
+-try {
+-  if ("@mozilla.org/windows-registry-key;1" in Components.classes) {
+-    let processType = Components.classes["@mozilla.org/xre/runtime;1"].
+-      getService(Components.interfaces.nsIXULRuntime).processType;
+-    if (processType == Components.interfaces.nsIXULRuntime.PROCESS_TYPE_DEFAULT) {
+-      let (prefs = Components.classes["@mozilla.org/preferences-service;1"]
+-                   .getService(Components.interfaces.nsIPrefBranch)) {
+-        prefs.setCharPref("network.dns.ipv4OnlyDomains", "localhost");
+-      }
+-    }
+-  }
+-}
+-catch (e) { }
+-
+-// Enable crash reporting, if possible
+-// We rely on the Python harness to set MOZ_CRASHREPORTER_NO_REPORT
+-// and handle checking for minidumps.
+-// Note that if we're in a child process, we don't want to init the
+-// crashreporter component.
+-try { // nsIXULRuntime is not available in some configurations.
+-  let processType = Components.classes["@mozilla.org/xre/runtime;1"].
+-    getService(Components.interfaces.nsIXULRuntime).processType;
+-  if (processType == Components.interfaces.nsIXULRuntime.PROCESS_TYPE_DEFAULT &&
+-      "@mozilla.org/toolkit/crash-reporter;1" in Components.classes) {
+-    // Remember to update </toolkit/crashreporter/test/unit/test_crashreporter.js>
+-    // too if you change this initial setting.
+-    let (crashReporter =
+-          Components.classes["@mozilla.org/toolkit/crash-reporter;1"]
+-          .getService(Components.interfaces.nsICrashReporter)) {
+-      crashReporter.enabled = true;
+-      crashReporter.minidumpPath = do_get_cwd();
+-    }
+-  }
+-}
+-catch (e) { }
+-
+ /**
+  * Date.now() is not necessarily monotonically increasing (insert sob story
+  * about times not being the right tool to use for measuring intervals of time,
+  * robarnold can tell all), so be wary of error by erring by at least
+  * _timerFuzz ms.
+  */
+ const _timerFuzz = 15;
+ 
+diff --git a/testing/xpcshell/main.js b/testing/xpcshell/main.js
+new file mode 100644
+--- /dev/null
++++ b/testing/xpcshell/main.js
+@@ -0,0 +1,87 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++/**
++ * This is the main JS entry point for the xpcshell test runner.
++ *
++ * This file is loaded with some additional global variables via the
++ * command-line arguments provided by the xpcshell Python driver. This
++ * function is then called.
++ */
++function main() {
++  // Disable automatic network detection so tests work when not
++  // connected to a network.
++  let ios = Components.classes["@mozilla.org/network/io-service;1"]
++              .getService(Components.interfaces.nsIIOService2);
++  //ios.managedOfflineStatus = false;
++  //ios.offline = false;
++
++  // Disable IPv6 lookups for 'localhost' on windows.
++  try {
++    if ("@mozilla.org/windows-registry-key;1" in Components.classes) {
++      let processType = Components.classes["@mozilla.org/xre/runtime;1"]
++                          .getService(Components.interfaces.nsIXULRuntime).processType;
++      if (processType == Components.interfaces.nsIXULRuntime.PROCESS_TYPE_DEFAULT) {
++        let prefs = Components.classes["@mozilla.org/preferences-service;1"]
++                       .getService(Components.interfaces.nsIPrefBranch);
++        prefs.setCharPref("network.dns.ipv4OnlyDomains", "localhost");
++      }
++    }
++  } catch (e) { }
++
++  // Enable crash reporting, if possible.
++  // We rely on the Python harness to set MOZ_CRASHREPORTER_NO_REPORT
++  // and handle checking for minidumps.
++  // Note that if we're in a child process, we don't want to init the
++  // crashreporter component.
++  try { // nsIXULRuntime is not available in some configurations.
++    let processType = Components.classes["@mozilla.org/xre/runtime;1"]
++                        .getService(Components.interfaces.nsIXULRuntime).processType;
++    if (processType == Components.interfaces.nsIXULRuntime.PROCESS_TYPE_DEFAULT &&
++        "@mozilla.org/toolkit/crash-reporter;1" in Components.classes) {
++      // Remember to update </toolkit/crashreporter/test/unit/test_crashreporter.js>
++      // too if you change this initial setting.
++      let crashReporter = Components.classes["@mozilla.org/toolkit/crash-reporter;1"]
++                            .getService(Components.interfaces.nsICrashReporter);
++      crashReporter.enabled = true;
++      // TODO do_get_cwd() not defined in this file.
++      crashReporter.minidumpPath = do_get_cwd();
++    }
++  } catch (e) { }
++
++  // The Debugger must exist in a separate compartment from the thing being
++  // debugged. So, we create a sandbox from which to run the Debugger.
++  let systemPrincipal = Components.classes["@mozilla.org/systemprincipal;1"]
++                          .createInstance(Components.interfaces.nsIPrincipal);
++
++  let debuggerSandbox = new Components.utils.Sandbox(systemPrincipal);
++  debuggerSandbox.importFunction(dump);
++  debuggerSandbox.importFunction(loadSubScript);
++  let debuggerFile = Components.classes["@mozilla.org/file/local;1"]
++                       .createInstance(Components.interfaces.nsILocalFile);
++  debuggerFile.initWithPath(DEBUGGER_JS_PATH);
++  let debuggerURI = ios.newFileURI(debuggerFile);
++
++  debuggerSandbox.loadSubScript(debuggerURI.asciiSpec);
++  debuggerSandbox.captureFrames(this);
++
++  load(HEAD_JS_PATH);
++  _execute_test();
++
++  if (COVERAGE_OUTPUT_PATH) {
++    debuggerSandbox.writeCoverageOutput(debuggerSandbox.frames,
++                                        COVERAGE_OUTPUT_PATH);
++  }
++}
++
++function loadSubScript(url) {
++  try {
++    let loader = Components.classes["@mozilla.org/moz/jssubscript-loader;1"]
++                   .getService(Components.interfaces.mozIJSSubScriptLoader);
++    loader.loadSubScript(url, this);
++  } catch (e) {
++    dump("Error loading: " + url + ": " + e + " - " + e.stack + "\n");
++    throw e;
++  }
++}
+diff --git a/testing/xpcshell/runxpcshelltests.py b/testing/xpcshell/runxpcshelltests.py
+--- a/testing/xpcshell/runxpcshelltests.py
++++ b/testing/xpcshell/runxpcshelltests.py
+@@ -42,16 +42,17 @@
+ import xml.dom.minidom
+ from glob import glob
+ from optparse import OptionParser
+ from subprocess import Popen, PIPE, STDOUT
+ from tempfile import mkdtemp, gettempdir
+ import manifestparser
+ import mozinfo
+ import random
++import mbs.coverage
+ 
+ from automationutils import *
+ 
+ #TODO: replace this with json.loads when Python 2.6 is required.
+ def parse_json(j):
+     """
+     Awful hack to parse a restricted subset of JSON strings into Python dicts.
+     """
+@@ -131,16 +132,19 @@
+   def setAbsPath(self):
+     """
+       Set the absolute path for xpcshell, httpdjspath and xrepath.
+       These 3 variables depend on input from the command line and we need to allow for absolute paths.
+       This function is overloaded for a remote solution as os.path* won't work remotely.
+     """
+     self.testharnessdir = os.path.dirname(os.path.abspath(__file__))
+     self.headJSPath = self.testharnessdir.replace("\\", "/") + "/head.js"
++    self.mainJSPath = self.testharnessdir.replace("\\", "/") + "/main.js"
++    self.debuggerJSPath = self.testharnessdir.replace("\\", "/") + \
++        "/debugger.js"
+     self.xpcshell = os.path.abspath(self.xpcshell)
+ 
+     # we assume that httpd.js lives in components/ relative to xpcshell
+     self.httpdJSPath = os.path.join(os.path.dirname(self.xpcshell), 'components', 'httpd.js')
+     self.httpdJSPath = replaceBackSlashes(self.httpdJSPath)
+ 
+     self.httpdManifest = os.path.join(os.path.dirname(self.xpcshell), 'components', 'httpd.manifest')
+     self.httpdManifest = replaceBackSlashes(self.httpdManifest)
+@@ -183,20 +187,20 @@
+     return self.env
+ 
+   def buildXpcsRunArgs(self):
+     """
+       Add arguments to run the test or make it interactive.
+     """
+     if self.interactive:
+       self.xpcsRunArgs = [
+-      '-e', 'print("To start the test, type |_execute_test();|.");',
++      '-e', 'print("To start the test, type |main();|.");',
+       '-i']
+     else:
+-      self.xpcsRunArgs = ['-e', '_execute_test(); quit(0);']
++      self.xpcsRunArgs = ['-e', 'main(); quit(0);']
+ 
+   def getPipes(self):
+     """
+       Determine the value of the stdout and stderr for the test.
+       Return value is a list (pStdout, pStderr).
+     """
+     if self.interactive:
+       pStdout = None
+@@ -218,38 +222,54 @@
+       Load the root head.js file as the first file in our test path, before other head, test, and tail files.
+       On a remote system, we overload this to add additional command line arguments, so this gets overloaded.
+     """
+     # - NOTE: if you rename/add any of the constants set here, update
+     #   do_load_child_test_harness() in head.js
+     if not self.appPath:
+         self.appPath = self.xrePath
+ 
+-    self.xpcsCmd = [
++    args = [
+         self.xpcshell,
+         '-g', self.xrePath,
+         '-a', self.appPath,
+         '-r', self.httpdManifest,
+         '-m',
+         '-n',
+         '-s',
+-        '-e', 'const _HTTPD_JS_PATH = "%s";' % self.httpdJSPath,
+-        '-e', 'const _HEAD_JS_PATH = "%s";' % self.headJSPath
++        '-d', # TODO DELETE BEFORE COMMIT
++        '-e', 'const HEAD_JS_PATH = "%s";' % self.headJSPath,
++        '-e', 'const DEBUGGER_JS_PATH = "%s";' % self.debuggerJSPath,
++        '-f', self.mainJSPath
+     ]
+ 
++    # HEAD_JS_PATH gets defined twice. The definition above is for main(). The
++    # definition here is for head.js. The difference is because main.js needs
++    # to access the raw value. Values passed to head.js are translated to
++    # string literals for simple usage in eval().
++    constants = {
++        '_HTTPD_JS_PATH': self.httpdJSPath,
++        '_HEAD_JS_PATH': self.headJSPath,
++        '_MAIN_JS_PATH': self.mainJSPath
++    }
++
++    if self.coveragePath is not None:
++        args.extend(['-e', 'const COVERAGE_OUTPUT_PATH = "%s";' %
++            self.coveragePath])
++
+     if self.testingModulesDir is not None:
+-        self.xpcsCmd.extend([
+-            '-e',
+-            'const _TESTING_MODULES_DIR = "%s";' % self.testingModulesDir
+-        ])
++        constants['_TESTING_MODULES_DIR'] = self.testingModulesDir
+ 
+-    self.xpcsCmd.extend(['-f', os.path.join(self.testharnessdir, 'head.js')])
++    for k, v in constants.iteritems():
++        args.extend(['-e', 'const %s = "%s";' % (k, v)])
+ 
+     if self.debuggerInfo:
+-      self.xpcsCmd = [self.debuggerInfo["path"]] + self.debuggerInfo["args"] + self.xpcsCmd
++        args = [self.debuggerInfo["path"]] + self.debuggerInfo["args"] + args
++
++    self.xpcsCmd = args
+ 
+   def buildTestPath(self):
+     """
+       If we specifiy a testpath, set the self.testPath variable to be the given directory or file.
+ 
+       |testPath| will be the optional path only, or |None|.
+       |singleFile| will be the optional test only, or |None|.
+     """
+@@ -392,28 +412,31 @@
+       along with the address of the webserver which some tests require.
+ 
+       On a remote system, this is overloaded to resolve quoting issues over a secondary command line.
+     """
+     cmdH = ", ".join(['"' + replaceBackSlashes(f) + '"'
+                    for f in headfiles])
+     cmdT = ", ".join(['"' + replaceBackSlashes(f) + '"'
+                    for f in tailfiles])
+-    return xpcscmd + \
+-            ['-e', 'const _SERVER_ADDR = "localhost"',
+-             '-e', 'const _HEAD_FILES = [%s];' % cmdH,
+-             '-e', 'const _TAIL_FILES = [%s];' % cmdT]
++
++    args = [
++        '-e', 'const _SERVER_ADDR = "localhost";',
++        '-e', 'const _HEAD_FILES = [%s];' % cmdH,
++        '-e', 'const _TAIL_FILES = [%s];' % cmdT
++    ]
++
++    return xpcscmd + args
+ 
+   def buildCmdTestFile(self, name):
+     """
+       Build the command line arguments for the test file.
+       On a remote system, this may be overloaded to use a remote path structure.
+     """
+-    return ['-e', 'const _TEST_FILE = ["%s"];' %
+-              replaceBackSlashes(name)]
++    return ['-e', 'const _TEST_FILE = ["%s"];' % replaceBackSlashes(name)]
+ 
+   def trySetupNode(self):
+     """
+       Run node for SPDY tests, if available, and updates mozinfo as appropriate.
+     """
+     nodeMozInfo = {'hasNode': False} # Assume the worst
+     nodeBin = None
+ 
+@@ -638,16 +661,19 @@
+     self.logfiles = logfiles
+     self.totalChunks = totalChunks
+     self.thisChunk = thisChunk
+     self.debuggerInfo = getDebuggerInfo(self.oldcwd, debugger, debuggerArgs, debuggerInteractive)
+     self.profileName = profileName or "xpcshell"
+     self.mozInfo = mozInfo
+     self.testingModulesDir = testingModulesDir
+ 
++    # TODO make conditional
++    self.coveragePath = '/Users/gps/tmp/coverage.json'
++
+     # If we have an interactive debugger, disable ctrl-c.
+     if self.debuggerInfo and self.debuggerInfo["interactive"]:
+         signal.signal(signal.SIGINT, lambda signum, frame: None)
+ 
+     if not testdirs and not manifest:
+       # nothing to test!
+       self.log.error("Error: No test dirs or test manifest specified!")
+       return False
+@@ -677,16 +703,17 @@
+     pStdout, pStderr = self.getPipes()
+ 
+     self.buildTestList()
+ 
+     if shuffle:
+       random.shuffle(self.alltests)
+ 
+     xunitResults = []
++    coverageData = mbs.coverage.CoverageData()
+ 
+     for test in self.alltests:
+       name = test['path']
+       if self.singleFile and not name.endswith(self.singleFile):
+         continue
+ 
+       if self.testPath and name.find(self.testPath) == -1:
+         continue
+@@ -822,16 +849,23 @@
+ 
+         if self.logfiles and stdout:
+           self.createLogFile(name, stdout, leakLogs)
+       finally:
+         # We don't want to delete the profile when running check-interactive
+         # or check-one.
+         if self.profileDir and not self.interactive and not self.singleFile:
+           self.removeDir(self.profileDir)
++
++      if self.coveragePath is not None and os.path.exists(self.coveragePath):
++          fh = open(self.coveragePath, "r")
++          data = mbs.coverage.JSParser.parse_file(fh)
++          coverageData.merge(data)
++          os.unlink(self.coveragePath)
++
+       if gotSIGINT:
+         xunitResult["passed"] = False
+         xunitResult["time"] = "0.0"
+         xunitResult["failure"] = {
+           "type": "SIGINT",
+           "message": "Received SIGINT",
+           "text": "Received SIGINT (control-C) during test execution."
+         }
+@@ -855,16 +889,21 @@
+ INFO | Passed: %d
+ INFO | Failed: %d
+ INFO | Todo: %d""" % (self.passCount, self.failCount, self.todoCount))
+ 
+     if xunitFilename is not None:
+         self.writeXunitResults(filename=xunitFilename, results=xunitResults,
+                                name=xunitName)
+ 
++    coverageReporter = mbs.coverage.XMLReporter(coverageData)
++    fh = open("/Users/gps/tmp/coverage.xml", "wb")
++    coverageReporter.write(fh)
++    fh.close()
++
+     if gotSIGINT and not keepGoing:
+       self.log.error("TEST-UNEXPECTED-FAIL | Received SIGINT (control-C), so stopped run. " \
+                      "(Use --keep-going to keep running tests after killing one with SIGINT)")
+       return False
+ 
+     return self.failCount == 0
+ 
+ class XPCShellOptions(OptionParser):

@@ -1,0 +1,39 @@
+# HG changeset patch
+# Parent b0d84238095938e638497cd1b02bc7005f1abdfb
+# User Gregory Szorc <gps@mozilla.com>
+Bug 859437 - Handle negative total session times
+
+diff --git a/services/datareporting/tests/xpcshell/test_session_recorder.js b/services/datareporting/tests/xpcshell/test_session_recorder.js
+--- a/services/datareporting/tests/xpcshell/test_session_recorder.js
++++ b/services/datareporting/tests/xpcshell/test_session_recorder.js
+@@ -299,8 +299,30 @@
+   do_check_eq(recorder.activeTicks, 4);
+ 
+   Services.obs.notifyObservers(null, "user-interaction-active", null);
+   do_check_eq(recorder.activeTicks, 5);
+ 
+   recorder.onShutdown();
+ });
+ 
++add_test(function test_negative_total_time() {
++  let tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
++  let recorder = getRecorder("negative_total_time");
++
++  recorder._startDate = tomorrow;
++  recorder.updateTotalTime();
++
++  recorder._moveCurrentToPrevious();
++
++  let sessions = recorder.getPreviousSessions();
++  do_check_eq(Object.keys(sessions).length, 1);
++
++  let session = recorder.getPreviousSession(0);
++
++  for (let key in session) {
++    print(key + "\t" + session[key]);
++  }
++
++  do_check_eq(typeof session.totalTime, 'number');
++
++  run_next_test();
++});

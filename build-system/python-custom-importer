@@ -1,0 +1,153 @@
+# HG changeset patch
+# Parent 9a105554b77a632b3e532d134ce01bf5f4bf30be
+# User Gregory Szorc <gps@mozilla.com>
+Bug 795995 - Part 1: Implement custom Python importer
+
+diff --git a/mach b/mach
+--- a/mach
++++ b/mach
+@@ -12,16 +12,28 @@
+ # Ensure we are running Python 2.7+. We put this check here so we generate a
+ # user-friendly error message rather than a cryptic stack trace on module
+ # import.
+ if sys.version_info[0] == 2 and sys.version_info[1] < 7:
+     print('Python 2.7 or above is required to run mach.')
+     print('You are running', platform.python_version())
+     sys.exit(1)
+ 
++our_dir = os.path.dirname(os.path.abspath(__file__))
++
++try:
++    from misc.importer import AlternateDirectoryBytecodeImporter
++except ImportError:
++    sys.path.insert(0, os.path.join(our_dir, 'python'))
++    from misc.importer import AlternateDirectoryBytecodeImporter
++    sys.path.pop(0)
++
++importer = AlternateDirectoryBytecodeImporter('/tmp')
++sys.meta_path = [importer]
++
+ # TODO Bug 794506 Integrate with the in-tree virtualenv configuration.
+ SEARCH_PATHS = [
+     'python/mach',
+     'python/mozbuild',
+     'build',
+     'build/pymake',
+     'python/blessings',
+     'python/psutil',
+@@ -36,18 +48,16 @@
+ 
+ # Individual files providing mach commands.
+ MACH_MODULES = [
+     'layout/tools/reftest/mach_commands.py',
+     'testing/mochitest/mach_commands.py',
+     'testing/xpcshell/mach_commands.py',
+ ]
+ 
+-our_dir = os.path.dirname(os.path.abspath(__file__))
+-
+ try:
+     import mach.main
+ except ImportError:
+     sys.path[0:0] = [os.path.join(our_dir, path) for path in SEARCH_PATHS]
+ 
+     import mach.main
+ 
+ # All of the code is in a module because EVERYTHING IS A LIBRARY.
+diff --git a/python/misc/__init__.py b/python/misc/__init__.py
+new file mode 100644
+diff --git a/python/misc/importer.py b/python/misc/importer.py
+new file mode 100644
+--- /dev/null
++++ b/python/misc/importer.py
+@@ -0,0 +1,90 @@
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++import imp
++import os
++import sys
++
++import pdb; pdb.set_trace()
++
++class AlternateDirectoryBytecodeImporter(object):
++    def __init__(self, bytecode_path):
++        self._bytecode_path = bytecode_path
++
++        self._load_file = None
++
++    def find_module(self, fullname, path=None):
++        is_package = path is None
++
++        print '%s; %s' % (fullname, path)
++
++        if imp.is_builtin(fullname) or imp.is_frozen(fullname):
++            return self
++
++        parts = fullname.split('.')
++
++        if not is_package:
++            mod_py = os.path.join(path[0], parts[-1]) + '.py'
++
++            if os.path.isfile(mod_py):
++                self._load_file = mod_py
++                return self
++
++            return None
++
++        for search_path in sys.path:
++            search_dir = os.path.join(search_path, *parts)
++
++            if os.path.isdir(search_dir):
++                init_py = os.path.join(search_dir, '__init__.py')
++
++                if os.path.isfile(init_py):
++                    self._load_file = init_py
++                    return self
++
++                continue
++
++            mod_py = search_dir + '.py'
++
++            if os.path.isfile(mod_py):
++                self._load_file = mod_py
++                return self
++
++        #print '%s; %s' % (fullname, path)
++
++        return None
++
++    def load_module(self, fullname):
++        try:
++            return sys.modules[fullname]
++        except KeyError:
++            pass
++
++        if imp.is_builtin(fullname):
++            return imp.init_builtin(fullname)
++
++        if imp.is_frozen(fullname):
++            return imp.init_frozen(fullname)
++
++        #print 'loading %s: %s' % (fullname, self._load_file)
++
++        with open(self._load_file, 'rt') as fh:
++            source = fh.read()
++
++        mod = sys.modules.setdefault(fullname, imp.new_module(fullname))
++        mod.__file__ = '<%s>' % self._load_file
++        mod.__load__ = self
++
++        if self.is_package(fullname):
++            mod.__package__ = fullname
++            #mod.__path__ = [os.path.dirname(self._load_file)]
++        else:
++            mod.__package__ = fullname.rpartition('.')[0]
++
++        exec(source, mod.__dict__)
++
++        return mod
++
++    def is_package(self, fullname):
++        return '.' not in fullname

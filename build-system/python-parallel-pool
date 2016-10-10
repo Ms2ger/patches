@@ -1,0 +1,509 @@
+# HG changeset patch
+# Parent a3dad9390a3098bf7c646c5197a303b3b993ce38
+# User Gregory Szorc <gps@mozilla.com>
+Bug 819048 - Add parallel worker pool class that actually works
+
+diff --git a/python/processpool/processpool/__init__.py b/python/processpool/processpool/__init__.py
+new file mode 100644
+--- /dev/null
++++ b/python/processpool/processpool/__init__.py
+@@ -0,0 +1,316 @@
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++from __future__ import unicode_literals
++
++import multiprocessing
++import pickle
++import select
++import sys
++import time
++
++
++class ProcessPoolError(Exception):
++    """An Exception from inside the processpool module."""
++
++
++class Task(object):
++    """Represents an executable unit in a ProcessPool.
++
++    This is meant to be an abstract base class. Use one of the child classes
++    instead.
++    """
++
++    def __init__(self):
++        self._worker = None
++
++    def run(self):
++        raise ProcessPoolError('Task must implement run().')
++
++    def send_progress(self, data):
++        """Send execution progress to results aggregator."""
++
++    def receive_progress(self, data):
++        pass
++
++    def attach(self, worker):
++        """Attach this task to a worker.
++
++        This is called automatically as part of executing the task. This is not
++        meant to be called by implementations.
++        """
++        self._worker = worker
++
++    def detach(self):
++        self._worker = None
++
++
++class ProcessTask(Task):
++    """A task that exexcutes a new process."""
++
++    def __init__(self, args, cwd=None, env=None):
++        Task.__init__(self)
++
++        self._args = args
++        self._cwd = cwd
++        self._env = env
++
++    def run(self):
++        print('Executing %s' % self._args)
++
++
++def receive_object(pipe, block=True):
++    """Receive an object from a pipe.
++
++    This is our universal object interchange function. We establish our own
++    IPC framing to prevent deadlock from large objects exceeding buffer
++    capacity.
++    """
++    if not block and not pipe.poll():
++        return False, None
++
++    # First grab the total wire size of the object to follow.
++    size_bytes = ''
++    while len(size_bytes) < 4:
++        size_bytes += pipe.read_bytes(4 - len(size_bytes))
++
++    size = struct.unpack('I', size_bytes)
++
++    obj = ''
++    while len(obj) < size:
++        obj += pipe.read_bytes(min(size - len(obj), 8192))
++
++    return True, pickle.loads(obj)
++
++
++def send_object(pipe, obj):
++    obj_bytes = pickle.dumps(obj)
++    size_bytes = struct.pack('I', len(obj_bytes))
++
++    pipe.send_bytes(size_bytes)
++
++    offset = 0
++    while offset < len(obj_bytes):
++        pipe.send_bytes(obj_bytes[offset:offset + 8192])
++        offset += 8192
++
++
++class Worker(object):
++    """Represents a process that runs tasks."""
++
++    def __init__(self, pipe):
++        self._pipe = pipe
++
++    def send(self, obj):
++        send_object(self._pipe, obj)
++
++    def recv(self):
++        return receive_object(self._pipe)
++
++    def run(self):
++        self.send(('ready',))
++
++        while True:
++            if not self._pipe.poll(1):
++                continue
++
++            have, data = receive_object(self._pipe)
++            if not have:
++                continue
++
++            assert isinstance(data, tuple)
++
++            if data[0] == 'shutdown':
++                break
++
++
++def run_worker(pipe):
++    worker = Worker(pipe)
++    worker.run()
++
++
++def pool_worker(pipe):
++    """Main function for processes in a ProcessPool."""
++    try:
++        # The first thing we do is signal the parent that we are ready to
++        # receive a job.
++        pipe.send('ready')
++
++        while True:
++            if not pipe.poll(1):
++                continue
++
++            data = pipe.recv()
++
++            if data == 'shutdown':
++                break
++
++            assert data[0] == 'job'
++            job_id, fn, args, kwargs = data[1:]
++
++            try:
++                result = fn(*args, **kwargs)
++
++                pipe.send(('job_result', job_id, result))
++            except KeyboardInterrupt:
++                raise
++            except Exception as e:
++                pipe.send(('job_error', job_id, e))
++            finally:
++                pipe.send('ready')
++
++    except KeyboardInterrupt:
++        pipe.close()
++        return 1
++    except Exception as e:
++        print(e)
++    finally:
++        pipe.close()
++
++
++
++class ProcessPool(object):
++    def __init__(self, workers='auto'):
++        if workers == 'auto':
++            self._size = multiprocessing.cpu_count()
++        else:
++            assert isinstance(workers, (int, long))
++            self._size = workers
++
++        self._pending_invocations = []
++        self._in_progress_invocations = {}
++        self._started = False
++
++        self._children = []
++        self._job_counter = 0
++
++    def __del__(self):
++        for proc, pipe, ready in self._children:
++            pipe.close()
++
++            if proc.is_alive():
++                proc.terminate()
++
++    def start(self):
++        """Start the process pool.
++
++        Worker processes will be started. Any queued tasks will start execution
++        immediately.
++        """
++        if self._started:
++            raise ProcessPoolError('ProcessPool already started.')
++
++        self._started = True
++
++        for i in range(0, self._size):
++            parent, child = multiprocessing.Pipe(duplex=True)
++
++            proc = multiprocessing.Process(target=pool_worker, args=(child,))
++            proc.start()
++
++            ready = parent.recv()
++            assert ready == 'ready'
++
++            self._children.append([proc, parent, True])
++
++    def stop(self):
++        """Stop the process pool gracefully."""
++        for proc, pipe, ready in self._children:
++            if proc.is_alive():
++                pipe.send('shutdown')
++
++                proc.join(5)
++
++                if proc.is_alive():
++                    proc.terminate()
++
++            pipe.close()
++
++        self._children = []
++
++    def pump(self):
++        """Perform pending work.
++
++        This should be called periodically to send work to children and to
++        process results from children.
++        """
++
++        # First do a pass and look for updates from children.
++        for child in self._children:
++            if not child[1].poll(0):
++                continue
++
++            try:
++                data = child[1].recv()
++            except EOFError:
++                child[0].join()
++                continue
++
++            if data == 'ready':
++                child[2] = True
++                continue
++
++            assert isinstance(data, tuple)
++
++            if data[0] in ('job_error', 'job_result'):
++                job_id, result = data[1:]
++                assert job_id in self._in_progress_invocations
++
++                callback = self._in_progress_invocations[job_id]
++
++                try:
++                    callback(result, data[0] == 'job_error')
++                except Exception:
++                    pass
++
++                del self._in_progress_invocations[job_id]
++
++            else:
++                raise Exception('Unhandled action from child: %s' % data[0])
++
++        # Send work to ready children.
++        for proc, pipe, ready in self._children:
++            if not ready:
++                continue
++
++            if not len(self._pending_invocations):
++                break
++
++            func, callback, args, kwargs = self._pending_invocations.pop(0)
++            job_id = self._job_counter
++            self._job_counter += 1
++
++            pipe.send(('job', job_id, func, args, kwargs))
++            self._in_progress_invocations[job_id] = callback
++
++        return len(self._pending_invocations) or len(self._in_progress_invocations)
++
++    def pump_all(self):
++        """Run pump() until all work has finished."""
++
++        fds = [pipe.fileno() for proc, pipe, ready in self._children]
++
++        while True:
++            if not self.pump():
++                return
++
++            # Windows doesn't support select() on pipes.
++            # TODO support select() equivalent on Windows.
++            if sys.platform == 'win32':
++                time.sleep(0.050)
++            else:
++                select.select(fds, [], [], 1)
++
++    def add_task(self, task):
++        """Add a task to be executed in the pool."""
++
++        assert isinstance(task, Task)
++
++        if not len(task._invocations):
++            raise ProcessPoolError('Task does not have any invocations.')
++
++        for callback, args, kwargs in task._invocations:
++            self._pending_invocations.append((task._func, callback, args,
++                kwargs))
++
+diff --git a/python/processpool/processpool/test/test_processpool.py b/python/processpool/processpool/test/test_processpool.py
+new file mode 100644
+--- /dev/null
++++ b/python/processpool/processpool/test/test_processpool.py
+@@ -0,0 +1,178 @@
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++import time
++import multiprocessing
++import unittest
++
++from processpool import (
++    ProcessPoolError,
++    ProcessPool,
++    Task,
++)
++
++
++#multiprocessing.util.log_to_stderr()
++
++
++def dummy_function(arg):
++    return arg
++
++def dummy_throw(message):
++    raise Exception(message)
++
++
++class TestTask(unittest.TestCase):
++    def test_init(self):
++        task = Task(dummy_function)
++
++    def test_reject_method(self):
++        with self.assertRaises(ProcessPoolError) as e:
++            Task(self.test_reject_method)
++
++        self.assertTrue(e.exception.message.startswith('Bound methods cannot'))
++
++    def test_add_invocation(self):
++        task = Task(dummy_function)
++
++        def on_result(result, is_exception):
++            pass
++
++        task.add_invocation(on_result, 5)
++        task.add_invocation(on_result, 6)
++
++
++class TestProcessPool(unittest.TestCase):
++    def test_empty(self):
++        pool = ProcessPool()
++        del pool
++
++    def test_empty_start_stop(self):
++        pool = ProcessPool()
++        pool.start()
++
++        self.assertEqual(len(pool._children), multiprocessing.cpu_count())
++        for proc, pipe, ready in pool._children:
++            self.assertTrue(proc.is_alive())
++            self.assertTrue(ready)
++
++        pool.stop()
++        del pool
++
++    def test_multiple_start(self):
++        pool = ProcessPool()
++        pool.start()
++
++        with self.assertRaises(ProcessPoolError) as e:
++            pool.start()
++
++        self.assertTrue(e.exception.message.startswith(
++            'ProcessPool already started'))
++
++        pool.stop()
++
++    def test_empty_pump(self):
++        pool = ProcessPool()
++        pool.start()
++        pool.pump()
++        pool.pump()
++        pool.stop()
++
++    def test_empty_pump_all(self):
++        pool = ProcessPool()
++        pool.start()
++        pool.pump_all()
++        pool.stop()
++
++    def test_add_empty_task(self):
++        pool = ProcessPool()
++        task = Task(dummy_function)
++
++        with self.assertRaises(ProcessPoolError) as e:
++            pool.add_task(task)
++
++        self.assertTrue(e.exception.message.startswith(
++            'Task does not have any'))
++
++    def test_run_single_invocation(self):
++        pool = ProcessPool()
++        task = Task(dummy_function)
++
++        counter = [0]
++
++        def on_result(result, is_exception):
++            counter[0] += 1
++
++            self.assertEqual(result, 1)
++            self.assertFalse(is_exception)
++
++        task.add_invocation(on_result, 1)
++        pool.add_task(task)
++
++        pool.start()
++        pool.pump_all()
++        self.assertEqual(counter[0], 1)
++        pool.stop()
++
++    def test_many_invocations(self):
++        task = Task(dummy_function)
++
++        counter = [0]
++
++        for i in range(0, 1000):
++            def on_result(result, is_exception):
++                counter[0] += 1
++                self.assertEqual(result, i)
++                self.assertFalse(is_exception)
++
++            task.add_invocation(on_result, i)
++
++        pool = ProcessPool()
++        pool.add_task(task)
++        pool.start()
++        pool.pump_all()
++        pool.stop()
++
++        self.assertEqual(counter[0], 1000)
++
++    def test_invocation_error(self):
++        task = Task(dummy_throw)
++
++        counter = [0]
++
++        for i in range(0, 100):
++            def on_result(result, is_exception):
++                counter[0] += 1
++                self.assertTrue(is_exception)
++                self.assertTrue(result.message.startswith(i))
++
++            task.add_invocation(on_result, i)
++
++        pool = ProcessPool()
++        pool.add_task(task)
++        pool.start()
++        pool.pump_all()
++        pool.stop()
++
++        self.assertEqual(counter[0], 100)
++
++    def test_large_results(self):
++        task = Task(dummy_function)
++
++        def on_result(result, is_exception):
++            pass
++
++        for i in range(0, 100):
++            task.add_invocation(on_result, 'x' * 8000000)
++
++        pool = ProcessPool()
++        pool.add_task(task)
++        pool.start()
++        pool.pump_all()
++        pool.stop()
++
++
++if __name__ == '__main__':
++    unittest.main()
++

@@ -1,0 +1,83 @@
+# HG changeset patch
+# Parent 1e11b4f64e01ded97318555b3bf37177866a3405
+# User Gregory Szorc <gps@mozilla.com>
+Bug 701393 - Add suffix stripping to generic preprocessor rule; r=glandium
+
+diff --git a/config/rules.mk b/config/rules.mk
+--- a/config/rules.mk
++++ b/config/rules.mk
+@@ -1562,29 +1562,31 @@
+ #
+ # The PP_TARGETS variable contains a list of all preprocessing target
+ # categories. Each category defines a target path, and optional extra flags
+ # like the following:
+ #
+ # FOO_PATH := target_path
+ # FOO_FLAGS := -Dsome_flag
+ # PP_TARGETS += FOO
++#
++# By default, a .in suffix is dropped from the output file name.
+ 
+ # preprocess_file_template defines preprocessing rules.
+ # $(call preprocess_file_template, source_file, target_path, extra_flags)
+ define preprocess_file_template
+-$(2)/$(notdir $(1)): $(1) $$(call mkdir_deps,$(2)) $$(GLOBAL_DEPS)
++$(3)/$(notdir $(2)): $(1) $$(call mkdir_deps,$(3)) $$(GLOBAL_DEPS)
+ 	$$(RM) $$@
+-	$$(PYTHON) $$(topsrcdir)/config/Preprocessor.py $(3) $$(DEFINES) $$(ACDEFINES) $$(XULPPFLAGS) $$< > $$@
+-libs:: $(2)/$(notdir $(1))
++	$$(PYTHON) $$(topsrcdir)/config/Preprocessor.py $(4) $$(DEFINES) $$(ACDEFINES) $$(XULPPFLAGS) $$< > $$@
++libs:: $(3)/$(notdir $(2))
+ endef
+ 
+ $(foreach category,$(PP_TARGETS),\
+   $(foreach file,$($(category)),\
+-    $(eval $(call preprocess_file_template,$(file),$($(category)_PATH),$($(category)_FLAGS)))\
++    $(eval $(call preprocess_file_template,$(file),(file:.in=),$($(category)_PATH),$($(category)_FLAGS)))\
+    )\
+  )
+ 
+ ################################################################################
+ # Special gmake rules.
+ ################################################################################
+ 
+ 
+diff --git a/js/src/config/rules.mk b/js/src/config/rules.mk
+--- a/js/src/config/rules.mk
++++ b/js/src/config/rules.mk
+@@ -1562,29 +1562,31 @@
+ #
+ # The PP_TARGETS variable contains a list of all preprocessing target
+ # categories. Each category defines a target path, and optional extra flags
+ # like the following:
+ #
+ # FOO_PATH := target_path
+ # FOO_FLAGS := -Dsome_flag
+ # PP_TARGETS += FOO
++#
++# By default, a .in suffix is dropped from the output file name.
+ 
+ # preprocess_file_template defines preprocessing rules.
+ # $(call preprocess_file_template, source_file, target_path, extra_flags)
+ define preprocess_file_template
+-$(2)/$(notdir $(1)): $(1) $$(call mkdir_deps,$(2)) $$(GLOBAL_DEPS)
++$(3)/$(notdir $(2)): $(1) $$(call mkdir_deps,$(3)) $$(GLOBAL_DEPS)
+ 	$$(RM) $$@
+-	$$(PYTHON) $$(topsrcdir)/config/Preprocessor.py $(3) $$(DEFINES) $$(ACDEFINES) $$(XULPPFLAGS) $$< > $$@
+-libs:: $(2)/$(notdir $(1))
++	$$(PYTHON) $$(topsrcdir)/config/Preprocessor.py $(4) $$(DEFINES) $$(ACDEFINES) $$(XULPPFLAGS) $$< > $$@
++libs:: $(3)/$(notdir $(2))
+ endef
+ 
+ $(foreach category,$(PP_TARGETS),\
+   $(foreach file,$($(category)),\
+-    $(eval $(call preprocess_file_template,$(file),$($(category)_PATH),$($(category)_FLAGS)))\
++    $(eval $(call preprocess_file_template,$(file),(file:.in=),$($(category)_PATH),$($(category)_FLAGS)))\
+    )\
+  )
+ 
+ ################################################################################
+ # Special gmake rules.
+ ################################################################################
+ 
+ 

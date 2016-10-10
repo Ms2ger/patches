@@ -1,0 +1,1728 @@
+# HG changeset patch
+# Parent 2ed3273ddaaa0d69f41d3ad4f50c9af4026f0410
+# User Gregory Szorc <gps@mozilla.com>
+Bug XXXXXX - Split Sync config and state into separate types
+
+This is preliminary work to support the async rewrite and the
+deprecation of service.js.
+
+diff --git a/services/sync/Makefile.in b/services/sync/Makefile.in
+--- a/services/sync/Makefile.in
++++ b/services/sync/Makefile.in
+@@ -22,16 +22,17 @@
+  -Dweave_id=$(weave_id)
+ SYNC_PP_PATH = $(FINAL_TARGET)/modules/services-sync
+ PP_TARGETS += SYNC_PP
+ 
+ # The set of core JavaScript modules for Sync. These are copied as-is.
+ sync_modules := \
+   addonsreconciler.js \
+   addonutils.js \
++  config.js \
+   engines.js \
+   identity.js \
+   jpakeclient.js \
+   keys.js \
+   main.js \
+   notifications.js \
+   policies.js \
+   record.js \
+diff --git a/services/sync/modules/config.js b/services/sync/modules/config.js
+new file mode 100644
+--- /dev/null
++++ b/services/sync/modules/config.js
+@@ -0,0 +1,176 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++"use strict";
++
++const EXPORTED_SYMBOLS = ["GlobalSettings", "GlobalState"];
++
++const {utils: Cu} = Components;
++
++Cu.import("resource://services-common/log4moz.js");
++Cu.import("resource://services-common/preferences.js");
++Cu.import("resource://services-sync/constants.js");
++Cu.import("resource://services-sync/util.js");
++
++/**
++ * Container for global Sync configuration settings.
++ *
++ * Settings are things that are typically under the control of users.
++ * They are exposed as options through the Sync set-up screen, etc. This
++ * is in contrast to `GlobalState`, which holds data that typically
++ * isn't user-facing and is more relevant to Sync's internals.
++ *
++ * As it is, this is a proxy to preferences rather than a generic container.
++ * This was done to facilitate moving functionality out of service.js. In the
++ * future, it should change into a true generic container. That will
++ * facilitate easier testing, multiple instances, etc.
++ *
++ * @param branch
++ *        (string) Preferences branch to read values from.
++ * @param identity
++ *        (IdentityManager) Holds account and credentials information.
++ */
++function GlobalSettings(branch, identity) {
++  this._prefs = new Preferences(branch);
++  this._identity = identity;
++
++  // Proxy properties to identity instance.
++  for (let prop of ["account", "username", "basicPassword", "syncKey"]) {
++    let descriptor = Object.getOwnPropertyDescriptor(identity.__proto__, prop);
++    Object.defineProperty(this, prop, {
++      get: descriptor.get,
++      set: descriptor.set,
++    });
++  }
++
++  this._log = Log4Moz.repository.getLogger("Sync.GlobalSettings");
++  this._log.level =
++    Log4Moz.Level[this._prefs.get("log.logger.config", "Debug")];
++}
++GlobalSettings.prototype = {
++  get serverURI() {
++    return this._prefs.get("serverURL");
++  },
++
++  set serverURI(value) {
++    if (value == this.serverURL) {
++      return;
++    }
++
++    this._prefs.set("serverURL", value);
++    this._prefs.reset("clusterURL");
++  },
++
++  /**
++   * The URI at which the user service is accessed.
++   *
++   * This is the base URI and doesn't include the user fragment.
++   */
++  get userURI() {
++    let uri = this._prefs.get("userURL");
++    if (!uri.contains(":")) {
++      uri = this.serverURI + uri;
++    }
++
++    return uri + USER_API_VERSION + "/";
++  },
++
++  get termsURI() {
++    return this._prefs.get("termsURL");
++  },
++
++  get passwordResetURI() {
++    return this.serverURI + "weave-password-reset";
++  },
++
++  get captchaURI() {
++    let misc = this._prefs.get("miscURL");
++    if (misc.indexOf(":") == -1) {
++      misc = this.serverURI + misc;
++    }
++
++    return misc + MISC_API_VERSION + "/captcha_html";
++  },
++
++  get identity() {
++    return this._identity;
++  },
++};
++Object.freeze(GlobalSettings.prototype);
++
++/**
++ * Container for global Sync state.
++ *
++ * This is very similar to GlobalSettings. The difference is this container is
++ * for data that is for Sync's internal state. Users should typically never
++ * need to care about the values in this container.
++ */
++function GlobalState(globalSettings) {
++  this._log = Log4Moz.repository.getLogger("Sync.GlobalState");
++  this._log.level = globalSettings._log.level;
++
++  this._settings = globalSettings;
++  this._prefs = globalSettings._prefs;
++
++  this.loggedIn = null;
++
++  this._updateCachedValues();
++}
++GlobalState.prototype = {
++  /**
++   * The URL of the storage node where data requests go.
++   *
++   * This is in GlobalState because the node is often computed by querying the
++   * user service API.
++   */
++  get storageNodeURI() {
++    return this._prefs.get("clusterURL", "");
++  },
++
++  set storageNodeURI(value) {
++    this._log.info("Setting storage node URL: " + value);
++    if (!value) {
++      value = "";
++    }
++
++    this._prefs.set("clusterURL", value);
++    this._updateCachedValues();
++  },
++
++  get syncID() {
++    // Generate a random syncID if we don't have one.
++    let id = this._prefs.get("client.syncID", null);
++
++    return id ? id : this.syncID = Utils.makeGUID();
++  },
++
++  set syncID(value) {
++    if (!value) {
++      value = "";
++    }
++
++    this._prefs.set("client.syncID", value);
++  },
++
++  _updateCachedValues: function _updateCachedValues() {
++    this.userStorageBaseURI = null;
++    this.infoCollectionsURI = null;
++    this.collectionsStorageURI = null;
++    this.metaglobalURI = null;
++    this.cryptoKeysURI = null;
++
++    if (!this.storageNodeURI || !this._settings.identity.username) {
++      return;
++    }
++
++    let storageURI = this.storageNodeURI + SYNC_API_VERSION + "/";
++
++    this.userStorageBaseURI = storageURI + this._settings.username + "/";
++    this.infoCollectionsURI = this.userStorageBaseURI + "info/collections";
++    this.collectionsStorageURI = this.userStorageBaseURI + "storage/";
++    this.metaglobalURI = this.collectionsStorageURI + "meta/global";
++    this.cryptoKeysURI = this.collectionsStorageURI + "crypto/keys";
++  },
++};
++Object.freeze(GlobalState.prototype);
+diff --git a/services/sync/modules/engines.js b/services/sync/modules/engines.js
+--- a/services/sync/modules/engines.js
++++ b/services/sync/modules/engines.js
+@@ -556,24 +556,27 @@
+   // How many records to pull at one time when specifying IDs. This is to avoid
+   // URI length limitations.
+   guidFetchBatchSize: DEFAULT_GUID_FETCH_BATCH_SIZE,
+   mobileGUIDFetchBatchSize: DEFAULT_MOBILE_GUID_FETCH_BATCH_SIZE,
+   
+   // How many records to process in a single batch.
+   applyIncomingBatchSize: DEFAULT_STORE_BATCH_SIZE,
+ 
+-  get storageURL() Svc.Prefs.get("clusterURL") + SYNC_API_VERSION +
+-    "/" + Identity.username + "/storage/",
++  get engineURL() {
++    return this.service.state.collectionsStorageURI + this.name;
++  },
+ 
+-  get engineURL() this.storageURL + this.name,
++  get cryptoKeysURL() {
++    return this.service.state.cryptoKeysURI;
++  },
+ 
+-  get cryptoKeysURL() this.storageURL + "crypto/keys",
+-
+-  get metaURL() this.storageURL + "meta/global",
++  get metaURL() {
++    return this.service.state.metaglobalURI;
++  },
+ 
+   get syncID() {
+     // Generate a random syncID if we don't have one
+     let syncID = Svc.Prefs.get(this.name + ".syncID", "");
+     return syncID == "" ? this.syncID = Utils.makeGUID() : syncID;
+   },
+   set syncID(value) {
+     Svc.Prefs.set(this.name + ".syncID", value);
+diff --git a/services/sync/modules/policies.js b/services/sync/modules/policies.js
+--- a/services/sync/modules/policies.js
++++ b/services/sync/modules/policies.js
+@@ -734,17 +734,17 @@
+       Status.sync = PROLONGED_SYNC_FAILURE;
+       this._log.trace("shouldReportError: true (prolonged sync failure).");
+       return true;
+     }
+ 
+     // We got a 401 mid-sync. Wait for the next sync before actually handling
+     // an error. This assumes that we'll get a 401 again on a login fetch in
+     // order to report the error.
+-    if (!this.service.clusterURL) {
++    if (!this.service.haveStorageNode) {
+       this._log.trace("shouldReportError: false (no cluster URL; " +
+                       "possible node reassignment).");
+       return false;
+     }
+ 
+     return ([Status.login, Status.sync].indexOf(SERVER_MAINTENANCE) == -1 &&
+             [Status.login, Status.sync].indexOf(LOGIN_FAILED_NETWORK_ERROR) == -1);
+   },
+diff --git a/services/sync/modules/service.js b/services/sync/modules/service.js
+--- a/services/sync/modules/service.js
++++ b/services/sync/modules/service.js
+@@ -18,16 +18,17 @@
+ 
+ const CRYPTO_COLLECTION = "crypto";
+ const KEYS_WBO = "keys";
+ 
+ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ Cu.import("resource://services-common/log4moz.js");
+ Cu.import("resource://services-common/preferences.js");
+ Cu.import("resource://services-common/utils.js");
++Cu.import("resource://services-sync/config.js");
+ Cu.import("resource://services-sync/constants.js");
+ Cu.import("resource://services-sync/engines.js");
+ Cu.import("resource://services-sync/engines/clients.js");
+ Cu.import("resource://services-sync/identity.js");
+ Cu.import("resource://services-sync/main.js");
+ Cu.import("resource://services-sync/policies.js");
+ Cu.import("resource://services-sync/record.js");
+ Cu.import("resource://services-sync/resource.js");
+@@ -50,51 +51,35 @@
+ };
+ 
+ const STORAGE_INFO_TYPES = [INFO_COLLECTIONS,
+                             INFO_COLLECTION_USAGE,
+                             INFO_COLLECTION_COUNTS,
+                             INFO_QUOTA];
+ 
+ 
+-function WeaveSvc() {
++function SyncService(settings) {
++  this.settings = settings;
+   this._notify = Utils.notify("weave:service:");
+ }
+-WeaveSvc.prototype = {
++SyncService.prototype = {
+ 
+   _lock: Utils.lock,
+   _locked: false,
+-  _loggedIn: false,
+-  _identity: Weave.Identity,
+-
+-  userBaseURL: null,
+-  infoURL: null,
+-  storageURL: null,
+-  metaURL: null,
+-  cryptoKeyURL: null,
+ 
+   get enabledEngineNames() {
+     return [e.name for each (e in this.engineManager.getEnabled())];
+   },
+ 
+-  get serverURL() Svc.Prefs.get("serverURL"),
+-  set serverURL(value) {
+-    // Only do work if it's actually changing
+-    if (value == this.serverURL)
+-      return;
+-
+-    // A new server most likely uses a different cluster, so clear that
+-    Svc.Prefs.set("serverURL", value);
+-    Svc.Prefs.reset("clusterURL");
++  get haveStorageNode() {
++    return !!this.state.storageNodeURI;
+   },
+ 
+-  get clusterURL() Svc.Prefs.get("clusterURL", ""),
+-  set clusterURL(value) {
+-    Svc.Prefs.set("clusterURL", value);
+-    this._updateCachedURLs();
++  get identity() {
++    return this.settings.identity;
+   },
+ 
+   get miscAPI() {
+     // Append to the serverURL if it's a relative fragment
+     let misc = Svc.Prefs.get("miscURL");
+     if (misc.indexOf(":") == -1)
+       misc = this.serverURL + misc;
+     return misc + MISC_API_VERSION + "/";
+@@ -112,34 +97,43 @@
+     let url = Svc.Prefs.get("userURL");
+     if (!url.contains(":")) {
+       url = this.serverURL + url;
+     }
+ 
+     return url + USER_API_VERSION + "/";
+   },
+ 
+-  get pwResetURL() {
+-    return this.serverURL + "weave-password-reset";
++  // We support legacy accessors for objects moved to GlobalSettings and
++  // GlobalState because a lot of code depends on Service being the
++  // interface.
++  get serverURL() {
++    this._log.warn("Legacy get of serverURL. Use Service.settings.serverURI.");
++    return this.settings.serverURI;
+   },
+ 
+-  get updatedURL() {
+-    return WEAVE_CHANNEL == "dev" ? UPDATED_DEV_URL : UPDATED_REL_URL;
++  set serverURL(value) {
++    this._log.warn("Legacy set of serverURL. Use Service.settings.serverURI.");
++    this.settings.serverURI = value;
++    this.state.storageNodeURI = null;
+   },
+ 
+-  get syncID() {
+-    // Generate a random syncID id we don't have one
+-    let syncID = Svc.Prefs.get("client.syncID", "");
+-    return syncID == "" ? this.syncID = Utils.makeGUID() : syncID;
+-  },
+-  set syncID(value) {
+-    Svc.Prefs.set("client.syncID", value);
++  get clusterURL() {
++    this._log.warn("Legacy get of clusterURL. Use Service.state.storageNodeURI.");
++    return this.state.storageNodeURI;
+   },
+ 
+-  get isLoggedIn() { return this._loggedIn; },
++  set clusterURL(value) {
++    this._log.warn("Legacy set of clusterURL. Use Service.state.storageNodeURI.");
++    this.state.storageNodeURI = value;
++  },
++
++  get isLoggedIn() {
++    return this.state.loggedIn;
++  },
+ 
+   get locked() { return this._locked; },
+   lock: function lock() {
+     if (this._locked)
+       return false;
+     this._locked = true;
+     return true;
+   },
+@@ -156,32 +150,16 @@
+         // This only happens if we're syncing already.
+         this._log.info("Cannot start sync: already syncing?");
+       }
+     }
+ 
+     return Utils.catch.call(this, func, lockExceptions);
+   },
+ 
+-  _updateCachedURLs: function _updateCachedURLs() {
+-    // Nothing to cache yet if we don't have the building blocks
+-    if (this.clusterURL == "" || this._identity.username == "")
+-      return;
+-
+-    let storageAPI = this.clusterURL + SYNC_API_VERSION + "/";
+-    this.userBaseURL = storageAPI + this._identity.username + "/";
+-    this._log.debug("Caching URLs under storage user base: " + this.userBaseURL);
+-
+-    // Generate and cache various URLs under the storage API for this user
+-    this.infoURL = this.userBaseURL + "info/collections";
+-    this.storageURL = this.userBaseURL + "storage/";
+-    this.metaURL = this.storageURL + "meta/global";
+-    this.cryptoKeysURL = this.storageURL + CRYPTO_COLLECTION + "/" + KEYS_WBO;
+-  },
+-
+   _checkCrypto: function _checkCrypto() {
+     let ok = false;
+ 
+     try {
+       let iv = Svc.Crypto.generateRandomIV();
+       if (iv.length == 24)
+         ok = true;
+ 
+@@ -230,40 +208,40 @@
+                    "or signaling to other clients.");
+ 
+     // Set the last handled time so that we don't act again.
+     this.lastHMACEvent = now;
+ 
+     // Fetch keys.
+     let cryptoKeys = new CryptoWrapper(CRYPTO_COLLECTION, KEYS_WBO);
+     try {
+-      let cryptoResp = cryptoKeys.fetch(this.cryptoKeysURL).response;
++      let cryptoResp = cryptoKeys.fetch(this.state.cryptoKeysURI).response;
+ 
+       // Save out the ciphertext for when we reupload. If there's a bug in
+       // CollectionKeys, this will prevent us from uploading junk.
+       let cipherText = cryptoKeys.ciphertext;
+ 
+       if (!cryptoResp.success) {
+         this._log.warn("Failed to download keys.");
+         return false;
+       }
+ 
+-      let keysChanged = this.handleFetchedKeys(this._identity.syncKeyBundle,
++      let keysChanged = this.handleFetchedKeys(this.identity.syncKeyBundle,
+                                                cryptoKeys, true);
+       if (keysChanged) {
+         // Did they change? If so, carry on.
+         this._log.info("Suggesting retry.");
+         return true;              // Try again.
+       }
+ 
+       // If not, reupload them and continue the current sync.
+       cryptoKeys.ciphertext = cipherText;
+       cryptoKeys.cleartext  = null;
+ 
+-      let uploadResp = cryptoKeys.upload(this.cryptoKeysURL);
++      let uploadResp = cryptoKeys.upload(this.state.cryptoKeysURI);
+       if (uploadResp.success)
+         this._log.info("Successfully re-uploaded keys. Continuing sync.");
+       else
+         this._log.warn("Got error response re-uploading keys. " +
+                        "Continuing sync; let's try again later.");
+ 
+       return false;            // Don't try again: same keys.
+ 
+@@ -308,20 +286,22 @@
+    */
+   onStartup: function onStartup() {
+     this._migratePrefs();
+ 
+     this.errorHandler = new ErrorHandler(this);
+ 
+     this._log = Log4Moz.repository.getLogger("Sync.Service");
+     this._log.level =
+-      Log4Moz.Level[Svc.Prefs.get("log.logger.service.main")];
++      Log4Moz.Level[Svc.Prefs.get("log.logger.service.main", "Debug")];
+ 
+     this._log.info("Loading Weave " + WEAVE_VERSION);
+ 
++    this.state = new GlobalState(this.settings);
++
+     this._clusterManager = new ClusterManager(this);
+ 
+     this.enabled = true;
+ 
+     this._registerEngines();
+ 
+     let ua = Cc["@mozilla.org/network/protocol;1?name=http"].
+       getService(Ci.nsIHttpProtocolHandler).userAgent;
+@@ -337,18 +317,16 @@
+     Svc.Prefs.observe("engine.", this);
+ 
+     this.scheduler = new SyncScheduler(this);
+ 
+     if (!this.enabled) {
+       this._log.info("Firefox Sync disabled.");
+     }
+ 
+-    this._updateCachedURLs();
+-
+     let status = this._checkSetup();
+     if (status != STATUS_DISABLED && status != CLIENT_NOT_CONFIGURED) {
+       Svc.Obs.notify("weave:engine:start-tracking");
+     }
+ 
+     // Send an event now that Weave service is ready.  We don't do this
+     // synchronously so that observers can import this module before
+     // registering an observer.
+@@ -469,17 +447,17 @@
+       Svc.Prefs.set("engineStatusChanged." + engine, true);
+     }
+   },
+ 
+   /**
+    * Perform the info fetch as part of a login or key fetch.
+    */
+   _fetchInfo: function _fetchInfo(url) {
+-    let infoURL = url || this.infoURL;
++    let infoURL = url || this.state.infoCollectionsURI;
+ 
+     this._log.trace("In _fetchInfo: " + infoURL);
+     let info;
+     try {
+       info = new Resource(infoURL).get();
+     } catch (ex) {
+       this.errorHandler.checkServerError(ex);
+       throw ex;
+@@ -494,23 +472,23 @@
+   verifyAndFetchSymmetricKeys: function verifyAndFetchSymmetricKeys(infoResponse) {
+ 
+     this._log.debug("Fetching and verifying -- or generating -- symmetric keys.");
+ 
+     // Don't allow empty/missing passphrase.
+     // Furthermore, we assume that our sync key is already upgraded,
+     // and fail if that assumption is invalidated.
+ 
+-    if (!this._identity.syncKey) {
++    if (!this.identity.syncKey) {
+       Status.login = LOGIN_FAILED_NO_PASSPHRASE;
+       Status.sync = CREDENTIALS_CHANGED;
+       return false;
+     }
+ 
+-    let syncKeyBundle = this._identity.syncKeyBundle;
++    let syncKeyBundle = this.identity.syncKeyBundle;
+     if (!syncKeyBundle) {
+       this._log.error("Sync Key Bundle not set. Invalid Sync Key?");
+ 
+       Status.login = LOGIN_FAILED_INVALID_PASSPHRASE;
+       Status.sync = CREDENTIALS_CHANGED;
+       return false;
+     }
+ 
+@@ -536,17 +514,17 @@
+         // Don't always set to CREDENTIALS_CHANGED -- we will probably take care of this.
+ 
+         // Fetch storage/crypto/keys.
+         let cryptoKeys;
+ 
+         if (infoCollections && (CRYPTO_COLLECTION in infoCollections)) {
+           try {
+             cryptoKeys = new CryptoWrapper(CRYPTO_COLLECTION, KEYS_WBO);
+-            let cryptoResp = cryptoKeys.fetch(this.cryptoKeysURL).response;
++            let cryptoResp = cryptoKeys.fetch(this.state.cryptoKeysURI).response;
+ 
+             if (cryptoResp.success) {
+               let keysChanged = this.handleFetchedKeys(syncKeyBundle, cryptoKeys);
+               return true;
+             }
+             else if (cryptoResp.status == 404) {
+               // On failure, ask CollectionKeys to generate new keys and upload them.
+               // Fall through to the behavior below.
+@@ -606,57 +584,61 @@
+       this._log.debug("Failed to fetch and verify keys: "
+                       + Utils.exceptionStr(ex));
+       this.errorHandler.checkServerError(ex);
+       return false;
+     }
+   },
+ 
+   verifyLogin: function verifyLogin() {
+-    if (!this._identity.username) {
++    if (!this.identity.username) {
+       this._log.warn("No username in verifyLogin.");
+       Status.login = LOGIN_FAILED_NO_USERNAME;
+       return false;
+     }
+ 
+     // Unlock master password, or return.
+     // Attaching auth credentials to a request requires access to
+     // passwords, which means that Resource.get can throw MP-related
+     // exceptions!
+     // Try to fetch the passphrase first, while we still have control.
+     try {
+-      this._identity.syncKey;
++      this.identity.syncKey;
+     } catch (ex) {
+       this._log.debug("Fetching passphrase threw " + ex +
+                       "; assuming master password locked.");
+       Status.login = MASTER_PASSWORD_LOCKED;
+       return false;
+     }
+ 
+     try {
+       // Make sure we have a cluster to verify against.
+       // This is a little weird, if we don't get a node we pretend
+       // to succeed, since that probably means we just don't have storage.
+-      if (this.clusterURL == "" && !this._clusterManager.setCluster()) {
++      if (!this.state.storageNodeURI && !this._clusterManager.setCluster()) {
+         Status.sync = NO_SYNC_NODE_FOUND;
+         Svc.Obs.notify("weave:service:sync:delayed");
+         return true;
+       }
+ 
++      for (let k of Object.keys(this.state)) {
++        this._log.debug(k + " = " + this.state[k]);
++      }
++
+       // Fetch collection info on every startup.
+-      let test = new Resource(this.infoURL).get();
++      let test = new Resource(this.state.infoCollectionsURI).get();
+ 
+       switch (test.status) {
+         case 200:
+           // The user is authenticated.
+ 
+           // We have no way of verifying the passphrase right now,
+           // so wait until remoteSetup to do so.
+           // Just make the most trivial checks.
+-          if (!this._identity.syncKey) {
++          if (!this.identity.syncKey) {
+             this._log.warn("No passphrase in verifyLogin.");
+             Status.login = LOGIN_FAILED_NO_PASSPHRASE;
+             return false;
+           }
+ 
+           // Go ahead and do remote setup, so that we can determine
+           // conclusively that our passphrase is correct.
+           if (this._remoteSetup()) {
+@@ -697,20 +679,20 @@
+       return false;
+     }
+   },
+ 
+   generateNewSymmetricKeys: function generateNewSymmetricKeys() {
+     this._log.info("Generating new keys WBO...");
+     let wbo = CollectionKeys.generateNewKeysWBO();
+     this._log.info("Encrypting new key bundle.");
+-    wbo.encrypt(this._identity.syncKeyBundle);
++    wbo.encrypt(this.identity.syncKeyBundle);
+ 
+     this._log.info("Uploading...");
+-    let uploadRes = wbo.upload(this.cryptoKeysURL);
++    let uploadRes = wbo.upload(this.state.cryptoKeysURI);
+     if (uploadRes.status != 200) {
+       this._log.warn("Got status " + uploadRes.status + " uploading new keys. What to do? Throw!");
+       this.errorHandler.checkServerError(uploadRes);
+       throw new Error("Unable to upload symmetric keys.");
+     }
+     this._log.info("Got status " + uploadRes.status + " uploading keys.");
+     let serverModified = uploadRes.obj;   // Modified timestamp according to server.
+     this._log.debug("Server reports crypto modified: " + serverModified);
+@@ -733,62 +715,62 @@
+     }
+ 
+     // Can't check against local modified: clock drift.
+     if (info[CRYPTO_COLLECTION] < serverModified) {
+       this._log.error("Consistency failure: info/collections crypto entry " + 
+                       "is stale after successful upload.");
+       throw new Error("Symmetric key upload failed.");
+     }
+-    
++
+     // Doesn't matter if the timestamp is ahead.
+-    
++
+     // Download and install them.
+     let cryptoKeys = new CryptoWrapper(CRYPTO_COLLECTION, KEYS_WBO);
+-    let cryptoResp = cryptoKeys.fetch(this.cryptoKeysURL).response;
++    let cryptoResp = cryptoKeys.fetch(this.state.cryptoKeysURI).response;
+     if (cryptoResp.status != 200) {
+       this._log.warn("Failed to download keys.");
+       throw new Error("Symmetric key download failed.");
+     }
+-    let keysChanged = this.handleFetchedKeys(this._identity.syncKeyBundle,
++    let keysChanged = this.handleFetchedKeys(this.identity.syncKeyBundle,
+                                              cryptoKeys, true);
+     if (keysChanged) {
+       this._log.info("Downloaded keys differed, as expected.");
+     }
+   },
+ 
+   changePassword: function changePassword(newPassword) {
+     let client = new UserAPI10Client(this.userAPIURI);
+     let cb = Async.makeSpinningCallback();
+-    client.changePassword(this._identity.username,
+-                          this._identity.basicPassword, newPassword, cb);
++    client.changePassword(this.identity.username,
++                          this.identity.basicPassword, newPassword, cb);
+ 
+     try {
+       cb.wait();
+     } catch (ex) {
+       this._log.debug("Password change failed: " +
+                       CommonUtils.exceptionStr(ex));
+       return false;
+     }
+ 
+     // Save the new password for requests and login manager.
+-    this._identity.basicPassword = newPassword;
++    this.identity.basicPassword = newPassword;
+     this.persistLogin();
+     return true;
+   },
+ 
+   changePassphrase: function changePassphrase(newphrase) {
+     return this._catch(function doChangePasphrase() {
+       /* Wipe. */
+       this.wipeServer();
+ 
+       this.logout();
+ 
+       /* Set this so UI is updated on next run. */
+-      this._identity.syncKey = newphrase;
++      this.identity.syncKey = newphrase;
+       this.persistLogin();
+ 
+       /* We need to re-encrypt everything, so reset. */
+       this.resetClient();
+       CollectionKeys.clear();
+ 
+       /* Login and sync. This also generates new keys. */
+       this.sync();
+@@ -802,23 +784,23 @@
+   startOver: function startOver() {
+     this._log.trace("Invoking Service.startOver.");
+     Svc.Obs.notify("weave:engine:stop-tracking");
+     Status.resetSync();
+ 
+     // We want let UI consumers of the following notification know as soon as
+     // possible, so let's fake for the CLIENT_NOT_CONFIGURED status for now
+     // by emptying the passphrase (we still need the password).
+-    this._identity.syncKey = null;
++    this.identity.syncKey = null;
+     Status.login = LOGIN_FAILED_NO_PASSPHRASE;
+     this.logout();
+     Svc.Obs.notify("weave:service:start-over");
+ 
+     // Deletion doesn't make sense if we aren't set up yet!
+-    if (this.clusterURL != "") {
++    if (this.state.storageNodeURI) {
+       // Clear client-specific data from the server, including disabled engines.
+       for each (let engine in [this.clientsEngine].concat(this.engineManager.getAll())) {
+         try {
+           engine.removeClientData();
+         } catch(ex) {
+           this._log.warn("Deleting client data for " + engine.name + " failed:"
+                          + Utils.exceptionStr(ex));
+         }
+@@ -834,90 +816,90 @@
+ 
+     // Reset Weave prefs.
+     this._ignorePrefObserver = true;
+     Svc.Prefs.resetBranch("");
+     this._ignorePrefObserver = false;
+ 
+     Svc.Prefs.set("lastversion", WEAVE_VERSION);
+ 
+-    this._identity.deleteSyncCredentials();
++    this.identity.deleteSyncCredentials();
+   },
+ 
+   persistLogin: function persistLogin() {
+     try {
+-      this._identity.persistCredentials(true);
++      this.identity.persistCredentials(true);
+     } catch (ex) {
+       this._log.info("Unable to persist credentials: " + ex);
+     }
+   },
+ 
+   login: function login(username, password, passphrase) {
+     function onNotify() {
+-      this._loggedIn = false;
++      this.state.loggedIn = false;
+       if (Services.io.offline) {
+         Status.login = LOGIN_FAILED_NETWORK_ERROR;
+         throw "Application is offline, login should not be called";
+       }
+ 
+       let initialStatus = this._checkSetup();
+       if (username) {
+-        this._identity.username = username;
++        this.identity.username = username;
+       }
+       if (password) {
+-        this._identity.basicPassword = password;
++        this.identity.basicPassword = password;
+       }
+       if (passphrase) {
+-        this._identity.syncKey = passphrase;
++        this.identity.syncKey = passphrase;
+       }
+ 
+       if (this._checkSetup() == CLIENT_NOT_CONFIGURED) {
+         throw "Aborting login, client not configured.";
+       }
+ 
+       // Calling login() with parameters when the client was
+       // previously not configured means setup was completed.
+       if (initialStatus == CLIENT_NOT_CONFIGURED
+           && (username || password || passphrase)) {
+         Svc.Obs.notify("weave:service:setup-complete");
+       }
+ 
+-      this._log.info("Logging in user " + this._identity.username);
+-      this._updateCachedURLs();
++      this._log.info("Logging in user " + this.identity.username);
+ 
+       if (!this.verifyLogin()) {
+         // verifyLogin sets the failure states here.
+         throw "Login failed: " + Status.login;
+       }
+ 
+-      this._loggedIn = true;
++      this.state.loggedIn = true;
+ 
+       return true;
+     }
+ 
+     let notifier = this._notify("login", "", onNotify.bind(this));
+     return this._catch(this._lock("service.js: login", notifier))();
+   },
+ 
+   logout: function logout() {
+     // No need to do anything if we're already logged out.
+-    if (!this._loggedIn)
++    if (!this.state.loggedIn) {
+       return;
++    }
+ 
+     this._log.info("Logging out");
+-    this._loggedIn = false;
++    this.state.loggedIn = false;
+ 
+     Svc.Obs.notify("weave:service:logout:finish");
+   },
+ 
+   checkAccount: function checkAccount(account) {
+     let client = new UserAPI10Client(this.userAPIURI);
+     let cb = Async.makeSpinningCallback();
+ 
+-    let username = this._identity.usernameFromAccount(account);
++    let username = this.identity.usernameFromAccount(account);
+     client.usernameExists(username, cb);
+ 
+     try {
+       let exists = cb.wait();
+       return exists ? "notAvailable" : "available";
+     } catch (ex) {
+       // TODO fix API convention.
+       return this.errorHandler.errorStr(ex);
+@@ -948,43 +930,43 @@
+   },
+ 
+   // Stuff we need to do after login, before we can really do
+   // anything (e.g. key setup).
+   _remoteSetup: function _remoteSetup(infoResponse) {
+     let reset = false;
+ 
+     this._log.debug("Fetching global metadata record");
+-    let meta = Records.get(this.metaURL);
++    let meta = Records.get(this.state.metaglobalURI);
+ 
+     // Checking modified time of the meta record.
+     if (infoResponse &&
+         (infoResponse.obj.meta != this.metaModified) &&
+         (!meta || !meta.isNew)) {
+ 
+       // Delete the cached meta record...
+       this._log.debug("Clearing cached meta record. metaModified is " +
+           JSON.stringify(this.metaModified) + ", setting to " +
+           JSON.stringify(infoResponse.obj.meta));
+ 
+-      Records.del(this.metaURL);
++      Records.del(this.state.metaglobalURI);
+ 
+       // ... fetch the current record from the server, and COPY THE FLAGS.
+-      let newMeta = Records.get(this.metaURL);
++      let newMeta = Records.get(this.state.metaglobalURI);
+ 
+       if (!Records.response.success || !newMeta) {
+         this._log.debug("No meta/global record on the server. Creating one.");
+         newMeta = new WBORecord("meta", "global");
+-        newMeta.payload.syncID = this.syncID;
++        newMeta.payload.syncID = this.state.syncID;
+         newMeta.payload.storageVersion = STORAGE_VERSION;
+ 
+         newMeta.isNew = true;
+ 
+-        Records.set(this.metaURL, newMeta);
+-        if (!newMeta.upload(this.metaURL).success) {
++        Records.set(this.state.metaglobalURI, newMeta);
++        if (!newMeta.upload(this.state.metaglobalURI).success) {
+           this._log.warn("Unable to upload new meta/global. Failing remote setup.");
+           return false;
+         }
+       } else {
+         // If newMeta, then it stands to reason that meta != null.
+         newMeta.isNew   = meta.isNew;
+         newMeta.changed = meta.changed;
+       }
+@@ -1013,17 +995,17 @@
+         Status.sync = METARECORD_DOWNLOAD_FAIL;
+         this.errorHandler.checkServerError(Records.response);
+         this._log.warn("Unknown error while downloading metadata record. " +
+                        "Aborting sync.");
+         return false;
+       }
+ 
+       if (!meta)
+-        this._log.info("No metadata record, server wipe needed");
++        this._log.info("No metaglobal record, server wipe needed");
+       if (meta && !meta.payload.syncID)
+         this._log.warn("No sync id, server wipe needed");
+ 
+       reset = true;
+ 
+       this._log.info("Wiping server data");
+       this._freshStart();
+ 
+@@ -1035,23 +1017,23 @@
+ 
+       return true;
+     }
+     else if (remoteVersion > STORAGE_VERSION) {
+       Status.sync = VERSION_OUT_OF_DATE;
+       this._log.warn("Upgrade required to access newer storage version.");
+       return false;
+     }
+-    else if (meta.payload.syncID != this.syncID) {
++    else if (meta.payload.syncID != this.state.syncID) {
+ 
+-      this._log.info("Sync IDs differ. Local is " + this.syncID + ", remote is " + meta.payload.syncID);
++      this._log.info("Sync IDs differ. Local is " + this.state.syncID + ", remote is " + meta.payload.syncID);
+       this.resetClient();
+       CollectionKeys.clear();
+-      this.syncID = meta.payload.syncID;
+-      this._log.debug("Clear cached values and take syncId: " + this.syncID);
++      this.state.syncID = meta.payload.syncID;
++      this._log.debug("Clear cached values and take syncId: " + this.state.syncID);
+ 
+       if (!this.upgradeSyncKey(meta.payload.syncID)) {
+         this._log.warn("Failed to upgrade sync key. Failing remote setup.");
+         return false;
+       }
+ 
+       if (!this.verifyAndFetchSymmetricKeys(infoResponse)) {
+         this._log.warn("Failed to fetch symmetric keys. Failing remote setup.");
+@@ -1087,17 +1069,17 @@
+    *
+    * Note that this function has strong ties to _checkSync: callers
+    * of this function should typically use _checkSync to verify that
+    * any necessary login took place.
+    */
+   _shouldLogin: function _shouldLogin() {
+     return this.enabled &&
+            !Services.io.offline &&
+-           !this.isLoggedIn;
++           !this.state.loggedIn;
+   },
+ 
+   /**
+    * Determine if a sync should run.
+    *
+    * @param ignore [optional]
+    *        array of reasons to ignore when checking
+    *
+@@ -1145,17 +1127,18 @@
+ 
+   /**
+    * Sync up engines with the server.
+    */
+   _lockedSync: function _lockedSync() {
+     return this._lock("service.js: sync",
+                       this._notify("sync", "", function onNotify() {
+ 
+-      let synchronizer = new EngineSynchronizer(this);
++      let synchronizer = new EngineSynchronizer(this, this.settings,
++                                                this.state);
+       let cb = Async.makeSpinningCallback();
+       synchronizer.onComplete = cb;
+ 
+       synchronizer.sync();
+       // wait() throws if the first argument is truthy, which is exactly what
+       // we want.
+       let result = cb.wait();
+     }))();
+@@ -1167,17 +1150,21 @@
+    *
+    * Store the new 'passphrase' back into the identity manager.
+    *
+    * We can check this as often as we want, because once it's done the
+    * check will no longer succeed. It only matters that it happens after
+    * we decide to bump the server storage version.
+    */
+   upgradeSyncKey: function upgradeSyncKey(syncID) {
+-    let p = this._identity.syncKey;
++    if (!syncID) {
++      throw new Error("syncID does not have a value!");
++    }
++
++    let p = this.identity.syncKey;
+ 
+     if (!p) {
+       return false;
+     }
+ 
+     // Check whether it's already a key that we generated.
+     if (Utils.isPassphrase(p)) {
+       this._log.info("Sync key is up-to-date: no need to upgrade.");
+@@ -1191,94 +1178,96 @@
+     let k = Utils.derivePresentableKeyFromPassphrase(p, s, PBKDF2_KEY_BYTES);   // Base 32.
+ 
+     if (!k) {
+       this._log.error("No key resulted from derivePresentableKeyFromPassphrase. Failing upgrade.");
+       return false;
+     }
+ 
+     this._log.info("Upgrading sync key...");
+-    this._identity.syncKey = k;
++    this.identity.syncKey = k;
+     this._log.info("Saving upgraded sync key...");
+     this.persistLogin();
+     this._log.info("Done saving.");
+     return true;
+   },
+ 
+   _freshStart: function _freshStart() {
+     this._log.info("Fresh start. Resetting client and considering key upgrade.");
+     this.resetClient();
+     CollectionKeys.clear();
+-    this.upgradeSyncKey(this.syncID);
++
++    this.upgradeSyncKey(this.state.syncID);
+ 
+     // Wipe the server.
+     let wipeTimestamp = this.wipeServer();
+ 
+     // Upload a new meta/global record.
+     let meta = new WBORecord("meta", "global");
+-    meta.payload.syncID = this.syncID;
++    meta.payload.syncID = this.state.syncID;
+     meta.payload.storageVersion = STORAGE_VERSION;
+     meta.isNew = true;
+ 
+-    this._log.debug("New metadata record: " + JSON.stringify(meta.payload));
+-    let res = new Resource(this.metaURL);
++    this._log.debug("New metaglobal record: " + JSON.stringify(meta.payload));
++    let res = new Resource(this.state.metaglobalURI);
+     // It would be good to set the X-If-Unmodified-Since header to `timestamp`
+     // for this PUT to ensure at least some level of transactionality.
+     // Unfortunately, the servers don't support it after a wipe right now
+     // (bug 693893), so we're going to defer this until bug 692700.
+     let resp = res.put(meta);
+     if (!resp.success) {
+       // If we got into a race condition, we'll abort the sync this way, too.
+       // That's fine. We'll just wait till the next sync. The client that we're
+       // racing is probably busy uploading stuff right now anyway.
+       throw resp;
+     }
+-    Records.set(this.metaURL, meta);
++    Records.set(this.state.metaglobalURI, meta);
+ 
+     // Wipe everything we know about except meta because we just uploaded it
+     let engines = [this.clientsEngine].concat(this.engineManager.getAll());
+     let collections = [engine.name for each (engine in engines)];
+ 
+     // Generate, upload, and download new keys. Do this last so we don't wipe
+     // them...
+     this.generateNewSymmetricKeys();
+   },
+ 
+   /**
+    * Wipe user data from the server.
+    *
+    * @param collections [optional]
+    *        Array of collections to wipe. If not given, all collections are
+-   *        wiped by issuing a DELETE request for `storageURL`.
++   *        wiped.
+    *
+    * @return the server's timestamp of the (last) DELETE.
+    */
+   wipeServer: function wipeServer(collections) {
+     let response;
+     if (!collections) {
+       // Strip the trailing slash.
+-      let res = new Resource(this.storageURL.slice(0, -1));
++      let uri = this.state.collectionsStorageURI.slice(0, -1);
++      let res = new Resource(uri);
+       res.setHeader("X-Confirm-Delete", "1");
+       try {
+         response = res.delete();
+       } catch (ex) {
+         this._log.debug("Failed to wipe server: " + CommonUtils.exceptionStr(ex));
+         throw ex;
+       }
+       if (response.status != 200 && response.status != 404) {
+         this._log.debug("Aborting wipeServer. Server responded with " +
+-                        response.status + " response for " + this.storageURL);
++                        response.status + " response for " + uri);
+         throw response;
+       }
+       return response.headers["x-weave-timestamp"];
+     }
+ 
+     let timestamp;
+     for (let name of collections) {
+-      let url = this.storageURL + name;
++      let url = this.state.collectionsStorageURI + name;
+       try {
+         response = new Resource(url).delete();
+       } catch (ex) {
+         this._log.debug("Failed to wipe '" + name + "' collection: " +
+                         Utils.exceptionStr(ex));
+         throw ex;
+       }
+ 
+@@ -1361,17 +1350,17 @@
+   /**
+    * Reset local service information like logs, sync times, caches.
+    */
+   resetService: function resetService() {
+     this._catch(function reset() {
+       this._log.info("Service reset.");
+ 
+       // Pretend we've never synced to the server and drop cached data
+-      this.syncID = "";
++      this.state.syncID = null;
+       Records.clearCache();
+     })();
+   },
+ 
+   /**
+    * Reset the client by getting rid of any local server data and client data.
+    *
+    * @param engines [optional]
+@@ -1413,17 +1402,17 @@
+    */
+   getStorageInfo: function getStorageInfo(type, callback) {
+     if (STORAGE_INFO_TYPES.indexOf(type) == -1) {
+       throw "Invalid value for 'type': " + type;
+     }
+ 
+     let info_type = "info/" + type;
+     this._log.trace("Retrieving '" + info_type + "'...");
+-    let url = this.userBaseURL + info_type;
++    let url = this.state.userStorageBaseURI + info_type;
+     return new SyncStorageRequest(url).get(function onComplete(error) {
+       // Note: 'this' is the request.
+       if (error) {
+         this._log.debug("Failed to retrieve '" + info_type + "': " +
+                         Utils.exceptionStr(error));
+         return callback(error);
+       }
+       if (this.response.status != 200) {
+@@ -1442,10 +1431,11 @@
+         return callback(ex);
+       }
+       this._log.trace("Successfully retrieved '" + info_type + "'.");
+       return callback(null, result);
+     });
+   },
+ };
+ 
+-let Service = new WeaveSvc();
++let settings = new GlobalSettings(PREFS_BRANCH, Identity);
++let Service = new SyncService(settings);
+ Service.onStartup();
+diff --git a/services/sync/modules/stages/cluster.js b/services/sync/modules/stages/cluster.js
+--- a/services/sync/modules/stages/cluster.js
++++ b/services/sync/modules/stages/cluster.js
+@@ -18,43 +18,39 @@
+  */
+ function ClusterManager(service) {
+   this._log = Log4Moz.repository.getLogger("Sync.Service");
+   this._log.level = Log4Moz.Level[Svc.Prefs.get("log.logger.service.main")];
+ 
+   this.service = service;
+ }
+ ClusterManager.prototype = {
+-  get identity() {
+-    return this.service._identity;
+-  },
+-
+   /**
+    * Obtain the cluster for the current user.
+    *
+    * Returns the string URL of the cluster or null on error.
+    */
+   _findCluster: function _findCluster() {
+-    this._log.debug("Finding cluster for user " + this.identity.username);
++    this._log.debug("Finding cluster for user " + this.service.settings.username);
+ 
+     // This should ideally use UserAPI10Client but the legacy hackiness is
+     // strong with this code.
+     let fail;
+-    let res = new Resource(this.service.userAPIURI + this.identity.username +
+-                           "/node/weave");
++    let uri = this.service.settings.userURI + this.service.settings.username + "/node/weave";
++    let res = new Resource(uri);
+     try {
+       let node = res.get();
+       switch (node.status) {
+         case 400:
+           Status.login = LOGIN_FAILED_LOGIN_REJECTED;
+           fail = "Find cluster denied: " + this.service.errorHandler.errorStr(node);
+           break;
+         case 404:
+-          this._log.debug("Using serverURL as data cluster (multi-cluster support disabled)");
+-          return this.service.serverURL;
++          this._log.debug("Using serverURI as data cluster (multi-cluster support disabled)");
++          return this.service.settings.serverURI;
+         case 0:
+         case 200:
+           if (node == "null") {
+             node = null;
+           }
+           this._log.trace("_findCluster successfully returning " + node);
+           return node;
+         default:
+@@ -78,20 +74,20 @@
+     // Make sure we didn't get some unexpected response for the cluster.
+     let cluster = this._findCluster();
+     this._log.debug("Cluster value = " + cluster);
+     if (cluster == null) {
+       return false;
+     }
+ 
+     // Don't update stuff if we already have the right cluster
+-    if (cluster == this.service.clusterURL) {
++    if (cluster == this.service.state.storageNodeURI) {
+       return false;
+     }
+ 
+     this._log.debug("Setting cluster to " + cluster);
+-    this.service.clusterURL = cluster;
++    this.service.state.storageNodeURI = cluster;
+     Svc.Prefs.set("lastClusterUpdate", Date.now().toString());
+ 
+     return true;
+   },
+ };
+ Object.freeze(ClusterManager.prototype);
+diff --git a/services/sync/modules/stages/enginesync.js b/services/sync/modules/stages/enginesync.js
+--- a/services/sync/modules/stages/enginesync.js
++++ b/services/sync/modules/stages/enginesync.js
+@@ -53,25 +53,25 @@
+       // this is a purposeful abort rather than a failure, so don't set
+       // any status bits
+       reason = "Can't sync: " + reason;
+       this.onComplete(new Error("Can't sync: " + reason));
+       return;
+     }
+ 
+     // If we don't have a node, get one. If that fails, retry in 10 minutes.
+-    if (!this.service.clusterURL && !this.service._clusterManager.setCluster()) {
++    if (!this.service.state.storageNodeURI && !this.service._clusterManager.setCluster()) {
+       Status.sync = NO_SYNC_NODE_FOUND;
+       this._log.info("No cluster URL found. Cannot sync.");
+       this.onComplete(null);
+       return;
+     }
+ 
+     // Ping the server with a special info request once a day.
+-    let infoURL = this.service.infoURL;
++    let infoURL = this.service.state.infoCollectionsURI;
+     let now = Math.floor(Date.now() / 1000);
+     let lastPing = Svc.Prefs.get("lastPing", 0);
+     if (now - lastPing > 86400) { // 60 * 60 * 24
+       infoURL += "?v=" + WEAVE_VERSION;
+       Svc.Prefs.set("lastPing", now);
+     }
+ 
+     // Figure out what the last modified time is for each collection
+@@ -151,27 +151,27 @@
+           this._log.info("Aborting sync for failure in " + engine.name);
+           break;
+         }
+       }
+ 
+       // If _syncEngine fails for a 401, we might not have a cluster URL here.
+       // If that's the case, break out of this immediately, rather than
+       // throwing an exception when trying to fetch metaURL.
+-      if (!this.service.clusterURL) {
++      if (!this.service.state.storageNodeURI) {
+         this._log.debug("Aborting sync, no cluster URL: " +
+                         "not uploading new meta/global.");
+         this.onComplete(null);
+         return;
+       }
+ 
+       // Upload meta/global if any engines changed anything
+-      let meta = Records.get(this.service.metaURL);
++      let meta = Records.get(this.service.state.metaglobalURI);
+       if (meta.isNew || meta.changed) {
+-        new Resource(this.service.metaURL).put(meta);
++        new Resource(this.service.state.metaglobalURI).put(meta);
+         delete meta.isNew;
+         delete meta.changed;
+       }
+ 
+       // If there were no sync engine failures
+       if (Status.service != SYNC_FAILED_PARTIAL) {
+         Svc.Prefs.set("lastSync", new Date().toString());
+         Status.sync = SYNC_SUCCEEDED;
+@@ -206,17 +206,17 @@
+     }
+ 
+     return true;
+   },
+ 
+   _updateEnabledEngines: function _updateEnabledEngines() {
+     this._log.info("Updating enabled engines: " +
+                    this.service.scheduler.numClients + " clients.");
+-    let meta = Records.get(this.service.metaURL);
++    let meta = Records.get(this.service.state.metaglobalURI);
+     if (meta.isNew || !meta.payload.engines)
+       return;
+ 
+     // If we're the only client, and no engines are marked as enabled,
+     // thumb our noses at the server data: it can't be right.
+     // Belt-and-suspenders approach to Bug 615926.
+     if ((this.service.scheduler.numClients <= 1) &&
+         ([e for (e in meta.payload.engines) if (e != "clients")].length == 0)) {
+diff --git a/services/sync/services-sync.js b/services/sync/services-sync.js
+--- a/services/sync/services-sync.js
++++ b/services/sync/services-sync.js
+@@ -50,16 +50,17 @@
+ pref("services.sync.log.appender.console", "Warn");
+ pref("services.sync.log.appender.dump", "Error");
+ pref("services.sync.log.appender.file.level", "Trace");
+ pref("services.sync.log.appender.file.logOnError", true);
+ pref("services.sync.log.appender.file.logOnSuccess", false);
+ pref("services.sync.log.appender.file.maxErrorAge", 864000); // 10 days
+ pref("services.sync.log.rootLogger", "Debug");
+ pref("services.sync.log.logger.addonutils", "Debug");
++pref("services.sync.log.logger.config", "Debug");
+ pref("services.sync.log.logger.service.main", "Debug");
+ pref("services.sync.log.logger.status", "Debug");
+ pref("services.sync.log.logger.authenticator", "Debug");
+ pref("services.sync.log.logger.network.resources", "Debug");
+ pref("services.sync.log.logger.service.jpakeclient", "Debug");
+ pref("services.sync.log.logger.engine.bookmarks", "Debug");
+ pref("services.sync.log.logger.engine.clients", "Debug");
+ pref("services.sync.log.logger.engine.forms", "Debug");
+diff --git a/services/sync/tests/unit/test_collections_recovery.js b/services/sync/tests/unit/test_collections_recovery.js
+--- a/services/sync/tests/unit/test_collections_recovery.js
++++ b/services/sync/tests/unit/test_collections_recovery.js
+@@ -1,8 +1,11 @@
++/* Any copyright is dedicated to the Public Domain.
++   http://creativecommons.org/publicdomain/zero/1.0/ */
++
+ // Verify that we wipe the server if we have to regenerate keys.
+ Cu.import("resource://services-sync/service.js");
+ 
+ add_test(function test_missing_crypto_collection() {
+   let johnHelper = track_collections_helper();
+   let johnU      = johnHelper.with_updated_collection;
+   let johnColls  = johnHelper.collections;
+ 
+diff --git a/services/sync/tests/unit/test_errorhandler.js b/services/sync/tests/unit/test_errorhandler.js
+--- a/services/sync/tests/unit/test_errorhandler.js
++++ b/services/sync/tests/unit/test_errorhandler.js
+@@ -171,17 +171,17 @@
+         server.stop(run_next_test);
+       });
+     }
+     Svc.Obs.add("weave:service:login:error", onLoginError);
+   }
+ 
+   // Make sync fail due to login rejected.
+   setBasicCredentials("janedoe", "irrelevant", "irrelevant");
+-  Service._updateCachedURLs();
++  Service.state._updateCachedValues();
+ 
+   _("Starting first sync.");
+   Service.sync();
+   _("First sync done.");
+ });
+ 
+ add_test(function test_credentials_changed_logout() {
+   let server = sync_httpd_setup();
+diff --git a/services/sync/tests/unit/test_errorhandler_sync_checkServerError.js b/services/sync/tests/unit/test_errorhandler_sync_checkServerError.js
+--- a/services/sync/tests/unit/test_errorhandler_sync_checkServerError.js
++++ b/services/sync/tests/unit/test_errorhandler_sync_checkServerError.js
+@@ -160,17 +160,17 @@
+   _("Test: Connection refused error from Service.sync() leads to the right status code.");
+   setUp();
+   // Provoke connection refused.
+   Service.clusterURL = "http://localhost:12345/";
+ 
+   try {
+     do_check_eq(Status.sync, SYNC_SUCCEEDED);
+ 
+-    Service._loggedIn = true;
++    Service.state.loggedIn = true;
+     Service.sync();
+ 
+     do_check_eq(Status.sync, LOGIN_FAILED_NETWORK_ERROR);
+     do_check_eq(Status.service, SYNC_FAILED);
+   } finally {
+     Status.resetSync();
+     Service.startOver();
+   }
+@@ -180,17 +180,17 @@
+ add_test(function test_service_offline() {
+   _("Test: Wanting to sync in offline mode leads to the right status code but does not increment the ignorable error count.");
+   setUp();
+   Services.io.offline = true;
+ 
+   try {
+     do_check_eq(Status.sync, SYNC_SUCCEEDED);
+ 
+-    Service._loggedIn = true;
++    Service.state.loggedIn = true;
+     Service.sync();
+ 
+     do_check_eq(Status.sync, LOGIN_FAILED_NETWORK_ERROR);
+     do_check_eq(Status.service, SYNC_FAILED);
+   } finally {
+     Status.resetSync();
+     Service.startOver();
+   }
+diff --git a/services/sync/tests/unit/test_load_modules.js b/services/sync/tests/unit/test_load_modules.js
+--- a/services/sync/tests/unit/test_load_modules.js
++++ b/services/sync/tests/unit/test_load_modules.js
+@@ -1,14 +1,15 @@
+ /* Any copyright is dedicated to the Public Domain.
+    http://creativecommons.org/publicdomain/zero/1.0/ */
+ 
+ const modules = [
+   "addonutils.js",
+   "addonsreconciler.js",
++  "config.js",
+   "constants.js",
+   "engines/addons.js",
+   "engines/bookmarks.js",
+   "engines/clients.js",
+   "engines/forms.js",
+   "engines/history.js",
+   "engines/passwords.js",
+   "engines/prefs.js",
+diff --git a/services/sync/tests/unit/test_resource_ua.js b/services/sync/tests/unit/test_resource_ua.js
+--- a/services/sync/tests/unit/test_resource_ua.js
++++ b/services/sync/tests/unit/test_resource_ua.js
+@@ -1,8 +1,11 @@
++/* Any copyright is dedicated to the Public Domain.
++   http://creativecommons.org/publicdomain/zero/1.0/ */
++
+ Cu.import("resource://services-sync/constants.js");
+ Cu.import("resource://services-sync/resource.js");
+ Cu.import("resource://services-sync/service.js");
+ 
+ const TEST_GET_URL = "http://localhost:8080/1.1/johndoe/storage/meta/global";
+ 
+ function test_resource_user_agent() {
+   let meta_global = new ServerWBO('global');
+@@ -21,26 +24,26 @@
+ 
+   do_test_pending();
+   let server = httpd_setup({
+     "/1.1/johndoe/info/collections": uaHandler(collectionsHelper.handler),
+     "/1.1/johndoe/storage/meta/global": uaHandler(meta_global.handler()),
+   });
+ 
+   setBasicCredentials("johndoe", "ilovejane");
+-  Weave.Service.serverURL  = TEST_SERVER_URL;
+-  Weave.Service.clusterURL = TEST_CLUSTER_URL;
++  Service.serverURL  = TEST_SERVER_URL;
++  Service.clusterURL = TEST_CLUSTER_URL;
+ 
+   let expectedUA = Services.appinfo.name + "/" + Services.appinfo.version +
+                    " FxSync/" + WEAVE_VERSION + "." +
+                    Services.appinfo.appBuildID;
+ 
+   function test_fetchInfo(next) {
+     _("Testing _fetchInfo.");
+-    Weave.Service._fetchInfo();
++    Service._fetchInfo();
+     _("User-Agent: " + ua);
+     do_check_eq(ua, expectedUA + ".desktop");
+     ua = "";
+     next();
+   }
+ 
+   function test_desktop_post(next) {
+     _("Testing direct Resource POST.");
+@@ -84,10 +87,11 @@
+     test_mobile_get,
+     function (next) {
+       server.stop(next);
+     },
+     do_test_finished)();
+ }
+ 
+ function run_test() {
++  initTestLogging("Trace");
+   test_resource_user_agent();
+ }
+diff --git a/services/sync/tests/unit/test_service_login.js b/services/sync/tests/unit/test_service_login.js
+--- a/services/sync/tests/unit/test_service_login.js
++++ b/services/sync/tests/unit/test_service_login.js
+@@ -82,42 +82,42 @@
+     Identity.account = "johndoe";
+     Identity.basicPassword = "ilovejane";
+     Service.login();
+     do_check_eq(Status.service, CLIENT_NOT_CONFIGURED);
+     do_check_eq(Status.login, LOGIN_FAILED_NO_PASSPHRASE);
+     do_check_false(Service.isLoggedIn);
+ 
+     _("Success if passphrase is set.");
+-    Identity.syncKey = "foo";
++    Identity.syncKey = Utils.generatePassphrase();
+     Service.login();
+     do_check_eq(Status.service, STATUS_OK);
+     do_check_eq(Status.login, LOGIN_SUCCEEDED);
+     do_check_true(Service.isLoggedIn);
+ 
+     _("We can also pass username, password and passphrase to login().");
+     Service.login("janedoe", "incorrectpassword", "bar");
+-    setBasicCredentials("janedoe", "incorrectpassword", "bar");
++    setBasicCredentials("janedoe", "incorrectpassword");
+     do_check_eq(Status.service, LOGIN_FAILED);
+     do_check_eq(Status.login, LOGIN_FAILED_LOGIN_REJECTED);
+     do_check_false(Service.isLoggedIn);
+ 
+     _("Try again with correct password.");
+     Service.login("janedoe", "ilovejohn");
+     do_check_eq(Status.service, STATUS_OK);
+     do_check_eq(Status.login, LOGIN_SUCCEEDED);
+     do_check_true(Service.isLoggedIn);
+ 
+     _("Calling login() with parameters when the client is unconfigured sends notification.");
+     let notified = false;
+     Svc.Obs.add("weave:service:setup-complete", function() {
+       notified = true;
+     });
+     setBasicCredentials(null, null, null);
+-    Service.login("janedoe", "ilovejohn", "bar");
++    Service.login("janedoe", "ilovejohn", Utils.generatePassphrase());
+     do_check_true(notified);
+     do_check_eq(Status.service, STATUS_OK);
+     do_check_eq(Status.login, LOGIN_SUCCEEDED);
+     do_check_true(Service.isLoggedIn);
+ 
+     _("Logout.");
+     Service.logout();
+     do_check_false(Service.isLoggedIn);
+@@ -129,26 +129,26 @@
+   } finally {
+     Svc.Prefs.resetBranch("");
+     server.stop(run_next_test);
+   }
+ });
+ 
+ add_test(function test_login_on_sync() {
+   let server = setup();
+-  setBasicCredentials("johndoe", "ilovejane", "bar");
++  setBasicCredentials("johndoe", "ilovejane", Utils.generatePassphrase());
+ 
+   try {
+     _("Sync calls login.");
+     let oldLogin = Service.login;
+     let loginCalled = false;
+     Service.login = function() {
+       loginCalled = true;
+       Status.login = LOGIN_SUCCEEDED;
+-      this._loggedIn = false;           // So that sync aborts.
++      this.state.loggedIn = false; // So that sync aborts.
+       return true;
+     };
+ 
+     Service.sync();
+ 
+     do_check_true(loginCalled);
+     Service.login = oldLogin;
+ 
+diff --git a/services/sync/tests/unit/test_service_verifyLogin.js b/services/sync/tests/unit/test_service_verifyLogin.js
+--- a/services/sync/tests/unit/test_service_verifyLogin.js
++++ b/services/sync/tests/unit/test_service_verifyLogin.js
+@@ -71,17 +71,17 @@
+     Identity.syncKey = "foo";
+     do_check_true(Service.verifyLogin());
+     do_check_eq(Status.service, STATUS_OK);
+     do_check_eq(Status.login, LOGIN_SUCCEEDED);
+ 
+     _("If verifyLogin() encounters a server error, it flips on the backoff flag and notifies observers on a 503 with Retry-After.");
+     Status.resetSync();
+     Identity.account = "janedoe";
+-    Service._updateCachedURLs();
++    Service.state._updateCachedValues();
+     do_check_false(Status.enforceBackoff);
+     let backoffInterval;
+     Svc.Obs.add("weave:service:backoff:interval", function observe(subject, data) {
+       Svc.Obs.remove("weave:service:backoff:interval", observe);
+       backoffInterval = subject;
+     });
+     do_check_false(Service.verifyLogin());
+     do_check_true(Status.enforceBackoff);
+diff --git a/services/sync/tests/unit/test_state.js b/services/sync/tests/unit/test_state.js
+new file mode 100644
+--- /dev/null
++++ b/services/sync/tests/unit/test_state.js
+@@ -0,0 +1,44 @@
++/* Any copyright is dedicated to the Public Domain.
++ * http://creativecommons.org/publicdomain/zero/1.0/ */
++
++Cu.import("resource://services-sync/config.js");
++Cu.import("resource://services-sync/constants.js");
++Cu.import("resource://services-sync/identity.js");
++
++function run_test() {
++  initTestLogging("Trace");
++  run_next_test();
++}
++
++add_test(function test_state_uris() {
++  _("Ensure that URIs have proper values.");
++
++  let settings = new GlobalSettings(PREFS_BRANCH, Identity);
++  let state = new GlobalState(settings);
++
++  _("URIs should be null by default.");
++  do_check_null(state.userStorageBaseURI);
++  do_check_null(state.infoCollectionsURI);
++  do_check_null(state.collectionsStorageURI);
++  do_check_null(state.metaglobalURI);
++  do_check_null(state.cryptoKeysURI);
++
++  _("URIs should still be null after defining a username but without a node.");
++  settings.username = "johndoe";
++  do_check_null(state.userStorageBaseURI);
++  do_check_null(state.infoCollectionsURI);
++  do_check_null(state.collectionsStorageURI);
++  do_check_null(state.metaglobalURI);
++  do_check_null(state.cryptoKeysURI);
++
++  _("Defining a storage node makes URIs appear.");
++  state.storageNodeURI = "http://node/";
++
++  do_check_eq(state.userStorageBaseURI, "http://node/1.1/johndoe/");
++  do_check_eq(state.infoCollectionsURI, "http://node/1.1/johndoe/info/collections");
++  do_check_eq(state.collectionsStorageURI, "http://node/1.1/johndoe/storage/");
++  do_check_eq(state.metaglobalURI, "http://node/1.1/johndoe/storage/meta/global");
++  do_check_eq(state.cryptoKeysURI, "http://node/1.1/johndoe/storage/crypto/keys");
++
++  run_next_test();
++});
+diff --git a/services/sync/tests/unit/test_syncengine.js b/services/sync/tests/unit/test_syncengine.js
+--- a/services/sync/tests/unit/test_syncengine.js
++++ b/services/sync/tests/unit/test_syncengine.js
+@@ -1,26 +1,25 @@
+ /* Any copyright is dedicated to the Public Domain.
+    http://creativecommons.org/publicdomain/zero/1.0/ */
+ 
+ Cu.import("resource://services-sync/engines.js");
+ Cu.import("resource://services-sync/service.js");
+ Cu.import("resource://services-sync/util.js");
+ 
+ function makeSteamEngine() {
+-  return new SyncEngine('Steam', Service);
++  return new SyncEngine("Steam", Service);
+ }
+ 
+ function test_url_attributes() {
+   _("SyncEngine url attributes");
+   let syncTesting = new SyncTestingInfrastructure();
+   Service.clusterURL = "https://cluster/";
+   let engine = makeSteamEngine();
+   try {
+-    do_check_eq(engine.storageURL, "https://cluster/1.1/foo/storage/");
+     do_check_eq(engine.engineURL, "https://cluster/1.1/foo/storage/steam");
+     do_check_eq(engine.metaURL, "https://cluster/1.1/foo/storage/meta/global");
+   } finally {
+     Svc.Prefs.resetBranch("");
+   }
+ }
+ 
+ function test_syncID() {
+diff --git a/services/sync/tests/unit/xpcshell.ini b/services/sync/tests/unit/xpcshell.ini
+--- a/services/sync/tests/unit/xpcshell.ini
++++ b/services/sync/tests/unit/xpcshell.ini
+@@ -39,16 +39,17 @@
+ 
+ # Generic Sync types.
+ [test_collection_inc_get.js]
+ [test_collections_recovery.js]
+ [test_identity_manager.js]
+ [test_keys.js]
+ [test_records_crypto.js]
+ [test_records_wbo.js]
++[test_state.js]
+ 
+ # Engine APIs.
+ [test_engine.js]
+ [test_engine_abort.js]
+ [test_enginemanager.js]
+ [test_syncengine.js]
+ [test_syncengine_sync.js]
+ # Bug 676978: test hangs on Android (see also testing/xpcshell/xpcshell.ini)

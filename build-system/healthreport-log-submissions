@@ -1,0 +1,151 @@
+# HG changeset patch
+# Parent 68a72e8f4b050c85ef3ce070fc72cf44de6c22a7
+# User Gregory Szorc <gps@mozilla.com>
+
+diff --git a/services/common/bagheeraclient.js b/services/common/bagheeraclient.js
+--- a/services/common/bagheeraclient.js
++++ b/services/common/bagheeraclient.js
+@@ -34,16 +34,27 @@
+ this.BagheeraClientRequestResult = function BagheeraClientRequestResult() {
+   this.transportSuccess = false;
+   this.serverSuccess = false;
+   this.request = null;
+ }
+ 
+ Object.freeze(BagheeraClientRequestResult.prototype);
+ 
++
++function BagheeraRequest(uri) {
++  RESTRequest.call(this, uri);
++}
++
++BagheeraRequest.prototype = Object.freeze({
++  __proto__: RESTRequest.prototype,
++
++  _logName: "Services.BagheeraRequest",
++});
++
+ /**
+  * Create a new Bagheera client instance.
+  *
+  * Each client is associated with a specific Bagheera HTTP URI endpoint.
+  *
+  * @param baseURI
+  *        (string) The base URI of the Bagheera HTTP endpoint.
+  */
+@@ -123,17 +134,17 @@
+     }
+ 
+     if (typeof(data) != "string") {
+       throw new Error("Unknown type for payload: " + typeof(data));
+     }
+ 
+     this._log.info("Uploading data to " + uri);
+ 
+-    let request = new RESTRequest(uri);
++    let request = new BagheeraRequest(uri);
+     request.loadFlags = this._loadFlags;
+     request.timeout = this.DEFAULT_TIMEOUT_MSEC;
+ 
+     if (deleteOldID) {
+       request.setHeader("X-Obsolete-Document", deleteOldID);
+     }
+ 
+     let deferred = Promise.defer();
+@@ -162,17 +173,17 @@
+    * @param id
+    *        (string) ID of document to delete.
+    *
+    * @return Promise<BagheeraClientRequestResult>
+    */
+   deleteDocument: function deleteDocument(namespace, id) {
+     let uri = this._submitURI(namespace, id);
+ 
+-    let request = new RESTRequest(uri);
++    let request = new BagheeraRequest(uri);
+     request.loadFlags = this._loadFlags;
+     request.timeout = this.DEFAULT_TIMEOUT_MSEC;
+ 
+     let result = new BagheeraClientRequestResult();
+     result.namespace = namespace;
+     result.id = id;
+     let deferred = Promise.defer();
+ 
+diff --git a/services/datareporting/DataReportingService.js b/services/datareporting/DataReportingService.js
+--- a/services/datareporting/DataReportingService.js
++++ b/services/datareporting/DataReportingService.js
+@@ -227,31 +227,52 @@
+ 
+     // How many times will we rewrite this code before rolling it up into a
+     // generic module? See also bug 451283.
+     const LOGGERS = [
+       "Services.DataReporting",
+       "Services.HealthReport",
+       "Services.Metrics",
+       "Services.BagheeraClient",
++      "Services.BagheeraRequest",
+       "Sqlite.Connection.healthreport",
+     ];
+ 
+     let loggingPrefs = new Preferences(HEALTHREPORT_LOGGING_BRANCH);
+     if (loggingPrefs.get("consoleEnabled", true)) {
+       let level = loggingPrefs.get("consoleLevel", "Warn");
+       let appender = new ns.Log4Moz.ConsoleAppender();
+       appender.level = ns.Log4Moz.Level[level] || ns.Log4Moz.Level.Warn;
+ 
+       for (let name of LOGGERS) {
+         let logger = ns.Log4Moz.repository.getLogger(name);
+         logger.addAppender(appender);
+       }
+     }
+ 
++    /*
++    if (loggingPrefs.get("submissionLogFile.enabled", false)) {
++      const SUBMISSION_LOGGERS = [
++        "Services.BagheeraClient",
++        "Services.BagheeraRequest",
++      ];
++
++      let level = loggingPrefs.get("submissionLogFile.level", "Info");
++      Cu.import("resource://gre/modules/FileUtils.jsm", ns);
++      let file = ns.FileUtils.getFile("ProfD", ["healthreport.log"]);
++      let appender = new ns.Log4Moz.FileAppender(file);
++      appender.level = ns.Log4Moz.Level[level] || ns.Log4Moz.Level.Info;
++
++      for (let name of SUBMISSION_LOGGERS) {
++        let logger = ns.Log4Moz.repository.getLogger(name);
++        logger.addAppender(appender);
++      }
++    }
++    */
++
+     // The reporter initializes in the background.
+     this._healthReporter = new ns.HealthReporter(HEALTHREPORT_BRANCH,
+                                                  this.policy,
+                                                  this.sessionRecorder);
+ 
+     // Record first run so subsequent service loads aren't as delayed.
+     this._prefs.set("service.firstRun", true);
+   },
+diff --git a/services/healthreport/healthreport-prefs.js b/services/healthreport/healthreport-prefs.js
+--- a/services/healthreport/healthreport-prefs.js
++++ b/services/healthreport/healthreport-prefs.js
+@@ -3,16 +3,18 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ pref("datareporting.healthreport.currentDaySubmissionFailureCount", 0);
+ pref("datareporting.healthreport.documentServerURI", "https://data.mozilla.com/");
+ pref("datareporting.healthreport.documentServerNamespace", "metrics");
+ pref("datareporting.healthreport.infoURL", "http://www.mozilla.org/legal/privacy/firefox.html#health-report");
+ pref("datareporting.healthreport.logging.consoleEnabled", true);
+ pref("datareporting.healthreport.logging.consoleLevel", "Warn");
++pref("datareporting.healthreport.logging.submissionLogFile.enabled", false);
++pref("datareporting.healthreport.logging.submissionLogFile.level", "Info");
+ pref("datareporting.healthreport.lastDataSubmissionFailureTime", "0");
+ pref("datareporting.healthreport.lastDataSubmissionRequestedTime", "0");
+ pref("datareporting.healthreport.lastDataSubmissionSuccessfulTime", "0");
+ pref("datareporting.healthreport.nextDataSubmissionTime", "0");
+ pref("datareporting.healthreport.pendingDeleteRemoteData", false);
+ 
+ // Health Report is enabled by default on all channels.
+ pref("datareporting.healthreport.uploadEnabled", true);

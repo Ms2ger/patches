@@ -1,0 +1,97 @@
+# HG changeset patch
+# Parent ef6a36bcd1d3ee5635463a55946119212a699b5d
+# User Gregory Szorc <gps@mozilla.com>
+
+diff --git a/services/sync/Makefile.in b/services/sync/Makefile.in
+--- a/services/sync/Makefile.in
++++ b/services/sync/Makefile.in
+@@ -23,16 +23,17 @@
+ SYNC_PP_PATH := $(FINAL_TARGET)/modules/services-sync
+ PP_TARGETS += SYNC_PP
+ 
+ # The set of core JavaScript modules for Sync. These are copied as-is.
+ sync_modules := \
+   addonsreconciler.js \
+   addonutils.js \
+   engines.js \
++  engine.js \
+   identity.js \
+   jpakeclient.js \
+   keys.js \
+   main.js \
+   notifications.js \
+   policies.js \
+   record.js \
+   repository.js \
+diff --git a/services/sync/modules/engine.js b/services/sync/modules/engine.js
+new file mode 100644
+--- /dev/null
++++ b/services/sync/modules/engine.js
+@@ -0,0 +1,29 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++const EXPORTED_SYMBOLS = [];
++
++const {utils: Cu} = Components;
++
++Cu.import("resource://services-common/log4moz.js");
++Cu.import("resource://services-sync/util.js");
++
++function EngineManager() {
++  this._log = Log4Moz.repository.getLogger("Sync.EngineManager");
++  this._log.level = Log4Moz.Level[Svc.Prefs.get("log.logger.enginemanager",
++                                                "Debug");
++}
++EngineManager.prototype = {
++
++};
++Object.freeze(EngineManager.prototype);
++
++function EngineSynchronizationStage(service) {
++  this.service = service;
++}
++EngineSynchronizationStage.prototype = {
++  sync: function sync(onComplete) {
++    this.onComplete = onComplete;
++  },
++};
+diff --git a/services/sync/modules/service.js b/services/sync/modules/service.js
+--- a/services/sync/modules/service.js
++++ b/services/sync/modules/service.js
+@@ -21,16 +21,17 @@
+ 
+ const LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S";
+ 
+ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ Cu.import("resource://services-sync/record.js");
+ Cu.import("resource://services-sync/constants.js");
+ Cu.import("resource://services-sync/engines.js");
+ Cu.import("resource://services-sync/engines/clients.js");
++Cu.import("resource://services-sync/engine.js");
+ Cu.import("resource://services-common/preferences.js");
+ Cu.import("resource://services-sync/identity.js");
+ Cu.import("resource://services-common/log4moz.js");
+ Cu.import("resource://services-sync/resource.js");
+ Cu.import("resource://services-sync/rest.js");
+ Cu.import("resource://services-sync/status.js");
+ Cu.import("resource://services-sync/policies.js");
+ Cu.import("resource://services-sync/util.js");
+diff --git a/services/sync/services-sync.js b/services/sync/services-sync.js
+--- a/services/sync/services-sync.js
++++ b/services/sync/services-sync.js
+@@ -65,12 +65,13 @@
+ pref("services.sync.log.logger.engine.clients", "Debug");
+ pref("services.sync.log.logger.engine.forms", "Debug");
+ pref("services.sync.log.logger.engine.history", "Debug");
+ pref("services.sync.log.logger.engine.passwords", "Debug");
+ pref("services.sync.log.logger.engine.prefs", "Debug");
+ pref("services.sync.log.logger.engine.tabs", "Debug");
+ pref("services.sync.log.logger.engine.addons", "Debug");
+ pref("services.sync.log.logger.engine.apps", "Debug");
++pref("services.sync.log.logger.enginemanager", "Debug");
+ pref("services.sync.log.logger.repositorysession", "Debug");
+ pref("services.sync.log.logger.crypto5middleware", "Debug");
+ pref("services.sync.log.logger.test.wborepositorysession", "Debug");
+ pref("services.sync.log.cryptoDebug", false);

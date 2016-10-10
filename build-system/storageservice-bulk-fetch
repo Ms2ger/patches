@@ -1,0 +1,615 @@
+# HG changeset patch
+# Parent fb232bb923f77e4f4f6a4684bfa60687973ce619
+# User Gregory Szorc <gps@mozilla.com>
+Bug 776763 - Implement streaming retrieval API for storage service client
+
+diff --git a/services/common/storageservice.js b/services/common/storageservice.js
+--- a/services/common/storageservice.js
++++ b/services/common/storageservice.js
+@@ -935,24 +935,23 @@
+  * By default, requests are issued in "streaming" mode. As the client receives
+  * data from the server, it will invoke the caller-supplied onBSORecord
+  * callback for each record as it is ready. When all records have been received,
+  * it will invoke onComplete as normal. To change this behavior, modify the
+  * "streaming" property before the request is dispatched.
+  */
+ function StorageCollectionGetRequest() {
+   StorageServiceRequest.call(this);
++
++  this._namedArgs = {};
++  this._streaming = true;
+ }
+ StorageCollectionGetRequest.prototype = {
+   __proto__: StorageServiceRequest.prototype,
+ 
+-  _namedArgs: {},
+-
+-  _streaming: true,
+-
+   /**
+    * Control whether streaming mode is in effect.
+    *
+    * Read the type documentation above for more details.
+    */
+   set streaming(value) {
+     this._streaming = !!value;
+   },
+@@ -1061,16 +1060,230 @@
+ 
+     for (let bso of items) {
+       this.handler.onBSORecord(this, bso);
+     }
+   },
+ };
+ 
+ /**
++ * Interface to obtaining an unbounded stream of BSOs.
++ *
++ * This requests abstracts away the details of request splitting and allows the
++ * caller to obtain a potentially unlimited stream of BSOs from the server.
++ *
++ * Behavior is similar to `StorageCollectionGetRequest`. When you create an
++ * instance, you first install a handler to process important events:
++ *
++ *   let request = client.getCollectionBatching("collection");
++ *   request.handler = {
++ *     onBSORecord: function onBSORecord(request, bso) { ... },
++ *     onFinish: function onFinish(error, request) { ... },
++ *   }
++ *
++ * This handler is similar but different to the one installed on
++ * `StorageServiceRequest`. `onBSORecord` works the same.
++ *
++ * Next, you define what to fetch. If you want to install filters, you set
++ * those appropriately first. Next, if you want to limit the set of fetched
++ * BSOs, you call `addID` for each ID you wan fetch. It is important you don't
++ * call `addID` until after other filers are set. If you adjust filters after
++ * calling `addID`, behavior is undefined.
++ *
++ * When you are done defining what to fetch, call `finish`. When all requests
++ * are finished, the `onFinish` callback supplied in the handler will be
++ * invoked.
++ *
++ * If you do not define what to fetch, the behavior is to fetch every item in
++ * the collection.
++ *
++ * To ensure consistency across paging of results that take multiple requests
++ * to obtain, streaming requests are automatically made conditional. If the
++ * server's collection is mutated between requests, a
++ * `StorageServiceRequestError` will be raised with the `serverModified` field
++ * set.
++ *
++ * Only subsequent requests are made conditional automatically. To make the
++ * initial request conditional, set `serverModifiedVersion` to the last known
++ * modification version of the server (e.g. the collection's last changed time).
++ *
++ * Instances of this type should never be instantiated directly by callers.
++ * Instead, obtain an instance through `StorageServiceClient`.
++ *
++ * @param client
++ *        (StorageServiceClient) Client request is associated with.
++ * @param collection
++ *        (string) Collection to operate on.
++ */
++function StorageCollectionBatchedGetRequest(client, collection) {
++  this.client                = client;
++  this.collection            = collection;
++  this.handler               = null;
++  this.serverModifiedVersion = null;
++
++  this._log             = client._log;
++  this._ids             = null;
++  this._full            = true;
++  this._namedArgs       = {};
++  this._requestInFlight = false;
++  this._waitingOnIDs    = false;
++  this._finished        = false;
++}
++StorageCollectionBatchedGetRequest.prototype = {
++  set full(value) {
++    this._full = !!value;
++  },
++
++  set older(value) {
++    this._namedArgs.older = value;
++  },
++
++  set newer(value) {
++    this._namedArgs.newer = value;
++  },
++
++  set index_above(value) {
++    this._namedArgs.index_above = value;
++  },
++
++  set index_below(value) {
++    this._namedArgs.index_below = value;
++  },
++
++  set sortOldest(value) {
++    this._namedArgs.sort = "oldest";
++  },
++
++  set sortNewest(value) {
++    this._namedArgs.sort = "newest";
++  },
++
++  set sortIndex(value) {
++    this._namedArgs.sort = "index";
++  },
++
++  addID: function addID(id) {
++    if (!this._ids) {
++      this._ids = [];
++    }
++
++    this._ids.push(id);
++  },
++
++  finish: function finish() {
++    if (this._finished) {
++      throw new Error("Request has already been finished!");
++    }
++
++    this._finished = true;
++
++    this._sendRequest();
++  },
++
++  _sendRequest: function _sendRequest() {
++    if (this._requestInFlight) {
++      return;
++    }
++
++    let request = this.client.getCollection(this.collection);
++
++    // We may mutate so shallow copy is needed.
++    for (let [k,v] in Iterator(this._namedArgs)) {
++      request._namedArgs[k] = v;
++    }
++
++    request.full = true;
++
++    if (this._ids) {
++      let thisBatch = this._ids.splice(0, this.client.REQUEST_BSO_FETCH_LIMIT);
++      request.ids = thisBatch;
++      this._log.info("Issuing request for batch of length " + thisBatch.length);
++    } else {
++      this._log.info("Issuing initial request to discover IDs.");
++      this._waitingOnIDs = true;
++      request.full = false;
++    }
++
++    if (this.serverModifiedVersion) {
++      request.serverModifiedVersion = this.serverModifiedVersion;
++    }
++
++    request.handler = this;
++    request.dispatch();
++  },
++
++  // Handler interface for `StorageServiceRequest`.
++  onBSORecord: function onBSORecord(request, bso) {
++    // If this is the special first request that fetches IDs, record IDs to be
++    // fetched by a subsequent "full" request.
++    if (this._waitingOnIDs) {
++      // This looks a lot like `addID` but we don't want to incur the potential
++      // side-effect of issuing a request.
++      if (!this._ids) {
++        this._ids = [];
++      }
++
++      this._ids.push(bso);
++      return;
++    }
++
++    try {
++      this.handler.onBSORecord(this, bso);
++    } catch (ex) {
++      this._log.warn("Exception in onBSORecord handler: " +
++                     CommonUtils.exceptionStr(ex));
++    }
++  },
++
++  onComplete: function onComplete(error, request) {
++    this._requestInFlight = false;
++
++    let serverVersion = request.response.headers["x-last-modified"];
++    if (!serverVersion) {
++      this._finished = true;
++      this.handler.onFinish(new Error("No X-Last-Modified response header!"),
++                            this);
++      return;
++    }
++
++    this.locallyModifiedVersion = serverVersion;
++
++    if (this._waitingOnIDs) {
++      this._waitingOnIDs = false;
++
++      if (error) {
++        this._finished = true;
++        this.handler.onFinish(error, this);
++        return;
++      }
++
++      // Proceed to fetch the payloads.
++      this._sendRequest();
++      return;
++    }
++
++    // This is a payload request.
++    if (error) {
++      this._finished = true;
++      this.handler.onFinish(error, this);
++      return;
++    }
++
++    if (this._ids.length) {
++      this._sendRequest();
++      return;
++    }
++
++    this._finished = true;
++    this.handler.onFinish(null, this);
++  },
++};
++Object.freeze(StorageCollectionBatchedGetRequest.prototype);
++
++/**
+  * Represents a request that sets data in a collection
+  *
+  * Instances of this type are returned by StorageServiceClient.setBSOs().
+  */
+ function StorageCollectionSetRequest() {
+   StorageServiceRequest.call(this);
+ 
+   this.size = 0;
+@@ -1557,16 +1770,23 @@
+ 
+   /**
+    * Maximum number of BSOs that can be deleted in a single DELETE.
+    *
+    * TODO this should come from the server. See bug 769759.
+    */
+   REQUEST_BSO_DELETE_LIMIT: 100,
+ 
++  /**
++   * Maximum number of BSOs allowed in fetches.
++   *
++   * TODO this should come from the server somehow. See bug 769759.
++   */
++  REQUEST_BSO_FETCH_LIMIT: 100,
++
+   _baseURI: null,
+   _log: null,
+ 
+   _listeners: null,
+ 
+   //----------------------------
+   // Event Listener Management |
+   //----------------------------
+@@ -1813,16 +2033,37 @@
+       allowIfModified: true,
+       requestType:     StorageCollectionGetRequest
+     });
+ 
+     return request;
+   },
+ 
+   /**
++   * Obtain an unbound stream of data from a collection.
++   *
++   * This facilitates bulk retrieval of BSOs from a specific collection. It is
++   * similar to `getCollection` in that regard. The big difference is that
++   * API intelligently allows multiple requests to be issued transparently. For
++   * example, you can obtain every BSO in a collection without having to
++   * implement the paging logic yourself.
++   *
++   * The behavior is similar to `getCollection` and
++   * `StorageCollectionGetRequest`. You obtain a request instance, configure it
++   * to do what you want, register an `onBSORecord` handler and dispatch
++   * it.
++   *
++   * @param collection
++   *        (string) Collection to fetch data from.
++   */
++  getCollectionBatching: function getCollectionBatching(collection) {
++    return new StorageCollectionBatchedGetRequest(this, collection);
++  },
++
++  /**
+    * Fetch a single Basic Storage Object (BSO).
+    *
+    * On success, the BSO may be available in the resultObj property of the
+    * request as a BasicStorageObject instance.
+    *
+    * The request can be made conditional by setting `locallyModifiedVersion`
+    * on the returned request instance.*
+    *
+diff --git a/services/common/tests/unit/test_storageservice_client.js b/services/common/tests/unit/test_storageservice_client.js
+--- a/services/common/tests/unit/test_storageservice_client.js
++++ b/services/common/tests/unit/test_storageservice_client.js
+@@ -1,12 +1,14 @@
+ /* Any copyright is dedicated to the Public Domain.
+  * http://creativecommons.org/publicdomain/zero/1.0/ */
+ 
+ Cu.import("resource://services-common/storageservice.js");
++
++Cu.import("resource://testing-common/httpd.js");
+ Cu.import("resource://testing-common/services-common/storageserver.js");
+ 
+ const BASE_URI = "http://localhost:8080/2.0";
+ 
+ function run_test() {
+   initTestLogging("Trace");
+ 
+   run_next_test();
+@@ -1208,34 +1210,34 @@
+     do_check_eq(requestCount, 2);
+     do_check_eq(request.successfulIDs.length, 100);
+     do_check_eq(Object.keys(request.failures).length, 0);
+ 
+     server.stop(run_next_test);
+   });
+ });
+ 
+-function getBatchedDeleteData(collection="testcoll") {
++function getPopulatedData(collection="testcoll", count=1000) {
+   let [server, client, username] = getServerAndClient();
+ 
+   let serverBSOs = {};
+-  for (let i = 1000; i; i -= 1) {
++  for (let i = 1; i <= count; i++) {
+     serverBSOs["bso" + i] = new ServerBSO("bso" + i, "payload" + i);
+   }
+ 
+   let user = server.user(username);
+   user.createCollection(collection, serverBSOs);
+ 
+   return [server, client, username, collection];
+ }
+ 
+ add_test(function test_batched_delete_single() {
+   _("Ensure batched delete with single request works.");
+ 
+-  let [server, client, username, collection] = getBatchedDeleteData();
++  let [server, client, username, collection] = getPopulatedData();
+ 
+   let requestCount = 0;
+   server.callback.onRequest = function onRequest() {
+     requestCount += 1;
+   }
+ 
+   let request = client.deleteBSOsBatching(collection);
+   for (let i = 1; i < 51; i += 1) {
+@@ -1253,17 +1255,17 @@
+ 
+     server.stop(run_next_test);
+   });
+ });
+ 
+ add_test(function test_batched_delete_multiple() {
+   _("Ensure batched delete splits requests properly.");
+ 
+-  let [server, client, username, collection] = getBatchedDeleteData();
++  let [server, client, username, collection] = getPopulatedData();
+ 
+   let requestCount = 0;
+   server.callback.onRequest = function onRequest() {
+     requestCount += 1;
+   }
+ 
+   let request = client.deleteBSOsBatching(collection);
+   for (let i = 1; i < 251; i += 1) {
+@@ -1281,17 +1283,17 @@
+ 
+     server.stop(run_next_test);
+   });
+ });
+ 
+ add_test(function test_batched_delete_conditional_success() {
+   _("Ensure conditional batched delete all work.");
+ 
+-  let [server, client, username, collection] = getBatchedDeleteData();
++  let [server, client, username, collection] = getPopulatedData();
+ 
+   let requestCount = 0;
+   server.callback.onRequest = function onRequest() {
+     requestCount++;
+   }
+ 
+   let serverCollection = server.user(username).collection(collection);
+   let initialTimestamp = serverCollection.timestamp;
+@@ -1313,17 +1315,17 @@
+   });
+ });
+ 
+ add_test(function test_batched_delete_conditional_initial_failure() {
+   _("Ensure conditional batched delete failure on initial request works.");
+ 
+   // The client needs to issue multiple requests but the first one was
+   // rejected. The client should only issue that initial request.
+-  let [server, client, username, collection] = getBatchedDeleteData();
++  let [server, client, username, collection] = getPopulatedData();
+ 
+   let requestCount = 0;
+   server.callback.onRequest = function onRequest() {
+     requestCount++;
+   }
+ 
+   let serverCollection = server.user(username).collection(collection);
+   let request = client.deleteBSOsBatching(collection);
+@@ -1339,17 +1341,17 @@
+ 
+     server.stop(run_next_test);
+   });
+ });
+ 
+ add_test(function test_batched_delete_conditional_subsequent_failure() {
+   _("Ensure conditional batched delete failure on non-initial request.");
+ 
+-  let [server, client, username, collection] = getBatchedDeleteData();
++  let [server, client, username, collection] = getPopulatedData();
+ 
+   let serverCollection = server.user(username).collection(collection);
+ 
+   let requestCount = 0;
+   server.callback.onRequest = function onRequest() {
+     requestCount++;
+ 
+     if (requestCount <= 1) {
+@@ -1370,8 +1372,153 @@
+ 
+   request.finish(function onFinish(request) {
+     do_check_eq(requestCount, 2);
+     do_check_eq(request.errors.length, 1);
+ 
+     server.stop(run_next_test);
+   });
+ });
++
++add_test(function test_batched_fetch_all_simple() {
++  _("Ensure batched fetch for all items in a collection works.");
++
++  let [server, client, username, collection] = getPopulatedData("testcoll", 50);
++  let serverCollection = server.user(username).collection(collection);
++
++  let bsos = [];
++
++  let request = client.getCollectionBatching(collection);
++  request.handler = {
++    onBSORecord: function onBSORecord(request, bso) {
++      bsos.push(bso);
++    },
++
++    onFinish: function onFinish(error, request) {
++      do_check_eq(bsos.length, serverCollection.count());
++
++      // 1 for initial IDs request. 1 for actual payload.
++      // This assumes batch size of 100.
++      do_check_eq(server.requestCount, 2);
++
++      do_check_eq(bsos[0].id, "bso1");
++
++      server.stop(run_next_test);
++    },
++  };
++  request.finish();
++});
++
++add_test(function test_batched_fetch_all_multiple() {
++  _("Ensure multiple requests to batched fetch for all items works.");
++
++  const COUNT = 250;
++  let [server, client, username, collection] = getPopulatedData("testcoll",
++                                                                COUNT);
++  let serverCollection = server.user(username).collection(collection);
++  let bsos = [];
++
++  let request = client.getCollectionBatching(collection);
++  request.handler = {
++    onBSORecord: function onBSORecord(request, bso) {
++      bsos.push(bso);
++    },
++
++    onFinish: function onFinish(error, request) {
++      do_check_eq(bsos.length, COUNT);
++
++      // 1 to fetch ID2 + 2 x 100 + 1 x 50.
++      do_check_eq(server.requestCount, 4);
++
++      for (let i = 1; i <= serverCollection.count(); i++) {
++        do_check_eq(bsos[i-1].id, "bso" + i);
++      }
++
++      server.stop(run_next_test);
++    },
++  };
++  request.finish();
++});
++
++add_test(function test_batched_fetch_initial_failure() {
++  _("Ensure failure on initial batch fetch request handled gracefully.");
++
++  let [server, client, username, collection] = getPopulatedData();
++
++  server.callback.onRequest = function onRequest() {
++    throw new HttpError(500, "Internal Server Error");
++  };
++
++  let request = client.getCollectionBatching(collection);
++  request.handler = {
++    onBSORecord: function onBSORecord() {
++      do_check_true(false);
++    },
++
++    onFinish: function onFinish(error, request) {
++      do_check_eq(server.requestCount, 1);
++      do_check_true(error instanceof StorageServiceRequestError);
++
++      server.stop(run_next_test);
++    },
++  };
++  request.finish();
++});
++
++add_test(function test_batched_fetch_second_failure() {
++  _("Ensure failure on 2nd request during batch fetch is handled properly.");
++
++  let [server, client, username, collection] = getPopulatedData();
++
++  server.callback.onRequest = function onRequest() {
++    if (server.requestCount != 2) {
++      return;
++    }
++
++    throw new HttpError(500, "Internal Server Error");
++  };
++
++  let request = client.getCollectionBatching(collection);
++  request.handler = {
++    onBSORecord: function onBSORecord() {
++      do_check_true(false);
++    },
++
++    onFinish: function onFinish(error, request) {
++      do_check_eq(server.requestCount, 2);
++      do_check_true(error instanceof StorageServiceRequestError);
++
++      server.stop(run_next_test);
++    },
++  };
++  request.finish();
++});
++
++add_test(function test_batched_fetch_partial_failure() {
++  _("Ensure failure after some BSOs are processed is handled properly.");
++
++  let [server, client, username, collection] = getPopulatedData();
++
++  server.callback.onRequest = function onRequest() {
++    if (server.requestCount != 3) {
++      return;
++    }
++
++    throw new HttpError(500, "Internal Server Error");
++  };
++
++  let bsoCount = 0;
++  let request = client.getCollectionBatching(collection);
++  request.handler = {
++    onBSORecord: function onBSORecord(request, bso) {
++      bsoCount++;
++    },
++
++    onFinish: function onFinish(error, request) {
++      do_check_eq(server.requestCount, 3);
++      do_check_eq(bsoCount, client.REQUEST_BSO_FETCH_LIMIT);
++      do_check_true(error instanceof StorageServiceRequestError);
++
++      server.stop(run_next_test);
++    },
++  };
++  request.finish();
++});

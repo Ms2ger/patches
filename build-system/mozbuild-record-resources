@@ -1,0 +1,219 @@
+# HG changeset patch
+# Parent c3dfe637819e56c19746401aa7fa9bd934094edc
+# User Gregory Szorc <gps@mozilla.com>
+Bug XXXXXX - Use resource monitor to record system state during building
+
+diff --git a/python/mozbuild/mozbuild/building/treebuilder.py b/python/mozbuild/mozbuild/building/treebuilder.py
+--- a/python/mozbuild/mozbuild/building/treebuilder.py
++++ b/python/mozbuild/mozbuild/building/treebuilder.py
+@@ -3,16 +3,18 @@
+ # You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ import logging
+ import os.path
+ import re
+ import time
+ import traceback
+ 
++from contextlib import contextmanager
++
+ from mozbuild.base import Base
+ from mozbuild.compilation.warnings import WarningsCollector
+ from mozbuild.compilation.warnings import WarningsDatabase
+ from mozbuild.configuration.configure import Configure
+ 
+ RE_TIER_DECLARE = re.compile(r'tier_(?P<tier>[a-z]+):\s(?P<directories>.*)')
+ RE_TIER_ACTION = re.compile(r'(?P<action>[a-z]+)_tier_(?P<tier>[a-z_]+)')
+ 
+@@ -24,17 +26,19 @@
+ 
+ 
+ class BuildInvocation(object):
+     """Holds state relevant to an individual build invocation.
+ 
+     Currently, functionality is limited to tracking tier progression.
+     Functionality can be expanded to cover all kinds of reporting, as needed.
+     """
+-    def __init__(self):
++    def __init__(self, monitor):
++        self.monitor = monitor
++
+         self.tier = None
+         self.action = None
+         self.directories = {}
+ 
+         self._on_update = []
+ 
+     def add_listener(self, listener):
+         """Registers a listener for this build instance.
+@@ -45,50 +49,62 @@
+         build -- This BuildInvocation instance.
+         action -- Single word str describing the action being performed.
+         directory -- If a directory state change caused this update, this will
+             be the str of the directory that changed.
+         """
+         self._on_update.append(listener)
+ 
+     def update_tier(self, tier):
++        if self.tier and tier != self.tier:
++            self.monitor.finish_phase('tier_%s' % self.tier)
++
+         self.tier = tier
+         self.action = 'default'
+         self.directories = {}
+ 
+         self._call_listeners(action='new_tier')
++        self.monitor.begin_phase('tier_%s' % tier)
+ 
+     def update_action(self, tier, action):
+         assert tier == self.tier
+ 
++        if self.action and self.action != 'default':
++            self.monitor.finish_phase('tier_%s_%s' % (self.tier, self.action))
++
+         self.action = action
+ 
+         for k in self.directories.iterkeys():
+             self.directories[k] = {'start_time': None, 'finish_time': None}
+ 
+         self._call_listeners(action='new_action')
++        self.monitor.begin_phase('tier_%s_%s' % (self.tier, action))
+ 
+     def register_directory(self, directory):
+         self.directories[directory] = {'start_time': None, 'finish_time': None}
+ 
+     def set_directory_in_progress(self, directory):
+         if not directory in self.directories:
+             return
+ 
+         self.directories[directory]['start_time'] = time.time()
+ 
+         self._call_listeners(action='directory_start', directory=directory)
++        self.monitor.begin_phase('directory_%s_%s_%s' % (self.tier,
++            self.action, directory))
+ 
+     def set_directory_finished(self, directory):
+         if not directory in self.directories:
+             return
+ 
+         self.directories[directory]['finish_time'] = time.time()
+ 
+         self._call_listeners(action='directory_finish', directory=directory)
++        self.monitor.finish_phase('directory_%s_%s_%s' % (self.tier,
++            self.action, directory))
+ 
+     def _call_listeners(self, action=None, directory=None):
+         for listener in self._on_update:
+             listener(build=self, action=action, directory=directory)
+ 
+ 
+ class TreeBuilder(Base):
+     """Provides a high-level interface for building a tree.
+@@ -112,17 +128,86 @@
+                     0 for queued, 1 for in progress, and 2 for finished.
+         """
+ 
+         self._ensure_objdir_exists()
+ 
+         c = self._spawn(Configure)
+         c.ensure_configure()
+ 
+-        build = BuildInvocation()
++        # We can't import and run the resource monitor until after configure
++        # because it requires psutil and psutil (likely) isn't available until
++        # after the virtualenv is populated in configure.
++        from mozbuild.resourcemonitor import SystemResourceMonitor
++        resource_monitor = SystemResourceMonitor()
++        resource_monitor.start()
++
++        try:
++            self._build(resource_monitor, on_update)
++        finally:
++            resource_monitor.stop()
++
++            def record_time(name, start, end):
++                self.log(logging.INFO, 'phase_time', {
++                    'name': name,
++                    'start': start,
++                    'end': end,
++                    'elapsed': end - start,
++                }, '{name} Time - {elapsed}s')
++
++            def record_cpu(name, cpu):
++                if cpu is None:
++                    return
++
++                self.log(logging.INFO, 'cpu_usage', {
++                    'name': name,
++                    'cores': cpu,
++                    'total': sum(cpu) / len(cpu),
++                }, '{name} CPU - Average CPU Usage: {total}%')
++
++            def record_io(name, io):
++                if io is None:
++                    return
++
++                self.log(logging.INFO, 'io_usage', {
++                    'name': name,
++                    'read_count': io.read_count,
++                    'write_count': io.write_count,
++                    'read_bytes': io.read_bytes,
++                    'write_bytes': io.write_bytes,
++                    'read_time': io.read_time,
++                    'write_time': io.write_time,
++                }, '{name} I/O - Reads: {read_count}; Writes: {write_count}; '
++                   'Read Bytes: {read_bytes}; Write Bytes: {write_bytes}; '
++                   'Read Time (ms): {read_time}; Write time (ms): {write_time}')
++
++            if resource_monitor.end_time is None:
++                return
++
++            record_time('total', resource_monitor.start_time,
++                resource_monitor.end_time)
++            record_cpu('total', resource_monitor.aggregate_cpu())
++            record_io('total', resource_monitor.aggregate_io())
++
++            for phase, (start, end) in resource_monitor.phases.iteritems():
++                if start is None or end is None:
++                    continue
++
++                record_time(phase, start, end)
++                record_cpu(phase, resource_monitor.aggregate_cpu(start, end))
++                record_io(phase, resource_monitor.aggregate_io(start, end))
++
++    def _build(self, monitor, on_update):
++        @contextmanager
++        def phase(phase):
++            monitor.begin_phase(phase)
++            yield
++            monitor.finish_phase(phase)
++
++        build = BuildInvocation(monitor)
+         if on_update:
+             build.add_listener(on_update)
+ 
+         warnings_path = self._get_state_filename('warnings.json')
+         warnings_database = WarningsDatabase()
+ 
+         if os.path.exists(warnings_path):
+             warnings_database.load_from_file(warnings_path)
+@@ -188,17 +273,18 @@
+                     self.log(logging.INFO, 'compiler_warning', warning,
+                         'Warning: {flag} in {filename}: {message}')
+ 
+             except:
+                 self.log(logging.WARNING, 'nonfatal_exception',
+                         {'exc': traceback.format_exc()},
+                         '{exc}')
+ 
+-        self._run_make(line_handler=handle_line, log=False)
++        with phase('build'):
++            self._run_make(line_handler=handle_line, log=False)
+ 
+         self.log(logging.WARNING, 'warning_summary',
+                 {'count': len(warnings_collector.database)},
+                 '{count} compiler warnings')
+ 
+         warnings_database.save_to_file(warnings_path)
+ 
+     def build_tier(self, tier=None, action=None):

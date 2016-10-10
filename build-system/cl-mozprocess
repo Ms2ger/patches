@@ -1,0 +1,143 @@
+# HG changeset patch
+# Parent aa5e3b4458103dbdc95ecc0b9e4d4ac1ee1a0457
+# User Gregory Szorc <gps@mozilla.com>
+Bug 799189 - Use mozprocess in cl.py
+
+diff --git a/build/cl.py b/build/cl.py
+--- a/build/cl.py
++++ b/build/cl.py
+@@ -1,16 +1,17 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+-import os, os.path
+-import subprocess
++import os
+ import sys
+ 
++from mozprocess.processhandler import ProcessHandlerMixin
++
+ CL_INCLUDES_PREFIX = os.environ.get("CL_INCLUDES_PREFIX", "Note: including file:")
+ 
+ def InvokeClWithDependencyGeneration(cmdline):
+     target = ""
+     # Figure out what the target is
+     for arg in cmdline:
+         if arg.startswith("-Fo"):
+             target = arg[3:]
+@@ -18,34 +19,42 @@
+ 
+     if target == None:
+         print >>sys.stderr, "No target set" and sys.exit(1)
+ 
+     # The deps target lives here
+     depstarget = os.path.basename(target) + ".pp"
+ 
+     cmdline += ['-showIncludes']
+-    cl = subprocess.Popen(cmdline, stdout=subprocess.PIPE)
+ 
+     deps = set()
+-    for line in cl.stdout:
++
++    def on_line(line):
+         # cl -showIncludes prefixes every header with "Note: including file:"
+         # and an indentation corresponding to the depth (which we don't need)
+         if line.startswith(CL_INCLUDES_PREFIX):
+             dep = line[len(CL_INCLUDES_PREFIX):].strip()
+             # We can't handle pathes with spaces properly in mddepend.pl, but
+             # we can assume that anything in a path with spaces is a system
+             # header and throw it away.
+             if dep.find(' ') == -1:
+                 deps.add(dep)
+         else:
+             sys.stdout.write(line) # Make sure we preserve the relevant output
+                                    # from cl
+ 
+-    ret = cl.wait()
++    # We need to ignore children because MSVC can fire up a background process
++    # during compilation. This process is cleaned up on its own. If we kill it,
++    # we can run into weird compilation issues.
++    p = ProcessHandlerMixin(cmdline, processOutputLine=on_line,
++        ignore_children=True)
++    p.run()
++    p.processOutput()
++    ret = p.wait()
++
+     if ret != 0 or target == "":
+         sys.exit(ret)
+ 
+     depsdir = os.path.normpath(os.path.join(os.curdir, ".deps"))
+     depstarget = os.path.join(depsdir, depstarget)
+     if not os.path.isdir(depsdir):
+         try:
+             os.makedirs(depsdir)
+diff --git a/js/src/build/cl.py b/js/src/build/cl.py
+--- a/js/src/build/cl.py
++++ b/js/src/build/cl.py
+@@ -1,16 +1,17 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+-import os, os.path
+-import subprocess
++import os
+ import sys
+ 
++from mozprocess.processhandler import ProcessHandlerMixin
++
+ CL_INCLUDES_PREFIX = os.environ.get("CL_INCLUDES_PREFIX", "Note: including file:")
+ 
+ def InvokeClWithDependencyGeneration(cmdline):
+     target = ""
+     # Figure out what the target is
+     for arg in cmdline:
+         if arg.startswith("-Fo"):
+             target = arg[3:]
+@@ -18,34 +19,42 @@
+ 
+     if target == None:
+         print >>sys.stderr, "No target set" and sys.exit(1)
+ 
+     # The deps target lives here
+     depstarget = os.path.basename(target) + ".pp"
+ 
+     cmdline += ['-showIncludes']
+-    cl = subprocess.Popen(cmdline, stdout=subprocess.PIPE)
+ 
+     deps = set()
+-    for line in cl.stdout:
++
++    def on_line(line):
+         # cl -showIncludes prefixes every header with "Note: including file:"
+         # and an indentation corresponding to the depth (which we don't need)
+         if line.startswith(CL_INCLUDES_PREFIX):
+             dep = line[len(CL_INCLUDES_PREFIX):].strip()
+             # We can't handle pathes with spaces properly in mddepend.pl, but
+             # we can assume that anything in a path with spaces is a system
+             # header and throw it away.
+             if dep.find(' ') == -1:
+                 deps.add(dep)
+         else:
+             sys.stdout.write(line) # Make sure we preserve the relevant output
+                                    # from cl
+ 
+-    ret = cl.wait()
++    # We need to ignore children because MSVC can fire up a background process
++    # during compilation. This process is cleaned up on its own. If we kill it,
++    # we can run into weird compilation issues.
++    p = ProcessHandlerMixin(cmdline, processOutputLine=on_line,
++        ignore_children=True)
++    p.run()
++    p.processOutput()
++    ret = p.wait()
++
+     if ret != 0 or target == "":
+         sys.exit(ret)
+ 
+     depsdir = os.path.normpath(os.path.join(os.curdir, ".deps"))
+     depstarget = os.path.join(depsdir, depstarget)
+     if not os.path.isdir(depsdir):
+         try:
+             os.makedirs(depsdir)

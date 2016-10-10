@@ -1,0 +1,83 @@
+# HG changeset patch
+# Parent 15debfd7c3469525e67b40e9ab826dc59caabce3
+# User Gregory Szorc <gps@mozilla.com>
+
+diff --git a/python/mozbuild/mozbuild/building/treebuilder.py b/python/mozbuild/mozbuild/building/treebuilder.py
+--- a/python/mozbuild/mozbuild/building/treebuilder.py
++++ b/python/mozbuild/mozbuild/building/treebuilder.py
+@@ -1,14 +1,14 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ # You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ import logging
+-import os.path
++import os
+ import re
+ import time
+ import traceback
+ 
+ from contextlib import contextmanager
+ 
+ from mozbuild.base import Base
+ from mozbuild.compilation.warnings import WarningsCollector
+@@ -125,31 +125,39 @@
+                 action - The tier action the build is in.
+                 directories - State of directories in the tier. Dict of str to
+                     int. Keys are relative paths in build system. Values are
+                     0 for queued, 1 for in progress, and 2 for finished.
+         """
+ 
+         self._ensure_objdir_exists()
+ 
++        ccache = self._find_executable_in_path('ccache')
++        self._run_command(['ccache', '-C', '-z'], log_name='ccache')
++
++        if 'CCACHE_COMPRESS' in os.environ:
++            del os.environ['CCACHE_COMPRESS']
++
+         c = self._spawn(Configure)
+         c.ensure_configure()
+ 
+         # We can't import and run the resource monitor until after configure
+         # because it requires psutil and psutil (likely) isn't available until
+         # after the virtualenv is populated in configure.
+         from mozbuild.resourcemonitor import SystemResourceMonitor
+         resource_monitor = SystemResourceMonitor()
+         resource_monitor.start()
+ 
+         try:
+             self._build(resource_monitor, on_update)
+         finally:
+             resource_monitor.stop()
+ 
++            self._run_command(['ccache', '-s'], log_name='ccache_stats')
++
+             def record_time(name, start, end):
+                 self.log(logging.INFO, 'phase_time', {
+                     'name': name,
+                     'start': start,
+                     'end': end,
+                     'elapsed': end - start,
+                 }, '{name} Time - {elapsed}s')
+ 
+@@ -190,16 +198,19 @@
+             for phase, (start, end) in resource_monitor.phases.iteritems():
+                 if start is None or end is None:
+                     continue
+ 
+                 record_time(phase, start, end)
+                 record_cpu(phase, resource_monitor.aggregate_cpu(start, end))
+                 record_io(phase, resource_monitor.aggregate_io(start, end))
+ 
++            for usage in resource_monitor.range_usage():
++                print usage
++
+     def _build(self, monitor, on_update):
+         @contextmanager
+         def phase(phase):
+             monitor.begin_phase(phase)
+             yield
+             monitor.finish_phase(phase)
+ 
+         build = BuildInvocation(monitor)

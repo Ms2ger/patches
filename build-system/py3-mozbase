@@ -1,0 +1,1518 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/testing/mozbase/manifestparser/manifestparser/__init__.py b/testing/mozbase/manifestparser/manifestparser/__init__.py
+--- a/testing/mozbase/manifestparser/manifestparser/__init__.py
++++ b/testing/mozbase/manifestparser/manifestparser/__init__.py
+@@ -1,5 +1,5 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ # You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+-from manifestparser import *
++from .manifestparser import *
+diff --git a/testing/mozbase/manifestparser/manifestparser/manifestparser.py b/testing/mozbase/manifestparser/manifestparser/manifestparser.py
+--- a/testing/mozbase/manifestparser/manifestparser/manifestparser.py
++++ b/testing/mozbase/manifestparser/manifestparser/manifestparser.py
+@@ -3,32 +3,41 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ # You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ """
+ Mozilla universal manifest parser
+ """
+ 
++from __future__ import print_function
++
+ __all__ = ['read_ini', # .ini reader
+            'ManifestParser', 'TestManifest', 'convert', # manifest handling
+            'parse', 'ParseError', 'ExpressionParser'] # conditional expression parser
+ 
+ import json
+ import fnmatch
+ import os
+ import re
+ import shutil
+ import sys
+ 
+ from optparse import OptionParser
+-from StringIO import StringIO
++
++try:
++    from StringIO import StringIO
++except ImportError: # 3+
++    from io import BytesIO as StringIO
+ 
+ relpath = os.path.relpath
+-string = (basestring,)
++try:
++    string = (basestring,)
++except:
++    string = (str,)
+ 
+ 
+ # expr.py
+ # from:
+ # http://k0s.org/mozilla/hg/expressionparser
+ # http://hg.mozilla.org/users/tmielczarek_mozilla.com/expressionparser
+ 
+ # Implements a top-down parser/evaluator for simple boolean expressions.
+@@ -222,17 +231,17 @@
+             return self.valuemapping.get(ident, None)
+ 
+     def advance(self, expected):
+         """
+         Assert that the next token is an instance of |expected|, and advance
+         to the next token.
+         """
+         if not isinstance(self.token, expected):
+-            raise Exception, "Unexpected token!"
++            raise Exception("Unexpected token!")
+         self.token = self.iter.next()
+ 
+     def expression(self, rbp=0):
+         """
+         Parse and return the value of an expression until a token with
+         right binding power greater than rbp is encountered.
+         """
+         t = self.token
+@@ -301,17 +310,17 @@
+     - strict : whether to be strict about parsing
+     """
+ 
+     # variables
+     variables = variables or {}
+     sections = []
+     key = value = None
+     section_names = set()
+-    if isinstance(fp, basestring):
++    if isinstance(fp, str):
+         fp = file(fp)
+ 
+     # read the lines
+     for (linenum, line) in enumerate(fp.readlines(), start=1):
+ 
+         stripped = line.strip()
+ 
+         # ignore blank lines
+@@ -492,17 +501,17 @@
+                 include_file = read_file('include:')
+                 if include_file:
+                     include_defaults = data.copy()
+                     self._read(root, include_file, include_defaults, parentmanifest=filename)
+                 continue
+ 
+             # otherwise an item
+             # apply ancestor defaults, while maintaining current file priority
+-            data = dict(self._ancestor_defaults.items() + data.items())
++            data = dict(list(self._ancestor_defaults.items()) + list(data.items()))
+ 
+             test = data
+             test['name'] = section
+ 
+             # Will be None if the manifest being read is a file-like object.
+             test['manifest'] = filename
+ 
+             # determine the path
+@@ -671,18 +680,18 @@
+     def check_missing(self, tests=None):
+         missing = self.missing(tests=tests)
+         if missing:
+             missing_paths = [test['path'] for test in missing]
+             if self.strict:
+                 raise IOError("Strict mode enabled, test paths must exist. "
+                               "The following test(s) are missing: %s" %
+                               json.dumps(missing_paths, indent=2))
+-            print >> sys.stderr, "Warning: The following test(s) are missing: %s" % \
+-                                  json.dumps(missing_paths, indent=2)
++            print("Warning: The following test(s) are missing: %s" % \
++                  json.dumps(missing_paths, indent=2), file=sys.stderr)
+         return missing
+ 
+     def verifyDirectory(self, directories, pattern=None, extensions=None):
+         """
+         checks what is on the filesystem vs what is in a manifest
+         returns a 2-tuple of sets:
+         (missing_from_filesystem, missing_from_manifest)
+         """
+@@ -1266,17 +1275,17 @@
+                           add_help_option=False)
+ 
+ class Copy(CLICommand):
+     usage = '%prog [options] copy manifest directory -tag1 -tag2 --key1=value1 --key2=value2 ...'
+     def __call__(self, options, args):
+       # parse the arguments
+       try:
+         kwargs, tags, args = parse_args(args)
+-      except ParserError, e:
++      except ParserError as e:
+         self._parser.error(e.message)
+ 
+       # make sure we have some manifests, otherwise it will
+       # be quite boring
+       if not len(args) == 2:
+         HelpCLI(self._parser)(options, ['copy'])
+         return
+ 
+@@ -1317,30 +1326,30 @@
+ 
+         # add the directories to the manifest
+         for arg in args:
+             assert os.path.exists(arg)
+             assert os.path.isdir(arg)
+             manifest = convert(args, pattern=options.pattern, ignore=options.ignore,
+                                write=options.in_place)
+         if manifest:
+-            print manifest
++            print(manifest)
+ 
+ 
+ class WriteCLI(CLICommand):
+     """
+     write a manifest based on a query
+     """
+     usage = '%prog [options] write manifest <manifest> -tag1 -tag2 --key1=value1 --key2=value2 ...'
+     def __call__(self, options, args):
+ 
+         # parse the arguments
+         try:
+             kwargs, tags, args = parse_args(args)
+-        except ParserError, e:
++        except ParserError as e:
+             self._parser.error(e.message)
+ 
+         # make sure we have some manifests, otherwise it will
+         # be quite boring
+         if not args:
+             HelpCLI(self._parser)(options, ['write'])
+             return
+ 
+@@ -1359,31 +1368,31 @@
+     """
+     usage = '%prog [options] help [command]'
+ 
+     def __call__(self, options, args):
+         if len(args) == 1 and args[0] in commands:
+             commands[args[0]](self._parser).parser().print_help()
+         else:
+             self._parser.print_help()
+-            print '\nCommands:'
++            print('\nCommands:')
+             for command in sorted(commands):
+-                print '  %s : %s' % (command, commands[command].__doc__.strip())
++                print('  %s : %s' % (command, commands[command].__doc__.strip()))
+ 
+ class UpdateCLI(CLICommand):
+     """
+     update the tests as listed in a manifest from a directory
+     """
+     usage = '%prog [options] update manifest directory -tag1 -tag2 --key1=value1 --key2=value2 ...'
+ 
+     def __call__(self, options, args):
+         # parse the arguments
+         try:
+             kwargs, tags, args = parse_args(args)
+-        except ParserError, e:
++        except ParserError as e:
+             self._parser.error(e.message)
+ 
+         # make sure we have some manifests, otherwise it will
+         # be quite boring
+         if not len(args) == 2:
+             HelpCLI(self._parser)(options, ['update'])
+             return
+ 
+diff --git a/testing/mozbase/mozfile/mozfile/__init__.py b/testing/mozbase/mozfile/mozfile/__init__.py
+--- a/testing/mozbase/mozfile/mozfile/__init__.py
++++ b/testing/mozbase/mozfile/mozfile/__init__.py
+@@ -1,5 +1,5 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+-from mozfile import *
++from .mozfile import *
+diff --git a/testing/mozbase/mozfile/mozfile/mozfile.py b/testing/mozbase/mozfile/mozfile/mozfile.py
+--- a/testing/mozbase/mozfile/mozfile/mozfile.py
++++ b/testing/mozbase/mozfile/mozfile/mozfile.py
+@@ -1,16 +1,18 @@
+ # -*- coding: utf-8 -*-
+ 
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ # We don't import all modules at the top for performance reasons. See Bug 1008943
+ 
++from __future__ import print_function
++
+ from contextlib import contextmanager
+ import errno
+ import os
+ import stat
+ import time
+ import warnings
+ 
+ __all__ = ['extract_tarball',
+@@ -46,17 +48,17 @@
+     import zipfile
+ 
+     if isinstance(src, zipfile.ZipFile):
+         bundle = src
+     else:
+         try:
+             bundle = zipfile.ZipFile(src)
+         except Exception:
+-            print "src: %s" % src
++            print("src: %s" % src)
+             raise
+ 
+     namelist = bundle.namelist()
+ 
+     for name in namelist:
+         filename = os.path.realpath(os.path.join(dest, name))
+         if name.endswith('/'):
+             if not os.path.isdir(filename):
+@@ -157,33 +159,33 @@
+         It's possible to see spurious errors on Windows due to various things
+         keeping a handle to the directory open (explorer, virus scanners, etc)
+         So we try a few times if it fails with a known error.
+         """
+         retry_count = 0
+         while True:
+             try:
+                 func(*args)
+-            except OSError, e:
++            except OSError as e:
+                 # The file or directory to be removed doesn't exist anymore
+                 if e.errno == errno.ENOENT:
+                     break
+ 
+                 # Error codes are defined in:
+                 # http://docs.python.org/2/library/errno.html#module-errno
+                 if e.errno not in [errno.EACCES, errno.ENOTEMPTY]:
+                     raise
+ 
+                 if retry_count == retry_max:
+                     raise
+ 
+                 retry_count += 1
+ 
+-                print '%s() failed for "%s". Reason: %s (%s). Retrying...' % \
+-                        (func.__name__, args, e.strerror, e.errno)
++                print('%s() failed for "%s". Reason: %s (%s). Retrying...' % \
++                        (func.__name__, args, e.strerror, e.errno))
+                 time.sleep(retry_delay)
+             else:
+                 # If no exception has been thrown it should be done
+                 break
+ 
+     def _update_permissions(path):
+         """Sets specified pemissions depending on filetype"""
+         if os.path.islink(path):
+diff --git a/testing/mozbase/mozfile/tests/stubs.py b/testing/mozbase/mozfile/tests/stubs.py
+--- a/testing/mozbase/mozfile/tests/stubs.py
++++ b/testing/mozbase/mozfile/tests/stubs.py
+@@ -24,14 +24,14 @@
+             dirname = os.path.dirname(fullpath)
+             if not os.path.exists(dirname):
+                 os.makedirs(dirname)
+             contents = path[-1]
+             f = file(fullpath, 'w')
+             f.write(contents)
+             f.close()
+         return tempdir
+-    except Exception, e:
++    except Exception as e:
+         try:
+             shutil.rmtree(tempdir)
+         except:
+             pass
+         raise e
+diff --git a/testing/mozbase/mozfile/tests/test_extract.py b/testing/mozbase/mozfile/tests/test_extract.py
+--- a/testing/mozbase/mozfile/tests/test_extract.py
++++ b/testing/mozbase/mozfile/tests/test_extract.py
+@@ -1,10 +1,12 @@
+ #!/usr/bin/env python
+ 
++from __future__ import print_function
++
+ import mozfile
+ import os
+ import shutil
+ import tarfile
+ import tempfile
+ import stubs
+ import unittest
+ import zipfile
+@@ -14,17 +16,17 @@
+     """test extracting archives"""
+ 
+     def ensure_directory_contents(self, directory):
+         """ensure the directory contents match"""
+         for f in stubs.files:
+             path = os.path.join(directory, *f)
+             exists = os.path.exists(path)
+             if not exists:
+-                print "%s does not exist" % (os.path.join(f))
++                print("%s does not exist" % os.path.join(f))
+             self.assertTrue(exists)
+             if exists:
+                 contents = file(path).read().strip()
+                 self.assertTrue(contents == f[-1])
+ 
+     def test_extract_zipfile(self):
+         """test extracting a zipfile"""
+         _zipfile = self.create_zip()
+@@ -85,17 +87,17 @@
+         # test extracting some non-archive; this should fail
+         fd, filename = tempfile.mkstemp()
+         os.write(fd, 'This is not a zipfile or tarball')
+         os.close(fd)
+         exception = None
+         try:
+             dest = tempfile.mkdtemp()
+             mozfile.extract(filename, dest)
+-        except Exception, exception:
++        except Exception as exception:
+             pass
+         finally:
+             os.remove(filename)
+             os.rmdir(dest)
+         self.assertTrue(isinstance(exception, Exception))
+ 
+     ### utility functions
+ 
+diff --git a/testing/mozbase/mozhttpd/mozhttpd/__init__.py b/testing/mozbase/mozhttpd/mozhttpd/__init__.py
+--- a/testing/mozbase/mozhttpd/mozhttpd/__init__.py
++++ b/testing/mozbase/mozhttpd/mozhttpd/__init__.py
+@@ -37,10 +37,10 @@
+                             urlhandlers = [ { 'method': 'GET',
+                                               'path': '/api/resources/([^/]+)/?',
+                                               'function': resource_get } ])
+   print "Serving '%s' at %s:%s" % (httpd.docroot, httpd.host, httpd.port)
+   httpd.start(block=True)
+ 
+ """
+ 
+-from mozhttpd import MozHttpd, Request, RequestHandler, main
+-from handlers import json_response
++from .mozhttpd import MozHttpd, Request, RequestHandler, main
++from .handlers import json_response
+diff --git a/testing/mozbase/mozhttpd/mozhttpd/mozhttpd.py b/testing/mozbase/mozhttpd/mozhttpd/mozhttpd.py
+--- a/testing/mozbase/mozhttpd/mozhttpd/mozhttpd.py
++++ b/testing/mozbase/mozhttpd/mozhttpd/mozhttpd.py
+@@ -1,14 +1,16 @@
+ #!/usr/bin/env python
+ 
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ # You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
++from __future__ import print_function
++
+ import BaseHTTPServer
+ import SimpleHTTPServer
+ import errno
+ import logging
+ import threading
+ import posixpath
+ import socket
+ import sys
+@@ -317,13 +319,13 @@
+     if options.external_ip:
+         host = moznetwork.get_lan_ip()
+     else:
+         host = options.host
+ 
+     # create the server
+     server = MozHttpd(host=host, port=options.port, docroot=options.docroot)
+ 
+-    print "Serving '%s' at %s:%s" % (server.docroot, server.host, server.port)
++    print("Serving '%s' at %s:%s" % (server.docroot, server.host, server.port))
+     server.start(block=True)
+ 
+ if __name__ == '__main__':
+     main()
+diff --git a/testing/mozbase/mozinfo/mozinfo/__init__.py b/testing/mozbase/mozinfo/mozinfo/__init__.py
+--- a/testing/mozbase/mozinfo/mozinfo/__init__.py
++++ b/testing/mozbase/mozinfo/mozinfo/__init__.py
+@@ -47,10 +47,10 @@
+    * :attr:`bits`
+    * :attr:`os`
+    * :attr:`processor`
+    * :attr:`version`
+ 
+ """
+ 
+ import mozinfo
+-from mozinfo import *
++from .mozinfo import *
+ __all__ = mozinfo.__all__
+diff --git a/testing/mozbase/mozinfo/mozinfo/mozinfo.py b/testing/mozbase/mozinfo/mozinfo/mozinfo.py
+--- a/testing/mozbase/mozinfo/mozinfo/mozinfo.py
++++ b/testing/mozbase/mozinfo/mozinfo/mozinfo.py
+@@ -3,16 +3,18 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ # You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ # TODO: it might be a good idea of adding a system name (e.g. 'Ubuntu' for
+ # linux) to the information; I certainly wouldn't want anyone parsing this
+ # information and having behaviour depend on it
+ 
++from __future__ import print_function
++
+ import os
+ import platform
+ import re
+ import sys
+ 
+ # keep a copy of the os module since updating globals overrides this
+ _os = os
+ 
+@@ -123,17 +125,17 @@
+ def update(new_info):
+     """
+     Update the info.
+ 
+     :param new_info: Either a dict containing the new info or a path/url
+                      to a json file containing the new info.
+     """
+ 
+-    if isinstance(new_info, basestring):
++    if isinstance(new_info, str): # XXX
+         # lazy import
+         import mozfile
+         import json
+         f = mozfile.load(new_info)
+         new_info = json.loads(f.read())
+         f.close()
+ 
+     info.update(new_info)
+@@ -178,17 +180,17 @@
+             update(json_path)
+             return json_path
+ 
+     return None
+ 
+ update({})
+ 
+ # exports
+-__all__ = info.keys()
++__all__ = list(info.keys())
+ __all__ += ['is' + os_name.title() for os_name in choices['os']]
+ __all__ += [
+     'info',
+     'unknown',
+     'main',
+     'choices',
+     'update',
+     'find_and_update_from_json',
+@@ -215,19 +217,19 @@
+             else:
+                 string = arg
+             update(json.loads(string))
+ 
+     # print out choices if requested
+     flag = False
+     for key, value in options.__dict__.items():
+         if value is True:
+-            print '%s choices: %s' % (key, ' '.join([str(choice)
+-                                                     for choice in choices[key]]))
++            print('%s choices: %s' % (key, ' '.join([str(choice)
++                                                     for choice in choices[key]])))
+             flag = True
+     if flag: return
+ 
+     # otherwise, print out all info
+     for key, value in info.items():
+-        print '%s: %s' % (key, value)
++        print('%s: %s' % (key, value))
+ 
+ if __name__ == '__main__':
+     main()
+diff --git a/testing/mozbase/mozinstall/setup.py b/testing/mozbase/mozinstall/setup.py
+--- a/testing/mozbase/mozinstall/setup.py
++++ b/testing/mozbase/mozinstall/setup.py
+@@ -2,17 +2,17 @@
+ # License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ # You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ import os
+ from setuptools import setup
+ 
+ try:
+     here = os.path.dirname(os.path.abspath(__file__))
+-    description = file(os.path.join(here, 'README.md')).read()
++    description = open(os.path.join(here, 'README.md')).read()
+ except IOError:
+     description = None
+ 
+ PACKAGE_VERSION = '1.10'
+ 
+ deps = ['mozinfo >= 0.7',
+         'mozfile >= 1.0',
+        ]
+diff --git a/testing/mozbase/mozlog/mozlog/__init__.py b/testing/mozbase/mozlog/mozlog/__init__.py
+--- a/testing/mozbase/mozlog/mozlog/__init__.py
++++ b/testing/mozbase/mozlog/mozlog/__init__.py
+@@ -6,19 +6,19 @@
+ Mozlog aims to standardize log formatting within Mozilla.
+ 
+ It simply wraps Python's logging_ module and adds a few convenience methods
+ for logging test results and events.
+ 
+ The structured submodule takes a different approach and implements a
+ JSON-based logging protocol designed for recording test results."""
+ 
+-from logger import *
+-from loglistener import LogMessageServer
+-from loggingmixin import LoggingMixin
++from .logger import *
++from .loglistener import LogMessageServer
++from .loggingmixin import LoggingMixin
+ 
+ try:
+     import structured
+ except ImportError:
+     # Structured logging doesn't work on python 2.6 which is still used on some
+     # legacy test machines; https://bugzilla.mozilla.org/show_bug.cgi?id=864866
+     # Once we move away from Python 2.6, please cleanup devicemanager.py's
+     # exception block
+diff --git a/testing/mozbase/mozlog/mozlog/loglistener.py b/testing/mozbase/mozlog/mozlog/loglistener.py
+--- a/testing/mozbase/mozlog/mozlog/loglistener.py
++++ b/testing/mozbase/mozlog/mozlog/loglistener.py
+@@ -1,13 +1,16 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ # You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+-import SocketServer
++try:
++    import SocketServer
++except ImportError:
++    import socketserver as SocketServer
+ import socket
+ import json
+ 
+ class LogMessageServer(SocketServer.TCPServer):
+     def __init__(self, server_address, logger, message_callback=None, timeout=3):
+         SocketServer.TCPServer.__init__(self, server_address, LogMessageHandler)
+         self._logger = logger
+         self._message_callback = message_callback
+diff --git a/testing/mozbase/mozlog/mozlog/structured/__init__.py b/testing/mozbase/mozlog/mozlog/structured/__init__.py
+--- a/testing/mozbase/mozlog/mozlog/structured/__init__.py
++++ b/testing/mozbase/mozlog/mozlog/structured/__init__.py
+@@ -1,7 +1,7 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+-import commandline
+-import structuredlog
+-from structuredlog import get_default_logger, set_default_logger
++from . import commandline
++from . import structuredlog
++from .structuredlog import get_default_logger, set_default_logger
+diff --git a/testing/mozbase/mozlog/mozlog/structured/commandline.py b/testing/mozbase/mozlog/mozlog/structured/commandline.py
+--- a/testing/mozbase/mozlog/mozlog/structured/commandline.py
++++ b/testing/mozbase/mozlog/mozlog/structured/commandline.py
+@@ -1,19 +1,19 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ import sys
+ import optparse
+ 
+ from collections import defaultdict
+-from structuredlog import StructuredLogger, set_default_logger
+-import handlers
+-import formatters
++from .structuredlog import StructuredLogger, set_default_logger
++from . import handlers
++from . import formatters
+ 
+ log_formatters = {
+     'raw': (formatters.JSONFormatter, "Raw structured log messages"),
+     'unittest': (formatters.UnittestFormatter, "Unittest style output"),
+     'xunit': (formatters.XUnitFormatter, "xUnit compatible XML"),
+     'html': (formatters.HTMLFormatter, "HTML report"),
+     'mach': (formatters.MachFormatter, "Human-readable output"),
+     'tbpl': (formatters.TbplFormatter, "TBPL style log format"),
+@@ -66,32 +66,32 @@
+     group_description = ("Each option represents a possible logging format "
+                          "and takes a filename to write that format to, "
+                          "or '-' to write to stdout.")
+ 
+     if isinstance(parser, optparse.OptionParser):
+         group = optparse.OptionGroup(parser,
+                                      group_name,
+                                      group_description)
+-        for name, (cls, help_str) in log_formatters.iteritems():
++        for name, (cls, help_str) in log_formatters.items():
+             group.add_option("--log-" + name, action="append", type="str",
+                              help=help_str)
+-        for optname, (cls, help_str, formatters, action) in fmt_options.iteritems():
++        for optname, (cls, help_str, formatters, action) in fmt_options.items():
+             for fmt in formatters:
+                 group.add_option("--log-%s-%s" % (fmt, optname), action=action,
+                                  help=help_str, default=None)
+         parser.add_option_group(group)
+     else:
+         group = parser.add_argument_group(group_name,
+                                           group_description)
+-        for name, (cls, help_str) in log_formatters.iteritems():
++        for name, (cls, help_str) in log_formatters.items():
+             group.add_argument("--log-" + name, action="append", type=log_file,
+                                help=help_str)
+ 
+-        for optname, (cls, help_str, formatters, action) in fmt_options.iteritems():
++        for optname, (cls, help_str, formatters, action) in fmt_options.items():
+             for fmt in formatters:
+                 group.add_argument("--log-%s-%s" % (fmt, optname), action=action,
+                                    help=help_str, default=None)
+ 
+ 
+ def setup_handlers(logger, formatters, formatter_options):
+     """
+     Add handlers to the given logger according to the formatters and
+@@ -103,20 +103,20 @@
+                               to use when configuring formatters.
+     """
+     unused_options = set(formatter_options.keys()) - set(formatters.keys())
+     if unused_options:
+         msg = ("Options specified for unused formatter(s) (%s) have no effect" %
+                list(unused_options))
+         raise ValueError(msg)
+ 
+-    for fmt, streams in formatters.iteritems():
++    for fmt, streams in formatters.items():
+         formatter_cls = log_formatters[fmt][0]
+         formatter = formatter_cls()
+-        for option, value in formatter_options[fmt].iteritems():
++        for option, value in formatter_options[fmt].items():
+             formatter = fmt_options[option][0](formatter, value)
+ 
+         for value in streams:
+             logger.add_handler(handlers.StreamHandler(stream=value,
+                                                       formatter=formatter))
+ 
+ 
+ def setup_logging(suite, args, defaults=None):
+@@ -140,53 +140,53 @@
+ 
+     logger = StructuredLogger(suite)
+     # Keep track of any options passed for formatters.
+     formatter_options = defaultdict(lambda: formatter_option_defaults.copy())
+     # Keep track of formatters and list of streams specified.
+     formatters = {}
+     found = False
+     found_stdout_logger = False
+-    if not hasattr(args, 'iteritems'):
++    if not hasattr(args, 'items'):
+         args = vars(args)
+ 
+     if defaults is None:
+         if sys.__stdout__.isatty():
+             defaults = {"mach": sys.stdout}
+         else:
+             defaults = {"raw": sys.stdout}
+ 
+-    for name, values in args.iteritems():
++    for name, values in args.items():
+         parts = name.split('_')
+         if len(parts) > 3:
+             continue
+         # Our args will be ['log', <formatter>] or ['log', <formatter>, <option>].
+         if parts[0] == 'log' and values is not None:
+             if len(parts) == 1 or parts[1] not in log_formatters:
+                 continue
+             if len(parts) == 2:
+                 _, formatter = parts
+                 formatters[formatter] = []
+                 for value in values:
+                     found = True
+-                    if isinstance(value, basestring):
++                    if isinstance(value, str):
+                         value = log_file(value)
+                     if value == sys.stdout:
+                         found_stdout_logger = True
+                     formatters[formatter].append(value)
+             if len(parts) == 3:
+                 _, formatter, opt = parts
+                 formatter_options[formatter][opt] = values
+ 
+     #If there is no user-specified logging, go with the default options
+     if not found:
+-        for name, value in defaults.iteritems():
++        for name, value in defaults.items():
+             formatters[name] = [value]
+ 
+     elif not found_stdout_logger and sys.stdout in defaults.values():
+-        for name, value in defaults.iteritems():
++        for name, value in defaults.items():
+             if value == sys.stdout:
+                 formatters[name] = [value]
+ 
+     setup_handlers(logger, formatters, formatter_options)
+     set_default_logger(logger)
+ 
+     return logger
+diff --git a/testing/mozbase/mozlog/mozlog/structured/formatters/__init__.py b/testing/mozbase/mozlog/mozlog/structured/formatters/__init__.py
+--- a/testing/mozbase/mozlog/mozlog/structured/formatters/__init__.py
++++ b/testing/mozbase/mozlog/mozlog/structured/formatters/__init__.py
+@@ -1,13 +1,13 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ import json
+-from unittest import UnittestFormatter
+-from xunit import XUnitFormatter
+-from html import HTMLFormatter
+-from machformatter import MachFormatter
+-from tbplformatter import TbplFormatter
++from .unittest import UnittestFormatter
++from .xunit import XUnitFormatter
++from .html import HTMLFormatter
++from .machformatter import MachFormatter
++from .tbplformatter import TbplFormatter
+ 
+ def JSONFormatter():
+     return lambda x: json.dumps(x) + "\n"
+diff --git a/testing/mozbase/mozlog/mozlog/structured/formatters/html/__init__.py b/testing/mozbase/mozlog/mozlog/structured/formatters/html/__init__.py
+--- a/testing/mozbase/mozlog/mozlog/structured/formatters/html/__init__.py
++++ b/testing/mozbase/mozlog/mozlog/structured/formatters/html/__init__.py
+@@ -1,1 +1,1 @@
+-from html import HTMLFormatter
++from .html import HTMLFormatter
+diff --git a/testing/mozbase/mozlog/mozlog/structured/formatters/html/html.py b/testing/mozbase/mozlog/mozlog/structured/formatters/html/html.py
+--- a/testing/mozbase/mozlog/mozlog/structured/formatters/html/html.py
++++ b/testing/mozbase/mozlog/mozlog/structured/formatters/html/html.py
+@@ -1,13 +1,15 @@
+ #!/usr/bin/env python
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
++from __future__ import unicode_literals
++
+ import base64
+ import cgi
+ from datetime import datetime
+ import os
+ 
+ from .. import base
+ 
+ from collections import defaultdict
+@@ -190,9 +192,9 @@
+                         html.tr([
+                             html.th('Result', class_='sortable', col='result'),
+                             html.th('Class', class_='sortable', col='class'),
+                             html.th('Test Name', class_='sortable', col='name'),
+                             html.th('Duration', class_='sortable numeric', col='duration'),
+                             html.th('Links')]), id='results-table-head'),
+                         html.tbody(self.result_rows, id='results-table-body')], id='results-table')))
+ 
+-        return u"<!DOCTYPE html>\n" + doc.unicode(indent=2)
++        return "<!DOCTYPE html>\n" + doc.unicode(indent=2)
+diff --git a/testing/mozbase/mozlog/mozlog/structured/formatters/machformatter.py b/testing/mozbase/mozlog/mozlog/structured/formatters/machformatter.py
+--- a/testing/mozbase/mozlog/mozlog/structured/formatters/machformatter.py
++++ b/testing/mozbase/mozlog/mozlog/structured/formatters/machformatter.py
+@@ -5,17 +5,17 @@
+ import time
+ from collections import defaultdict
+ 
+ try:
+     import blessings
+ except ImportError:
+     blessings = None
+ 
+-import base
++from . import base
+ 
+ def format_seconds(total):
+     """Format number of seconds to MM:SS.DD form."""
+     minutes, seconds = divmod(total, 60)
+     return '%2d:%05.2f' % (minutes, seconds)
+ 
+ class NullTerminal(object):
+     def __getattr__(self, name):
+diff --git a/testing/mozbase/mozlog/mozlog/structured/formatters/tbplformatter.py b/testing/mozbase/mozlog/mozlog/structured/formatters/tbplformatter.py
+--- a/testing/mozbase/mozlog/mozlog/structured/formatters/tbplformatter.py
++++ b/testing/mozbase/mozlog/mozlog/structured/formatters/tbplformatter.py
+@@ -54,16 +54,18 @@
+ 
+         rv = "\n".join(rv)
+         if not rv[-1] == "\n":
+             rv += "\n"
+ 
+         return rv
+ 
+     def suite_start(self, data):
++        print("suite_start")
++        print(data["time"])
+         self.suite_start_time = data["time"]
+         return "SUITE-START | Running %i tests\n" % len(data["tests"])
+ 
+     def test_start(self, data):
+         self.test_start_times[self.test_id(data["test"])] = data["time"]
+ 
+         return "TEST-START | %s\n" % self.id_str(data["test"])
+ 
+@@ -123,18 +125,18 @@
+ 
+     def suite_end(self, data):
+         start_time = self.suite_start_time
+         time = int((data["time"] - start_time) / 1000)
+ 
+         return "SUITE-END | took %is\n" % time
+ 
+     def test_id(self, test_id):
+-        if isinstance(test_id, (str, unicode)):
++        if isinstance(test_id, (str, bytes)):
+             return test_id
+         else:
+             return tuple(test_id)
+ 
+     def id_str(self, test_id):
+-        if isinstance(test_id, (str, unicode)):
++        if isinstance(test_id, (str, bytes)):
+             return test_id
+         else:
+             return " ".join(test_id)
+diff --git a/testing/mozbase/mozlog/mozlog/structured/formatters/unittest.py b/testing/mozbase/mozlog/mozlog/structured/formatters/unittest.py
+--- a/testing/mozbase/mozlog/mozlog/structured/formatters/unittest.py
++++ b/testing/mozbase/mozlog/mozlog/structured/formatters/unittest.py
+@@ -1,14 +1,14 @@
+ #!/usr/bin/env python
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+-import base
++from . import base
+ 
+ class UnittestFormatter(base.BaseFormatter):
+     """Formatter designed to produce output in a format like that used by
+     the ``unittest`` module in the standard library."""
+     def __init__(self):
+         self.fails = []
+         self.errors = []
+         self.tests_run = 0
+diff --git a/testing/mozbase/mozlog/mozlog/structured/formatters/xunit.py b/testing/mozbase/mozlog/mozlog/structured/formatters/xunit.py
+--- a/testing/mozbase/mozlog/mozlog/structured/formatters/xunit.py
++++ b/testing/mozbase/mozlog/mozlog/structured/formatters/xunit.py
+@@ -1,12 +1,12 @@
+ import types
+ from xml.etree import ElementTree
+ 
+-import base
++from . import base
+ 
+ def format_test_id(test_id):
+     """Take a test id and return something that looks a bit like
+     a class path"""
+     if type(test_id) not in types.StringTypes:
+         #Not sure how to deal with reftests yet
+         raise NotImplementedError
+ 
+diff --git a/testing/mozbase/mozlog/mozlog/structured/handlers/__init__.py b/testing/mozbase/mozlog/mozlog/structured/handlers/__init__.py
+--- a/testing/mozbase/mozlog/mozlog/structured/handlers/__init__.py
++++ b/testing/mozbase/mozlog/mozlog/structured/handlers/__init__.py
+@@ -1,17 +1,17 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ from threading import Lock
+ import codecs
+ 
+ from ..structuredlog import log_levels
+-from statushandler import StatusHandler
++from .statushandler import StatusHandler
+ 
+ 
+ class BaseHandler(object):
+     def __init__(self, formatter=str):
+         self.formatter = formatter
+         self.filters = []
+ 
+     def add_filter(self, filter_func):
+@@ -68,16 +68,16 @@
+     def __call__(self, data):
+         """Write a log message.
+ 
+         :param data: Structured log message dictionary."""
+         formatted = self.formatter(data)
+         if not formatted:
+             return
+         with self._lock:
+-            if isinstance(formatted, unicode):
+-                self.stream.write(formatted.encode("utf-8", "replace"))
+-            elif isinstance(formatted, str):
++            if isinstance(formatted, str):
+                 self.stream.write(formatted)
++            elif isinstance(formatted, bytes):
++                self.stream.write(formatted.decode('utf-8'))
+             else:
+                 assert False, "Got output from the formatter of an unexpected type"
+ 
+             self.stream.flush()
+diff --git a/testing/mozbase/mozlog/mozlog/structured/logtypes.py b/testing/mozbase/mozlog/mozlog/structured/logtypes.py
+--- a/testing/mozbase/mozlog/mozlog/structured/logtypes.py
++++ b/testing/mozbase/mozlog/mozlog/structured/logtypes.py
+@@ -78,28 +78,28 @@
+                 raise TypeError("Argument %s specified twice" % name)
+             values[name] = args[i + num_no_default]
+ 
+         # Fill in missing arguments
+         for name in self.args_with_default:
+             if name not in values:
+                 values[name] = self.args[name].default
+ 
+-        for key, value in values.iteritems():
++        for key, value in values.items():
+             if key in self.args:
+                 out_value = self.args[key](value)
+                 if out_value is not missing:
+                     data[key] = out_value
+             else:
+                 raise TypeError("Unrecognised argument %s" % key)
+ 
+         return data
+ 
+     def convert_known(self, **kwargs):
+-        known_kwargs = {name: value for name, value in kwargs.iteritems()
++        known_kwargs = {name: value for name, value in kwargs.items()
+                         if name in self.args}
+         return self.convert(**known_kwargs)
+ 
+ class DataType(object):
+     def __init__(self, name, default=no_default, optional=False):
+         self.name = name
+         self.default = default
+ 
+@@ -117,27 +117,27 @@
+         try:
+             return self.convert(value)
+         except:
+             raise ValueError("Failed to convert value %s of type %s for field %s to type %s" %
+                              (value, type(value).__name__, self.name, self.__class__.__name__))
+ 
+ class Unicode(DataType):
+     def convert(self, data):
+-        if isinstance(data, unicode):
++        if isinstance(data, str):
+             return data
+-        if isinstance(data, str):
++        if isinstance(data, bytes):
+             return data.decode("utf8", "replace")
+-        return unicode(data)
++        return str(data)
+ 
+ class TestId(DataType):
+     def convert(self, data):
+-        if isinstance(data, unicode):
++        if isinstance(data, str):
+             return data
+-        elif isinstance(data, str):
++        elif isinstance(data, bytes):
+             return data.decode("utf-8", "replace")
+         elif isinstance(data, tuple):
+             # This is really a bit of a hack; should really split out convertors from the
+             # fields they operate on
+             func = Unicode(None).convert
+             return tuple(func(item) for item in data)
+         else:
+             raise ValueError
+diff --git a/testing/mozbase/mozlog/mozlog/structured/stdadapter.py b/testing/mozbase/mozlog/mozlog/structured/stdadapter.py
+--- a/testing/mozbase/mozlog/mozlog/structured/stdadapter.py
++++ b/testing/mozbase/mozlog/mozlog/structured/stdadapter.py
+@@ -1,11 +1,11 @@
+ import logging
+ 
+-from structuredlog import StructuredLogger, log_levels
++from .structuredlog import StructuredLogger, log_levels
+ 
+ class UnstructuredHandler(logging.Handler):
+     def __init__(self, name=None, level=logging.NOTSET):
+         self.structured = StructuredLogger(name)
+         logging.Handler.__init__(self, level=level)
+ 
+     def emit(self, record):
+         if record.levelname in log_levels:
+diff --git a/testing/mozbase/mozlog/mozlog/structured/structuredlog.py b/testing/mozbase/mozlog/mozlog/structured/structuredlog.py
+--- a/testing/mozbase/mozlog/mozlog/structured/structuredlog.py
++++ b/testing/mozbase/mozlog/mozlog/structured/structuredlog.py
+@@ -6,18 +6,18 @@
+ 
+ from multiprocessing import current_process
+ from threading import current_thread, Lock
+ import json
+ import sys
+ import time
+ import traceback
+ 
+-from logtypes import Unicode, TestId, Status, SubStatus, Dict, List, Int, Any
+-from logtypes import log_action, convertor_registry
++from .logtypes import Unicode, TestId, Status, SubStatus, Dict, List, Int, Any
++from .logtypes import log_action, convertor_registry
+ 
+ """Structured Logging for recording test results.
+ 
+ Allowed actions, and subfields:
+   suite_start
+       tests  - List of test names
+ 
+   suite_end
+@@ -327,17 +327,17 @@
+                 Any("exc_info", default=False))
+     def log(self, data):
+         exc_info = data.pop("exc_info", None)
+         if exc_info:
+             if not isinstance(exc_info, tuple):
+                 exc_info = sys.exc_info()
+             if exc_info != (None, None, None):
+                 bt = traceback.format_exception(*exc_info)
+-                data["stack"] = u"\n".join(bt)
++                data["stack"] = "\n".join(bt)
+ 
+         data["level"] = level_name
+         self._log_data("log", data)
+ 
+     log.__doc__ = """Log a message with level %s
+ 
+ :param message: The string message to log
+ :param exc_info: Either a boolean indicating whether to include a traceback
+diff --git a/testing/mozbase/mozlog/tests/test_structured.py b/testing/mozbase/mozlog/tests/test_structured.py
+--- a/testing/mozbase/mozlog/tests/test_structured.py
++++ b/testing/mozbase/mozlog/tests/test_structured.py
+@@ -1,17 +1,22 @@
+ # -*- coding: utf-8 -*-
+ import argparse
+ import json
+ import optparse
+ import os
+-import StringIO
+ import sys
+ import unittest
+ 
++try:
++    from StringIO import StringIO
++except ImportError: # 3+
++    from io import StringIO as StringIO
++
++
+ import mozfile
+ 
+ from mozlog.structured import (
+     commandline,
+     reader,
+     structuredlog,
+     stdadapter,
+     handlers,
+@@ -45,17 +50,17 @@
+             actual = self.pop_last_item()
+ 
+         all_expected = {"pid": os.getpid(),
+                         "thread": "MainThread",
+                         "source": "test"}
+         specials = set(["time"])
+ 
+         all_expected.update(expected)
+-        for key, value in all_expected.iteritems():
++        for key, value in all_expected.items():
+             self.assertEqual(actual[key], value)
+ 
+         self.assertEquals(set(all_expected.keys()) | specials, set(actual.keys()))
+ 
+ 
+ class TestStatusHandler(BaseStructuredTest):
+     def setUp(self):
+         super(TestStatusHandler, self).setUp()
+@@ -370,35 +375,35 @@
+         self.logger.log_raw({"action":"suite_start", "tests":[1], "time": "1234"})
+         self.assert_log_equals({"action": "suite_start",
+                                 "tests":["1"],
+                                 "time": 1234})
+         self.logger.suite_end()
+ 
+     def test_tuple(self):
+         self.logger.suite_start([])
+-        self.logger.test_start(("\xf0\x90\x8d\x84\xf0\x90\x8c\xb4\xf0\x90\x8d\x83\xf0\x90\x8d\x84", 42, u"\u16a4"))
++        self.logger.test_start(("\xf0\x90\x8d\x84\xf0\x90\x8c\xb4\xf0\x90\x8d\x83\xf0\x90\x8d\x84", 42, "\u16a4"))
+         self.assert_log_equals({"action": "test_start",
+-                                "test": (u'\U00010344\U00010334\U00010343\U00010344', u"42", u"\u16a4")})
++                                "test": ('\U00010344\U00010334\U00010343\U00010344', "42", "\u16a4")})
+         self.logger.suite_end()
+ 
+     def test_non_string_messages(self):
+         self.logger.suite_start([])
+         self.logger.info(1)
+         self.assert_log_equals({"action": "log",
+                                 "message": "1",
+                                 "level": "INFO"})
+         self.logger.info([1, (2, '3'), "s", "s" + chr(255)])
+         self.assert_log_equals({"action": "log",
+                                 "message": "[1, (2, '3'), 's', 's\\xff']",
+                                 "level": "INFO"})
+         self.logger.suite_end()
+ 
+     def test_utf8str_write(self):
+-        with mozfile.NamedTemporaryFile() as logfile:
++        with mozfile.NamedTemporaryFile(mode='w+') as logfile:
+             _fmt = formatters.TbplFormatter()
+             _handler = handlers.StreamHandler(logfile, _fmt)
+             self.logger.add_handler(_handler)
+             self.logger.suite_start([])
+             self.logger.info("☺")
+             logfile.seek(0)
+             data = logfile.readlines()[-1].strip()
+             self.assertEquals(data, "☺")
+@@ -434,17 +439,17 @@
+         self.logger.suite_end()
+ 
+ 
+ class FormatterTest(unittest.TestCase):
+ 
+     def setUp(self):
+         self.position = 0
+         self.logger = structuredlog.StructuredLogger("test_%s" % type(self).__name__)
+-        self.output_file = StringIO.StringIO()
++        self.output_file = StringIO()
+         self.handler = handlers.StreamHandler(
+             self.output_file, self.get_formatter())
+         self.logger.add_handler(self.handler)
+ 
+     def set_position(self, pos=None):
+         if pos is None:
+             pos = self.output_file.tell()
+         self.position = pos
+@@ -573,42 +578,42 @@
+         self.assertIn("OK", self.loglines)
+         self.assertIn("Expected results: 5", self.loglines)
+         self.assertIn("Unexpected results: 0", self.loglines)
+ 
+ 
+ class TestCommandline(unittest.TestCase):
+ 
+     def setUp(self):
+-        self.logfile = mozfile.NamedTemporaryFile()
++        self.logfile = mozfile.NamedTemporaryFile(mode='w+')
+ 
+     @property
+     def loglines(self):
+         self.logfile.seek(0)
+         return [line.rstrip() for line in self.logfile.readlines()]
+ 
+     def test_setup_logging(self):
+         parser = argparse.ArgumentParser()
+         commandline.add_logging_group(parser)
+         args = parser.parse_args(["--log-raw=-"])
+         logger = commandline.setup_logging("test_setup_logging", args, {})
+         self.assertEqual(len(logger.handlers), 1)
+ 
+     def test_setup_logging_optparse(self):
+         parser = optparse.OptionParser()
+         commandline.add_logging_group(parser)
+-        args, _ = parser.parse_args(["--log-raw=-"])
++        args, _ = parser.parse_args([b"--log-raw=-"])
+         logger = commandline.setup_logging("test_optparse", args, {})
+         self.assertEqual(len(logger.handlers), 1)
+         self.assertIsInstance(logger.handlers[0], handlers.StreamHandler)
+ 
+     def test_setup_logging_optparse_unicode(self):
+         parser = optparse.OptionParser()
+         commandline.add_logging_group(parser)
+-        args, _ = parser.parse_args([u"--log-raw=-"])
++        args, _ = parser.parse_args(["--log-raw=-"])
+         logger = commandline.setup_logging("test_optparse_unicode", args, {})
+         self.assertEqual(len(logger.handlers), 1)
+         self.assertEqual(logger.handlers[0].stream, sys.stdout)
+         self.assertIsInstance(logger.handlers[0], handlers.StreamHandler)
+ 
+     def test_logging_defaultlevel(self):
+         parser = argparse.ArgumentParser()
+         commandline.add_logging_group(parser)
+@@ -654,17 +659,17 @@
+         parser = argparse.ArgumentParser()
+         commandline.add_logging_group(parser)
+         args = parser.parse_args(["--log-tbpl-level=error"])
+         self.assertRaises(ValueError, commandline.setup_logging, "test_fmtopts", args, {})
+ 
+ class TestReader(unittest.TestCase):
+     def to_file_like(self, obj):
+         data_str = "\n".join(json.dumps(item) for item in obj)
+-        return StringIO.StringIO(data_str)
++        return StringIO(data_str)
+ 
+     def test_read(self):
+         data = [{"action": "action_0", "data": "data_0"},
+                 {"action": "action_1", "data": "data_1"}]
+ 
+         f = self.to_file_like(data)
+         self.assertEquals(data, list(reader.read(f)))
+ 
+diff --git a/testing/mozbase/mozprofile/setup.py b/testing/mozbase/mozprofile/setup.py
+--- a/testing/mozbase/mozprofile/setup.py
++++ b/testing/mozbase/mozprofile/setup.py
+@@ -3,19 +3,16 @@
+ # You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ import sys
+ from setuptools import setup
+ 
+ PACKAGE_NAME = 'mozprofile'
+ PACKAGE_VERSION = '0.22'
+ 
+-# we only support python 2 right now
+-assert sys.version_info[0] == 2
+-
+ deps = ['manifestparser >= 0.6',
+         'mozfile >= 1.0',
+         'mozlog']
+ 
+ setup(name=PACKAGE_NAME,
+       version=PACKAGE_VERSION,
+       description="Library to create and modify Mozilla application profiles",
+       long_description="see http://mozbase.readthedocs.org/",
+diff --git a/testing/mozbase/mozrunner/setup.py b/testing/mozbase/mozrunner/setup.py
+--- a/testing/mozbase/mozrunner/setup.py
++++ b/testing/mozbase/mozrunner/setup.py
+@@ -14,19 +14,16 @@
+         'mozdevice >= 0.37',
+         'mozfile >= 1.0',
+         'mozinfo >= 0.7',
+         'mozlog >= 1.5',
+         'mozprocess >= 0.17',
+         'mozprofile >= 0.18',
+         ]
+ 
+-# we only support python 2 right now
+-assert sys.version_info[0] == 2
+-
+ setup(name=PACKAGE_NAME,
+       version=PACKAGE_VERSION,
+       description=desc,
+       long_description="see http://mozbase.readthedocs.org/",
+       classifiers=['Environment :: Console',
+                    'Intended Audience :: Developers',
+                    'License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)',
+                    'Natural Language :: English',
+diff --git a/testing/mozbase/moztest/moztest/__init__.py b/testing/mozbase/moztest/moztest/__init__.py
+--- a/testing/mozbase/moztest/moztest/__init__.py
++++ b/testing/mozbase/moztest/moztest/__init__.py
+@@ -1,5 +1,5 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+-import adapters
++from . import adapters
+diff --git a/testing/mozbase/moztest/moztest/adapters/__init__.py b/testing/mozbase/moztest/moztest/adapters/__init__.py
+--- a/testing/mozbase/moztest/moztest/adapters/__init__.py
++++ b/testing/mozbase/moztest/moztest/adapters/__init__.py
+@@ -1,5 +1,5 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+-import unit
++from . import unit
+diff --git a/testing/mozbase/moztest/moztest/results.py b/testing/mozbase/moztest/moztest/results.py
+--- a/testing/mozbase/moztest/moztest/results.py
++++ b/testing/mozbase/moztest/moztest/results.py
+@@ -79,17 +79,17 @@
+         time_start = timestamp (seconds since UNIX epoch) of when the test started
+                      running; if not provided, defaults to the current time
+                      ! Provide 0 if you only have the duration
+         context = TestContext instance; can be None
+         result_expected = string representing the expected outcome of the test"""
+ 
+         msg = "Result '%s' not in possible results: %s" %\
+                     (result_expected, ', '.join(self.POSSIBLE_RESULTS))
+-        assert isinstance(name, basestring), "name has to be a string"
++        assert isinstance(name, str), "name has to be a string"
+         assert result_expected in self.POSSIBLE_RESULTS, msg
+ 
+         self.name = name
+         self.test_class = test_class
+         self.context = context
+         self.time_start = time_start if time_start is not None else time.time()
+         self.time_end = None
+         self._result_expected = result_expected
+@@ -165,17 +165,17 @@
+             self.result = result
+         else:
+             valid = self.POSSIBLE_RESULTS + self.COMPUTED_RESULTS
+             msg = "Result '%s' not valid. Need one of: %s" %\
+                     (result, ', '.join(valid))
+             raise ValueError(msg)
+ 
+         # use lists instead of multiline strings
+-        if isinstance(output, basestring):
++        if isinstance(output, str):
+             output = output.splitlines()
+ 
+         self.time_end = time_end if time_end is not None else time.time()
+         self.output = output or self.output
+         self.reason = reason
+ 
+     @property
+     def finished(self):
+diff --git a/testing/mozbase/setup_development.py b/testing/mozbase/setup_development.py
+--- a/testing/mozbase/setup_development.py
++++ b/testing/mozbase/setup_development.py
+@@ -8,16 +8,18 @@
+ Setup mozbase packages for development.
+ 
+ Packages may be specified as command line arguments.
+ If no arguments are given, install all packages.
+ 
+ See https://wiki.mozilla.org/Auto-tools/Projects/Mozbase
+ """
+ 
++from __future__ import print_function
++
+ import os
+ import subprocess
+ import sys
+ from optparse import OptionParser
+ from subprocess import PIPE
+ try:
+     from subprocess import check_call as call
+ except ImportError:
+@@ -47,30 +49,30 @@
+     "get the package setup.py information"
+ 
+     assert os.path.exists(os.path.join(directory, 'setup.py'))
+ 
+     # setup the egg info
+     try:
+         call([sys.executable, 'setup.py', 'egg_info'], cwd=directory, stdout=PIPE)
+     except subprocess.CalledProcessError:
+-        print "Error running setup.py in %s" % directory
++        print("Error running setup.py in %s" % directory)
+         raise
+ 
+     # get the .egg-info directory
+     egg_info = [entry for entry in os.listdir(directory)
+                 if entry.endswith('.egg-info')]
+     assert len(egg_info) == 1, 'Expected one .egg-info directory in %s, got: %s' % (directory, egg_info)
+     egg_info = os.path.join(directory, egg_info[0])
+     assert os.path.isdir(egg_info), "%s is not a directory" % egg_info
+ 
+     # read the package information
+     pkg_info = os.path.join(egg_info, 'PKG-INFO')
+     info_dict = {}
+-    for line in file(pkg_info).readlines():
++    for line in open(pkg_info).readlines():
+         if not line or line[0].isspace():
+             continue # XXX neglects description
+         assert ':' in line
+         key, value = [i.strip() for i in line.split(':', 1)]
+         info_dict[key] = value
+ 
+     return info_dict
+ 
+@@ -83,17 +85,17 @@
+     # get the .egg-info directory
+     egg_info = [entry for entry in os.listdir(directory)
+                 if entry.endswith('.egg-info')][0]
+ 
+     # read the dependencies
+     requires = os.path.join(directory, egg_info, 'requires.txt')
+     if os.path.exists(requires):
+         dependencies = [line.strip()
+-                        for line in file(requires).readlines()
++                        for line in open(requires).readlines()
+                         if line.strip()]
+     else:
+         dependencies = []
+ 
+     # return the information
+     return info_dict['Name'], dependencies
+ 
+ def dependency_info(dep):
+@@ -162,17 +164,17 @@
+         packages = sorted(mozbase_packages)
+ 
+     # ensure specified packages are in the list
+     assert set(packages).issubset(mozbase_packages), "Packages should be in %s (You gave: %s)" % (mozbase_packages, packages)
+ 
+     if options.list_dependencies:
+         # list the package dependencies
+         for package in packages:
+-            print '%s: %s' % get_dependencies(os.path.join(here, package))
++            print('%s: %s' % get_dependencies(os.path.join(here, package)))
+         parser.exit()
+ 
+     # gather dependencies
+     # TODO: version conflict checking
+     deps = {}
+     alldeps = {}
+     mapping = {} # mapping from subdir name to package name
+     # core dependencies
+@@ -217,17 +219,17 @@
+     reverse_mapping = dict([(j,i) for i, j in mapping.items()])
+ 
+     # we only care about dependencies in mozbase
+     unrolled = [package for package in unrolled if package in reverse_mapping]
+ 
+     if options.list:
+         # list what will be installed
+         for package in unrolled:
+-            print package
++            print(package)
+         parser.exit()
+ 
+     # set up the packages for development
+     for package in unrolled:
+         call([sys.executable, 'setup.py', 'develop', '--no-deps'],
+              cwd=os.path.join(here, reverse_mapping[package]))
+ 
+     # add the directory of sys.executable to path to aid the correct
+diff --git a/testing/mozbase/test.py b/testing/mozbase/test.py
+--- a/testing/mozbase/test.py
++++ b/testing/mozbase/test.py
+@@ -4,16 +4,18 @@
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ """
+ run mozbase tests from a manifest,
+ by default https://github.com/mozilla/mozbase/blob/master/test-manifest.ini
+ """
+ 
++from __future__ import print_function
++
+ import imp
+ import manifestparser
+ import mozinfo
+ import optparse
+ import os
+ import sys
+ import unittest
+ 
+@@ -78,17 +80,17 @@
+ 
+     # gather the tests
+     tests = manifest.active_tests(disabled=False, **mozinfo.info)
+     tests = [test['path'] for test in tests]
+     logger.suite_start(tests)
+ 
+     if options.list_tests:
+         # print test paths
+-        print '\n'.join(tests)
++        print('\n'.join(tests))
+         sys.exit(0)
+ 
+     # create unittests
+     unittestlist = []
+     for test in tests:
+         unittestlist.extend(unittests(test))
+ 
+     # run the tests

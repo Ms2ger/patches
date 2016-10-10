@@ -1,0 +1,437 @@
+# HG changeset patch
+# Parent 1b1043f83dcf922074597c8bcd278b9287db1861
+# User Gregory Szorc <gps@mozilla.com>
+Bug XXXXXX - Convert add-ons engine to repository API
+
+diff --git a/services/sync/modules/engines/addons.js b/services/sync/modules/engines/addons.js
+--- a/services/sync/modules/engines/addons.js
++++ b/services/sync/modules/engines/addons.js
+@@ -138,57 +138,16 @@
+     if (addon.guid != item.id) {
+       return addon.guid;
+     }
+ 
+     return null;
+   },
+ 
+   /**
+-   * Override getChangedIDs to pull in tracker changes plus changes from the
+-   * reconciler log.
+-   */
+-  getChangedIDs: function getChangedIDs() {
+-    let changes = {};
+-    for (let [id, modified] in Iterator(this._tracker.changedIDs)) {
+-      changes[id] = modified;
+-    }
+-
+-    let lastSyncDate = new Date(this.lastSync * 1000);
+-
+-    // The reconciler should have been refreshed at the beginning of a sync and
+-    // we assume this function is only called from within a sync.
+-    let reconcilerChanges = this._reconciler.getChangesSinceDate(lastSyncDate);
+-    let addons = this._reconciler.addons;
+-    for each (let change in reconcilerChanges) {
+-      let changeTime = change[0];
+-      let id = change[2];
+-
+-      if (!(id in addons)) {
+-        continue;
+-      }
+-
+-      // Keep newest modified time.
+-      if (id in changes && changeTime < changes[id]) {
+-          continue;
+-      }
+-
+-      if (!this._store.isAddonSyncable(addons[id])) {
+-        continue;
+-      }
+-
+-      this._log.debug("Adding changed add-on from changes log: " + id);
+-      let addon = addons[id];
+-      changes[addon.guid] = changeTime.getTime() / 1000;
+-    }
+-
+-    return changes;
+-  },
+-
+-  /**
+    * Override start of sync function to refresh reconciler.
+    *
+    * Many functions in this class assume the reconciler is refreshed at the
+    * top of a sync. If this ever changes, those functions should be revisited.
+    *
+    * Technically speaking, we don't need to refresh the reconciler on every
+    * sync since it is installed as an AddonManager listener. However, add-ons
+    * are complicated and we force a full refresh, just in case the listeners
+@@ -212,59 +171,30 @@
+    * highly unlikely to occur. Still, we exercise defense just in case.
+    */
+   _syncCleanup: function _syncCleanup() {
+     let ms = 1000 * this.lastSync - PRUNE_ADDON_CHANGES_THRESHOLD;
+     this._reconciler.pruneChangesBeforeDate(new Date(ms));
+ 
+     SyncEngine.prototype._syncCleanup.call(this);
+   },
+-
+-  /**
+-   * Helper function to ensure reconciler is up to date.
+-   *
+-   * This will synchronously load the reconciler's state from the file
+-   * system (if needed) and refresh the state of the reconciler.
+-   */
+-  _refreshReconcilerState: function _refreshReconcilerState() {
+-    this._log.debug("Refreshing reconciler state");
+-    let cb = Async.makeSpinningCallback();
+-    this._reconciler.refreshGlobalState(cb);
+-    cb.wait();
+-  }
+ };
+ 
+ /**
+  * This is the primary interface between Sync and the Addons Manager.
+  *
+  * In addition to the core store APIs, we provide convenience functions to wrap
+  * Add-on Manager APIs with Sync-specific semantics.
+  */
+ function AddonsStore(name) {
+   Store.call(this, name);
+ }
+ AddonsStore.prototype = {
+   __proto__: Store.prototype,
+ 
+-  // Define the add-on types (.type) that we support.
+-  _syncableTypes: ["extension", "theme"],
+-
+-  _extensionsPrefs: new Preferences("extensions."),
+-
+-  get reconciler() {
+-    return this.engine._reconciler;
+-  },
+-
+-  get engine() {
+-    // Ideally we'd link to a specific object, but the API doesn't provide an
+-    // easy way to faciliate this. When the async API lands, this hackiness can
+-    // go away.
+-    return Engines.get("addons");
+-  },
+-
+   /**
+    * Override applyIncoming to filter out records we can't handle.
+    */
+   applyIncoming: function applyIncoming(record) {
+     // The fields we look at aren't present when the record is deleted.
+     if (!record.deleted) {
+       // Ignore records not belonging to our application ID because that is the
+       // current policy.
+@@ -363,50 +293,16 @@
+    */
+   itemExists: function itemExists(guid) {
+     let addon = this.reconciler.getAddonStateFromSyncGUID(guid);
+ 
+     return !!addon;
+   },
+ 
+   /**
+-   * Create an add-on record from its GUID.
+-   *
+-   * @param guid
+-   *        Add-on GUID (from extensions DB)
+-   * @param collection
+-   *        Collection to add record to.
+-   *
+-   * @return AddonRecord instance
+-   */
+-  createRecord: function createRecord(guid, collection) {
+-    let record = new AddonRecord(collection, guid);
+-    record.applicationID = Services.appinfo.ID;
+-
+-    let addon = this.reconciler.getAddonStateFromSyncGUID(guid);
+-
+-    // If we don't know about this GUID or if it has been uninstalled, we mark
+-    // the record as deleted.
+-    if (!addon || !addon.installed) {
+-      record.deleted = true;
+-      return record;
+-    }
+-
+-    record.modified = addon.modified.getTime() / 1000;
+-
+-    record.addonID = addon.id;
+-    record.enabled = addon.enabled;
+-
+-    // This needs to be dynamic when add-ons don't come from AddonRepository.
+-    record.source = "amo";
+-
+-    return record;
+-  },
+-
+-  /**
+    * Changes the id of an add-on.
+    *
+    * This implements a core API of the store.
+    */
+   changeItemID: function changeItemID(oldID, newID) {
+     // We always update the GUID in the reconciler because it will be
+     // referenced later in the sync process.
+     let state = this.reconciler.getAddonStateFromSyncGUID(oldID);
+@@ -497,16 +393,71 @@
+    */
+   getAddonByGUID: function getAddonByGUID(guid) {
+     let cb = Async.makeSyncCallback();
+     AddonManager.getAddonBySyncGUID(guid, cb);
+     return Async.waitForSyncCallback(cb);
+   },
+ 
+   /**
++   * Update the userDisabled flag on an add-on.
++   *
++   * This will enable or disable an add-on and call the supplied callback when
++   * the action is complete. If no action is needed, the callback gets called
++   * immediately.
++   *
++   * @param addon
++   *        Addon instance to manipulate.
++   * @param value
++   *        Boolean to which to set userDisabled on the passed Addon.
++   * @param callback
++   *        Function to be called when action is complete. Will receive 2
++   *        arguments, a truthy value that signifies error, and the Addon
++   *        instance passed to this function.
++   */
++  updateUserDisabled: function updateUserDisabled(addon, value, callback) {
++    if (addon.userDisabled == value) {
++      callback(null, addon);
++      return;
++    }
++
++    // A pref allows changes to the enabled flag to be ignored.
++    if (Svc.Prefs.get("addons.ignoreUserEnabledChanges", false)) {
++      this._log.info("Ignoring enabled state change due to preference: " +
++                     addon.id);
++      callback(null, addon);
++      return;
++    }
++
++    AddonUtils.updateUserDisabled(addon, value, callback);
++  },
++};
++
++function AddonsRepository() {
++  Repository.call(this);
++
++  this.reconciler = new AddonsReconciler();
++}
++AddonsRepository.prototype = {
++  __proto__: Repository.prototype,
++
++  _logLevel: "log.logger.repository.addons",
++  _logName: "Sync.Repository.Addons",
++
++  _syncableTypes: ["extension", "theme"],
++
++  _extensionsPrefs: new Preferences("extensions."),
++
++  createSession: function createSession(storeCallback, sessionCallback) {
++    let session = new AddonsRepositorySession(this, storeCallback);
++
++    sessionCallback(null, session);
++  },
++
++  /**
+    * Determines whether an add-on is suitable for Sync.
+    *
+    * @param  addon
+    *         Addon instance
+    * @return Boolean indicating whether it is appropriate for Sync
+    */
+   isAddonSyncable: function isAddonSyncable(addon) {
+     // Currently, we limit syncable add-ons to those that are:
+@@ -604,97 +555,104 @@
+     if (trustedHostnames.indexOf(uri.host) == -1) {
+       this._log.debug("Source hostname not trusted: " + uri.host);
+       return false;
+     }
+ 
+     return true;
+   },
+ 
+-  /**
+-   * Update the userDisabled flag on an add-on.
+-   *
+-   * This will enable or disable an add-on and call the supplied callback when
+-   * the action is complete. If no action is needed, the callback gets called
+-   * immediately.
+-   *
+-   * @param addon
+-   *        Addon instance to manipulate.
+-   * @param value
+-   *        Boolean to which to set userDisabled on the passed Addon.
+-   * @param callback
+-   *        Function to be called when action is complete. Will receive 2
+-   *        arguments, a truthy value that signifies error, and the Addon
+-   *        instance passed to this function.
+-   */
+-  updateUserDisabled: function updateUserDisabled(addon, value, callback) {
+-    if (addon.userDisabled == value) {
+-      callback(null, addon);
+-      return;
++};
++Object.freeze(AddonsRepository.prototype);
++
++function AddonsRepositorySession(repository, storeCallback) {
++  RepositorySession.call(this, repository, storeCallback);
++}
++AddonsRepositorySession.prototype = {
++  __proto__: RepositorySession.prototype,
++
++  _logLevel: "log.logger.repositorysession.addons",
++  _logName: "Sync.RepositorySession.Addons",
++
++  begin: function begin(cb) {
++    this.repository.reconciler.refreshGlobalState(cb);
++  },
++
++  guidsSince: function guidsSince(timestamp, cb) {
++    let reconciler = this.repository.reconciler;
++
++    let reconcilerChanges = reconciler.getChangesSinceDate(timestamp);
++    let addons = reconciler.addons;
++
++    let guids = new Set();
++
++    for each (let change in reconcilerChanges) {
++      let changeTime = change[0];
++      let id = change[2];
++
++      if (!(id in addons)) {
++        continue;
++      }
++
++      if (!this.repository.isAddonSyncable(adddons[id])) {
++        continue;
++      }
++
++      guids.add(addons[id].guid);
+     }
+ 
+-    // A pref allows changes to the enabled flag to be ignored.
+-    if (Svc.Prefs.get("addons.ignoreUserEnabledChanges", false)) {
+-      this._log.info("Ignoring enabled state change due to preference: " +
+-                     addon.id);
+-      callback(null, addon);
+-      return;
++    cb(null, [guid for guid in guids]);
++  },
++
++  fetchSince: function fetchSince(timestamp, cb) {
++    this._guidsSince(timestamp, function onGuidsSince(error, guids) {
++      if (error) {
++        cb(error);
++        return;
++      }
++
++      this.fetch(guids, cb);
++    }.bind(this));
++  },
++
++  fetch: function fetch(guids, cb) {
++    let addons = this.repository.reconciler.addons;
++
++    for (let guid of guids) {
++      let addon;
++      for (let [k, v] of addons) {
++        if (v.syncGUID == guid) {
++          addon = v;
++          break;
++        }
++      }
++
++      let record = new Map();
++      record.applicationID = Services.appinfo.ID;
++
++      // If we couldn't find the add-on but it was changed, it must have been
++      // deleted.
++      if (!addon) {
++        record.deleted = true;
++        cb(null, record);
++        continue;
++      }
++
++      record.modified = addon.modified.getTime() / 1000;
++      record.addonID = addon.id;
++      record.enabled = addon.enabled;
++
++      // Hard-coded for now because we only sync add-ons from AddonRepository.
++      record.source = "amo";
++
++      cb(null, record);
+     }
+ 
+-    AddonUtils.updateUserDisabled(addon, value, callback);
++    cb(null, this.repository.DONE);
++  },
++
++  store: function store(record) {
++    if (record.deleted) {
++      
++    },
+   },
+ };
+-
+-/**
+- * The add-ons tracker keeps track of real-time changes to add-ons.
+- *
+- * It hooks up to the reconciler and receives notifications directly from it.
+- */
+-function AddonsTracker(name) {
+-  Tracker.call(this, name);
+-
+-  Svc.Obs.add("weave:engine:start-tracking", this);
+-  Svc.Obs.add("weave:engine:stop-tracking", this);
+-}
+-AddonsTracker.prototype = {
+-  __proto__: Tracker.prototype,
+-
+-  get reconciler() {
+-    return Engines.get("addons")._reconciler;
+-  },
+-
+-  get store() {
+-    return Engines.get("addons")._store;
+-  },
+-
+-  /**
+-   * This callback is executed whenever the AddonsReconciler sends out a change
+-   * notification. See AddonsReconciler.addChangeListener().
+-   */
+-  changeListener: function changeHandler(date, change, addon) {
+-    this._log.debug("changeListener invoked: " + change + " " + addon.id);
+-    // Ignore changes that occur during sync.
+-    if (this.ignoreAll) {
+-      return;
+-    }
+-
+-    if (!this.store.isAddonSyncable(addon)) {
+-      this._log.debug("Ignoring change because add-on isn't syncable: " +
+-                      addon.id);
+-      return;
+-    }
+-
+-    this.addChangedID(addon.guid, date.getTime() / 1000);
+-    this.score += SCORE_INCREMENT_XLARGE;
+-  },
+-
+-  observe: function(subject, topic, data) {
+-    switch (topic) {
+-      case "weave:engine:start-tracking":
+-        this.reconciler.addChangeListener(this);
+-        break;
+-
+-      case "weave:engine:stop-tracking":
+-        this.reconciler.removeChangeListener(this);
+-        break;
+-    }
+-  }
+-};
++Object.freeze(AddonsRepositorySession.prototype);

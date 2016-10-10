@@ -1,0 +1,156 @@
+# HG changeset patch
+# User Gregory Szorc <gps@mozilla.com>
+# Date 1353353479 28800
+# Branch healthreport-rebase
+# Node ID a9162bef5a542845bf0f5e8a5c3531a140ef3ba9
+# Parent  8ac2a4be8bd485d2fc26f1e8f51039b6c71d9f23
+Bug 813226 - Add ability to bypass policy acceptance; r=rnewman
+
+This is needed to support background "always OK" data submission, such
+as ADU pings.
+
+diff --git a/services/healthreport/healthreport-prefs.js b/services/healthreport/healthreport-prefs.js
+--- a/services/healthreport/healthreport-prefs.js
++++ b/services/healthreport/healthreport-prefs.js
+@@ -5,16 +5,17 @@
+ pref("healthreport.documentServerURI", "https://data.mozilla.com/");
+ pref("healthreport.documentServerNamespace", "metrics");
+ pref("healthreport.serviceEnabled", true);
+ pref("healthreport.logging.consoleEnabled", true);
+ pref("healthreport.logging.consoleLevel", "Warn");
+ pref("healthreport.policy.currentDaySubmissionFailureCount", 0);
+ pref("healthreport.policy.dataSubmissionEnabled", true);
+ pref("healthreport.policy.dataSubmissionPolicyAccepted", false);
++pref("healthreport.policy.dataSubmissionPolicyBypassAcceptance", false);
+ pref("healthreport.policy.dataSubmissionPolicyNotifiedTime", "0");
+ pref("healthreport.policy.dataSubmissionPolicyResponseType", "");
+ pref("healthreport.policy.dataSubmissionPolicyResponseTime", "0");
+ pref("healthreport.policy.firstRunTime", "0");
+ pref("healthreport.policy.lastDataSubmissionFailureTime", "0");
+ pref("healthreport.policy.lastDataSubmissionRequestedTime", "0");
+ pref("healthreport.policy.lastDataSubmissionSuccessfulTime", "0");
+ pref("healthreport.policy.nextDataSubmissionTime", "0");
+diff --git a/services/healthreport/policy.jsm b/services/healthreport/policy.jsm
+--- a/services/healthreport/policy.jsm
++++ b/services/healthreport/policy.jsm
+@@ -355,16 +355,26 @@
+ 
+   set firstRunDate(value) {
+     this._log.debug("Setting first-run date: " + value);
+     CommonUtils.setDatePref(this._prefs, "firstRunTime", value,
+                             OLDEST_ALLOWED_YEAR);
+   },
+ 
+   /**
++   * Short circuit policy checking and always assume acceptance.
++   *
++   * This shuld never be set by the user. Instead, it is a per-application or
++   * per-deployment default pref.
++   */
++  get dataSubmissionPolicyBypassAcceptance() {
++    return this._prefs.get("dataSubmissionPolicyBypassAcceptance", false);
++  },
++
++  /**
+    * When the user was notified that data submission could occur.
+    *
+    * This is used for logging purposes. this._dataSubmissionPolicyNotifiedDate
+    * is what's used internally.
+    */
+   get dataSubmissionPolicyNotifiedDate() {
+     return CommonUtils.getDatePref(this._prefs,
+                                    "dataSubmissionPolicyNotifiedTime", 0,
+@@ -749,17 +759,17 @@
+     }
+ 
+     // If the user hasn't responded to the data policy, don't do anything.
+     if (!this.ensureNotifyResponse(now)) {
+       return;
+     }
+ 
+     // User has opted out of data submission.
+-    if (!this.dataSubmissionPolicyAccepted) {
++    if (!this.dataSubmissionPolicyAccepted && !this.dataSubmissionPolicyBypassAcceptance) {
+       this._log.debug("Data submission has been disabled per user request.");
+       return;
+     }
+ 
+     // User has responded to data policy and data submission is enabled. Now
+     // comes the scheduling part.
+ 
+     if (nowT < nextSubmissionDate.getTime()) {
+@@ -775,16 +785,20 @@
+    * Ensure user has responded to data submission policy.
+    *
+    * This must be called before data submission. If the policy has not been
+    * responded to, data submission must not occur.
+    *
+    * @return bool Whether user has responded to data policy.
+    */
+   ensureNotifyResponse: function ensureNotifyResponse(now) {
++    if (this.dataSubmissionPolicyBypassAcceptance) {
++      return true;
++    }
++
+     let notifyState = this.notifyState;
+ 
+     if (notifyState == this.STATE_NOTIFY_UNNOTIFIED) {
+       let notifyAt = new Date(this.firstRunDate.getTime() +
+                               this.SUBMISSION_NOTIFY_INTERVAL_MSEC);
+ 
+       if (now.getTime() < notifyAt.getTime()) {
+         this._log.debug("Don't have to notify about data submission yet.");
+diff --git a/services/healthreport/tests/xpcshell/test_policy.js b/services/healthreport/tests/xpcshell/test_policy.js
+--- a/services/healthreport/tests/xpcshell/test_policy.js
++++ b/services/healthreport/tests/xpcshell/test_policy.js
+@@ -75,16 +75,20 @@
+   policy.dataSubmissionEnabled = false;
+   do_check_false(prefs.get("dataSubmissionEnabled", true));
+   do_check_false(policy.dataSubmissionEnabled);
+ 
+   policy.dataSubmissionPolicyAccepted = false;
+   do_check_false(prefs.get("dataSubmissionPolicyAccepted", true));
+   do_check_false(policy.dataSubmissionPolicyAccepted);
+ 
++  do_check_false(policy.dataSubmissionPolicyBypassAcceptance);
++  prefs.set("dataSubmissionPolicyBypassAcceptance", true);
++  do_check_true(policy.dataSubmissionPolicyBypassAcceptance);
++
+   policy.lastDataSubmissionRequestedDate = now;
+   do_check_eq(prefs.get("lastDataSubmissionRequestedTime"), nowT);
+   do_check_eq(policy.lastDataSubmissionRequestedDate.getTime(), nowT);
+ 
+   policy.lastDataSubmissionSuccessfulDate = now;
+   do_check_eq(prefs.get("lastDataSubmissionSuccessfulTime"), nowT);
+   do_check_eq(policy.lastDataSubmissionSuccessfulDate.getTime(), nowT);
+ 
+@@ -149,16 +153,29 @@
+   do_check_true(policy.dataSubmissionPolicyNotifiedDate.getTime() > 0);
+   do_check_eq(policy.dataSubmissionPolicyNotifiedDate.getTime(),
+               policy._dataSubmissionPolicyNotifiedDate.getTime());
+   do_check_eq(policy.notifyState, policy.STATE_NOTIFY_WAIT);
+ 
+   run_next_test();
+ });
+ 
++add_test(function test_bypass_acceptance() {
++  let [policy, prefs, listener] = getPolicy("bypass_acceptance");
++
++  prefs.set("dataSubmissionPolicyBypassAcceptance", true);
++  do_check_false(policy.dataSubmissionPolicyAccepted);
++  do_check_true(policy.dataSubmissionPolicyBypassAcceptance);
++  defineNow(policy, new Date(policy.nextDataSubmissionDate.getTime()));
++  policy.checkStateAndTrigger();
++  do_check_eq(listener.requestDataUploadCount, 1);
++
++  run_next_test();
++});
++
+ add_test(function test_notification_implicit_acceptance() {
+   let [policy, prefs, listener] = getPolicy("notification_implicit_acceptance");
+ 
+   let now = new Date(policy.nextDataSubmissionDate.getTime() -
+                      policy.SUBMISSION_NOTIFY_INTERVAL_MSEC + 1);
+   defineNow(policy, now);
+   policy.checkStateAndTrigger();
+   do_check_eq(listener.notifyUserCount, 1);

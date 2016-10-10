@@ -1,0 +1,101 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/python/mozbuild/mozbuild/mach_commands.py b/python/mozbuild/mozbuild/mach_commands.py
+--- a/python/mozbuild/mozbuild/mach_commands.py
++++ b/python/mozbuild/mozbuild/mach_commands.py
+@@ -912,27 +912,30 @@
+     @Command('mozbuild-migrate', category='build-dev',
+         description='Migrate Makefile.in variables to moz.build files.')
+     @CommandArgument('--list', dest='is_list', action='store_true',
+         help='Whether the variable is a list. Defaults to string.')
+     @CommandArgument('makefile-variable', nargs='+',
+         help='The Makefile variable(s) to move.')
+     @CommandArgument('mozbuild-variable',
+         help='The name of the moz.build variable to create.')
++    @CommandArgument('dir',
++        help='The dir to convert.')
+     def mozbuild_migrate(self, is_list=False, **kwargs):
+         import pymake.parser
+         import pymake.parserdata
+ 
+         # For some reason argparse doesn't like dest= specified on positional
+         # arguments. And, it's passing in these options without normalization.
+         # So, we have to use **kwargs. Weird.
+         makefile_variables = kwargs['makefile-variable']
+         mozbuild_variable = kwargs['mozbuild-variable']
++        dir = kwargs['dir']
+ 
+-        for path in self._makefile_ins():
++        for path in self._makefile_ins(top=dir):
+             relpath = os.path.relpath(path, self.topsrcdir)
+ 
+             try:
+                 statements = \
+                     list(self._iterstatements(pymake.parser.parsefile(path)))
+             except Exception as e:
+                 print(e)
+                 continue
+@@ -989,21 +992,41 @@
+ 
+ 
+                 strip_lines |= set(range(exp.loc.line - 1, line - 1))
+ 
+             values -= set(['$(NULL)'])
+             newlines = []
+ 
+             if is_list:
++                def convert(vs):
++                    for v in vs:
++                        if not v.startswith('-I'):
++                            raise Exception(v)
++                        v = v[2:]
++                        if v == '$(srcdir)' or v == '.':
++                            continue
++                        if v.startswith('$(topsrcdir)/'):
++                            yield v[len('$(topsrcdir)'):]
++                        elif v.startswith('$(srcdir)/'):
++                            yield v[len('$(srcdir)/'):]
++                        else:
++                            raise Exception(v)
++
++                try:
++                    values = sorted(convert(values))
++                except Exception as e:
++                    print('Unexpected value: %s in %s' % (e, relpath))
++                    continue
++
+                 if not values:
+                     continue
+ 
+                 newlines.extend(['', '%s += [' % mozbuild_variable])
+-                for value in sorted(values):
++                for value in values:
+                     newlines.append("    '%s'," % value)
+                 newlines.append(']')
+                 newlines.append('')
+             else:
+                 if not string_value:
+                     continue
+ 
+                 if string_value != '1':
+@@ -1065,18 +1088,18 @@
+             return "if %sCONFIG['%s']:" % (
+                 "" if condition.expected else "not ",
+                 condition.exp.s)
+         elif isinstance(condition, pymake.parserdata.ElseCondition):
+             return "else [sorry, not helpful]"
+         else:
+             raise Exception("Unknown condition " + str(condition))
+ 
+-    def _makefile_ins(self):
+-        for root, dirs, files in os.walk(self.topsrcdir):
++    def _makefile_ins(self, top=None):
++        for root, dirs, files in os.walk(top or self.topsrcdir):
+             for f in files:
+                 if f == 'Makefile.in':
+                     yield os.path.join(root, f)
+ 
+     def _iterstatements(self, statements):
+         import pymake.parserdata
+ 
+         cond_stack = []

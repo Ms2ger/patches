@@ -1,0 +1,435 @@
+# HG changeset patch
+# Parent 165213bd1deddbfa3406cb9ac72d090e57f172a9
+# User Gregory Szorc <gps@mozilla.com>
+Bug 847662 - Part 4: Inject sanity into provider management APIs
+
+diff --git a/services/metrics/providermanager.jsm b/services/metrics/providermanager.jsm
+--- a/services/metrics/providermanager.jsm
++++ b/services/metrics/providermanager.jsm
+@@ -22,25 +22,23 @@
+  * Handles and coordinates the collection of metrics data from providers.
+  *
+  * This provides an interface for managing `Metrics.Provider` instances. It
+  * provides APIs for bulk collection of data.
+  */
+ this.ProviderManager = function (storage) {
+   this._log = Log4Moz.repository.getLogger("Services.Metrics.ProviderManager");
+ 
++  // Provider name to object holding state.
+   this._providers = new Map();
+   this._storage = storage;
+ 
+   this._providerInitQueue = [];
+   this._providerInitializing = false;
+ 
+-  this._pullOnlyProviders = {};
+-  this._pullOnlyProvidersRegistered = false;
+-
+   // Callback to allow customization of providers after they are constructed
+   // but before they call out into their initialization code.
+   this.onProviderInit = null;
+ }
+ 
+ this.ProviderManager.prototype = Object.freeze({
+   get providers() {
+     let providers = [];
+@@ -60,16 +58,65 @@
+     if (!provider) {
+       return null;
+     }
+ 
+     return provider.provider;
+   },
+ 
+   /**
++   * Registers a provider from its constructor function.
++   *
++   * This is how a Metrics.Provider begins its association with this manager.
++   *
++   * A constructor function for a Metrics.Provider-derived type is passed in
++   * and this manager is made aware of that provider and all it can do.
++   * Depending on whether the provider is pull-only, it may be initialized
++   * immediately or deferred until it's existence is needed. This should
++   * largely be opaque to the outside world.
++   *
++   * @param type
++   *        (function) Constructor function for Metrics.Provider.
++   */
++  registerProviderFromType: function (type) {
++    if (typeof(type) != "function") {
++      throw new Error("Expected function. Got: " + typeof(type));
++    }
++
++    let proto = type.prototype;
++    if (!proto.name) {
++      throw new Error("Prototype does not define a name.");
++    }
++
++    if (this._providers.has(proto.name)) {
++      throw new Error("Provider with this name already registered: " +
++                      proto.name);
++    }
++
++    let state = {
++      type: type,
++      pullOnly: proto.pullOnly,
++      provider: null,
++      initialized: false,
++      initializedPromise: null,
++      constantCollected: false,
++    };
++
++    this._providers.set(proto.name, state);
++
++    if (proto.pullOnly) {
++      this._log.info("Provider is pull-only. Deferring initialization: " +
++                     proto.name);
++      return;
++    }
++
++    this._initializeProvider(proto.name);
++  },
++
++  /**
+    * Registers providers from a category manager category.
+    *
+    * This examines the specified category entries and registers found
+    * providers.
+    *
+    * Category entries are essentially JS modules and the name of the symbol
+    * within that module that is a `Metrics.Provider` instance.
+    *
+@@ -92,192 +139,162 @@
+    * @param category
+    *        (string) Name of category to query and load from.
+    */
+   registerProvidersFromCategoryManager: function (category) {
+     this._log.info("Registering providers from category: " + category);
+     let cm = Cc["@mozilla.org/categorymanager;1"]
+                .getService(Ci.nsICategoryManager);
+ 
+-    let promises = [];
+     let enumerator = cm.enumerateCategory(category);
+     while (enumerator.hasMoreElements()) {
+       let entry = enumerator.getNext()
+                             .QueryInterface(Ci.nsISupportsCString)
+                             .toString();
+ 
+       let uri = cm.getCategoryEntry(category, entry);
+       this._log.info("Attempting to load provider from category manager: " +
+                      entry + " from " + uri);
+ 
+       try {
+         let ns = {};
+         Cu.import(uri, ns);
+ 
+-        let promise = this.registerProviderFromType(ns[entry]);
+-        if (promise) {
+-          promises.push(promise);
+-        }
++        this.registerProviderFromType(ns[entry]);
+       } catch (ex) {
+-        this._recordError("Error registering provider from category manager : " +
+-                          entry + ": ", ex);
++        this._log.error("Error registering provider from category manager : " +
++                        entry + ": " + CommonUtils.exceptionStr(ex));
+         continue;
+       }
+     }
+ 
+-    return Task.spawn(function wait() {
+-      for (let promise of promises) {
+-        yield promise;
+-      }
+-    });
++    return this._ensureProvidersInitialized(false);
+   },
+ 
+   /**
+-   * Registers a `MetricsProvider` with this manager.
++   * Ensure a provider is initialized.
+    *
+-   * Once a `MetricsProvider` is registered, data will be collected from it
+-   * whenever we collect data.
+-   *
+-   * The returned value is a promise that will be resolved once registration
+-   * is complete.
+-   *
+-   * Providers are initialized as part of registration by calling
+-   * provider.init().
+-   *
+-   * @param provider
+-   *        (Metrics.Provider) The provider instance to register.
+-   *
+-   * @return Promise<null>
++   * This will return a promise that is resolved when the provider is
++   * initialized. If the provider is not initialized, its initialization will
++   * be scheduled.
+    */
+-  registerProvider: function (provider) {
+-    if (!(provider instanceof Provider)) {
+-      throw new Error("Argument must be a Provider instance.");
++  _ensureProviderInitialized: function (name) {
++    let state = this._providers.get(name);
++    if (!state) {
++      throw new Error("Unknown provider: " + name);
+     }
+ 
+-    if (this._providers.has(provider.name)) {
++    if (state.initialized) {
++      this._log.warn("Provider already initialized: " + name);
+       return Promise.resolve();
+     }
+ 
++    if (state.initializedPromise) {
++      this._log.warn("Provider already initializing: " + name);
++      return state.initializedPromise;
++    }
++
++    let provider = new state.type();
++
++    // This should ideally never happen. If it does, remove the registration
++    // so we don't error again.
++    if (!(provider instanceof Provider)) {
++      this._providers.delete(name);
++      return Promise.reject(new Error("Provider does not construct to a Provider: " +
++                                      name));
++    }
++
++    if (this.onProviderInit) {
++      this.onProviderInit(provider);
++    }
++
+     let deferred = Promise.defer();
++    state.initializedPromise = deferred.promise;
+     this._providerInitQueue.push([provider, deferred]);
+ 
+     if (this._providerInitQueue.length == 1) {
+       this._popAndInitProvider();
+     }
+ 
+     return deferred.promise;
+   },
+ 
+   /**
+-   * Registers a provider from its constructor function.
+-   *
+-   * If the provider is pull-only, it will be stashed away and
+-   * initialized later. Null will be returned.
+-   *
+-   * If it is not pull-only, it will be initialized immediately and a
+-   * promise will be returned. The promise will be resolved when the
+-   * provider has finished initializing.
++   * Deinitialize a provider.
+    */
+-  registerProviderFromType: function (type) {
+-    let proto = type.prototype;
+-    if (proto.pullOnly) {
+-      this._log.info("Provider is pull-only. Deferring initialization: " +
+-                     proto.name);
+-      this._pullOnlyProviders[proto.name] = type;
++  _deinitProvider: function (name) {
++    let state = this._providers.get(name);
+ 
+-      return null;
++    if (!state) {
++      throw new Error("Provider is not known: " + name);
+     }
+ 
+-    let provider = this._initProviderFromType(type);
+-    return this.registerProvider(provider);
++    if (!state.initialized) {
++      return Promise.resolve();
++    }
++
++    return Task.spawn(function deinitProvider() {
++      this._log.info("Deinitializing provider: " + name);
++
++      try {
++        yield state.provider.shutdown();
++      } catch (ex) {
++        this._recordError("Error when shutting down provider: " + provider.name,
++                          ex);
++      } finally {
++        state.provider = null;
++        state.initialized = false;
++        state.initializedPromise = null;
++      }
++    }.bind(this));
+   },
+ 
+   /**
+-   * Initializes a provider from its type.
++   * Convenience function to ensure all the specified providers are initialized.
+    *
+-   * This is how a constructor function should be turned into a provider
+-   * instance.
++   * The returned promise is resolved once all providers are initialized.
+    *
+-   * A side-effect is the provider is registered with the manager.
++   * @return Promise<>
+    */
+-  _initProviderFromType: function (type) {
+-    let provider = new type();
+-    if (this.onProviderInit) {
+-      this.onProviderInit(provider);
++  _ensureProvidersInitialized: function (names=null, initPullOnly=false) {
++    if (!names) {
++      names = [name for let [name, state] of this._providers];
+     }
+ 
+-    return provider;
+-  },
+-
+-  /**
+-   * Remove a named provider from the manager.
+-   *
+-   * It is the caller's responsibility to shut down the provider
+-   * instance.
+-   */
+-  unregisterProvider: function (name) {
+-    this._providers.delete(name);
+-  },
+-
+-  /**
+-   * Ensure that pull-only providers are registered.
+-   */
+-  ensurePullOnlyProvidersRegistered: function () {
+-    if (this._pullOnlyProvidersRegistered) {
+-      return Promise.resolve();
+-    }
+-
+-    let onFinished = function () {
+-      this._pullOnlyProvidersRegistered = true;
+-
+-      return Promise.resolve();
+-    }.bind(this);
+-
+-    return Task.spawn(function registerPullProviders() {
+-      for each (let providerType in this._pullOnlyProviders) {
+-        try {
+-          let provider = this._initProviderFromType(providerType);
+-          yield this.registerProvider(provider);
+-        } catch (ex) {
+-          this._recordError("Error registering pull-only provider", ex);
+-        }
+-      }
+-    }.bind(this)).then(onFinished, onFinished);
+-  },
+-
+-  ensurePullOnlyProvidersUnregistered: function () {
+-    if (!this._pullOnlyProvidersRegistered) {
+-      return Promise.resolve();
+-    }
+-
+-    let onFinished = function () {
+-      this._pullOnlyProvidersRegistered = false;
+-
+-      return Promise.resolve();
+-    }.bind(this);
+-
+-    return Task.spawn(function unregisterPullProviders() {
+-      for (let provider of this.providers) {
+-        if (!provider.pullOnly) {
++    return Task.spawn(function initializeAllProviders() {
++      for (let name of names) {
++        let state = this._providers.get(name);
++        if (!state) {
++          this._log.warn("Unknown provider: " + name);
+           continue;
+         }
+ 
+-        this._log.info("Shutting down pull-only provider: " +
+-                       provider.name);
++        if (!initPullOnly && state.pullOnly) {
++          continue;
++        }
+ 
+         try {
+-          yield provider.shutdown();
++          yield this._ensureProviderInitialized(name);
+         } catch (ex) {
+-          this._recordError("Error when shutting down provider: " +
+-                            provider.name, ex);
+-        } finally {
+-          this.unregisterProvider(provider.name);
++          this._recordError("Error initializing provider", ex);
+         }
+       }
+-    }.bind(this)).then(onFinished, onFinished);
++    }.bind(this));
++  },
++
++  _deinitPullProviders: function () {
++    return Task.spawn(function deinitPullProviders() {
++      this._log.info("Deinitializing pull-only providers.");
++
++      for (let [name, state] of this._providers) {
++        if (state.pullOnly) {
++          yield this._deinitProvider(name);
++        }
++      }
++    }.bind(this));
+   },
+ 
+   _popAndInitProvider: function () {
+     if (!this._providerInitQueue.length || this._providerInitializing) {
+       return;
+     }
+ 
+     let [provider, deferred] = this._providerInitQueue.shift();
+@@ -310,45 +327,45 @@
+    * Collects all constant measurements from all providers.
+    *
+    * Returns a Promise that will be fulfilled once all data providers have
+    * provided their constant data. A side-effect of this promise fulfillment
+    * is that the manager is populated with the obtained collection results.
+    * The resolved value to the promise is this `ProviderManager` instance.
+    */
+   collectConstantData: function () {
+-    let entries = [];
++    let names = [];
+ 
+-    for (let [name, entry] of this._providers) {
+-      if (entry.constantsCollected) {
++    for (let [name, state] of this._providers) {
++      if (state.constantCollected) {
+         this._log.trace("Provider has already provided constant data: " +
+                         name);
+         continue;
+       }
+ 
+-      entries.push(entry);
++      names.push(name);
+     }
+ 
+-    let onCollect = function (entry, result) {
+-      entry.constantsCollected = true;
+-    };
++    let onCollect = function (name, result) {
++      this._providers.get(name).constantCollected = true;
++    }.bind(this);
+ 
+-    return this._callCollectOnProviders(entries, "collectConstantData",
++    return this._callCollectOnProviders(names, "collectConstantData",
+                                         onCollect);
+   },
+ 
+   /**
+    * Calls collectDailyData on all providers.
+    */
+   collectDailyData: function () {
+     return this._callCollectOnProviders(this._providers.values(),
+                                         "collectDailyData");
+   },
+ 
+-  _callCollectOnProviders: function (entries, fnProperty, onCollect=null) {
++  _callCollectOnProviders: function (names, fnProperty, onCollect=null) {
+     let promises = [];
+ 
+     for (let entry of entries) {
+       let provider = entry.provider;
+       let collectPromise;
+       try {
+         collectPromise = provider[fnProperty].call(provider);
+       } catch (ex) {

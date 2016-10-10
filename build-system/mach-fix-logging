@@ -1,0 +1,553 @@
+# HG changeset patch
+# Parent 9733881b2b423b12ffb67925dcd5ca66908a2fe1
+# User Gregory Szorc <gps@mozilla.com>
+Bug 796875 - Overhaul mach's logging mechanism
+
+diff --git a/python/mach/mach/logging.py b/python/mach/mach/logging.py
+--- a/python/mach/mach/logging.py
++++ b/python/mach/mach/logging.py
+@@ -13,23 +13,29 @@
+ except ImportError:
+     blessings = None
+ 
+ import json
+ import logging
+ import sys
+ import time
+ 
++from contextlib import contextmanager
+ 
+-def format_seconds(total):
+-    """Format number of seconds to MM:SS.DD form."""
+ 
+-    minutes, seconds = divmod(total, 60)
++if sys.version_info[0] == 2:
++    str_type = unicode
++else:
++    str_type = str
+ 
+-    return '%2d:%05.2f' % (minutes, seconds)
++
++class StructuredOnlyFilter(logging.Filter):
++    """Only allow structured log messages."""
++    def filter(self, record):
++        return hasattr(record, 'action') and hasattr(record, 'params')
+ 
+ 
+ class ConvertToStructuredFilter(logging.Filter):
+     """Filter that converts unstructured records into structured ones."""
+     def filter(self, record):
+         if hasattr(record, 'action') and hasattr(record, 'params'):
+             return True
+ 
+@@ -45,187 +51,238 @@
+ 
+     def format(self, record):
+         action = getattr(record, 'action', 'UNKNOWN')
+         params = getattr(record, 'params', {})
+ 
+         return json.dumps([record.created, action, params])
+ 
+ 
+-class StructuredHumanFormatter(logging.Formatter):
+-    """Log formatter that writes structured messages for humans.
++class TerminalHandler(logging.Handler):
++    """Handler for writing to the terminal.
+ 
+-    It is important that this formatter never be added to a logger that
+-    produces unstructured/classic log messages. If it is, the call to format()
+-    could fail because the string could contain things (like JSON) that look
+-    like formatting character sequences.
++    This handles writing both structured and unstructured records to the
++    terminal. It also handles colorization (if possible).
+ 
+-    Because of this limitation, format() will fail with a KeyError if an
+-    unstructured record is passed or if the structured message is malformed.
++    The bulk of this class theoretically belongs in a logging.Formatter.
++    However, we merge the handler and formatter together to get more control
++    over Unicode handling, which can be a bit fragile.
+     """
+-    def __init__(self, start_time, write_interval=False):
+-        self.start_time = start_time
+-        self.write_interval = write_interval
+-        self.last_time = None
+ 
+-    def format(self, record):
+-        elapsed = self._time(record)
++    def __init__(self, stream, start_time, prefix=None, colorize=None):
++        """Initialize a terminal handler.
+ 
+-        return '%s %s' % (format_seconds(elapsed),
+-            record.msg.format(**record.params))
++        The handler will write to the opened passed file handle (stream).
+ 
+-    def _time(self, record):
+-        t = record.created - self.start_time
++        The caller has some control over writing behavior. The handler can
++        prefix each outputted line with the elapsed time since start_time by
++        defining prefix to 'elapsed'. If prefix is 'interval', each line will
++        be prefixed with the time since the last event.
+ 
+-        if self.write_interval and self.last_time is not None:
+-            t = record.created - self.last_time
++        If writing to a TTY and we know how to colorize for the destination
++        terminal, the default behavior is to colorize output. Callers can
++        disable all colorization by setting colorize to False. Or, they can
++        attempt to enable colorization by setting colorize to True.
++        Colorization doesn't always work because we don't always know how to
++        colorize for a given terminal.
++        """
++        logging.Handler.__init__(self)
+ 
+-        self.last_time = record.created
++        self._stream = stream
++        self._start_time = start_time
+ 
+-        return t
++        self.set_prefix(prefix)
++        self._last_time = None
+ 
++        if not self._print_elapsed and not self._print_interval and prefix is not None:
++            raise Exception('Invalid value for prefix: %s' % prefix)
+ 
+-class StructuredTerminalFormatter(StructuredHumanFormatter):
+-    """Log formatter for structured messages writing to a terminal."""
++        self._encoding = 'UTF-8'
+ 
+-    def set_terminal(self, terminal):
+-        self.terminal = terminal
++        if hasattr(stream, 'encoding') and stream.encoding is not None:
++            self._encoding = stream.encoding
+ 
+-    def format(self, record):
+-        t = self.terminal.blue(format_seconds(self._time(record)))
+-        f = record.msg.format(**record.params)
++        self._terminal = None
+ 
+-        return '%s %s' % (t, self._colorize(f))
++        if (colorize is None or colorize is True) and blessings:
++            terminal = blessings.Terminal(stream=stream)
+ 
+-    def _colorize(self, s):
+-        if not self.terminal:
+-            return s
++            if terminal.is_a_tty or colorize:
++                self._terminal = terminal
+ 
+-        result = s
++                # We prepopulate some translations so they don't have to be
++                # computed for every line. If this set grows, it should
++                # probably be hoisted into a class-level list or something.
++                self._test_pass = self._terminal.green(b'TEST-PASS')
++                self._test_unexpected = self._terminal.red(b'TEST-UNEXPECTED')
+ 
+-        if s.startswith('TEST-PASS'):
+-            result = self.terminal.green(s[0:9]) + s[9:]
+-        elif s.startswith('TEST-UNEXPECTED'):
+-            result = self.terminal.red(s[0:20]) + s[21:]
++                if isinstance(self._test_pass, str_type):
++                    self._test_pass = self._test_pass.encode('utf-8', 'ignore')
++                    self._test_unexpected = self._test_unexpected.encode('utf-8', 'ignore')
++
++    def set_prefix(self, prefix):
++        """Set a prefix for printed lines.
++
++        If 'elapsed', the elapsed time since start will be prepended to every
++        line. If set to 'interval' the time since the last message will be
++        prepended. If something else, no prefix will be used.
++        """
++        self._print_elapsed = prefix == 'elapsed'
++        self._print_interval = prefix == 'interval'
++
++    def emit(self, record):
++        if hasattr(record, 'action') and hasattr(record, 'params'):
++            msg = record.msg.format(**record.params)
++        else:
++            msg = record.msg
++
++        # Ensure the message is in binary. We ensure the Unicode -> binary
++        # encoding always works and replace unknown code points with the
++        # standard replacement character.
++        if isinstance(msg, str_type):
++            msg = msg.encode(self._encoding, 'replace')
++
++        if self._terminal is not None:
++            msg = self._colorize(msg)
++
++        if self._print_elapsed:
++            t = record.created - self._start_time
++        elif self._print_interval:
++            if self._last_time is not None:
++                t = record.created - self._last_time
++            else:
++                t = 0
++
++            self._last_time = record.created
++        else:
++            t = None
++
++        if t is not None:
++            minutes, seconds = divmod(t, 60)
++            t = b'%d:%05.2f' % (minutes, seconds)
++
++            if self._terminal is not None:
++                t = self._terminal.blue(t)
++
++            self._stream.write(t)
++            self._stream.write(b' ')
++
++        self._stream.write(msg)
++        self._stream.write(b'\n')
++        self._stream.flush()
++
++    def flush(self):
++        self._stream.flush()
++
++    def _colorize(self, msg):
++        assert not isinstance(msg, str_type)
++
++        result = msg.replace(b'TEST-PASS', self._test_pass)
++        result = result.replace(b'TEST-UNEXPECTED', self._test_unexpected)
+ 
+         return result
+ 
+ 
+ class LoggingManager(object):
+-    """Holds and controls global logging state.
++    """Manages how logging is handled.
+ 
+-    An application should instantiate one of these and configure it as needed.
++    By default, no logging is enabled. All log messages disappear into a black
++    hole.
+ 
+-    This class provides a mechanism to configure the output of logging data
+-    both from mach and from the overall logging system (e.g. from other
+-    modules).
++    There are essentially two classes of log output managed by this class.
++
++    First, we have stdout logging. This encapsulates scenarios where stdout is
++    the terminal and when stdout is a pipe. When stdout is a TTY, we are able
++    to perform colorization, etc. For stdout logging, loggers must be
++    explicitly registered or their messages won't be captured by stdout.
++
++    We also have support for writing JSON files. Messages written to these
++    loggers are newline delimited JSON arrays. All messages written to JSON
++    handlers are structured log messages.
+     """
+ 
+     def __init__(self):
+         self.start_time = time.time()
+ 
+-        self.json_handlers = []
+-        self.terminal_handler = None
+-        self.terminal_formatter = None
+-
+         self.root_logger = logging.getLogger()
+         self.root_logger.setLevel(logging.DEBUG)
+ 
+         # Installing NullHandler on the root logger ensures that *all* log
+         # messages have at least one handler. This prevents Python from
+-        # complaining about "no handlers could be found for logger XXX."
++        # complaining with "no handlers could be found for logger XXX."
+         self.root_logger.addHandler(logging.NullHandler())
+ 
+-        self.mach_logger = logging.getLogger('mach')
+-        self.mach_logger.setLevel(logging.DEBUG)
++        # JSON handlers will receive structured log messages.
++        self.json_handlers = []
+ 
+-        self.structured_filter = ConvertToStructuredFilter()
+-
+-        self.structured_loggers = [self.mach_logger]
+-
+-        self._terminal = None
+-
+-    @property
+-    def terminal(self):
+-        if not self._terminal and blessings:
+-            terminal = blessings.Terminal(stream=sys.stdout)
+-
+-            if terminal.is_a_tty:
+-                self._terminal = terminal
+-
+-        return self._terminal
++        self._terminal_handler = None
++        self._terminal_loggers = set()
+ 
+     def add_json_handler(self, fh):
+-        """Enable JSON logging on the specified file object."""
++        """Adds a JSON handler.
+ 
+-        # Configure the consumer of structured messages.
++        An open file handle is passed. Future messages will be written to
++        this handle as newline delimited JSON arrays.
++
++        JSON file handlers capture all structured log messages from all loggers
++        by default.
++        """
+         handler = logging.StreamHandler(stream=fh)
+         handler.setFormatter(StructuredJSONFormatter())
+         handler.setLevel(logging.DEBUG)
++        handler.add_filter(StructuredOnlyFilter())
+ 
+-        # And hook it up.
+-        for logger in self.structured_loggers:
+-            logger.addHandler(handler)
++        self.root_handler.append(handler)
+ 
+-        self.json_handlers.append(handler)
++    def set_terminal_handler(self, level=logging.INFO, prefix=None,
++            colorize=None, stream=sys.stdout):
++        """Define characteristics of terminal logging.
+ 
+-    def add_terminal_logging(self, fh=sys.stdout, level=logging.INFO,
+-            write_interval=False):
+-        """Enable logging to the terminal."""
++        By itself, this does not enable output of messages to the terminal. You
++        will need to call add_terminal_logger() with a logger whose output to
++        capture.
++        """
++        old = self._terminal_handler
+ 
+-        formatter = StructuredHumanFormatter(self.start_time,
+-            write_interval=write_interval)
+-
+-        if self.terminal:
+-            formatter = StructuredTerminalFormatter(self.start_time,
+-                write_interval=write_interval)
+-            formatter.set_terminal(self.terminal)
+-
+-        handler = logging.StreamHandler(stream=fh)
+-        handler.setFormatter(formatter)
+-        handler.setLevel(level)
+-
+-        for logger in self.structured_loggers:
+-            logger.addHandler(handler)
+-
+-        self.terminal_handler = handler
+-        self.terminal_formatter = formatter
+-
+-    def replace_terminal_handler(self, handler):
+-        """Replace the installed terminal handler.
+-
+-        Returns the old handler or None if none was configured.
+-        If the new handler is None, removes any existing handler and disables
+-        logging to the terminal.
+-        """
+-        old = self.terminal_handler
+-
+-        if old:
+-            for logger in self.structured_loggers:
++        if old is not None:
++            for logger in self._terminal_loggers:
+                 logger.removeHandler(old)
+ 
+-        if handler:
+-            for logger in self.structured_loggers:
+-                logger.addHandler(handler)
++        self._terminal_handler = TerminalHandler(stream, self.start_time,
++            prefix=prefix, colorize=colorize)
++        self._terminal_handler.setLevel(level)
+ 
+-        self.terminal_handler = handler
++        for logger in self._terminal_loggers:
++            logger.addHandler(self._terminal_handler)
+ 
+         return old
+ 
+-    def enable_unstructured(self):
+-        """Enable logging of unstructured messages."""
+-        if self.terminal_handler:
+-            self.terminal_handler.addFilter(self.structured_filter)
+-            self.root_logger.addHandler(self.terminal_handler)
++    def set_terminal_prefix(self, prefix):
++        """Set the line prefix for terminal logging."""
++        self._terminal_handler.set_prefix(prefix)
+ 
+-    def disable_unstructured(self):
+-        """Disable logging of unstructured messages."""
+-        if self.terminal_handler:
+-            self.terminal_handler.removeFilter(self.structured_filter)
+-            self.root_logger.removeHandler(self.terminal_handler)
++    def add_terminal_logger(self, logger):
++        """Add a logger whose output should be printed to the terminal."""
+ 
+-    def register_structured_logger(self, logger):
+-        """Register a structured logger.
++        self._terminal_loggers.add(logger)
+ 
+-        This needs to be called for all structured loggers that don't chain up
+-        to the mach logger in order for their output to be captured.
+-        """
+-        self.structured_loggers.append(logger)
++        if self._terminal_handler is None:
++            return
++
++        logger.addHandler(self._terminal_handler)
++
++    def remove_terminal_logger(self, logger):
++        """No longer record a logger's messages to the terminal."""
++
++        self._terminal_loggers.discard(logger)
++
++        if self._terminal_handler is None:
++            return
++
++        logger.removeHandler(self._terminal_handler)
++
++    @contextmanager
++    def temporary_add_terminal_logger(self, logger):
++        """Context manager that captures a logger's output to a terminal."""
++        self.add_terminal_logger(logger)
++        yield
++        self.remove_terminal_logger(logger)
++
+diff --git a/python/mach/mach/main.py b/python/mach/mach/main.py
+--- a/python/mach/mach/main.py
++++ b/python/mach/mach/main.py
+@@ -32,17 +32,16 @@
+ 
+ 
+ # Settings for argument parser that don't get proxied to sub-module. i.e. these
+ # are things consumed by the driver itself.
+ CONSUMED_ARGUMENTS = [
+     'settings_file',
+     'verbose',
+     'logfile',
+-    'log_interval',
+     'command',
+     'mach_class',
+     'mach_method',
+     'mach_pass_context',
+ ]
+ 
+ MACH_ERROR = r'''
+ The error occurred in mach itself. This is likely a bug in mach itself or a
+@@ -137,17 +136,17 @@
+     def __init__(self, cwd):
+         assert os.path.isdir(cwd)
+ 
+         self.cwd = cwd
+         self.log_manager = LoggingManager()
+         self.logger = logging.getLogger(__name__)
+         self.settings = ConfigSettings()
+ 
+-        self.log_manager.register_structured_logger(self.logger)
++        self.log_manager.add_terminal_logger(logging.getLogger('mach'))
+ 
+     def load_commands_from_directory(self, path):
+         """Scan for mach commands from modules in a directory.
+ 
+         This takes a path to a directory, loads the .py files in it, and
+         registers and found mach command providers with this mach instance.
+         """
+         for f in sorted(os.listdir(path)):
+@@ -264,22 +263,19 @@
+         if args.logfile:
+             self.log_manager.add_json_handler(args.logfile)
+ 
+         # Up the logging level if requested.
+         log_level = logging.INFO
+         if args.verbose:
+             log_level = logging.DEBUG
+ 
+-        self.log_manager.register_structured_logger(logging.getLogger('mach'))
+-
+         # Always enable terminal logging. The log manager figures out if we are
+         # actually in a TTY or are a pipe and does the right thing.
+-        self.log_manager.add_terminal_logging(level=log_level,
+-            write_interval=args.log_interval)
++        self.log_manager.set_terminal_handler(level=log_level)
+ 
+         self.load_settings(args)
+ 
+         stripped = {k: getattr(args, k) for k in vars(args) if k not in
+             CONSUMED_ARGUMENTS}
+ 
+         context = CommandContext(topdir=self.cwd, cwd=self.cwd,
+             settings=self.settings, log_manager=self.log_manager,
+@@ -434,21 +430,16 @@
+         #    metavar='FILENAME', help='Path to settings file.')
+ 
+         global_group.add_argument('-v', '--verbose', dest='verbose',
+             action='store_true', default=False,
+             help='Print verbose output.')
+         global_group.add_argument('-l', '--log-file', dest='logfile',
+             metavar='FILENAME', type=argparse.FileType('ab'),
+             help='Filename to write log data to.')
+-        global_group.add_argument('--log-interval', dest='log_interval',
+-            action='store_true', default=False,
+-            help='Prefix log line with interval from last message rather '
+-                'than relative time. Note that this is NOT execution time '
+-                'if there are parallel operations.')
+ 
+         Registrar.populate_argument_parser(subparser)
+ 
+         return parser
+ 
+     @Command('help', help='Show mach usage info or help for a command.')
+     @CommandArgument('subcommand', default=None, nargs='?',
+         help='Command to show help info for.')
+diff --git a/python/mozbuild/mozbuild/mach_commands.py b/python/mozbuild/mozbuild/mach_commands.py
+--- a/python/mozbuild/mozbuild/mach_commands.py
++++ b/python/mozbuild/mozbuild/mach_commands.py
+@@ -31,16 +31,18 @@
+     @Command('build', help='Build the tree.')
+     @CommandArgument('what', default=None, nargs='*', help=BUILD_WHAT_HELP)
+     def build(self, what=None):
+         # This code is only meant to be temporary until the more robust tree
+         # building code in bug 780329 lands.
+         from mozbuild.compilation.warnings import WarningsCollector
+         from mozbuild.compilation.warnings import WarningsDatabase
+ 
++        self.log_manager.set_terminal_prefix('elapsed')
++
+         warnings_path = self._get_state_filename('warnings.json')
+         warnings_database = WarningsDatabase()
+ 
+         if os.path.exists(warnings_path):
+             try:
+                 warnings_database.load_from_file(warnings_path)
+             except ValueError:
+                 os.remove(warnings_path)
+diff --git a/testing/xpcshell/mach_commands.py b/testing/xpcshell/mach_commands.py
+--- a/testing/xpcshell/mach_commands.py
++++ b/testing/xpcshell/mach_commands.py
+@@ -89,17 +89,17 @@
+         test_path=None, debug=False, shuffle=False, interactive=False,
+         keep_going=False):
+ 
+         # Obtain a reference to the xpcshell test runner.
+         import runxpcshelltests
+ 
+         dummy_log = StringIO()
+         xpcshell = runxpcshelltests.XPCShellTests(log=dummy_log)
+-        self.log_manager.enable_unstructured()
++        self.log_manager.add_terminal_logger(self.log_manager.root_logger)
+ 
+         tests_dir = os.path.join(self.topobjdir, '_tests', 'xpcshell')
+         modules_dir = os.path.join(self.topobjdir, '_tests', 'modules')
+ 
+         args = {
+             'xpcshell': os.path.join(self.bindir, 'xpcshell'),
+             'mozInfo': os.path.join(self.topobjdir, 'mozinfo.json'),
+             'symbolsPath': os.path.join(self.distdir, 'crashreporter-symbols'),
+@@ -137,18 +137,16 @@
+ 
+             if isinstance(k, unicode_type):
+                 k = k.encode('utf-8')
+ 
+             filtered_args[k] = v
+ 
+         result = xpcshell.runTests(**filtered_args)
+ 
+-        self.log_manager.disable_unstructured()
+-
+         return int(not result)
+ 
+ 
+ @CommandProvider
+ class MachCommands(MachCommandBase):
+     @Command('xpcshell-test', help='Run an xpcshell test.')
+     @CommandArgument('test_file', default='all', nargs='?', metavar='TEST',
+         help='Test to run. Can be specified as a single JS file, a directory, '

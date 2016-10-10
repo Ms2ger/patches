@@ -1,0 +1,111 @@
+# HG changeset patch
+# Parent a36586a6d54fc258ec7f0b243f17e22c5bc97dfe
+# User Gregory Szorc <gps@mozilla.com>
+Bug 875013 - Add build warning for VPATH usage
+
+diff --git a/config/rules.mk b/config/rules.mk
+--- a/config/rules.mk
++++ b/config/rules.mk
+@@ -19,21 +19,21 @@
+   MODULE \
+   PARALLEL_DIRS \
+   TEST_DIRS \
+   TIERS \
+   TOOL_DIRS \
+   XPIDL_MODULE \
+   $(NULL)
+ 
+-ifndef EXTERNALLY_MANAGED_MAKE_FILE
+ # Using $(firstword) may not be perfect. But it should be good enough for most
+ # scenarios.
+ _current_makefile = $(CURDIR)/$(firstword $(MAKEFILE_LIST))
+ 
++ifndef EXTERNALLY_MANAGED_MAKE_FILE
+ $(foreach var,$(_MOZBUILD_EXTERNAL_VARIABLES),$(if $($(var)),\
+     $(error Variable $(var) is defined in $(_current_makefile). It should only be defined in moz.build files),\
+     ))
+ 
+ ifneq (,$(XPIDLSRCS)$(SDK_XPIDLSRCS))
+     $(error XPIDLSRCS and SDK_XPIDLSRCS have been merged and moved to moz.build files as the XPIDL_SOURCES variable. You must move these variables out of $(_current_makefile))
+ endif
+ 
+@@ -41,16 +41,26 @@
+ # the backend hasn't been properly configured. We want this to be a fatal
+ # error, hence not using "-include".
+ ifndef STANDALONE_MAKEFILE
+ GLOBAL_DEPS += backend.mk
+ include backend.mk
+ endif
+ endif
+ 
++ifdef VPATH
++ifneq ($(srcdir),$(VPATH))
++$(warning VPATH defined in $(_current_makefile). We are trying to move away from VPATH. Please try to avoid using it)
++endif
++endif
++
++ifeq (,$(filter $(srcdir),$(VPATH)))
++VPATH := $(srcdir) $(VPATH)
++endif
++
+ ifdef TIERS
+ DIRS += $(foreach tier,$(TIERS),$(tier_$(tier)_dirs))
+ STATIC_DIRS += $(foreach tier,$(TIERS),$(tier_$(tier)_staticdirs))
+ endif
+ 
+ ifndef MOZILLA_DIR
+ MOZILLA_DIR = $(topsrcdir)
+ endif
+diff --git a/js/src/config/rules.mk b/js/src/config/rules.mk
+--- a/js/src/config/rules.mk
++++ b/js/src/config/rules.mk
+@@ -19,21 +19,21 @@
+   MODULE \
+   PARALLEL_DIRS \
+   TEST_DIRS \
+   TIERS \
+   TOOL_DIRS \
+   XPIDL_MODULE \
+   $(NULL)
+ 
+-ifndef EXTERNALLY_MANAGED_MAKE_FILE
+ # Using $(firstword) may not be perfect. But it should be good enough for most
+ # scenarios.
+ _current_makefile = $(CURDIR)/$(firstword $(MAKEFILE_LIST))
+ 
++ifndef EXTERNALLY_MANAGED_MAKE_FILE
+ $(foreach var,$(_MOZBUILD_EXTERNAL_VARIABLES),$(if $($(var)),\
+     $(error Variable $(var) is defined in $(_current_makefile). It should only be defined in moz.build files),\
+     ))
+ 
+ ifneq (,$(XPIDLSRCS)$(SDK_XPIDLSRCS))
+     $(error XPIDLSRCS and SDK_XPIDLSRCS have been merged and moved to moz.build files as the XPIDL_SOURCES variable. You must move these variables out of $(_current_makefile))
+ endif
+ 
+@@ -41,16 +41,26 @@
+ # the backend hasn't been properly configured. We want this to be a fatal
+ # error, hence not using "-include".
+ ifndef STANDALONE_MAKEFILE
+ GLOBAL_DEPS += backend.mk
+ include backend.mk
+ endif
+ endif
+ 
++ifdef VPATH
++ifneq ($(srcdir),$(VPATH))
++$(warning VPATH defined in $(_current_makefile). We are trying to move away from VPATH. Please try to avoid using it)
++endif
++endif
++
++ifeq (,$(filter $(srcdir),$(VPATH)))
++VPATH := $(srcdir) $(VPATH)
++endif
++
+ ifdef TIERS
+ DIRS += $(foreach tier,$(TIERS),$(tier_$(tier)_dirs))
+ STATIC_DIRS += $(foreach tier,$(TIERS),$(tier_$(tier)_staticdirs))
+ endif
+ 
+ ifndef MOZILLA_DIR
+ MOZILLA_DIR = $(topsrcdir)
+ endif

@@ -1,0 +1,36 @@
+# HG changeset patch
+# Parent 86413e921d5d5bdbefd6475619ebb0eab6185184
+# User Gregory Szorc <gps@mozilla.com>
+Bug 879406 - Unbust |mach help| when arguments are not prefixed with '-'
+
+diff --git a/python/mach/mach/dispatcher.py b/python/mach/mach/dispatcher.py
+--- a/python/mach/mach/dispatcher.py
++++ b/python/mach/mach/dispatcher.py
+@@ -172,18 +172,25 @@
+         # command arguments, we can't simply put all arguments on the same
+         # parser instance because argparse would complain. We can't register an
+         # argparse subparser here because it won't properly show help for
+         # global arguments. So, we employ a strategy similar to command
+         # execution where we construct a 2nd, independent ArgumentParser for
+         # just the command data then supplement the main help's output with
+         # this 2nd parser's. We use a custom formatter class to ignore some of
+         # the help output.
+-        c_parser = argparse.ArgumentParser(formatter_class=CommandFormatter,
+-            add_help=False)
++        parser_args = {
++            'formatter_class': CommandFormatter,
++            'add_help': False,
++        }
++
++        if handler.allow_all_arguments:
++            parser_args['prefix_chars'] = '+'
++
++        c_parser = argparse.ArgumentParser(**parser_args)
+ 
+         group = c_parser.add_argument_group('Command Arguments')
+ 
+         for arg in handler.arguments:
+             group.add_argument(*arg[0], **arg[1])
+ 
+         # This will print the description of the command below the usage.
+         description = handler.description

@@ -1,0 +1,205 @@
+# HG changeset patch
+# Parent b51316b2af6c4b8de998ce3f4ddcacb71258c375
+# User Gregory Szorc <gps@mozilla.com>
+Bug 879809 - Don't export MOZBUILD_BACKEND_CHECKED to independent build systems
+
+diff --git a/config/rules.mk b/config/rules.mk
+--- a/config/rules.mk
++++ b/config/rules.mk
+@@ -414,46 +414,50 @@
+ 
+ ifdef MOZ_UPDATE_XTERM
+ # Its good not to have a newline at the end of the titlebar string because it
+ # makes the make -s output easier to read.  Echo -n does not work on all
+ # platforms, but we can trick printf into doing it.
+ UPDATE_TITLE = printf "\033]0;%s in %s\007" $(1) $(shell $(BUILD_TOOLS)/print-depth-path.sh)/$(2) ;
+ endif
+ 
+-define SUBMAKE # $(call SUBMAKE,target,directory)
++# Static directories are largely independent of our build system. But, they
++# could share the same build mechanism (like moz.build files). We need to
++# prevent leaking of our backend state to these independent build systems. This
++# is why MOZBUILD_BACKEND_CHECKED isn't exported to make invocations for static
++# directories.
++define SUBMAKE # $(call SUBMAKE,target,directory,static)
+ +@$(UPDATE_TITLE)
+-+$(MAKE) $(if $(2),-C $(2)) $(1)
+++@if test -n "$(3)"; then \
++  MOZBUILD_BACKEND_CHECKED= $(MAKE) $(if $(2),-C $(2)) $(1); \
++else \
++  $(MAKE) $(if $(2),-C $(2)) $(1); \
++fi
+ 
+ endef # The extra line is important here! don't delete it
+ 
+ define TIER_DIR_SUBMAKE
+ @echo "BUILDSTATUS TIERDIR_START $(2)"
+-$(call SUBMAKE,$(1),$(2))
++$(call SUBMAKE,$(1),$(2),$(3))
+ @echo "BUILDSTATUS TIERDIR_FINISH $(2)"
+ 
+ endef # Ths empty line is important.
+ 
+ 
+ ifneq (,$(strip $(DIRS)))
+ LOOP_OVER_DIRS = \
+   $(foreach dir,$(DIRS),$(call SUBMAKE,$@,$(dir)))
+ endif
+ 
+ # we only use this for the makefiles target and other stuff that doesn't matter
+ ifneq (,$(strip $(PARALLEL_DIRS)))
+ LOOP_OVER_PARALLEL_DIRS = \
+   $(foreach dir,$(PARALLEL_DIRS),$(call SUBMAKE,$@,$(dir)))
+ endif
+ 
+-ifneq (,$(strip $(STATIC_DIRS)))
+-LOOP_OVER_STATIC_DIRS = \
+-  $(foreach dir,$(STATIC_DIRS),$(call SUBMAKE,$@,$(dir)))
+-endif
+-
+ ifneq (,$(strip $(TOOL_DIRS)))
+ LOOP_OVER_TOOL_DIRS = \
+   $(foreach dir,$(TOOL_DIRS),$(call SUBMAKE,$@,$(dir)))
+ endif
+ 
+ #
+ # Now we can differentiate between objects used to build a library, and
+ # objects used to build an executable in the same directory.
+@@ -669,17 +673,17 @@
+ ifdef TIERS
+ default all alldep::
+ 	@echo "BUILDSTATUS TIERS $(TIERS)"
+ 	$(foreach tier,$(TIERS),$(call SUBMAKE,tier_$(tier)))
+ else
+ 
+ default all::
+ ifneq (,$(strip $(STATIC_DIRS)))
+-	$(foreach dir,$(STATIC_DIRS),$(call SUBMAKE,,$(dir)))
++	$(foreach dir,$(STATIC_DIRS),$(call SUBMAKE,,$(dir),1))
+ endif
+ 	$(MAKE) export
+ 	$(MAKE) libs
+ 	$(MAKE) tools
+ 
+ # Do depend as well
+ alldep::
+ 	$(MAKE) export
+@@ -713,17 +717,17 @@
+ ifneq (,$(tier_$(1)_dirs))
+ 	@printf " export libs tools"
+ endif
+ 	@printf "\n"
+ 	@echo "BUILDSTATUS STATICDIRS $$($$@_staticdirs)"
+ 	@echo "BUILDSTATUS DIRS $$($$@_dirs)"
+ ifneq (,$(tier_$(1)_staticdirs))
+ 	@echo "BUILDSTATUS SUBTIER_START $(1) static"
+-	$$(foreach dir,$$($$@_staticdirs),$$(call TIER_DIR_SUBMAKE,,$$(dir)))
++	$$(foreach dir,$$($$@_staticdirs),$$(call TIER_DIR_SUBMAKE,,$$(dir),1))
+ 	@echo "BUILDSTATUS SUBTIER_FINISH $(1) static"
+ endif
+ ifneq (,$(tier_$(1)_dirs))
+ 	@echo "BUILDSTATUS SUBTIER_START $(1) export"
+ 	$$(MAKE) export_$$@
+ 	@echo "BUILDSTATUS SUBTIER_FINISH $(1) export"
+ 	@echo "BUILDSTATUS SUBTIER_START $(1) libs"
+ 	$$(MAKE) libs_$$@
+diff --git a/js/src/config/rules.mk b/js/src/config/rules.mk
+--- a/js/src/config/rules.mk
++++ b/js/src/config/rules.mk
+@@ -414,46 +414,50 @@
+ 
+ ifdef MOZ_UPDATE_XTERM
+ # Its good not to have a newline at the end of the titlebar string because it
+ # makes the make -s output easier to read.  Echo -n does not work on all
+ # platforms, but we can trick printf into doing it.
+ UPDATE_TITLE = printf "\033]0;%s in %s\007" $(1) $(shell $(BUILD_TOOLS)/print-depth-path.sh)/$(2) ;
+ endif
+ 
+-define SUBMAKE # $(call SUBMAKE,target,directory)
++# Static directories are largely independent of our build system. But, they
++# could share the same build mechanism (like moz.build files). We need to
++# prevent leaking of our backend state to these independent build systems. This
++# is why MOZBUILD_BACKEND_CHECKED isn't exported to make invocations for static
++# directories.
++define SUBMAKE # $(call SUBMAKE,target,directory,static)
+ +@$(UPDATE_TITLE)
+-+$(MAKE) $(if $(2),-C $(2)) $(1)
+++@if test -n "$(3)"; then \
++  MOZBUILD_BACKEND_CHECKED= $(MAKE) $(if $(2),-C $(2)) $(1); \
++else \
++  $(MAKE) $(if $(2),-C $(2)) $(1); \
++fi
+ 
+ endef # The extra line is important here! don't delete it
+ 
+ define TIER_DIR_SUBMAKE
+ @echo "BUILDSTATUS TIERDIR_START $(2)"
+-$(call SUBMAKE,$(1),$(2))
++$(call SUBMAKE,$(1),$(2),$(3))
+ @echo "BUILDSTATUS TIERDIR_FINISH $(2)"
+ 
+ endef # Ths empty line is important.
+ 
+ 
+ ifneq (,$(strip $(DIRS)))
+ LOOP_OVER_DIRS = \
+   $(foreach dir,$(DIRS),$(call SUBMAKE,$@,$(dir)))
+ endif
+ 
+ # we only use this for the makefiles target and other stuff that doesn't matter
+ ifneq (,$(strip $(PARALLEL_DIRS)))
+ LOOP_OVER_PARALLEL_DIRS = \
+   $(foreach dir,$(PARALLEL_DIRS),$(call SUBMAKE,$@,$(dir)))
+ endif
+ 
+-ifneq (,$(strip $(STATIC_DIRS)))
+-LOOP_OVER_STATIC_DIRS = \
+-  $(foreach dir,$(STATIC_DIRS),$(call SUBMAKE,$@,$(dir)))
+-endif
+-
+ ifneq (,$(strip $(TOOL_DIRS)))
+ LOOP_OVER_TOOL_DIRS = \
+   $(foreach dir,$(TOOL_DIRS),$(call SUBMAKE,$@,$(dir)))
+ endif
+ 
+ #
+ # Now we can differentiate between objects used to build a library, and
+ # objects used to build an executable in the same directory.
+@@ -669,17 +673,17 @@
+ ifdef TIERS
+ default all alldep::
+ 	@echo "BUILDSTATUS TIERS $(TIERS)"
+ 	$(foreach tier,$(TIERS),$(call SUBMAKE,tier_$(tier)))
+ else
+ 
+ default all::
+ ifneq (,$(strip $(STATIC_DIRS)))
+-	$(foreach dir,$(STATIC_DIRS),$(call SUBMAKE,,$(dir)))
++	$(foreach dir,$(STATIC_DIRS),$(call SUBMAKE,,$(dir),1))
+ endif
+ 	$(MAKE) export
+ 	$(MAKE) libs
+ 	$(MAKE) tools
+ 
+ # Do depend as well
+ alldep::
+ 	$(MAKE) export
+@@ -713,17 +717,17 @@
+ ifneq (,$(tier_$(1)_dirs))
+ 	@printf " export libs tools"
+ endif
+ 	@printf "\n"
+ 	@echo "BUILDSTATUS STATICDIRS $$($$@_staticdirs)"
+ 	@echo "BUILDSTATUS DIRS $$($$@_dirs)"
+ ifneq (,$(tier_$(1)_staticdirs))
+ 	@echo "BUILDSTATUS SUBTIER_START $(1) static"
+-	$$(foreach dir,$$($$@_staticdirs),$$(call TIER_DIR_SUBMAKE,,$$(dir)))
++	$$(foreach dir,$$($$@_staticdirs),$$(call TIER_DIR_SUBMAKE,,$$(dir),1))
+ 	@echo "BUILDSTATUS SUBTIER_FINISH $(1) static"
+ endif
+ ifneq (,$(tier_$(1)_dirs))
+ 	@echo "BUILDSTATUS SUBTIER_START $(1) export"
+ 	$$(MAKE) export_$$@
+ 	@echo "BUILDSTATUS SUBTIER_FINISH $(1) export"
+ 	@echo "BUILDSTATUS SUBTIER_START $(1) libs"
+ 	$$(MAKE) libs_$$@

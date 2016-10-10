@@ -1,0 +1,241 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/layout/base/nsCSSFrameConstructor.cpp b/layout/base/nsCSSFrameConstructor.cpp
+--- a/layout/base/nsCSSFrameConstructor.cpp
++++ b/layout/base/nsCSSFrameConstructor.cpp
+@@ -4103,18 +4103,23 @@
+   if (!gfxScrollFrame) {
+     // Build a XULScrollFrame when the child is a box, otherwise an
+     // HTMLScrollFrame
+     // XXXbz this is the lone remaining consumer of IsXULDisplayType.
+     // I wonder whether we can eliminate that somehow.
+     const nsStyleDisplay* displayStyle = aContentStyle->StyleDisplay();
+     if (IsXULDisplayType(displayStyle)) {
+       gfxScrollFrame = NS_NewXULScrollFrame(mPresShell, contentStyle, aIsRoot,
++#ifdef MOZ_XUL
+           displayStyle->mDisplay == NS_STYLE_DISPLAY_STACK ||
+-          displayStyle->mDisplay == NS_STYLE_DISPLAY_INLINE_STACK);
++          displayStyle->mDisplay == NS_STYLE_DISPLAY_INLINE_STACK
++#else
++          false
++#endif
++          );
+     } else {
+       gfxScrollFrame = NS_NewHTMLScrollFrame(mPresShell, contentStyle, aIsRoot);
+     }
+ 
+     InitAndRestoreFrame(aState, aContent, aParentFrame, gfxScrollFrame);
+   }
+ 
+   // if there are any anonymous children for the scroll frame, create
+diff --git a/layout/generic/nsGfxScrollFrame.cpp b/layout/generic/nsGfxScrollFrame.cpp
+--- a/layout/generic/nsGfxScrollFrame.cpp
++++ b/layout/generic/nsGfxScrollFrame.cpp
+@@ -2846,16 +2846,17 @@
+     // Make sure we are not a text area.
+     nsCOMPtr<nsIDOMHTMLTextAreaElement> textAreaElement(do_QueryInterface(parent->GetContent()));
+     if (!textAreaElement) {
+       mNeverHasVerticalScrollbar = mNeverHasHorizontalScrollbar = true;
+       return NS_OK;
+     }
+   }
+ 
++#ifdef MOZ_XUL
+   nsNodeInfoManager *nodeInfoManager =
+     presContext->Document()->NodeInfoManager();
+   nsCOMPtr<nsINodeInfo> nodeInfo;
+   nodeInfo = nodeInfoManager->GetNodeInfo(nsGkAtoms::scrollbar, nullptr,
+                                           kNameSpaceID_XUL,
+                                           nsIDOMNode::ELEMENT_NODE);
+   NS_ENSURE_TRUE(nodeInfo, NS_ERROR_OUT_OF_MEMORY);
+ 
+@@ -2939,16 +2940,17 @@
+   if (canHaveHorizontal && canHaveVertical) {
+     nodeInfo = nodeInfoManager->GetNodeInfo(nsGkAtoms::scrollcorner, nullptr,
+                                             kNameSpaceID_XUL,
+                                             nsIDOMNode::ELEMENT_NODE);
+     NS_TrustedNewXULElement(getter_AddRefs(mScrollCornerContent), nodeInfo.forget());
+     if (!aElements.AppendElement(mScrollCornerContent))
+       return NS_ERROR_OUT_OF_MEMORY;
+   }
++#endif // MOZ_XUL
+ 
+   return NS_OK;
+ }
+ 
+ void
+ nsGfxScrollFrameInner::AppendAnonymousContentTo(nsBaseContentList& aElements,
+                                                 uint32_t aFilter)
+ {
+diff --git a/layout/generic/nsHTMLReflowState.cpp b/layout/generic/nsHTMLReflowState.cpp
+--- a/layout/generic/nsHTMLReflowState.cpp
++++ b/layout/generic/nsHTMLReflowState.cpp
+@@ -689,18 +689,20 @@
+     case NS_STYLE_DISPLAY_FLEX:
+       frameType = NS_CSS_FRAME_TYPE_BLOCK;
+       break;
+ 
+     case NS_STYLE_DISPLAY_INLINE:
+     case NS_STYLE_DISPLAY_INLINE_BLOCK:
+     case NS_STYLE_DISPLAY_INLINE_TABLE:
+     case NS_STYLE_DISPLAY_INLINE_BOX:
++#ifdef MOZ_XUL
+     case NS_STYLE_DISPLAY_INLINE_GRID:
+     case NS_STYLE_DISPLAY_INLINE_STACK:
++#endif
+     case NS_STYLE_DISPLAY_INLINE_FLEX:
+       frameType = NS_CSS_FRAME_TYPE_INLINE;
+       break;
+ 
+     case NS_STYLE_DISPLAY_TABLE_CELL:
+     case NS_STYLE_DISPLAY_TABLE_ROW_GROUP:
+     case NS_STYLE_DISPLAY_TABLE_COLUMN:
+     case NS_STYLE_DISPLAY_TABLE_COLUMN_GROUP:
+diff --git a/layout/generic/nsVideoFrame.cpp b/layout/generic/nsVideoFrame.cpp
+--- a/layout/generic/nsVideoFrame.cpp
++++ b/layout/generic/nsVideoFrame.cpp
+@@ -115,27 +115,29 @@
+     NS_ENSURE_TRUE(mCaptionDiv, NS_ERROR_OUT_OF_MEMORY);
+     nsGenericHTMLElement* div = static_cast<nsGenericHTMLElement*>(mCaptionDiv.get());
+     div->SetClassName(NS_LITERAL_STRING("caption-box"));
+ 
+     if (!aElements.AppendElement(mCaptionDiv))
+       return NS_ERROR_OUT_OF_MEMORY;
+   }
+ 
++#ifdef MOZ_XUL
+   // Set up "videocontrols" XUL element which will be XBL-bound to the
+   // actual controls.
+   nodeInfo = nodeInfoManager->GetNodeInfo(nsGkAtoms::videocontrols,
+                                           nullptr,
+                                           kNameSpaceID_XUL,
+                                           nsIDOMNode::ELEMENT_NODE);
+   NS_ENSURE_TRUE(nodeInfo, NS_ERROR_OUT_OF_MEMORY);
+ 
+   NS_TrustedNewXULElement(getter_AddRefs(mVideoControls), nodeInfo.forget());
+   if (!aElements.AppendElement(mVideoControls))
+     return NS_ERROR_OUT_OF_MEMORY;
++#endif // MOZ_XUL
+ 
+   return NS_OK;
+ }
+ 
+ void
+ nsVideoFrame::AppendAnonymousContentTo(nsBaseContentList& aElements,
+                                        uint32_t aFliter)
+ {
+diff --git a/layout/style/nsStyleStruct.h b/layout/style/nsStyleStruct.h
+--- a/layout/style/nsStyleStruct.h
++++ b/layout/style/nsStyleStruct.h
+@@ -1667,20 +1667,22 @@
+            NS_STYLE_DISPLAY_LIST_ITEM == mDisplay ||
+            NS_STYLE_DISPLAY_TABLE == mDisplay;
+   }
+ 
+   static bool IsDisplayTypeInlineOutside(uint8_t aDisplay) {
+     return NS_STYLE_DISPLAY_INLINE == aDisplay ||
+            NS_STYLE_DISPLAY_INLINE_BLOCK == aDisplay ||
+            NS_STYLE_DISPLAY_INLINE_TABLE == aDisplay ||
++#ifdef MOZ_XUL
++           NS_STYLE_DISPLAY_INLINE_GRID == aDisplay ||
++           NS_STYLE_DISPLAY_INLINE_STACK == aDisplay ||
++#endif
+            NS_STYLE_DISPLAY_INLINE_BOX == aDisplay ||
+-           NS_STYLE_DISPLAY_INLINE_FLEX == aDisplay ||
+-           NS_STYLE_DISPLAY_INLINE_GRID == aDisplay ||
+-           NS_STYLE_DISPLAY_INLINE_STACK == aDisplay;
++           NS_STYLE_DISPLAY_INLINE_FLEX == aDisplay;
+   }
+ 
+   bool IsInlineOutsideStyle() const {
+     return IsDisplayTypeInlineOutside(mDisplay);
+   }
+ 
+   bool IsOriginalDisplayInlineOutsideStyle() const {
+     return IsDisplayTypeInlineOutside(mOriginalDisplay);
+diff --git a/mozconfig-noxul b/mozconfig-noxul
+new file mode 100644
+--- /dev/null
++++ b/mozconfig-noxul
+@@ -0,0 +1,3 @@
++mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/obj-noxul
++ac_add_options --disable-gstreamer
++ac_add_options --disable-xul
+diff --git a/netwerk/streamconv/converters/nsIndexedToHTML.cpp b/netwerk/streamconv/converters/nsIndexedToHTML.cpp
+--- a/netwerk/streamconv/converters/nsIndexedToHTML.cpp
++++ b/netwerk/streamconv/converters/nsIndexedToHTML.cpp
+@@ -567,25 +567,27 @@
+         buffer.AppendLiteral("\" />\n");
+     }
+     else
+     {
+         NS_ERROR("broken protocol handler didn't escape double-quote.");
+     }
+ 
+     nsAutoString direction(NS_LITERAL_STRING("ltr"));
++#ifdef MOZ_XUL
+     nsCOMPtr<nsIXULChromeRegistry> reg =
+       mozilla::services::GetXULChromeRegistryService();
+     if (reg) {
+       bool isRTL = false;
+       reg->IsLocaleRTL(NS_LITERAL_CSTRING("global"), &isRTL);
+       if (isRTL) {
+         direction.AssignLiteral("rtl");
+       }
+     }
++#endif
+ 
+     buffer.AppendLiteral("</head>\n<body dir=\"");
+     buffer.Append(direction);
+     buffer.AppendLiteral("\">\n<h1>");
+     
+     const PRUnichar* formatHeading[] = {
+         htmlEscSpec.get()
+     };
+diff --git a/xpcom/build/ServiceList.h b/xpcom/build/ServiceList.h
+--- a/xpcom/build/ServiceList.h
++++ b/xpcom/build/ServiceList.h
+@@ -4,18 +4,20 @@
+ 
+ // IWYU pragma: private, include "mozilla/Services.h"
+ 
+ #ifdef ACCESSIBILITY
+ MOZ_SERVICE(AccessibilityService, nsIAccessibilityService, "@mozilla.org/accessibilityService;1")
+ #endif
+ MOZ_SERVICE(ChromeRegistryService, nsIChromeRegistry, "@mozilla.org/chrome/chrome-registry;1")
+ MOZ_SERVICE(ToolkitChromeRegistryService, nsIToolkitChromeRegistry, "@mozilla.org/chrome/chrome-registry;1")
++#ifdef MOZ_XUL
+ MOZ_SERVICE(XULChromeRegistryService, nsIXULChromeRegistry, "@mozilla.org/chrome/chrome-registry;1")
+ MOZ_SERVICE(XULOverlayProviderService, nsIXULOverlayProvider, "@mozilla.org/chrome/chrome-registry;1")
++#endif
+ MOZ_SERVICE(IOService, nsIIOService, "@mozilla.org/network/io-service;1")
+ MOZ_SERVICE(ObserverService, nsIObserverService, "@mozilla.org/observer-service;1")
+ MOZ_SERVICE(StringBundleService, nsIStringBundleService, "@mozilla.org/intl/stringbundle;1")
+ MOZ_SERVICE(XPConnect, nsIXPConnect, "@mozilla.org/js/xpc/XPConnect;1")
+ 
+ #ifdef MOZ_USE_NAMESPACE
+ namespace mozilla
+ {
+diff --git a/xpcom/build/Services.cpp b/xpcom/build/Services.cpp
+--- a/xpcom/build/Services.cpp
++++ b/xpcom/build/Services.cpp
+@@ -12,17 +12,19 @@
+ #endif
+ #include "nsIChromeRegistry.h"
+ #include "nsIObserverService.h"
+ #include "nsNetCID.h"
+ #include "nsObserverService.h"
+ #include "nsXPCOMPrivate.h"
+ #include "nsIStringBundle.h"
+ #include "nsIToolkitChromeRegistry.h"
++#ifdef MOZ_XUL
+ #include "nsIXULOverlayProvider.h"
++#endif
+ #include "IHistory.h"
+ #include "nsIXPConnect.h"
+ 
+ using namespace mozilla;
+ using namespace mozilla::services;
+ 
+ /*
+  * Define a global variable and a getter for every service in ServiceList.

@@ -1,0 +1,173 @@
+# HG changeset patch
+# Parent b97be87043093a4afde958f09d4052998ea148d0
+# User Gregory Szorc <gps@mozilla.com>
+Bug 781349 - Engine manager API improvements
+
+diff --git a/services/sync/modules/engines.js b/services/sync/modules/engines.js
+--- a/services/sync/modules/engines.js
++++ b/services/sync/modules/engines.js
+@@ -386,17 +386,36 @@
+     return engine;
+   },
+   getAll: function EngMgr_getAll() {
+     return [engine for ([name, engine] in Iterator(Engines._engines))];
+   },
+   getEnabled: function EngMgr_getEnabled() {
+     return this.getAll().filter(function(engine) engine.enabled);
+   },
+-  
++
++  get names() {
++    for (let name in Engines._engines) {
++      yield name;
++    }
++  },
++
++  /**
++   * An array of engine names for enabled engines.
++   */
++  get enabledNames() {
++    for (let [name, engine] of Engines._engines) {
++      if (!engine.enabled) {
++        continue;
++      }
++
++      yield name;
++    }
++  },
++
+   /**
+    * Register an Engine to the service. Alternatively, give an array of engine
+    * objects to register.
+    *
+    * @param engineObject
+    *        Engine object used to get an instance of the engine
+    * @return The engine object if anything failed
+    */
+diff --git a/services/sync/modules/service.js b/services/sync/modules/service.js
+--- a/services/sync/modules/service.js
++++ b/services/sync/modules/service.js
+@@ -831,17 +831,17 @@
+     this._identity.syncKey = null;
+     Status.login = LOGIN_FAILED_NO_PASSPHRASE;
+     this.logout();
+     Svc.Obs.notify("weave:service:start-over");
+ 
+     // Deletion doesn't make sense if we aren't set up yet!
+     if (this.clusterURL != "") {
+       // Clear client-specific data from the server, including disabled engines.
+-      for each (let engine in [Clients].concat(Engines.getAll())) {
++      for (let engine of [Clients].concat(Engines.getAll())) {
+         try {
+           engine.removeClientData();
+         } catch(ex) {
+           this._log.warn("Deleting client data for " + engine.name + " failed:"
+                          + Utils.exceptionStr(ex));
+         }
+       }
+     } else {
+@@ -1223,17 +1223,17 @@
+       infoURL += "?v=" + WEAVE_VERSION;
+       Svc.Prefs.set("lastPing", now);
+     }
+ 
+     // Figure out what the last modified time is for each collection
+     let info = this._fetchInfo(infoURL);
+ 
+     // Convert the response to an object and read out the modified times
+-    for each (let engine in [Clients].concat(Engines.getAll()))
++    for (let engine of [Clients].concat(Engines.getAll()))
+       engine.lastModified = info.obj[engine.name] || 0;
+ 
+     if (!(this._remoteSetup(info)))
+       throw "aborting sync, remote setup failed";
+ 
+     // Make sure we have an up-to-date list of clients before sending commands
+     this._log.debug("Refreshing client list.");
+     if (!this._syncEngine(Clients)) {
+@@ -1241,23 +1241,23 @@
+       // and we can elect to abort the sync.
+       this._log.warn("Client engine sync failed. Aborting.");
+       return;
+     }
+ 
+     // Wipe data in the desired direction if necessary
+     switch (Svc.Prefs.get("firstSync")) {
+       case "resetClient":
+-        this.resetClient(Engines.getEnabled().map(function(e) e.name));
++        this.resetClient(Engines.enabledNames);
+         break;
+       case "wipeClient":
+-        this.wipeClient(Engines.getEnabled().map(function(e) e.name));
++        this.wipeClient(Engines.enabledNames);
+         break;
+       case "wipeRemote":
+-        this.wipeRemote(Engines.getEnabled().map(function(e) e.name));
++        this.wipeRemote(Engines.enabledNames);
+         break;
+     }
+ 
+     if (Clients.localCommands) {
+       try {
+         if (!(Clients.processIncomingCommands())) {
+           Status.sync = ABORT_SYNC_COMMAND;
+           throw "aborting sync, process commands said so";
+@@ -1282,17 +1282,17 @@
+     } catch (ex) {
+       this._log.debug("Updating enabled engines failed: " +
+                       Utils.exceptionStr(ex));
+       ErrorHandler.checkServerError(ex);
+       throw ex;
+     }
+ 
+     try {
+-      for each (let engine in Engines.getEnabled()) {
++      for (let engine of Engines.getEnabled()) {
+         // If there's any problems with syncing the engine, report the failure
+         if (!(this._syncEngine(engine)) || Status.enforceBackoff) {
+           this._log.info("Aborting sync");
+           break;
+         }
+       }
+ 
+       // If _syncEngine fails for a 401, we might not have a cluster URL here.
+@@ -1340,17 +1340,17 @@
+     if ((SyncScheduler.numClients <= 1) &&
+         ([e for (e in meta.payload.engines) if (e != "clients")].length == 0)) {
+       this._log.info("One client and no enabled engines: not touching local engine status.");
+       return;
+     }
+ 
+     this._ignorePrefObserver = true;
+ 
+-    let enabled = [eng.name for each (eng in Engines.getEnabled())];
++    let enabled = Engines.enabledNamed;
+     for (let engineName in meta.payload.engines) {
+       if (engineName == "clients") {
+         // Clients is special.
+         continue;
+       }
+       let index = enabled.indexOf(engineName);
+       if (index != -1) {
+         // The engine is enabled locally. Nothing to do.
+@@ -1479,19 +1479,17 @@
+       // If we got into a race condition, we'll abort the sync this way, too.
+       // That's fine. We'll just wait till the next sync. The client that we're
+       // racing is probably busy uploading stuff right now anyway.
+       throw resp;
+     }
+     Records.set(this.metaURL, meta);
+ 
+     // Wipe everything we know about except meta because we just uploaded it
+-    let collections = [Clients].concat(Engines.getAll()).map(function(engine) {
+-      return engine.name;
+-    });
++    let collections = [Clients.name].concat(Engines.names);
+ 
+     // Generate, upload, and download new keys. Do this last so we don't wipe
+     // them...
+     this.generateNewSymmetricKeys();
+   },
+ 
+   /**
+    * Wipe user data from the server.

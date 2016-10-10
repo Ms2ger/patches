@@ -1,0 +1,2976 @@
+# HG changeset patch
+# Parent 9115d8b717e130d229e314e9b26a9557aec3f81b
+# User Gregory Szorc <gps@mozilla.com>
+Bug 850380 - Build XPIDLs with moz.build-derived non-recursive make file
+
+diff --git a/browser/components/places/moz.build b/browser/components/places/moz.build
+--- a/browser/components/places/moz.build
++++ b/browser/components/places/moz.build
+@@ -2,12 +2,8 @@
+ # vim: set filetype=python:
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ DIRS += ['src']
+ TEST_DIRS += ['tests']
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/browser/components/',
+-]
+-
+diff --git a/browser/components/places/src/moz.build b/browser/components/places/src/moz.build
+--- a/browser/components/places/src/moz.build
++++ b/browser/components/places/src/moz.build
+@@ -1,14 +1,10 @@
+ # -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+ # vim: set filetype=python:
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/browser/components',
+-]
+-
+ EXTRA_COMPONENTS += [
+     'BrowserPlaces.manifest',
+     'PlacesProtocolHandler.js',
+ ]
+diff --git a/build/xpidl/Makefile.in b/build/xpidl/Makefile.in
+new file mode 100644
+--- /dev/null
++++ b/build/xpidl/Makefile.in
+@@ -0,0 +1,106 @@
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++DEPTH := @DEPTH@
++topsrcdir := @top_srcdir@
++srcdir := @srcdir@
++VPATH := @srcdir@
++
++include $(DEPTH)/config/autoconf.mk
++
++# These could probably be moved to a previous tier.
++export::
++	$(MAKE) -C $(DEPTH)/xpcom/idl-parser ply-parser
++	$(MAKE) -C $(DEPTH)/xpcom/typelib export
++
++include $(topsrcdir)/config/rules.mk
++
++# Now we define our custom logic for building xpidl files.
++# Building XPIDLs effectively consists of two steps:
++#   1) Staging all .idl files to a common directory.
++#   2) Doing everything with the .idl files.
++#
++# Each .idl file is converted into a .h and .xpt file which share the
++# root stem filename of the input file. Some .idl files belong to the
++# same "module." We link their corresponding .xpt files together and put
++# them in a common directory. Finally, we install files into the
++# distribution directory (if configured).
++
++# We stage all .idl files to this directory.
++idl_stage_dir := stage
++
++# This is where we put the original output of xpidl parsing.
++idl_gen_dir := gen
++
++# This is where we put our final, linked .xpt files.
++idl_xpt_dir := xpt
++
++parser_dir := $(topsrcdir)/xpcom/idl-parser
++cache_dir := $(DEPTH)/xpcom/idl-parser
++
++idlprocess := $(PYTHON_PATH) $(PLY_INCLUDE) -I$(parser_dir) -I$(cache_dir) \
++    $(parser_dir)/generate-h-and-xpt.py $(idl_stage_dir) $(cache_dir) $(idl_gen_dir)
++
++xptlink := $(PYTHON) $(SDK_BIN_DIR)/xpt.py link
++
++# config.status will produce a file with all the variables we need.
++include xpidls.mk
++
++idl_basenames := $(addsuffix .idl,$(roots))
++header_basenames := $(addsuffix .h,$(roots))
++xpt_basenames := $(addsuffix .xpt,$(roots))
++done_basenames := $(addsuffix .done,$(roots))
++xpt_link_basenames := $(addsuffix .xpt,$(extra_xpt_link_roots))
++
++staged_idls := $(addprefix $(idl_stage_dir)/,$(idl_basenames))
++header_files := $(addprefix $(idl_gen_dir)/,$(header_basenames))
++xpt_files := $(addprefix $(idl_gen_dir)/,$(xpt_basenames))
++done_files := $(addprefix $(idl_gen_dir)/,$(done_basenames))
++linked_xpt_files := $(addprefix $(idl_xpt_dir)/,$(xpt_link_basenames))
++
++# We need to stage all .idl files in a common directory before any
++# parsing is done because we don't know the relationship between .idls
++# until parse time. We use subtiers to ensure this completes before
++# parsing.
++export:: $(staged_idls)
++
++libs:: $(done_files) $(linked_xpt_files)
++
++ifndef NO_DIST_INSTALL
++dist_idls := $(addprefix $(DIST)/idl/,$(idl_basenames))
++dist_headers := $(addprefix $(DIST)/include/,$(header_basenames))
++
++libs:: $(dist_idls) $(dist_headers)
++
++$(dist_idls): $(DIST)/idl/%.idl: $(idl_stage_dir)/%.idl
++	$(INSTALL) $< $(DIST)/idl/
++
++$(dist_headers): $(DIST)/include/%.h: $(idl_gen_dir)/%.done
++	$(INSTALL) $(basename $<).h $(DIST)/include/
++
++endif
++
++# We generate the .h and intermediate .xpt files with a single command
++# invocation. This saves some parsing redundancy. Until bug 869120 is
++# fixed, we can't use a multiple target rule because pymake will choke.
++# So, we use a dummy file to hold state.
++$(done_files): $(idl_gen_dir)/%.done: $(idl_stage_dir)/%.idl
++	@echo "$(notdir $<)"
++	$(idlprocess) $(notdir $<)
++	$(TOUCH) $@
++
++$(header_files): $(idl_gen_dir)/%.h: $(idl_gen_dir)/%.done
++$(xpt_files): $(idl_gen_dir)/%.xpt: $(idl_gen_dir)/%.done
++
++ifeq (libs,$(MAKECMDGOALS))
++depends_files := $(wildcard $(idl_gen_dir)/*.pp)
++ifneq (,$(strip $(depends_files)))
++ifdef .PYMAKE
++includedeps $(depends_files)
++else
++include $(depends_files)
++endif
++endif
++endif
++
+diff --git a/build/xpidl/moz.build b/build/xpidl/moz.build
+new file mode 100644
+--- /dev/null
++++ b/build/xpidl/moz.build
+@@ -0,0 +1,5 @@
++# vim: set filetype=python:
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
+diff --git a/build/xpidl/xpidls.mk.template b/build/xpidl/xpidls.mk.template
+new file mode 100644
+--- /dev/null
++++ b/build/xpidl/xpidls.mk.template
+@@ -0,0 +1,16 @@
++# vim: set filetype=make:
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++{header}
++
++roots := {roots}
++extra_xpt_link_roots := {extra_xpt_link_roots}
++
++# We manually define each "copy .idl into stage directory" rule because files
++# come from all over the place.
++{install_rules}
++
++{xpt_link_rules}
++
+diff --git a/config/config.mk b/config/config.mk
+--- a/config/config.mk
++++ b/config/config.mk
+@@ -371,17 +371,16 @@
+ #
+ MY_CONFIG	:= $(DEPTH)/config/myconfig.mk
+ MY_RULES	:= $(DEPTH)/config/myrules.mk
+ 
+ #
+ # Default command macros; can be overridden in <arch>.mk.
+ #
+ CCC = $(CXX)
+-XPIDL_LINK = $(PYTHON) $(LIBXUL_DIST)/sdk/bin/xpt.py link
+ 
+ # Java macros
+ JAVA_GEN_DIR  = _javagen
+ JAVA_DIST_DIR = $(DEPTH)/$(JAVA_GEN_DIR)
+ JAVA_IFACES_PKG_NAME = org/mozilla/interfaces
+ 
+ OS_INCLUDES += $(MOZ_JPEG_CFLAGS) $(MOZ_PNG_CFLAGS) $(MOZ_ZLIB_CFLAGS)
+ 
+@@ -528,23 +527,16 @@
+ ifneq (WINNT_,$(OS_ARCH)_$(GNU_CC))
+ LIBS_DIR	= -L$(DIST)/bin -L$(DIST)/lib
+ ifdef LIBXUL_SDK
+ LIBS_DIR	+= -L$(LIBXUL_SDK)/bin -L$(LIBXUL_SDK)/lib
+ endif
+ endif
+ 
+ # Default location of include files
+-IDL_DIR		= $(DIST)/idl
+-
+-XPIDL_FLAGS += -I$(srcdir) -I$(IDL_DIR)
+-ifdef LIBXUL_SDK
+-XPIDL_FLAGS += -I$(LIBXUL_SDK)/idl
+-endif
+-
+ SDK_LIB_DIR = $(DIST)/sdk/lib
+ SDK_BIN_DIR = $(DIST)/sdk/bin
+ 
+ DEPENDENCIES	= .md
+ 
+ MOZ_COMPONENT_LIBS=$(XPCOM_LIBS) $(MOZ_COMPONENT_NSPR_LIBS)
+ 
+ ifeq ($(OS_ARCH),OS2)
+diff --git a/config/makefiles/nonrecursive.mk b/config/makefiles/nonrecursive.mk
+--- a/config/makefiles/nonrecursive.mk
++++ b/config/makefiles/nonrecursive.mk
+@@ -14,49 +14,59 @@
+ # NONRECURSIVE_TARGETS variable lists the make targets that modified. For
+ # each target in this list, the NONRECURSIVE_TARGET_<target> variable will
+ # contain a list of partial variable names. We will then look in variables
+ # named NONRECURSIVE_TARGETS_<target>_<fragment>_* for information describing
+ # how to evaluate non-recursive make targets.
+ #
+ # Targets are defined by the following variables:
+ #
+-#   FILE - The make file to evaluate.
++#   FILE - The make file to evaluate. This is equivalent to
++#      |make -f <FILE>|
++#   DIRECTORY - The directory whose Makefile to evaluate. This is
++#      equivalent to |make -C <DIRECTORY>|.
+ #   TARGETS - Targets to evaluate in that make file.
+ #
++# Only 1 of FILE or DIRECTORY may be defined.
++#
+ # For example:
+ #
+ # NONRECURSIVE_TARGETS = export libs
+ # NONRECURSIVE_TARGETS_export = headers
+ # NONRECURSIVE_TARGETS_export_headers_FILE = /path/to/exports.mk
+ # NONRECURSIVE_TARGETS_export_headers_TARGETS = $(DIST)/include/foo.h $(DIST)/include/bar.h
+ # NONRECURSIVE_TARGETS_libs = cppsrcs
+-# NONRECURSIVE_TARGETS_libs_cppsrcs_FILE = /path/to/compilation.mk
++# NONRECURSIVE_TARGETS_libs_cppsrcs_DIRECTORY = $(DEPTH)/foo
+ # NONRECURSIVE_TARGETS_libs_cppsrcs_TARGETS = /path/to/foo.o /path/to/bar.o
+ #
+ # Will get turned into the following:
+ #
+ # exports::
+-#     $(MAKE) -f /path/to/exports.mk $(DIST)/include/foo.h $(DIST)/include/bar.h
++#     cd $$(DEPTH) $(MAKE) -f /path/to/exports.mk $(DIST)/include/foo.h $(DIST)/include/bar.h
+ #
+ # libs::
+-#     $(MAKE) -f /path/to/compilation.mk /path/to/foo.o /path/to/bar.o
++#     $(MAKE) -C $(DEPTH)/foo /path/to/foo.o /path/to/bar.o
+ 
+ ifndef INCLUDED_NONRECURSIVE_MK
+ 
+ define define_nonrecursive_target
+ $(1)::
+-	cd $$(DEPTH) && $$(MAKE) -f $(2) $(3)
++ifneq (,$(3))
++	cd $$(DEPTH) && $$(MAKE) -f $(3) $(2)
++else
++	$$(MAKE) -C $(4) $(2)
++endif
+ endef
+ 
+ $(foreach target,$(NONRECURSIVE_TARGETS), \
+     $(foreach entry,$(NONRECURSIVE_TARGETS_$(target)), \
+         $(eval $(call define_nonrecursive_target, \
+             $(target), \
++            $(NONRECURSIVE_TARGETS_$(target)_$(entry)_TARGETS), \
+             $(NONRECURSIVE_TARGETS_$(target)_$(entry)_FILE), \
+-            $(NONRECURSIVE_TARGETS_$(target)_$(entry)_TARGETS) \
++            $(NONRECURSIVE_TARGETS_$(target)_$(entry)_DIRECTORY), \
+         )) \
+     ) \
+ )
+ 
+ INCLUDED_NONRECURSIVE_MK := 1
+ endif
+ 
+diff --git a/config/rules.mk b/config/rules.mk
+--- a/config/rules.mk
++++ b/config/rules.mk
+@@ -19,25 +19,33 @@
+   MODULE \
+   PARALLEL_DIRS \
+   TEST_DIRS \
+   TIERS \
+   TOOL_DIRS \
+   XPIDL_MODULE \
+   $(NULL)
+ 
++_DEPRECATED_VARIABLES := \
++  XPIDL_FLAGS \
++  $(NULL)
++
+ ifndef EXTERNALLY_MANAGED_MAKE_FILE
+ # Using $(firstword) may not be perfect. But it should be good enough for most
+ # scenarios.
+ _current_makefile = $(CURDIR)/$(firstword $(MAKEFILE_LIST))
+ 
+ $(foreach var,$(_MOZBUILD_EXTERNAL_VARIABLES),$(if $($(var)),\
+     $(error Variable $(var) is defined in $(_current_makefile). It should only be defined in moz.build files),\
+     ))
+ 
++$(foreach var,$(_DEPRECATED_VARIABLES),$(if $($(var)),\
++    $(error Variable $(var) is defined in $(_current_makefile). This variable has been deprecated. It does nothing. It must be removed in order to build)\
++    ))
++
+ ifneq (,$(XPIDLSRCS)$(SDK_XPIDLSRCS))
+     $(error XPIDLSRCS and SDK_XPIDLSRCS have been merged and moved to moz.build files as the XPIDL_SOURCES variable. You must move these variables out of $(_current_makefile))
+ endif
+ 
+ # Import the automatically generated backend file. If this file doesn't exist,
+ # the backend hasn't been properly configured. We want this to be a fatal
+ # error, hence not using "-include".
+ ifndef STANDALONE_MAKEFILE
+@@ -405,18 +413,16 @@
+ #
+ # the Solaris WorkShop template repository cache.  it occasionally can get
+ # out of sync, so targets like clobber should kill it.
+ #
+ ifeq ($(SOLARIS_SUNPRO_CXX),1)
+ GARBAGE_DIRS += SunWS_cache
+ endif
+ 
+-XPIDL_GEN_DIR		= _xpidlgen
+-
+ ifdef MOZ_UPDATE_XTERM
+ # Its good not to have a newline at the end of the titlebar string because it
+ # makes the make -s output easier to read.  Echo -n does not work on all
+ # platforms, but we can trick printf into doing it.
+ UPDATE_TITLE = printf "\033]0;%s in %s\007" $(1) $(shell $(BUILD_TOOLS)/print-depth-path.sh)/$(2) ;
+ endif
+ 
+ define SUBMAKE # $(call SUBMAKE,target,directory)
+@@ -1359,108 +1365,33 @@
+ AUTOCFG_JS_EXPORTS_FILES := $(AUTOCFG_JS_EXPORTS)
+ AUTOCFG_JS_EXPORTS_DEST := $(FINAL_TARGET)/defaults/autoconfig
+ AUTOCFG_JS_EXPORTS_TARGET := export
+ INSTALL_TARGETS += AUTOCFG_JS_EXPORTS
+ endif
+ endif
+ 
+ ################################################################################
+-# Export the elements of $(XPIDLSRCS)
+-# generating .h and .xpt files and moving them to the appropriate places.
+-
+-ifneq ($(XPIDLSRCS),) #{
+-
+-export:: $(patsubst %.idl,$(XPIDL_GEN_DIR)/%.h, $(XPIDLSRCS))
+-
+-ifndef XPIDL_MODULE
+-XPIDL_MODULE		= $(MODULE)
+-endif
+-
+-ifeq ($(XPIDL_MODULE),) # we need $(XPIDL_MODULE) to make $(XPIDL_MODULE).xpt
+-export:: FORCE
+-	@echo
+-	@echo "*** Error processing XPIDLSRCS:"
+-	@echo "Please define MODULE or XPIDL_MODULE when defining XPIDLSRCS,"
+-	@echo "so we have a module name to use when creating MODULE.xpt."
+-	@echo; sleep 2; false
+-endif
+-
+-# generate .h files from into $(XPIDL_GEN_DIR), then export to $(DIST)/include;
+-# warn against overriding existing .h file.
+-
+-XPIDL_DEPS = \
+-  $(LIBXUL_DIST)/sdk/bin/header.py \
+-  $(LIBXUL_DIST)/sdk/bin/typelib.py \
+-  $(LIBXUL_DIST)/sdk/bin/xpidl.py \
+-  $(NULL)
+-
+-xpidl-preqs = \
+-  $(call mkdir_deps,$(XPIDL_GEN_DIR)) \
+-  $(call mkdir_deps,$(MDDEPDIR)) \
+-  $(NULL)
+-
+-$(XPIDL_GEN_DIR)/%.h: %.idl $(XPIDL_DEPS) $(xpidl-preqs)
+-	$(REPORT_BUILD)
+-	$(PYTHON_PATH) \
+-	  $(PLY_INCLUDE) \
+-	  $(LIBXUL_DIST)/sdk/bin/header.py $(XPIDL_FLAGS) $(_VPATH_SRCS) -d $(MDDEPDIR)/$(@F).pp -o $@
+-	@if test -n "$(findstring $*.h, $(EXPORTS))"; \
+-	  then echo "*** WARNING: file $*.h generated from $*.idl overrides $(srcdir)/$*.h"; else true; fi
+-
+-# generate intermediate .xpt files into $(XPIDL_GEN_DIR), then link
+-# into $(XPIDL_MODULE).xpt and export it to $(FINAL_TARGET)/components.
+-$(XPIDL_GEN_DIR)/%.xpt: %.idl $(XPIDL_DEPS) $(xpidl-preqs)
+-	$(REPORT_BUILD)
+-	$(PYTHON_PATH) \
+-	  $(PLY_INCLUDE) \
+-	  -I$(topsrcdir)/xpcom/typelib/xpt/tools \
+-	  $(LIBXUL_DIST)/sdk/bin/typelib.py $(XPIDL_FLAGS) $(_VPATH_SRCS) -d $(MDDEPDIR)/$(@F).pp -o $@
+-
+-# no need to link together if XPIDLSRCS contains only XPIDL_MODULE
+-ifneq ($(XPIDL_MODULE).idl,$(strip $(XPIDLSRCS)))
+-XPT_PY = $(filter %/xpt.py,$(XPIDL_LINK))
+-
+-xpidl-idl2xpt = $(patsubst %.idl,$(XPIDL_GEN_DIR)/%.xpt,$(XPIDLSRCS))
+-xpidl-module-deps = $(xpidl-idl2xpt) $(GLOBAL_DEPS) $(XPT_PY)
+-
+-$(XPIDL_GEN_DIR)/$(XPIDL_MODULE).xpt: $(xpidl-module-deps)
+-	$(XPIDL_LINK) $@ $(xpidl-idl2xpt)
+-
+-$(XPT_PY):
+-	$(MAKE) -C $(DEPTH)/xpcom/typelib/xpt/tools libs
+-
+-endif # XPIDL_MODULE.xpt != XPIDLSRCS
++# Install a linked .xpt into the appropriate place.
++# This should ideally be performed by the non-recursive idl make file. Some day.
++ifdef XPT_NAME #{
+ 
+ ifndef NO_DIST_INSTALL
+-XPIDL_MODULE_FILES := $(XPIDL_GEN_DIR)/$(XPIDL_MODULE).xpt
+-XPIDL_MODULE_DEST := $(FINAL_TARGET)/components
+-INSTALL_TARGETS += XPIDL_MODULE
++_XPT_NAME_FILES := $(DEPTH)/build/xpidl/xpt/$(XPT_NAME)
++_XPT_NAME_DEST := $(FINAL_TARGET)/components
++INSTALL_TARGETS += _XPT_NAME
+ 
+ ifndef NO_INTERFACES_MANIFEST
+ libs:: $(call mkdir_deps,$(FINAL_TARGET)/components)
+-	@$(PYTHON) $(MOZILLA_DIR)/config/buildlist.py $(FINAL_TARGET)/components/interfaces.manifest "interfaces $(XPIDL_MODULE).xpt"
++	@$(PYTHON) $(MOZILLA_DIR)/config/buildlist.py $(FINAL_TARGET)/components/interfaces.manifest "interfaces $(XPT_NAME)"
+ 	@$(PYTHON) $(MOZILLA_DIR)/config/buildlist.py $(FINAL_TARGET)/chrome.manifest "manifest components/interfaces.manifest"
+ endif
+ endif
+ 
+-GARBAGE_DIRS		+= $(XPIDL_GEN_DIR)
+-
+-ifndef NO_DIST_INSTALL
+-XPIDL_HEADERS_FILES := $(patsubst %.idl,$(XPIDL_GEN_DIR)/%.h, $(XPIDLSRCS))
+-XPIDL_HEADERS_DEST := $(DIST)/include
+-XPIDL_HEADERS_TARGET := export
+-INSTALL_TARGETS += XPIDL_HEADERS
+-
+-XPIDLSRCS_FILES := $(XPIDLSRCS)
+-XPIDLSRCS_DEST := $(IDL_DIR)
+-XPIDLSRCS_TARGET := export
+-INSTALL_TARGETS += XPIDLSRCS
+-endif
+-endif #} XPIDLSRCS
++endif #} XPT_NAME
+ 
+ ################################################################################
+ # Copy each element of EXTRA_COMPONENTS to $(FINAL_TARGET)/components
+ ifneq (,$(filter %.js,$(EXTRA_COMPONENTS) $(EXTRA_PP_COMPONENTS)))
+ ifeq (,$(filter %.manifest,$(EXTRA_COMPONENTS) $(EXTRA_PP_COMPONENTS)))
+ ifndef NO_JS_MANIFEST
+ $(error .js component without matching .manifest. See https://developer.mozilla.org/en/XPCOM/XPCOM_changes_in_Gecko_2.0)
+ endif
+@@ -1660,17 +1591,17 @@
+ #
+ #   We use $(CURDIR) in the rule's target to ensure that we don't find
+ #   a dependency directory in the source tree via VPATH (perhaps from
+ #   a previous build in the source tree) and thus neglect to create a
+ #   dependency directory in the object directory, where we really need
+ #   it.
+ 
+ ifneq (,$(filter-out all chrome default export realchrome tools clean clobber clobber_all distclean realclean,$(MAKECMDGOALS)))
+-MDDEPEND_FILES		:= $(strip $(wildcard $(foreach file,$(sort $(OBJS) $(PROGOBJS) $(HOST_OBJS) $(HOST_PROGOBJS) $(TARGETS) $(XPIDLSRCS:.idl=.h) $(XPIDLSRCS:.idl=.xpt)),$(MDDEPDIR)/$(notdir $(file)).pp) $(addprefix $(MDDEPDIR)/,$(EXTRA_MDDEPEND_FILES))))
++MDDEPEND_FILES		:= $(strip $(wildcard $(foreach file,$(sort $(OBJS) $(PROGOBJS) $(HOST_OBJS) $(HOST_PROGOBJS) $(TARGETS)),$(MDDEPDIR)/$(notdir $(file)).pp) $(addprefix $(MDDEPDIR)/,$(EXTRA_MDDEPEND_FILES))))
+ 
+ ifneq (,$(MDDEPEND_FILES))
+ ifdef .PYMAKE
+ includedeps $(MDDEPEND_FILES)
+ else
+ include $(MDDEPEND_FILES)
+ endif
+ endif
+@@ -1853,17 +1784,16 @@
+ 	$(LOOP_OVER_TOOL_DIRS)
+ endif
+ 
+ 
+ FREEZE_VARIABLES = \
+   CSRCS \
+   CPPSRCS \
+   EXPORTS \
+-  XPIDLSRCS \
+   DIRS \
+   LIBRARY \
+   MODULE \
+   SHORT_LIBNAME \
+   TIERS \
+   EXTRA_COMPONENTS \
+   EXTRA_PP_COMPONENTS \
+   MOCHITEST_FILES \
+diff --git a/dom/activities/interfaces/moz.build b/dom/activities/interfaces/moz.build
+--- a/dom/activities/interfaces/moz.build
++++ b/dom/activities/interfaces/moz.build
+@@ -10,14 +10,8 @@
+     'nsIDOMActivityHandlerDescription.idl',
+     'nsIDOMActivityOptions.idl',
+     'nsIDOMActivityRequestHandler.idl',
+     'nsIDOMNavigatorActivities.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_activities'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/base',
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-]
+-
+diff --git a/dom/alarm/moz.build b/dom/alarm/moz.build
+--- a/dom/alarm/moz.build
++++ b/dom/alarm/moz.build
+@@ -8,20 +8,16 @@
+ 
+ XPIDL_SOURCES += [
+     'nsIAlarmHalService.idl',
+     'nsIDOMAlarmsManager.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_alarm'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-]
+-
+ MODULE = 'dom'
+ 
+ EXPORTS.mozilla.dom.alarm += [
+     'AlarmHalService.h',
+ ]
+ 
+ CPP_SOURCES += [
+     'AlarmHalService.cpp',
+diff --git a/dom/base/moz.build b/dom/base/moz.build
+--- a/dom/base/moz.build
++++ b/dom/base/moz.build
+@@ -9,21 +9,16 @@
+ XPIDL_SOURCES += [
+     'nsIDOMDOMCursor.idl',
+     'nsIDOMDOMRequest.idl',
+     'nsIEntropyCollector.idl',
+     'nsIScriptChannel.idl',
+     'nsISiteSpecificUserAgent.idl',
+ ]
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-]
+-
+ MODULE = 'dom'
+ 
+ EXPORTS += [
+     'Crypto.h',
+     'nsContentPermissionHelper.h',
+     'nsDOMCID.h',
+     'nsDOMClassInfoClasses.h',
+     'nsDOMClassInfoID.h',
+diff --git a/dom/battery/moz.build b/dom/battery/moz.build
+--- a/dom/battery/moz.build
++++ b/dom/battery/moz.build
+@@ -7,21 +7,16 @@
+ TEST_DIRS += ['test']
+ 
+ XPIDL_SOURCES += [
+     'nsINavigatorBattery.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_battery'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-]
+-
+ EXPORTS.mozilla.dom.battery += [
+     'Constants.h',
+     'Types.h',
+ ]
+ 
+ CPP_SOURCES += [
+     'BatteryManager.cpp',
+ ]
+diff --git a/dom/camera/moz.build b/dom/camera/moz.build
+--- a/dom/camera/moz.build
++++ b/dom/camera/moz.build
+@@ -6,23 +6,16 @@
+ 
+ XPIDL_SOURCES += [
+     'nsIDOMCameraManager.idl',
+     'nsIDOMNavigatorCamera.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_camera'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/base',
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-    '-I$(topsrcdir)/dom/media',
+-]
+-
+ MODULE = 'dom'
+ 
+ EXPORTS += [
+     'CameraCommon.h',
+     'CameraPreviewMediaStream.h',
+     'DOMCameraManager.h',
+     'GonkCameraControl.h',
+     'GonkNativeWindow.h',
+diff --git a/dom/cellbroadcast/interfaces/moz.build b/dom/cellbroadcast/interfaces/moz.build
+--- a/dom/cellbroadcast/interfaces/moz.build
++++ b/dom/cellbroadcast/interfaces/moz.build
+@@ -9,14 +9,8 @@
+     'nsIDOMMozCellBroadcast.idl',
+     'nsIDOMMozCellBroadcastEvent.idl',
+     'nsIDOMMozCellBroadcastMessage.idl',
+     'nsINavigatorCellBroadcast.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_cellbroadcast'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/base',
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-]
+-
+diff --git a/dom/file/moz.build b/dom/file/moz.build
+--- a/dom/file/moz.build
++++ b/dom/file/moz.build
+@@ -8,22 +8,16 @@
+ 
+ XPIDL_SOURCES += [
+     'nsIDOMFileHandle.idl',
+     'nsIDOMLockedFile.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_file'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/base',
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-]
+-
+ MODULE = 'dom'
+ 
+ EXPORTS += [
+     'nsIFileStorage.h',
+ ]
+ 
+ EXPORTS.mozilla.dom.file += [
+     'ArchiveEvent.h',
+diff --git a/dom/fm/moz.build b/dom/fm/moz.build
+--- a/dom/fm/moz.build
++++ b/dom/fm/moz.build
+@@ -6,19 +6,15 @@
+ 
+ XPIDL_SOURCES += [
+     'nsIDOMFMRadio.idl',
+     'nsIFMRadio.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_fm'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-]
+-
+ MODULE = 'dom'
+ 
+ CPP_SOURCES += [
+     'FMRadio.cpp',
+     'nsFMRadioSettings.cpp',
+ ]
+ 
+diff --git a/dom/icc/interfaces/moz.build b/dom/icc/interfaces/moz.build
+--- a/dom/icc/interfaces/moz.build
++++ b/dom/icc/interfaces/moz.build
+@@ -8,14 +8,8 @@
+     'SimToolKit.idl',
+     'nsIDOMICCCardLockErrorEvent.idl',
+     'nsIDOMIccManager.idl',
+     'nsIIccProvider.idl',
+     'nsINavigatorIccManager.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_icc'
+-
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-]
+-
+diff --git a/dom/indexedDB/moz.build b/dom/indexedDB/moz.build
+--- a/dom/indexedDB/moz.build
++++ b/dom/indexedDB/moz.build
+@@ -19,21 +19,16 @@
+     'nsIIDBRequest.idl',
+     'nsIIDBTransaction.idl',
+     'nsIIDBVersionChangeEvent.idl',
+     'nsIIndexedDatabaseManager.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_indexeddb'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-]
+-
+ MODULE = 'dom'
+ 
+ EXPORTS.mozilla.dom.indexedDB += [
+     'Client.h',
+     'DatabaseInfo.h',
+     'FileInfo.h',
+     'FileManager.h',
+     'IDBCursor.h',
+diff --git a/dom/interfaces/apps/moz.build b/dom/interfaces/apps/moz.build
+--- a/dom/interfaces/apps/moz.build
++++ b/dom/interfaces/apps/moz.build
+@@ -10,15 +10,10 @@
+     'nsIAppsService.idl',
+     'nsIDOMApplicationRegistry.idl',
+     'nsIDOMApplicationRegistry2.idl',
+     'nsIDOMMozApplicationEvent.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_apps'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/dom/interfaces/base/moz.build b/dom/interfaces/base/moz.build
+--- a/dom/interfaces/base/moz.build
++++ b/dom/interfaces/base/moz.build
+@@ -59,14 +59,10 @@
+ 
+ if CONFIG['MOZ_WEBSPEECH']:
+     XPIDL_SOURCES += [
+         'nsISpeechSynthesisGetter.idl'
+     ]
+ 
+ XPIDL_MODULE = 'dom_base'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/dom/interfaces/contacts/moz.build b/dom/interfaces/contacts/moz.build
+--- a/dom/interfaces/contacts/moz.build
++++ b/dom/interfaces/contacts/moz.build
+@@ -7,15 +7,10 @@
+ XPIDL_SOURCES += [
+     'nsIContactProperties.idl',
+     'nsIDOMContactManager.idl',
+     'nsIDOMMozContactChangeEvent.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_contacts'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/dom/interfaces/core/moz.build b/dom/interfaces/core/moz.build
+--- a/dom/interfaces/core/moz.build
++++ b/dom/interfaces/core/moz.build
+@@ -26,14 +26,10 @@
+     'nsIDOMUserDataHandler.idl',
+     'nsIDOMXMLDocument.idl',
+     'nsIDocumentRegister.idl',
+     'nsIInlineEventHandlers.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_core'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/dom/interfaces/css/moz.build b/dom/interfaces/css/moz.build
+--- a/dom/interfaces/css/moz.build
++++ b/dom/interfaces/css/moz.build
+@@ -28,15 +28,10 @@
+     'nsIDOMElementCSSInlineStyle.idl',
+     'nsIDOMMozCSSKeyframeRule.idl',
+     'nsIDOMMozCSSKeyframesRule.idl',
+     'nsIDOMRect.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_css'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/stylesheets',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/dom/interfaces/devicestorage/moz.build b/dom/interfaces/devicestorage/moz.build
+--- a/dom/interfaces/devicestorage/moz.build
++++ b/dom/interfaces/devicestorage/moz.build
+@@ -7,15 +7,10 @@
+ XPIDL_SOURCES += [
+     'nsIDOMDeviceStorage.idl',
+     'nsIDOMDeviceStorageChangeEvent.idl',
+     'nsIDOMNavigatorDeviceStorage.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_devicestorage'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/dom/interfaces/events/moz.build b/dom/interfaces/events/moz.build
+--- a/dom/interfaces/events/moz.build
++++ b/dom/interfaces/events/moz.build
+@@ -54,14 +54,10 @@
+     'nsIDOMTransitionEvent.idl',
+     'nsIDOMUIEvent.idl',
+     'nsIDOMUserProximityEvent.idl',
+     'nsIDOMWheelEvent.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_events'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/dom/interfaces/geolocation/moz.build b/dom/interfaces/geolocation/moz.build
+--- a/dom/interfaces/geolocation/moz.build
++++ b/dom/interfaces/geolocation/moz.build
+@@ -11,14 +11,10 @@
+     'nsIDOMGeoPositionCoords.idl',
+     'nsIDOMGeoPositionError.idl',
+     'nsIDOMGeoPositionErrorCallback.idl',
+     'nsIDOMNavigatorGeolocation.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_geolocation'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/dom/interfaces/html/moz.build b/dom/interfaces/html/moz.build
+--- a/dom/interfaces/html/moz.build
++++ b/dom/interfaces/html/moz.build
+@@ -76,15 +76,10 @@
+     'nsIDOMMozBrowserFrame.idl',
+     'nsIDOMTimeRanges.idl',
+     'nsIDOMValidityState.idl',
+     'nsIMozBrowserFrame.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_html'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/core',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/dom/interfaces/json/moz.build b/dom/interfaces/json/moz.build
+--- a/dom/interfaces/json/moz.build
++++ b/dom/interfaces/json/moz.build
+@@ -5,14 +5,10 @@
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ XPIDL_SOURCES += [
+     'nsIJSON.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_json'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/dom/interfaces/notification/moz.build b/dom/interfaces/notification/moz.build
+--- a/dom/interfaces/notification/moz.build
++++ b/dom/interfaces/notification/moz.build
+@@ -6,14 +6,10 @@
+ 
+ XPIDL_SOURCES += [
+     'nsIDOMDesktopNotification.idl',
+     'nsIDOMNavigatorDesktopNotification.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_notification'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/dom/interfaces/offline/moz.build b/dom/interfaces/offline/moz.build
+--- a/dom/interfaces/offline/moz.build
++++ b/dom/interfaces/offline/moz.build
+@@ -6,14 +6,10 @@
+ 
+ XPIDL_SOURCES += [
+     'nsIDOMLoadStatus.idl',
+     'nsIDOMOfflineResourceList.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_offline'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/dom/interfaces/permission/moz.build b/dom/interfaces/permission/moz.build
+--- a/dom/interfaces/permission/moz.build
++++ b/dom/interfaces/permission/moz.build
+@@ -6,14 +6,10 @@
+ 
+ XPIDL_SOURCES += [
+     'nsIDOMPermissionSettings.idl',
+     'nsIPermissionPromptService.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_permissionsettings'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/dom/interfaces/push/moz.build b/dom/interfaces/push/moz.build
+--- a/dom/interfaces/push/moz.build
++++ b/dom/interfaces/push/moz.build
+@@ -1,9 +1,8 @@
+ # vim: set filetype=python:
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ MODULE        = 'dom'
+ XPIDL_MODULE  = 'dom_push'
+ XPIDL_SOURCES += ['nsIDOMPushManager.idl']
+-XPIDL_FLAGS += ['-I$(topsrcdir)/dom/interfaces/base']
+diff --git a/dom/interfaces/range/moz.build b/dom/interfaces/range/moz.build
+--- a/dom/interfaces/range/moz.build
++++ b/dom/interfaces/range/moz.build
+@@ -5,14 +5,10 @@
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ XPIDL_SOURCES += [
+     'nsIDOMRange.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_range'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/dom/interfaces/settings/moz.build b/dom/interfaces/settings/moz.build
+--- a/dom/interfaces/settings/moz.build
++++ b/dom/interfaces/settings/moz.build
+@@ -7,15 +7,10 @@
+ XPIDL_SOURCES += [
+     'nsIDOMMozSettingsEvent.idl',
+     'nsIDOMSettingsManager.idl',
+     'nsISettingsService.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_settings'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/dom/interfaces/smil/moz.build b/dom/interfaces/smil/moz.build
+--- a/dom/interfaces/smil/moz.build
++++ b/dom/interfaces/smil/moz.build
+@@ -5,17 +5,10 @@
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ XPIDL_SOURCES += [
+     'nsIDOMTimeEvent.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_smil'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/core',
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-    '-I$(topsrcdir)/dom/interfaces/svg',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/dom/interfaces/storage/moz.build b/dom/interfaces/storage/moz.build
+--- a/dom/interfaces/storage/moz.build
++++ b/dom/interfaces/storage/moz.build
+@@ -9,19 +9,14 @@
+     'nsIDOMStorageEvent.idl',
+     'nsIDOMStorageIndexedDB.idl',
+     'nsIDOMStorageManager.idl',
+     'nsIDOMToString.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_storage'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-]
+-
+ MODULE = 'dom'
+ 
+ EXPORTS += [
+     'nsPIDOMStorage.h',
+ ]
+ 
+diff --git a/dom/interfaces/stylesheets/moz.build b/dom/interfaces/stylesheets/moz.build
+--- a/dom/interfaces/stylesheets/moz.build
++++ b/dom/interfaces/stylesheets/moz.build
+@@ -8,14 +8,10 @@
+     'nsIDOMLinkStyle.idl',
+     'nsIDOMMediaList.idl',
+     'nsIDOMStyleSheet.idl',
+     'nsIDOMStyleSheetList.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_stylesheets'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/dom/interfaces/svg/moz.build b/dom/interfaces/svg/moz.build
+--- a/dom/interfaces/svg/moz.build
++++ b/dom/interfaces/svg/moz.build
+@@ -14,16 +14,10 @@
+     'nsIDOMSVGDocument.idl',
+     'nsIDOMSVGElement.idl',
+     'nsIDOMSVGLength.idl',
+     'nsIDOMSVGNumber.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_svg'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/core',
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/dom/interfaces/traversal/moz.build b/dom/interfaces/traversal/moz.build
+--- a/dom/interfaces/traversal/moz.build
++++ b/dom/interfaces/traversal/moz.build
+@@ -7,14 +7,10 @@
+ XPIDL_SOURCES += [
+     'nsIDOMNodeFilter.idl',
+     'nsIDOMNodeIterator.idl',
+     'nsIDOMTreeWalker.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_traversal'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/dom/interfaces/xbl/moz.build b/dom/interfaces/xbl/moz.build
+--- a/dom/interfaces/xbl/moz.build
++++ b/dom/interfaces/xbl/moz.build
+@@ -5,14 +5,10 @@
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ XPIDL_SOURCES += [
+     'nsIDOMDocumentXBL.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_xbl'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/dom/interfaces/xpath/moz.build b/dom/interfaces/xpath/moz.build
+--- a/dom/interfaces/xpath/moz.build
++++ b/dom/interfaces/xpath/moz.build
+@@ -10,15 +10,10 @@
+     'nsIDOMXPathExpression.idl',
+     'nsIDOMXPathNSResolver.idl',
+     'nsIDOMXPathNamespace.idl',
+     'nsIDOMXPathResult.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_xpath'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/core',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/dom/interfaces/xul/moz.build b/dom/interfaces/xul/moz.build
+--- a/dom/interfaces/xul/moz.build
++++ b/dom/interfaces/xul/moz.build
+@@ -24,16 +24,10 @@
+     'nsIDOMXULSelectCntrlEl.idl',
+     'nsIDOMXULSelectCntrlItemEl.idl',
+     'nsIDOMXULTextboxElement.idl',
+     'nsIDOMXULTreeElement.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_xul'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/core',
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/dom/messages/interfaces/moz.build b/dom/messages/interfaces/moz.build
+--- a/dom/messages/interfaces/moz.build
++++ b/dom/messages/interfaces/moz.build
+@@ -6,12 +6,8 @@
+ 
+ XPIDL_SOURCES += [
+     'nsIDOMNavigatorSystemMessages.idl',
+     'nsISystemMessagesInternal.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_messages'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-]
+-
+diff --git a/dom/mobilemessage/interfaces/moz.build b/dom/mobilemessage/interfaces/moz.build
+--- a/dom/mobilemessage/interfaces/moz.build
++++ b/dom/mobilemessage/interfaces/moz.build
+@@ -27,14 +27,8 @@
+ 
+ if CONFIG['MOZ_B2G_RIL']:
+     XPIDL_SOURCES += [
+         'nsIRilMobileMessageDatabaseService.idl',
+     ]
+ 
+ XPIDL_MODULE = 'dom_mobilemessage'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/base',
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-]
+-
+diff --git a/dom/network/interfaces/moz.build b/dom/network/interfaces/moz.build
+--- a/dom/network/interfaces/moz.build
++++ b/dom/network/interfaces/moz.build
+@@ -20,14 +20,8 @@
+         'nsIDOMMobileConnection.idl',
+         'nsIDOMNetworkStats.idl',
+         'nsIDOMNetworkStatsManager.idl',
+         'nsIMobileConnectionProvider.idl',
+         'nsINavigatorMobileConnection.idl',
+     ]
+ 
+ XPIDL_MODULE = 'dom_network'
+-
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-]
+-
+diff --git a/dom/payment/interfaces/moz.build b/dom/payment/interfaces/moz.build
+--- a/dom/payment/interfaces/moz.build
++++ b/dom/payment/interfaces/moz.build
+@@ -8,12 +8,8 @@
+     'nsIDOMPaymentRequestInfo.idl',
+     'nsINavigatorPayment.idl',
+     'nsIPaymentFlowInfo.idl',
+     'nsIPaymentUIGlue.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_payment'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-]
+-
+diff --git a/dom/system/gonk/moz.build b/dom/system/gonk/moz.build
+--- a/dom/system/gonk/moz.build
++++ b/dom/system/gonk/moz.build
+@@ -25,20 +25,16 @@
+     'nsIVolumeMountLock.idl',
+     'nsIVolumeService.idl',
+     'nsIVolumeStat.idl',
+     'nsIWorkerHolder.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_system_gonk'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/network/interfaces',
+-]
+-
+ MODULE = 'dom'
+ 
+ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
+     EXPORTS += [
+         'GonkGPSGeolocationProvider.h',
+         'nsVolume.h',
+         'nsVolumeService.h',
+     ]
+diff --git a/dom/telephony/moz.build b/dom/telephony/moz.build
+--- a/dom/telephony/moz.build
++++ b/dom/telephony/moz.build
+@@ -9,21 +9,15 @@
+     'nsIDOMNavigatorTelephony.idl',
+     'nsIDOMTelephony.idl',
+     'nsIDOMTelephonyCall.idl',
+     'nsITelephonyProvider.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_telephony'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/base',
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-]
+-
+ MODULE = 'dom'
+ 
+ CPP_SOURCES += [
+     'Telephony.cpp',
+     'TelephonyCall.cpp',
+ ]
+ 
+diff --git a/dom/voicemail/moz.build b/dom/voicemail/moz.build
+--- a/dom/voicemail/moz.build
++++ b/dom/voicemail/moz.build
+@@ -9,22 +9,16 @@
+     'nsIDOMMozVoicemailEvent.idl',
+     'nsIDOMMozVoicemailStatus.idl',
+     'nsINavigatorVoicemail.idl',
+     'nsIVoicemailProvider.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_voicemail'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/base',
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-]
+-
+ MODULE = 'dom'
+ 
+ EXPORTS.mozilla.dom += [
+     'Voicemail.h',
+ ]
+ 
+ CPP_SOURCES += [
+     'Voicemail.cpp',
+diff --git a/dom/wifi/moz.build b/dom/wifi/moz.build
+--- a/dom/wifi/moz.build
++++ b/dom/wifi/moz.build
+@@ -7,17 +7,10 @@
+ XPIDL_SOURCES += [
+     'nsIDOMMozWifiConnectionInfoEvent.idl',
+     'nsIDOMMozWifiStatusChangeEvent.idl',
+     'nsIWifi.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_wifi'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/dom/base',
+-    '-I$(topsrcdir)/dom/interfaces/base',
+-    '-I$(topsrcdir)/dom/interfaces/events',
+-    '-I$(topsrcdir)/dom/system/gonk',
+-]
+-
+ MODULE = 'dom'
+ 
+diff --git a/hal/moz.build b/hal/moz.build
+--- a/hal/moz.build
++++ b/hal/moz.build
+@@ -1,16 +1,16 @@
+ # -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+ # vim: set filetype=python:
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ XPIDL_SOURCES += [
+-    'nsIRecoveryService.idl',
++    'gonk/nsIRecoveryService.idl',
+ ]
+ 
+ MODULE = 'hal'
+ 
+ EXPORTS.mozilla += [
+     'Hal.h',
+     'HalImpl.h',
+     'HalSandbox.h',
+diff --git a/js/src/config/config.mk b/js/src/config/config.mk
+--- a/js/src/config/config.mk
++++ b/js/src/config/config.mk
+@@ -371,17 +371,16 @@
+ #
+ MY_CONFIG	:= $(DEPTH)/config/myconfig.mk
+ MY_RULES	:= $(DEPTH)/config/myrules.mk
+ 
+ #
+ # Default command macros; can be overridden in <arch>.mk.
+ #
+ CCC = $(CXX)
+-XPIDL_LINK = $(PYTHON) $(LIBXUL_DIST)/sdk/bin/xpt.py link
+ 
+ # Java macros
+ JAVA_GEN_DIR  = _javagen
+ JAVA_DIST_DIR = $(DEPTH)/$(JAVA_GEN_DIR)
+ JAVA_IFACES_PKG_NAME = org/mozilla/interfaces
+ 
+ OS_INCLUDES += $(MOZ_JPEG_CFLAGS) $(MOZ_PNG_CFLAGS) $(MOZ_ZLIB_CFLAGS)
+ 
+@@ -528,23 +527,16 @@
+ ifneq (WINNT_,$(OS_ARCH)_$(GNU_CC))
+ LIBS_DIR	= -L$(DIST)/bin -L$(DIST)/lib
+ ifdef LIBXUL_SDK
+ LIBS_DIR	+= -L$(LIBXUL_SDK)/bin -L$(LIBXUL_SDK)/lib
+ endif
+ endif
+ 
+ # Default location of include files
+-IDL_DIR		= $(DIST)/idl
+-
+-XPIDL_FLAGS += -I$(srcdir) -I$(IDL_DIR)
+-ifdef LIBXUL_SDK
+-XPIDL_FLAGS += -I$(LIBXUL_SDK)/idl
+-endif
+-
+ SDK_LIB_DIR = $(DIST)/sdk/lib
+ SDK_BIN_DIR = $(DIST)/sdk/bin
+ 
+ DEPENDENCIES	= .md
+ 
+ MOZ_COMPONENT_LIBS=$(XPCOM_LIBS) $(MOZ_COMPONENT_NSPR_LIBS)
+ 
+ ifeq ($(OS_ARCH),OS2)
+diff --git a/js/src/config/makefiles/nonrecursive.mk b/js/src/config/makefiles/nonrecursive.mk
+--- a/js/src/config/makefiles/nonrecursive.mk
++++ b/js/src/config/makefiles/nonrecursive.mk
+@@ -14,49 +14,59 @@
+ # NONRECURSIVE_TARGETS variable lists the make targets that modified. For
+ # each target in this list, the NONRECURSIVE_TARGET_<target> variable will
+ # contain a list of partial variable names. We will then look in variables
+ # named NONRECURSIVE_TARGETS_<target>_<fragment>_* for information describing
+ # how to evaluate non-recursive make targets.
+ #
+ # Targets are defined by the following variables:
+ #
+-#   FILE - The make file to evaluate.
++#   FILE - The make file to evaluate. This is equivalent to
++#      |make -f <FILE>|
++#   DIRECTORY - The directory whose Makefile to evaluate. This is
++#      equivalent to |make -C <DIRECTORY>|.
+ #   TARGETS - Targets to evaluate in that make file.
+ #
++# Only 1 of FILE or DIRECTORY may be defined.
++#
+ # For example:
+ #
+ # NONRECURSIVE_TARGETS = export libs
+ # NONRECURSIVE_TARGETS_export = headers
+ # NONRECURSIVE_TARGETS_export_headers_FILE = /path/to/exports.mk
+ # NONRECURSIVE_TARGETS_export_headers_TARGETS = $(DIST)/include/foo.h $(DIST)/include/bar.h
+ # NONRECURSIVE_TARGETS_libs = cppsrcs
+-# NONRECURSIVE_TARGETS_libs_cppsrcs_FILE = /path/to/compilation.mk
++# NONRECURSIVE_TARGETS_libs_cppsrcs_DIRECTORY = $(DEPTH)/foo
+ # NONRECURSIVE_TARGETS_libs_cppsrcs_TARGETS = /path/to/foo.o /path/to/bar.o
+ #
+ # Will get turned into the following:
+ #
+ # exports::
+-#     $(MAKE) -f /path/to/exports.mk $(DIST)/include/foo.h $(DIST)/include/bar.h
++#     cd $$(DEPTH) $(MAKE) -f /path/to/exports.mk $(DIST)/include/foo.h $(DIST)/include/bar.h
+ #
+ # libs::
+-#     $(MAKE) -f /path/to/compilation.mk /path/to/foo.o /path/to/bar.o
++#     $(MAKE) -C $(DEPTH)/foo /path/to/foo.o /path/to/bar.o
+ 
+ ifndef INCLUDED_NONRECURSIVE_MK
+ 
+ define define_nonrecursive_target
+ $(1)::
+-	cd $$(DEPTH) && $$(MAKE) -f $(2) $(3)
++ifneq (,$(3))
++	cd $$(DEPTH) && $$(MAKE) -f $(3) $(2)
++else
++	$$(MAKE) -C $(4) $(2)
++endif
+ endef
+ 
+ $(foreach target,$(NONRECURSIVE_TARGETS), \
+     $(foreach entry,$(NONRECURSIVE_TARGETS_$(target)), \
+         $(eval $(call define_nonrecursive_target, \
+             $(target), \
++            $(NONRECURSIVE_TARGETS_$(target)_$(entry)_TARGETS), \
+             $(NONRECURSIVE_TARGETS_$(target)_$(entry)_FILE), \
+-            $(NONRECURSIVE_TARGETS_$(target)_$(entry)_TARGETS) \
++            $(NONRECURSIVE_TARGETS_$(target)_$(entry)_DIRECTORY), \
+         )) \
+     ) \
+ )
+ 
+ INCLUDED_NONRECURSIVE_MK := 1
+ endif
+ 
+diff --git a/js/src/config/rules.mk b/js/src/config/rules.mk
+--- a/js/src/config/rules.mk
++++ b/js/src/config/rules.mk
+@@ -19,25 +19,33 @@
+   MODULE \
+   PARALLEL_DIRS \
+   TEST_DIRS \
+   TIERS \
+   TOOL_DIRS \
+   XPIDL_MODULE \
+   $(NULL)
+ 
++_DEPRECATED_VARIABLES := \
++  XPIDL_FLAGS \
++  $(NULL)
++
+ ifndef EXTERNALLY_MANAGED_MAKE_FILE
+ # Using $(firstword) may not be perfect. But it should be good enough for most
+ # scenarios.
+ _current_makefile = $(CURDIR)/$(firstword $(MAKEFILE_LIST))
+ 
+ $(foreach var,$(_MOZBUILD_EXTERNAL_VARIABLES),$(if $($(var)),\
+     $(error Variable $(var) is defined in $(_current_makefile). It should only be defined in moz.build files),\
+     ))
+ 
++$(foreach var,$(_DEPRECATED_VARIABLES),$(if $($(var)),\
++    $(error Variable $(var) is defined in $(_current_makefile). This variable has been deprecated. It does nothing. It must be removed in order to build)\
++    ))
++
+ ifneq (,$(XPIDLSRCS)$(SDK_XPIDLSRCS))
+     $(error XPIDLSRCS and SDK_XPIDLSRCS have been merged and moved to moz.build files as the XPIDL_SOURCES variable. You must move these variables out of $(_current_makefile))
+ endif
+ 
+ # Import the automatically generated backend file. If this file doesn't exist,
+ # the backend hasn't been properly configured. We want this to be a fatal
+ # error, hence not using "-include".
+ ifndef STANDALONE_MAKEFILE
+@@ -405,18 +413,16 @@
+ #
+ # the Solaris WorkShop template repository cache.  it occasionally can get
+ # out of sync, so targets like clobber should kill it.
+ #
+ ifeq ($(SOLARIS_SUNPRO_CXX),1)
+ GARBAGE_DIRS += SunWS_cache
+ endif
+ 
+-XPIDL_GEN_DIR		= _xpidlgen
+-
+ ifdef MOZ_UPDATE_XTERM
+ # Its good not to have a newline at the end of the titlebar string because it
+ # makes the make -s output easier to read.  Echo -n does not work on all
+ # platforms, but we can trick printf into doing it.
+ UPDATE_TITLE = printf "\033]0;%s in %s\007" $(1) $(shell $(BUILD_TOOLS)/print-depth-path.sh)/$(2) ;
+ endif
+ 
+ define SUBMAKE # $(call SUBMAKE,target,directory)
+@@ -1359,108 +1365,33 @@
+ AUTOCFG_JS_EXPORTS_FILES := $(AUTOCFG_JS_EXPORTS)
+ AUTOCFG_JS_EXPORTS_DEST := $(FINAL_TARGET)/defaults/autoconfig
+ AUTOCFG_JS_EXPORTS_TARGET := export
+ INSTALL_TARGETS += AUTOCFG_JS_EXPORTS
+ endif
+ endif
+ 
+ ################################################################################
+-# Export the elements of $(XPIDLSRCS)
+-# generating .h and .xpt files and moving them to the appropriate places.
+-
+-ifneq ($(XPIDLSRCS),) #{
+-
+-export:: $(patsubst %.idl,$(XPIDL_GEN_DIR)/%.h, $(XPIDLSRCS))
+-
+-ifndef XPIDL_MODULE
+-XPIDL_MODULE		= $(MODULE)
+-endif
+-
+-ifeq ($(XPIDL_MODULE),) # we need $(XPIDL_MODULE) to make $(XPIDL_MODULE).xpt
+-export:: FORCE
+-	@echo
+-	@echo "*** Error processing XPIDLSRCS:"
+-	@echo "Please define MODULE or XPIDL_MODULE when defining XPIDLSRCS,"
+-	@echo "so we have a module name to use when creating MODULE.xpt."
+-	@echo; sleep 2; false
+-endif
+-
+-# generate .h files from into $(XPIDL_GEN_DIR), then export to $(DIST)/include;
+-# warn against overriding existing .h file.
+-
+-XPIDL_DEPS = \
+-  $(LIBXUL_DIST)/sdk/bin/header.py \
+-  $(LIBXUL_DIST)/sdk/bin/typelib.py \
+-  $(LIBXUL_DIST)/sdk/bin/xpidl.py \
+-  $(NULL)
+-
+-xpidl-preqs = \
+-  $(call mkdir_deps,$(XPIDL_GEN_DIR)) \
+-  $(call mkdir_deps,$(MDDEPDIR)) \
+-  $(NULL)
+-
+-$(XPIDL_GEN_DIR)/%.h: %.idl $(XPIDL_DEPS) $(xpidl-preqs)
+-	$(REPORT_BUILD)
+-	$(PYTHON_PATH) \
+-	  $(PLY_INCLUDE) \
+-	  $(LIBXUL_DIST)/sdk/bin/header.py $(XPIDL_FLAGS) $(_VPATH_SRCS) -d $(MDDEPDIR)/$(@F).pp -o $@
+-	@if test -n "$(findstring $*.h, $(EXPORTS))"; \
+-	  then echo "*** WARNING: file $*.h generated from $*.idl overrides $(srcdir)/$*.h"; else true; fi
+-
+-# generate intermediate .xpt files into $(XPIDL_GEN_DIR), then link
+-# into $(XPIDL_MODULE).xpt and export it to $(FINAL_TARGET)/components.
+-$(XPIDL_GEN_DIR)/%.xpt: %.idl $(XPIDL_DEPS) $(xpidl-preqs)
+-	$(REPORT_BUILD)
+-	$(PYTHON_PATH) \
+-	  $(PLY_INCLUDE) \
+-	  -I$(topsrcdir)/xpcom/typelib/xpt/tools \
+-	  $(LIBXUL_DIST)/sdk/bin/typelib.py $(XPIDL_FLAGS) $(_VPATH_SRCS) -d $(MDDEPDIR)/$(@F).pp -o $@
+-
+-# no need to link together if XPIDLSRCS contains only XPIDL_MODULE
+-ifneq ($(XPIDL_MODULE).idl,$(strip $(XPIDLSRCS)))
+-XPT_PY = $(filter %/xpt.py,$(XPIDL_LINK))
+-
+-xpidl-idl2xpt = $(patsubst %.idl,$(XPIDL_GEN_DIR)/%.xpt,$(XPIDLSRCS))
+-xpidl-module-deps = $(xpidl-idl2xpt) $(GLOBAL_DEPS) $(XPT_PY)
+-
+-$(XPIDL_GEN_DIR)/$(XPIDL_MODULE).xpt: $(xpidl-module-deps)
+-	$(XPIDL_LINK) $@ $(xpidl-idl2xpt)
+-
+-$(XPT_PY):
+-	$(MAKE) -C $(DEPTH)/xpcom/typelib/xpt/tools libs
+-
+-endif # XPIDL_MODULE.xpt != XPIDLSRCS
++# Install a linked .xpt into the appropriate place.
++# This should ideally be performed by the non-recursive idl make file. Some day.
++ifdef XPT_NAME #{
+ 
+ ifndef NO_DIST_INSTALL
+-XPIDL_MODULE_FILES := $(XPIDL_GEN_DIR)/$(XPIDL_MODULE).xpt
+-XPIDL_MODULE_DEST := $(FINAL_TARGET)/components
+-INSTALL_TARGETS += XPIDL_MODULE
++_XPT_NAME_FILES := $(DEPTH)/build/xpidl/xpt/$(XPT_NAME)
++_XPT_NAME_DEST := $(FINAL_TARGET)/components
++INSTALL_TARGETS += _XPT_NAME
+ 
+ ifndef NO_INTERFACES_MANIFEST
+ libs:: $(call mkdir_deps,$(FINAL_TARGET)/components)
+-	@$(PYTHON) $(MOZILLA_DIR)/config/buildlist.py $(FINAL_TARGET)/components/interfaces.manifest "interfaces $(XPIDL_MODULE).xpt"
++	@$(PYTHON) $(MOZILLA_DIR)/config/buildlist.py $(FINAL_TARGET)/components/interfaces.manifest "interfaces $(XPT_NAME)"
+ 	@$(PYTHON) $(MOZILLA_DIR)/config/buildlist.py $(FINAL_TARGET)/chrome.manifest "manifest components/interfaces.manifest"
+ endif
+ endif
+ 
+-GARBAGE_DIRS		+= $(XPIDL_GEN_DIR)
+-
+-ifndef NO_DIST_INSTALL
+-XPIDL_HEADERS_FILES := $(patsubst %.idl,$(XPIDL_GEN_DIR)/%.h, $(XPIDLSRCS))
+-XPIDL_HEADERS_DEST := $(DIST)/include
+-XPIDL_HEADERS_TARGET := export
+-INSTALL_TARGETS += XPIDL_HEADERS
+-
+-XPIDLSRCS_FILES := $(XPIDLSRCS)
+-XPIDLSRCS_DEST := $(IDL_DIR)
+-XPIDLSRCS_TARGET := export
+-INSTALL_TARGETS += XPIDLSRCS
+-endif
+-endif #} XPIDLSRCS
++endif #} XPT_NAME
+ 
+ ################################################################################
+ # Copy each element of EXTRA_COMPONENTS to $(FINAL_TARGET)/components
+ ifneq (,$(filter %.js,$(EXTRA_COMPONENTS) $(EXTRA_PP_COMPONENTS)))
+ ifeq (,$(filter %.manifest,$(EXTRA_COMPONENTS) $(EXTRA_PP_COMPONENTS)))
+ ifndef NO_JS_MANIFEST
+ $(error .js component without matching .manifest. See https://developer.mozilla.org/en/XPCOM/XPCOM_changes_in_Gecko_2.0)
+ endif
+@@ -1660,17 +1591,17 @@
+ #
+ #   We use $(CURDIR) in the rule's target to ensure that we don't find
+ #   a dependency directory in the source tree via VPATH (perhaps from
+ #   a previous build in the source tree) and thus neglect to create a
+ #   dependency directory in the object directory, where we really need
+ #   it.
+ 
+ ifneq (,$(filter-out all chrome default export realchrome tools clean clobber clobber_all distclean realclean,$(MAKECMDGOALS)))
+-MDDEPEND_FILES		:= $(strip $(wildcard $(foreach file,$(sort $(OBJS) $(PROGOBJS) $(HOST_OBJS) $(HOST_PROGOBJS) $(TARGETS) $(XPIDLSRCS:.idl=.h) $(XPIDLSRCS:.idl=.xpt)),$(MDDEPDIR)/$(notdir $(file)).pp) $(addprefix $(MDDEPDIR)/,$(EXTRA_MDDEPEND_FILES))))
++MDDEPEND_FILES		:= $(strip $(wildcard $(foreach file,$(sort $(OBJS) $(PROGOBJS) $(HOST_OBJS) $(HOST_PROGOBJS) $(TARGETS)),$(MDDEPDIR)/$(notdir $(file)).pp) $(addprefix $(MDDEPDIR)/,$(EXTRA_MDDEPEND_FILES))))
+ 
+ ifneq (,$(MDDEPEND_FILES))
+ ifdef .PYMAKE
+ includedeps $(MDDEPEND_FILES)
+ else
+ include $(MDDEPEND_FILES)
+ endif
+ endif
+@@ -1853,17 +1784,16 @@
+ 	$(LOOP_OVER_TOOL_DIRS)
+ endif
+ 
+ 
+ FREEZE_VARIABLES = \
+   CSRCS \
+   CPPSRCS \
+   EXPORTS \
+-  XPIDLSRCS \
+   DIRS \
+   LIBRARY \
+   MODULE \
+   SHORT_LIBNAME \
+   TIERS \
+   EXTRA_COMPONENTS \
+   EXTRA_PP_COMPONENTS \
+   MOCHITEST_FILES \
+diff --git a/js/xpconnect/tests/idl/Makefile.in b/js/xpconnect/tests/idl/Makefile.in
+--- a/js/xpconnect/tests/idl/Makefile.in
++++ b/js/xpconnect/tests/idl/Makefile.in
+@@ -8,11 +8,11 @@
+ srcdir = @srcdir@
+ VPATH = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+ componentdir = js/xpconnect/tests/components
+-libs:: $(XPIDL_GEN_DIR)/$(MODULE).xpt
++libs:: $(DEPTH)/build/xpidl/xpt/$(MODULE).xpt
+ 	$(INSTALL) $^ $(testxpcobjdir)/$(componentdir)/native
+ 	$(INSTALL) $^ $(testxpcobjdir)/$(componentdir)/js
+diff --git a/modules/libjar/moz.build b/modules/libjar/moz.build
+--- a/modules/libjar/moz.build
++++ b/modules/libjar/moz.build
+@@ -5,17 +5,20 @@
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ if CONFIG['MOZ_ZIPWRITER']:
+     DIRS += ['zipwriter']
+ 
+ TEST_TOOL_DIRS += ['test']
+ 
+ XPIDL_SOURCES += [
+-    '$(MODULES_LIBJAR_LXPIDLSRCS)',
++    'nsIJARChannel.idl',
++    'nsIJARProtocolHandler.idl',
++    'nsIJARURI.idl',
++    'nsIZipReader.idl',
+ ]
+ 
+ MODULE = 'jar'
+ 
+ EXPORTS += [
+     'nsJARURI.h',
+     'nsZipArchive.h',
+     'zipstruct.h',
+diff --git a/modules/libjar/objs.mk b/modules/libjar/objs.mk
+--- a/modules/libjar/objs.mk
++++ b/modules/libjar/objs.mk
+@@ -8,19 +8,10 @@
+ 		nsJARInputStream.cpp \
+ 		nsJAR.cpp \
+ 		nsJARFactory.cpp \
+ 		nsJARProtocolHandler.cpp \
+ 		nsJARChannel.cpp  \
+ 		nsJARURI.cpp  \
+ 		$(NULL)
+ 
+-MODULES_LIBJAR_LXPIDLSRCS = \
+-		nsIZipReader.idl \
+-		nsIJARChannel.idl \
+-		nsIJARURI.idl \
+-		nsIJARProtocolHandler.idl \
+-		$(NULL)
+-
+ MODULES_LIBJAR_CPPSRCS := $(addprefix $(topsrcdir)/modules/libjar/, $(MODULES_LIBJAR_LCPPSRCS))
+ 
+-MODULES_LIBJAR_XPIDLSRCS := $(addprefix $(topsrcdir)/modules/libjar/, $(MODULES_LIBJAR_LXPIDLSRCS))
+-
+diff --git a/netwerk/mime/moz.build b/netwerk/mime/moz.build
+--- a/netwerk/mime/moz.build
++++ b/netwerk/mime/moz.build
+@@ -5,20 +5,16 @@
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ XPIDL_SOURCES += [
+     'nsIMIMEHeaderParam.idl',
+     'nsIMIMEInfo.idl',
+     'nsIMIMEService.idl',
+ ]
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/netwerk/base/public',
+-]
+-
+ MODULE = 'mimetype'
+ 
+ EXPORTS += [
+     'nsMimeTypes.h',
+ ]
+ 
+ CPP_SOURCES += [
+     'nsMIMEHeaderParamImpl.cpp',
+diff --git a/netwerk/protocol/file/moz.build b/netwerk/protocol/file/moz.build
+--- a/netwerk/protocol/file/moz.build
++++ b/netwerk/protocol/file/moz.build
+@@ -6,19 +6,15 @@
+ 
+ XPIDL_SOURCES += [
+     'nsIFileChannel.idl',
+     'nsIFileProtocolHandler.idl',
+ ]
+ 
+ XPIDL_MODULE = 'necko_file'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/netwerk/base/public',
+-]
+-
+ MODULE = 'necko'
+ 
+ CPP_SOURCES += [
+     'nsFileChannel.cpp',
+     'nsFileProtocolHandler.cpp',
+ ]
+ 
+diff --git a/netwerk/protocol/http/moz.build b/netwerk/protocol/http/moz.build
+--- a/netwerk/protocol/http/moz.build
++++ b/netwerk/protocol/http/moz.build
+@@ -15,20 +15,16 @@
+     'nsIHttpChannelInternal.idl',
+     'nsIHttpEventSink.idl',
+     'nsIHttpHeaderVisitor.idl',
+     'nsIHttpProtocolHandler.idl',
+ ]
+ 
+ XPIDL_MODULE = 'necko_http'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/netwerk/base/public',
+-]
+-
+ MODULE = 'necko'
+ 
+ EXPORTS += [
+     'nsHttp.h',
+     'nsHttpAtomList.h',
+     'nsHttpHeaderArray.h',
+     'nsHttpResponseHead.h',
+ ]
+diff --git a/netwerk/protocol/res/moz.build b/netwerk/protocol/res/moz.build
+--- a/netwerk/protocol/res/moz.build
++++ b/netwerk/protocol/res/moz.build
+@@ -5,18 +5,14 @@
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ XPIDL_SOURCES += [
+     'nsIResProtocolHandler.idl',
+ ]
+ 
+ XPIDL_MODULE = 'necko_res'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/netwerk/base/public',
+-]
+-
+ MODULE = 'necko'
+ 
+ CPP_SOURCES += [
+     'nsResProtocolHandler.cpp',
+ ]
+ 
+diff --git a/netwerk/protocol/viewsource/moz.build b/netwerk/protocol/viewsource/moz.build
+--- a/netwerk/protocol/viewsource/moz.build
++++ b/netwerk/protocol/viewsource/moz.build
+@@ -5,19 +5,15 @@
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ XPIDL_SOURCES += [
+     'nsIViewSourceChannel.idl',
+ ]
+ 
+ XPIDL_MODULE = 'necko_viewsource'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/netwerk/base/public',
+-]
+-
+ MODULE = 'necko'
+ 
+ CPP_SOURCES += [
+     'nsViewSourceChannel.cpp',
+     'nsViewSourceHandler.cpp',
+ ]
+ 
+diff --git a/netwerk/protocol/wyciwyg/moz.build b/netwerk/protocol/wyciwyg/moz.build
+--- a/netwerk/protocol/wyciwyg/moz.build
++++ b/netwerk/protocol/wyciwyg/moz.build
+@@ -5,20 +5,16 @@
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ XPIDL_SOURCES += [
+     'nsIWyciwygChannel.idl',
+ ]
+ 
+ XPIDL_MODULE = 'necko_wyciwyg'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/netwerk/base/public',
+-]
+-
+ MODULE = 'necko'
+ 
+ EXPORTS.mozilla.net += [
+     'WyciwygChannelChild.h',
+     'WyciwygChannelParent.h',
+ ]
+ 
+ CPP_SOURCES += [
+diff --git a/netwerk/streamconv/public/moz.build b/netwerk/streamconv/public/moz.build
+--- a/netwerk/streamconv/public/moz.build
++++ b/netwerk/streamconv/public/moz.build
+@@ -15,14 +15,10 @@
+ 
+ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
+     XPIDL_SOURCES += [
+         'nsIAppleFileDecoder.idl',
+     ]
+ 
+ XPIDL_MODULE = 'necko_strconv'
+ 
+-XPIDL_FLAGS += [
+-    '-I$(topsrcdir)/netwerk/base/public',
+-]
+-
+ MODULE = 'necko'
+ 
+diff --git a/python/mozbuild/mozbuild/backend/common.py b/python/mozbuild/mozbuild/backend/common.py
+new file mode 100644
+--- /dev/null
++++ b/python/mozbuild/mozbuild/backend/common.py
+@@ -0,0 +1,62 @@
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++from __future__ import unicode_literals
++
++import errno
++import os
++
++import mozpack.path as path
++
++from .base import BuildBackend
++
++from ..frontend.data import XPIDLFile
++
++
++class XPIDLManager(object):
++    """Helps manage XPCOM IDLs in the context of the build system."""
++    def __init__(self, config):
++        self.config = config
++        self.topsrcdir = config.topsrcdir
++        self.topobjdir = config.topobjdir
++
++        self.idls = {}
++        self.modules = {}
++
++    def register_idl(self, source, module, allow_existing=False):
++        """Registers an IDL file with this instance.
++
++        The IDL file will be built, installed, etc.
++        """
++        basename = path.basename(source)
++        root = path.splitext(basename)[0]
++
++        entry = {
++            'source': source,
++            'module': module,
++            'basename': basename,
++            'root': root,
++        }
++
++        if not allow_existing and entry['basename'] in self.idls:
++            raise Exception('IDL already registered: %' % entry['basename'])
++
++        self.idls[entry['basename']] = entry
++        self.modules.setdefault(entry['module'], set()).add(entry['root'])
++
++
++class CommonBackend(BuildBackend):
++    """Holds logic common to all build backends."""
++
++    def _init(self):
++        self._idl_manager = XPIDLManager(self.environment)
++
++    def consume_object(self, obj):
++        if isinstance(obj, XPIDLFile):
++            self._idl_manager.register_idl(obj.source_path, obj.module)
++
++    def consume_finished(self):
++        if len(self._idl_manager.idls):
++            self._handle_idl_manager(self._idl_manager)
++
+diff --git a/python/mozbuild/mozbuild/backend/recursivemake.py b/python/mozbuild/mozbuild/backend/recursivemake.py
+--- a/python/mozbuild/mozbuild/backend/recursivemake.py
++++ b/python/mozbuild/mozbuild/backend/recursivemake.py
+@@ -4,24 +4,30 @@
+ 
+ from __future__ import unicode_literals
+ 
+ import errno
+ import logging
+ import os
+ import types
+ 
+-from .base import BuildBackend
++import mozpack.path as path
++
++from mozpack.copier import DirectoryPruner
++from mozpack.files import File
++
++from .common import CommonBackend
+ from ..frontend.data import (
+     ConfigFileSubstitution,
+     DirectoryTraversal,
+     SandboxDerived,
+     VariablePassthru,
+     Exports,
+     Program,
++    XPIDLFile,
+     XpcshellManifests,
+ )
+ from ..util import FileAvoidWrite
+ 
+ 
+ STUB_MAKEFILE = '''
+ # THIS FILE WAS AUTOMATICALLY GENERATED. DO NOT MODIFY BY HAND.
+ 
+@@ -62,55 +68,86 @@
+     """
+ 
+     def __init__(self, srcdir, objdir, environment):
+         self.srcdir = srcdir
+         self.objdir = objdir
+         self.environment = environment
+         self.path = os.path.join(objdir, 'backend.mk')
+ 
++        # XPIDLFiles attached to this file.
++        self.idls = []
++        self.xpt_name = None
++
+         self.fh = FileAvoidWrite(self.path)
+         self.fh.write('# THIS FILE WAS AUTOMATICALLY GENERATED. DO NOT EDIT.\n')
+         self.fh.write('\n')
+         self.fh.write('MOZBUILD_DERIVED := 1\n')
+ 
+         # The global rule to incur backend generation generates Makefiles.
+         self.fh.write('NO_MAKEFILE_RULE := 1\n')
+ 
+         # We can't blindly have a SUBMAKEFILES rule because some of the
+         # Makefile may not have a corresponding Makefile.in. For the case
+         # where a new directory is added, the mozbuild file referencing that
+         # new directory will need updated. This will cause a full backend
+         # scan and build, installing the new Makefile.
+         self.fh.write('NO_SUBMAKEFILES_RULE := 1\n')
+ 
+-
+     def write(self, buf):
+         self.fh.write(buf)
+ 
+     def close(self):
++        if self.idls:
++            basenames = sorted(idl.basename for idl in self.idls)
++            modules = sorted(set(idl.module for idl in self.idls))
++            roots = [os.path.splitext(b)[0] for b in basenames]
++            export_targets = ['stage/%s' % b for b in basenames]
++
++            libs_targets = ['gen/%s.done' % root for root in roots]
++
++            libs_targets.extend('gen/%s.xpt' % root for root in roots)
++            libs_targets.extend('xpt/%s.xpt' % root for root in modules)
++
++            self.fh.write('NONRECURSIVE_TARGETS += export libs\n')
++            self.fh.write('NONRECURSIVE_TARGETS_export += idls\n')
++            self.fh.write('NONRECURSIVE_TARGETS_export_idls_DIRECTORY = '
++                '$(DEPTH)/build/xpidl\n')
++            self.fh.write('NONRECURSIVE_TARGETS_export_idls_TARGETS = %s\n' %
++                ' '.join(export_targets))
++            self.fh.write('NONRECURSIVE_TARGETS_libs += idls\n')
++            self.fh.write('NONRECURSIVE_TARGETS_libs_idls_DIRECTORY = '
++                '$(DEPTH)/build/xpidl\n')
++            self.fh.write('NONRECURSIVE_TARGETS_libs_idls_TARGETS = %s\n' %
++                ' '.join(libs_targets))
++
++        if self.xpt_name:
++            self.fh.write('XPT_NAME := %s\n' % self.xpt_name)
++
+         return self.fh.close()
+ 
+ 
+-class RecursiveMakeBackend(BuildBackend):
++class RecursiveMakeBackend(CommonBackend):
+     """Backend that integrates with the existing recursive make build system.
+ 
+     This backend facilitates the transition from Makefile.in to moz.build
+     files.
+ 
+     This backend performs Makefile.in -> Makefile conversion. It also writes
+     out .mk files containing content derived from moz.build files. Both are
+     consumed by the recursive make builder.
+ 
+     This backend may eventually evolve to write out non-recursive make files.
+     However, as long as there are Makefile.in files in the tree, we are tied to
+     recursive make and thus will need this backend.
+     """
+ 
+     def _init(self):
++        CommonBackend._init(self)
++
+         self._backend_files = {}
+ 
+         self.summary.managed_count = 0
+         self.summary.created_count = 0
+         self.summary.updated_count = 0
+         self.summary.unchanged_count = 0
+ 
+         def detailed(summary):
+@@ -133,29 +170,34 @@
+         elif updated:
+             self.summary.updated_count += 1
+         else:
+             self.summary.unchanged_count += 1
+ 
+     def consume_object(self, obj):
+         """Write out build files necessary to build with recursive make."""
+ 
++        CommonBackend.consume_object(self, obj)
++
+         if not isinstance(obj, SandboxDerived):
+             return
+ 
+         backend_file = self._backend_files.get(obj.srcdir,
+             BackendMakeFile(obj.srcdir, obj.objdir, self.get_environment(obj)))
+ 
+         if isinstance(obj, DirectoryTraversal):
+             self._process_directory_traversal(obj, backend_file)
+         elif isinstance(obj, ConfigFileSubstitution):
+             self._update_from_avoid_write(
+                 backend_file.environment.create_config_file(obj.output_path))
+             self.backend_input_files.add(obj.input_path)
+             self.summary.managed_count += 1
++        elif isinstance(obj, XPIDLFile):
++            backend_file.idls.append(obj)
++            backend_file.xpt_name = '%s.xpt' % obj.module
+         elif isinstance(obj, VariablePassthru):
+             # Sorted so output is consistent and we don't bump mtimes.
+             for k, v in sorted(obj.variables.items()):
+                 if isinstance(v, list):
+                     for item in v:
+                         backend_file.write('%s += %s\n' % (k, item))
+ 
+                 else:
+@@ -167,16 +209,18 @@
+             self._process_program(obj.program, backend_file)
+ 
+         elif isinstance(obj, XpcshellManifests):
+             self._process_xpcshell_manifests(obj.xpcshell_manifests, backend_file)
+ 
+         self._backend_files[obj.srcdir] = backend_file
+ 
+     def consume_finished(self):
++        CommonBackend.consume_finished(self)
++
+         for srcdir in sorted(self._backend_files.keys()):
+             bf = self._backend_files[srcdir]
+ 
+             if not os.path.exists(bf.objdir):
+                 try:
+                     os.makedirs(bf.objdir)
+                 except OSError as error:
+                     if error.errno != errno.EEXIST:
+@@ -295,13 +339,94 @@
+         if strings:
+             backend_file.write('%s += %s\n' % (export_name, ' '.join(strings)))
+ 
+         children = exports.get_children()
+         for subdir in sorted(children):
+             self._process_exports(children[subdir], backend_file,
+                                   namespace=namespace + subdir)
+ 
++    def _handle_idl_manager(self, manager):
++        base_dir = path.join(manager.topobjdir, 'build/xpidl')
++        stage_dir = path.join(base_dir, 'stage')
++        gen_dir = path.join(base_dir, 'gen')
++        xpt_dir = path.join(base_dir, 'xpt')
++
++        pruner = DirectoryPruner()
++        for p in ('xpidls.mk', 'Makefile', 'backend.mk'):
++            pruner.add(p, File(p))
++
++        for idl in manager.idls.values():
++            stage_path = path.join('idl', idl['basename'])
++            header_path = path.join('gen', '%s.h' % idl['root'])
++            xpt_path = path.join('gen', '%s.xpt' % idl['root'])
++            done_path = path.join('gen', '%s.done' % idl['root'])
++            pp_path = path.join('gen', '%s.pp' % idl['root'])
++
++            pruner.add(stage_path, File(stage_path))
++            pruner.add(header_path, File(header_path))
++            pruner.add(xpt_path, File(xpt_path))
++            pruner.add(done_path, File(done_path))
++            pruner.add(pp_path, File(pp_path))
++
++        for module in manager.modules:
++            module_path = path.join('xpt', '%s.xpt' % module)
++            pruner.add(module_path, File(module_path))
++
++        pruner.prune(base_dir)
++
++        for d in [stage_dir, gen_dir, xpt_dir]:
++            try:
++                os.makedirs(d)
++            except OSError as e:
++                if e.errno != errno.EEXIST:
++                    raise
++
++        template_path = os.path.join(manager.topsrcdir, 'build', 'xpidl',
++            'xpidls.mk.template')
++        template = open(template_path, 'r').read()
++
++        install_rules = []
++        roots = []
++
++        for k in sorted(manager.idls):
++            idl = manager.idls[k]
++
++            install_rules.extend([
++                '$(idl_stage_dir)/%s: %s' % (idl['basename'], idl['source']),
++                '\t$(INSTALL) $< $(idl_stage_dir)',
++            ])
++            roots.append(idl['root'])
++
++        modules = manager.modules
++        xpt_modules = sorted(modules.keys())
++        xpt_link_rules = []
++
++        for k in xpt_modules:
++            depends = ['$(idl_gen_dir)/%s.xpt' % b for b in modules[k]]
++            xpt_link_rules.extend([
++                '$(idl_xpt_dir)/%s.xpt: %s' % (k, ' '.join(depends)),
++                '\t@echo "$(notdir $@)"',
++                '\t$(xptlink) $@ $^',
++            ])
++
++        mk_path = os.path.join(base_dir, 'xpidls.mk')
++        fh = FileAvoidWrite(mk_path)
++        fh.write(template.format(
++            header='# THIS FILE IS AUTOMATICALLY GENERATED. DO NOT EDIT.',
++            topsrcdir=manager.topsrcdir,
++            stage_dir=stage_dir,
++            gen_dir=gen_dir,
++            xpt_dir=xpt_dir,
++            install_rules='\n'.join(install_rules),
++            roots=' '.join(roots),
++            extra_xpt_link_roots=' '.join(xpt_modules),
++            xpt_link_rules='\n'.join(xpt_link_rules),
++        ))
++
++        self._update_from_avoid_write(fh.close())
++        self.summary.managed_count += 1
++
+     def _process_program(self, program, backend_file):
+         backend_file.write('PROGRAM = %s\n' % program)
+ 
+     def _process_xpcshell_manifests(self, manifest, backend_file, namespace=""):
+         backend_file.write('XPCSHELL_TESTS += %s\n' % os.path.dirname(manifest))
+diff --git a/python/mozbuild/mozbuild/frontend/data.py b/python/mozbuild/mozbuild/frontend/data.py
+--- a/python/mozbuild/mozbuild/frontend/data.py
++++ b/python/mozbuild/mozbuild/frontend/data.py
+@@ -12,16 +12,18 @@
+ Logic for populating these data structures is not defined in this class.
+ Instead, what we have here are dumb container classes. The emitter module
+ contains the code for converting executed mozbuild files into these data
+ structures.
+ """
+ 
+ from __future__ import unicode_literals
+ 
++import os
++
+ from collections import OrderedDict
+ 
+ 
+ class TreeMetadata(object):
+     """Base class for all data being captured."""
+ 
+ 
+ class ReaderSummary(TreeMetadata):
+@@ -131,16 +133,32 @@
+     in our build backends since we will continue to be tied to our rules.mk.
+     """
+     __slots__ = ('variables')
+ 
+     def __init__(self, sandbox):
+         SandboxDerived.__init__(self, sandbox)
+         self.variables = {}
+ 
++
++class XPIDLFile(SandboxDerived):
++    """Describes an XPIDL file to be compiled."""
++
++    __slots__ = (
++        'basename',
++        'source_path',
++    )
++
++    def __init__(self, sandbox, source, module):
++        SandboxDerived.__init__(self, sandbox)
++
++        self.source_path = source
++        self.basename = os.path.basename(source)
++        self.module = module
++
+ class Exports(SandboxDerived):
+     """Sandbox container object for EXPORTS, which is a HierarchicalStringList.
+ 
+     We need an object derived from SandboxDerived for use in the backend, so
+     this object fills that role. It just has a reference to the underlying
+     HierarchicalStringList, which is created when parsing EXPORTS.
+     """
+     __slots__ = ('exports')
+diff --git a/python/mozbuild/mozbuild/frontend/emitter.py b/python/mozbuild/mozbuild/frontend/emitter.py
+--- a/python/mozbuild/mozbuild/frontend/emitter.py
++++ b/python/mozbuild/mozbuild/frontend/emitter.py
+@@ -1,27 +1,33 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ from __future__ import unicode_literals
+ 
+ import os
+ 
++import mozpack.path as mozpath
++
+ from .data import (
+     ConfigFileSubstitution,
+     DirectoryTraversal,
+     Exports,
+     Program,
+     ReaderSummary,
+     VariablePassthru,
++    XPIDLFile,
+     XpcshellManifests,
+ )
+ 
+-from .reader import MozbuildSandbox
++from .reader import (
++    MozbuildSandbox,
++    SandboxValidationError,
++)
+ 
+ 
+ class TreeMetadataEmitter(object):
+     """Converts the executed mozbuild files into data structures.
+ 
+     This is a bridge between reader.py and data.py. It takes what was read by
+     reader.BuildReader and converts it into the classes defined in the data
+     module.
+@@ -68,16 +74,28 @@
+                 path = path[1:]
+ 
+             sub = ConfigFileSubstitution(sandbox)
+             sub.input_path = os.path.join(sandbox['SRCDIR'], '%s.in' % path)
+             sub.output_path = os.path.join(sandbox['OBJDIR'], path)
+             sub.relpath = path
+             yield sub
+ 
++        xpidl_module = sandbox['MODULE']
++        if sandbox['XPIDL_MODULE']:
++            xpidl_module = sandbox['XPIDL_MODULE']
++
++        if sandbox['XPIDL_SOURCES'] and not xpidl_module:
++            raise SandboxValidationError('MODULE or XPIDL_MODULE must be '
++                'defined if XPIDL_SOURCES is defined.')
++
++        for idl in sandbox['XPIDL_SOURCES']:
++            yield XPIDLFile(sandbox, mozpath.join(sandbox['SRCDIR'], idl),
++                xpidl_module)
++
+         # Proxy some variables as-is until we have richer classes to represent
+         # them. We should aim to keep this set small because it violates the
+         # desired abstraction of the build definition away from makefiles.
+         passthru = VariablePassthru(sandbox)
+         varmap = dict(
+             # Makefile.in : moz.build
+             ASFILES='ASFILES',
+             CMMSRCS='CMMSRCS',
+@@ -85,19 +103,16 @@
+             CSRCS='CSRCS',
+             DEFINES='DEFINES',
+             EXTRA_COMPONENTS='EXTRA_COMPONENTS',
+             HOST_CSRCS='HOST_CSRCS',
+             HOST_LIBRARY_NAME='HOST_LIBRARY_NAME',
+             MODULE='MODULE',
+             SIMPLE_PROGRAMS='SIMPLE_PROGRAMS',
+             SSRCS='SSRCS',
+-            XPIDL_FLAGS='XPIDL_FLAGS',
+-            XPIDL_MODULE='XPIDL_MODULE',
+-            XPIDLSRCS='XPIDL_SOURCES',
+             )
+         for mak, moz in varmap.items():
+             if sandbox[moz]:
+                 passthru.variables[mak] = sandbox[moz]
+ 
+         if passthru.variables:
+             yield passthru
+ 
+diff --git a/python/mozbuild/mozbuild/frontend/sandbox_symbols.py b/python/mozbuild/mozbuild/frontend/sandbox_symbols.py
+--- a/python/mozbuild/mozbuild/frontend/sandbox_symbols.py
++++ b/python/mozbuild/mozbuild/frontend/sandbox_symbols.py
+@@ -196,20 +196,18 @@
+         like @foo@ will be substituted with the values of the AC_SUBST
+         variables declared during configure.
+         """),
+ 
+     'MODULE': (unicode, unicode, "",
+         """Module name.
+ 
+         Historically, this variable was used to describe where to install header
+-        files, but that feature is now handled by EXPORTS_NAMESPACES. Currently
+-        it is used as the XPIDL module name if XPIDL_MODULE is not defined, but
+-        using XPIDL_MODULE directly is preferred. MODULE will likely be removed
+-        in the future.
++        files, but that feature is now handled by EXPORTS_NAMEAPACES. MODULE
++        will likely be removed in the future.
+         """),
+ 
+     'EXPORTS': (HierarchicalStringList, list, HierarchicalStringList(),
+         """List of files to be exported, and in which subdirectories.
+ 
+         EXPORTS is generally used to list the include files to be exported to
+         dist/include, but it can be used for other files as well. This variable
+         behaves as a list when appending filenames for export in the top-level
+@@ -249,24 +247,16 @@
+     'XPIDL_MODULE': (unicode, unicode, "",
+         """XPCOM Interface Definition Module Name.
+ 
+         This is the name of the .xpt file that is created by linking
+         XPIDL_SOURCES together. If unspecified, it defaults to be the same as
+         MODULE.
+         """),
+ 
+-    'XPIDL_FLAGS': (list, list, [],
+-        """XPCOM Interface Definition Module Flags.
+-
+-        This is a list of extra flags that are passed to the IDL compiler.
+-        Typically this is a set of -I flags that denote extra include
+-        directories to search for included .idl files.
+-        """),
+-
+     'XPCSHELL_TESTS_MANIFESTS': (StrictOrderingOnAppendList, list, [],
+         """XPCSHELL Test Manifest list
+ 
+         This is a list of xpcshell.ini manifest files.
+         Formerly XPCSHELL_TESTS=
+         """),
+ }
+ 
+diff --git a/python/mozbuild/mozbuild/test/backend/common.py b/python/mozbuild/mozbuild/test/backend/common.py
+--- a/python/mozbuild/mozbuild/test/backend/common.py
++++ b/python/mozbuild/mozbuild/test/backend/common.py
+@@ -65,16 +65,21 @@
+     },
+     'xpcshell_manifests': {
+         'defines': [],
+         'non_global_defines': [],
+         'substs': [
+             ('XPCSHELL_TESTS_MANIFESTS', 'XPCSHELL_TESTS'),
+             ],
+     },
++    'xpidl': {
++        'defines': [],
++        'non_global_defines': [],
++        'substs': [],
++    },
+ }
+ 
+ 
+ class BackendTester(unittest.TestCase):
+     def _get_environment(self, name):
+         """Obtain a new instance of a ConfigEnvironment for a known profile.
+ 
+         A new temporary object directory is created for the environment. The
+@@ -84,25 +89,25 @@
+ 
+         objdir = mkdtemp()
+         self.addCleanup(rmtree, objdir)
+ 
+         srcdir = os.path.join(test_data_path, name)
+         config['substs'].append(('top_srcdir', srcdir))
+         return ConfigEnvironment(srcdir, objdir, **config)
+ 
+-    def _emit(self, name):
+-        env = self._get_environment(name)
++    def _emit(self, name, env=None):
++        env = env or self._get_environment(name)
+         reader = BuildReader(env)
+         emitter = TreeMetadataEmitter(env)
+ 
+         return env, emitter.emit(reader.read_topsrcdir())
+ 
+-    def _consume(self, name, cls):
+-        env, objs = self._emit(name)
++    def _consume(self, name, cls, env=None):
++        env, objs = self._emit(name, env=env)
+         backend = cls(env)
+         backend.consume(objs)
+ 
+         return env
+ 
+     def _tree_paths(self, topdir, filename):
+         for dirpath, dirnames, filenames in os.walk(topdir):
+             for f in filenames:
+diff --git a/python/mozbuild/mozbuild/test/backend/data/variable_passthru/moz.build b/python/mozbuild/mozbuild/test/backend/data/variable_passthru/moz.build
+--- a/python/mozbuild/mozbuild/test/backend/data/variable_passthru/moz.build
++++ b/python/mozbuild/mozbuild/test/backend/data/variable_passthru/moz.build
+@@ -1,15 +1,13 @@
+ # -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+ # Any copyright is dedicated to the Public Domain.
+ # http://creativecommons.org/publicdomain/zero/1.0/
+ 
+-XPIDL_SOURCES = ['bar.idl', 'biz.idl', 'foo.idl']
+-XPIDL_MODULE = 'module_name'
+-XPIDL_FLAGS = ['-Idir1', '-Idir2', '-Idir3']
++MODULE = 'module_name'
+ 
+ ASFILES = ['bar.s', 'foo.asm']
+ 
+ DEFINES = ['-Dbar', '-Dfoo']
+ 
+ EXTRA_COMPONENTS = ['bar.js', 'foo.js']
+ 
+ HOST_CSRCS = ['bar.c', 'foo.c']
+diff --git a/python/mozbuild/mozbuild/test/backend/data/xpidl/build/xpidl/xpidls.mk.template b/python/mozbuild/mozbuild/test/backend/data/xpidl/build/xpidl/xpidls.mk.template
+new file mode 100644
+diff --git a/python/mozbuild/mozbuild/test/backend/data/xpidl/moz.build b/python/mozbuild/mozbuild/test/backend/data/xpidl/moz.build
+new file mode 100644
+--- /dev/null
++++ b/python/mozbuild/mozbuild/test/backend/data/xpidl/moz.build
+@@ -0,0 +1,6 @@
++# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
++# Any copyright is dedicated to the Public Domain.
++# http://creativecommons.org/publicdomain/zero/1.0/
++
++MODULE = 'my_module'
++XPIDL_SOURCES = ['bar.idl', 'foo.idl']
+diff --git a/python/mozbuild/mozbuild/test/backend/test_recursivemake.py b/python/mozbuild/mozbuild/test/backend/test_recursivemake.py
+--- a/python/mozbuild/mozbuild/test/backend/test_recursivemake.py
++++ b/python/mozbuild/mozbuild/test/backend/test_recursivemake.py
+@@ -168,29 +168,16 @@
+             'SIMPLE_PROGRAMS': [
+                 'SIMPLE_PROGRAMS += bar.x',
+                 'SIMPLE_PROGRAMS += foo.x',
+             ],
+             'SSRCS': [
+                 'SSRCS += bar.S',
+                 'SSRCS += foo.S',
+             ],
+-            'XPIDL_FLAGS': [
+-                'XPIDL_FLAGS += -Idir1',
+-                'XPIDL_FLAGS += -Idir2',
+-                'XPIDL_FLAGS += -Idir3',
+-            ],
+-            'XPIDL_MODULE': [
+-                'XPIDL_MODULE := module_name'
+-            ],
+-            'XPIDLSRCS': [
+-                'XPIDLSRCS += bar.idl',
+-                'XPIDLSRCS += biz.idl',
+-                'XPIDLSRCS += foo.idl',
+-            ]
+         }
+ 
+         for var, val in expected.items():
+             # print("test_variable_passthru[%s]" % (var))
+             found = [str for str in lines if str.startswith(var)]
+             self.assertEqual(found, val)
+ 
+     def test_exports(self):
+@@ -225,10 +212,50 @@
+         # Avoid positional parameter and async related breakage
+         var = 'XPCSHELL_TESTS'
+         xpclines = sorted([val for val in lines if val.startswith(var)])
+ 
+         # Assignment[aa], append[cc], conditional[valid]
+         expected = ('aa', 'bb', 'cc', 'dd', 'valid_val')
+         self.assertEqual(xpclines, ["XPCSHELL_TESTS += %s" % val for val in expected])
+ 
++    def test_xpidl_generation(self):
++        """Ensure xpidl files and directories are written out."""
++        env = self._consume('xpidl', RecursiveMakeBackend)
++
++        p = os.path.join(env.topobjdir, 'build/xpidl')
++        self.assertTrue(os.path.isdir(p))
++        self.assertTrue(os.path.isdir(os.path.join(p, 'stage')))
++        self.assertTrue(os.path.isdir(os.path.join(p, 'gen')))
++        self.assertTrue(os.path.isdir(os.path.join(p, 'xpt')))
++
++        self.assertTrue(os.path.isfile(os.path.join(p, 'xpidls.mk')))
++
++        # Now pretend that we built the tree by putting some files in place.
++        h_path = os.path.join(p, 'gen', 'biz.h')
++        xpt_path = os.path.join(p, 'gen', 'biz.xpt')
++        stage_path = os.path.join(p, 'stage', 'biz.idl')
++        good_path = os.path.join(p, 'gen', 'foo.h')
++
++        with open(h_path, 'a'):
++            pass
++
++        with open(xpt_path, 'a'):
++            pass
++
++        with open(stage_path, 'a'):
++            pass
++
++        with open(good_path, 'a'):
++            pass
++
++        self.assertTrue(os.path.isfile(h_path))
++
++        # If we read again, the orphaned files should be removed.
++        self._consume('xpidl', RecursiveMakeBackend, env)
++        self.assertFalse(os.path.exists(h_path))
++        self.assertFalse(os.path.exists(xpt_path))
++        self.assertFalse(os.path.exists(stage_path))
++        self.assertTrue(os.path.exists(good_path))
++
++
+ if __name__ == '__main__':
+     main()
+diff --git a/python/mozbuild/mozbuild/test/frontend/data/variable-passthru/moz.build b/python/mozbuild/mozbuild/test/frontend/data/variable-passthru/moz.build
+--- a/python/mozbuild/mozbuild/test/frontend/data/variable-passthru/moz.build
++++ b/python/mozbuild/mozbuild/test/frontend/data/variable-passthru/moz.build
+@@ -1,15 +1,13 @@
+ # -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+ # Any copyright is dedicated to the Public Domain.
+ # http://creativecommons.org/publicdomain/zero/1.0/
+ 
+-XPIDL_SOURCES += ['bar.idl', 'biz.idl', 'foo.idl']
+-XPIDL_MODULE = 'module_name'
+-XPIDL_FLAGS += ['-Idir1', '-Idir2', '-Idir3']
++MODULE = 'module_name'
+ 
+ ASFILES += ['fans.asm', 'tans.s']
+ 
+ DEFINES=['-Dfans', '-Dtans']
+ 
+ EXTRA_COMPONENTS=['fans.js', 'tans.js']
+ 
+ HOST_CSRCS += ['fans.c', 'tans.c']
+diff --git a/python/mozbuild/mozbuild/test/frontend/test_emitter.py b/python/mozbuild/mozbuild/test/frontend/test_emitter.py
+--- a/python/mozbuild/mozbuild/test/frontend/test_emitter.py
++++ b/python/mozbuild/mozbuild/test/frontend/test_emitter.py
+@@ -129,20 +129,18 @@
+             CMMSRCS=['fans.mm', 'tans.mm'],
+             CSRCS=['fans.c', 'tans.c'],
+             DEFINES=['-Dfans', '-Dtans'],
+             EXTRA_COMPONENTS=['fans.js', 'tans.js'],
+             HOST_CSRCS=['fans.c', 'tans.c'],
+             HOST_LIBRARY_NAME='host_fans',
+             SIMPLE_PROGRAMS=['fans.x', 'tans.x'],
+             SSRCS=['fans.S', 'tans.S'],
+-            XPIDLSRCS=['bar.idl', 'biz.idl', 'foo.idl'],
+-            XPIDL_MODULE='module_name',
+-            XPIDL_FLAGS=['-Idir1', '-Idir2', '-Idir3'],
+-            )
++            MODULE='module_name',
++        )
+ 
+         variables = objs[1].variables
+         self.assertEqual(len(variables), len(wanted))
+ 
+         for var, val in wanted.items():
+             # print("test_variable_passthru[%s]" % var)
+             self.assertIn(var, variables)
+             self.assertEqual(variables[var], val)
+diff --git a/python/mozbuild/mozpack/copier.py b/python/mozbuild/mozpack/copier.py
+--- a/python/mozbuild/mozpack/copier.py
++++ b/python/mozbuild/mozpack/copier.py
+@@ -156,16 +156,54 @@
+                 actual_dest_files.add(os.path.normpath(os.path.join(root, f)))
+         for f in actual_dest_files - dest_files:
+             os.remove(f)
+         for root, dirs, files in os.walk(destination):
+             if not files and not dirs:
+                 os.removedirs(root)
+ 
+ 
++class DirectoryPruner(FileRegistry):
++    '''
++    FileRegistry that can be applied on a target directory to remove
++    unaccounted files.
++    '''
++    def prune(self, destination):
++        '''
++        Prune files and directories in destination not present in the registry.
++
++        Returns a tuple of (# files removed, # dirs removed)
++        '''
++        assert isinstance(destination, basestring)
++        destination = os.path.normpath(destination)
++
++        existing = set()
++        for root, dirs, files in os.walk(destination):
++            for f in files:
++                existing.add(os.path.normpath(os.path.join(root, f)))
++
++        allowed = set()
++        for path, f in self:
++            allowed.add(os.path.normpath(os.path.join(destination, path)))
++
++        file_count = 0
++        dir_count = 0
++
++        for p in existing - allowed:
++            os.remove(p)
++            file_count += 1
++
++        for root, dirs, files in os.walk(destination):
++            if not files and not dirs:
++                os.removedirs(root)
++                dir_count += 1
++
++        return file_count, dir_count
++
++
+ class Jarrer(FileRegistry, BaseFile):
+     '''
+     FileRegistry with the ability to copy and pack the registered files as a
+     jar file. Also acts as a BaseFile instance, to be copied with a FileCopier.
+     '''
+     def __init__(self, compress=True, optimize=True):
+         '''
+         Create a Jarrer instance. See mozpack.mozjar.JarWriter documentation
+@@ -243,8 +281,9 @@
+         raise RuntimeError('unsupported')
+ 
+     def preload(self, paths):
+         '''
+         Add the given set of paths to the list of preloaded files. See
+         mozpack.mozjar.JarWriter documentation for details on jar preloading.
+         '''
+         self._preload.extend(paths)
++
+diff --git a/python/mozbuild/mozpack/test/test_copier.py b/python/mozbuild/mozpack/test/test_copier.py
+--- a/python/mozbuild/mozpack/test/test_copier.py
++++ b/python/mozbuild/mozpack/test/test_copier.py
+@@ -1,13 +1,14 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ from mozpack.copier import (
++    DirectoryPruner,
+     FileCopier,
+     FileRegistry,
+     Jarrer,
+ )
+ from mozpack.files import GeneratedFile
+ from mozpack.mozjar import JarReader
+ import mozpack.path
+ import unittest
+@@ -126,16 +127,52 @@
+ 
+         copier.remove('foo')
+         copier.add('test', GeneratedFile('test'))
+         copier.copy(self.tmpdir)
+         self.assertEqual(self.all_files(self.tmpdir), set(copier.paths()))
+         self.assertEqual(self.all_dirs(self.tmpdir), set(['qux']))
+ 
+ 
++class TestDirectoryPruner(unittest.TestCase):
++    def setUp(self):
++        self.tmpdir = mkdtemp()
++
++    def tearDown(self):
++        shutil.rmtree(self.tmpdir)
++
++    def test_directory_pruner(self):
++        existing = os.path.join(self.tmpdir, 'existing')
++        extra = os.path.join(self.tmpdir, 'extra')
++        empty_dir = os.path.join(self.tmpdir, 'dir')
++
++        with open(existing, 'a'):
++            pass
++
++        with open(extra, 'a'):
++            pass
++
++        os.mkdir(empty_dir)
++        with open(os.path.join(empty_dir, 'foo'), 'a'):
++            pass
++
++        self.assertTrue(os.path.exists(existing))
++        self.assertTrue(os.path.exists(extra))
++
++        pruner = DirectoryPruner()
++        pruner.add('existing', GeneratedFile('existing'))
++        files, dirs = pruner.prune(self.tmpdir)
++        self.assertEqual(files, 2)
++        self.assertEqual(dirs, 1)
++
++        self.assertTrue(os.path.exists(existing))
++        self.assertFalse(os.path.exists(extra))
++        self.assertFalse(os.path.exists(empty_dir))
++
++
+ class TestJarrer(unittest.TestCase):
+     def check_jar(self, dest, copier):
+         jar = JarReader(fileobj=dest)
+         self.assertEqual([f.filename for f in jar], copier.paths())
+         for f in jar:
+             self.assertEqual(f.uncompressed_data.read(),
+                              copier[f.filename].content)
+ 
+diff --git a/toolkit/components/places/moz.build b/toolkit/components/places/moz.build
+--- a/toolkit/components/places/moz.build
++++ b/toolkit/components/places/moz.build
+@@ -17,17 +17,17 @@
+         'mozIAsyncHistory.idl',
+         'mozIAsyncLivemarks.idl',
+         'mozIColorAnalyzer.idl',
+         'mozIPlacesAutoComplete.idl',
+         'nsIAnnotationService.idl',
+         'nsIBrowserHistory.idl',
+         'nsIFaviconService.idl',
+         'nsINavBookmarksService.idl',
+-        'nsITaggingService.idl ',
++        'nsITaggingService.idl',
+         'nsPIPlacesDatabase.idl',
+         'nsPIPlacesHistoryListenersNotifier.idl',
+     ]
+ 
+     EXPORTS.mozilla.places = [
+         'History.h',
+         'Database.h',
+     ]
+diff --git a/toolkit/crashreporter/test/Makefile.in b/toolkit/crashreporter/test/Makefile.in
+--- a/toolkit/crashreporter/test/Makefile.in
++++ b/toolkit/crashreporter/test/Makefile.in
+@@ -18,17 +18,16 @@
+ 
+ VPATH += \
+   $(srcdir)/../google-breakpad/src/processor/ \
+   $(srcdir)/../google-breakpad/src/common/ \
+   $(topsrcdir)/build/ \
+   $(NULL)
+ 
+ LOCAL_INCLUDES += \
+-  -I$(XPIDL_GEN_DIR) \
+   -I$(srcdir)/../google-breakpad/src/ \
+   $(NULL)
+ EXTRA_DSO_LIBS += xpcom
+ EXTRA_DSO_LDOPTS += $(LIBS_DIR) $(MOZ_COMPONENT_LIBS) $(XPCOM_GLUE_LDOPTS)
+ 
+ EXTRA_JS_MODULES = CrashTestUtils.jsm
+ 
+ MOCHITEST_BROWSER_FILES = \
+diff --git a/toolkit/toolkit.mozbuild b/toolkit/toolkit.mozbuild
+--- a/toolkit/toolkit.mozbuild
++++ b/toolkit/toolkit.mozbuild
+@@ -4,16 +4,18 @@
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ if CONFIG['LIBXUL_SDK']:
+     error('toolkit.mozbuild is not compatible with --enable-libxul-sdk=')
+ 
+ if not CONFIG['MOZ_NATIVE_NSPR']:
+     add_tier_dir('nspr', 'config/nspr')
+ 
++add_tier_dir('xpidl', 'build/xpidl')
++
+ if not CONFIG['MOZ_NATIVE_SQLITE']:
+     add_tier_dir('nss', 'db/sqlite3/src')
+ 
+ if CONFIG['MOZ_PSM'] and not CONFIG['MOZ_NATIVE_NSS']:
+     add_tier_dir('nss', 'security/build')
+ 
+ include('/config/js/js.mozbuild')
+ 
+diff --git a/xpcom/idl-parser/Makefile.in b/xpcom/idl-parser/Makefile.in
+--- a/xpcom/idl-parser/Makefile.in
++++ b/xpcom/idl-parser/Makefile.in
+@@ -1,37 +1,36 @@
+-#
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ DEPTH = @DEPTH@
+ topsrcdir = @top_srcdir@
+ srcdir = @srcdir@
+ VPATH = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+-PARSER_SRCS = \
++parser_sources := \
+   header.py \
+   typelib.py \
+   xpidl.py \
+   $(NULL)
+ 
+ ifndef MOZ_SYSTEM_PLY
+-PLY_PROGS = \
++ply_progs = \
+   $(topsrcdir)/other-licenses/ply/ply/lex.py \
+   $(topsrcdir)/other-licenses/ply/ply/yacc.py \
+   $(NULL)
+ endif
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+ # Generate the PLY lexer and parser.
+-export:: $(PARSER_SRCS) $(PLY_PROGS)
++ply-parser:: $(parser_sources) $(ply_progs)
+ 	$(PYTHON_PATH) \
+ 	  $(PLY_INCLUDE) \
+ 	  $(srcdir)/header.py --cachedir=. --regen
+ 
+ check::
+ 	$(PYTHON_PATH) \
+ 	  $(PLY_INCLUDE) \
+ 	  -I. \
+diff --git a/xpcom/idl-parser/generate-h-and-xpt.py b/xpcom/idl-parser/generate-h-and-xpt.py
+new file mode 100755
+--- /dev/null
++++ b/xpcom/idl-parser/generate-h-and-xpt.py
+@@ -0,0 +1,61 @@
++#!/usr/bin/env python
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++# This script is used to generate an output header and xpt file for
++# input IDL file(s). It's purpose is to directly support the build
++# system. The API will change to meet the needs of the build system.
++
++import argparse
++import os
++
++from header import print_header
++from typelib import write_typelib
++from xpidl import IDLParser
++
++
++def process(input_dir, cache_dir, out_dir, basenames):
++    p = IDLParser(outputdir=cache_dir)
++
++    for idl_basename in basenames:
++        basename = os.path.splitext(idl_basename)[0]
++        path = os.path.join(input_dir, idl_basename)
++        idl_data = open(path).read()
++
++        idl = p.parse(idl_data, filename=path)
++        idl.resolve([input_dir], p)
++
++        header_path = os.path.join(out_dir, '%s.h' % basename)
++        xpt_path = os.path.join(out_dir, '%s.xpt' % basename)
++        deps_path = os.path.join(out_dir, '%s.pp' % basename)
++        done_path = os.path.join(out_dir, '%s.done' % basename)
++
++        with open(header_path, 'wb') as fh:
++            print_header(idl, fh, path)
++
++        with open(xpt_path, 'wb') as fh:
++            write_typelib(idl, fh, path)
++
++        with open(deps_path, 'w') as fh:
++            deps = [dep.replace('\\', '/') for dep in idl.deps]
++
++            fh.write('%s: %s\n' % (done_path, ' '.join(deps)))
++            for dep in deps:
++                fh.write('%s:\n' % dep)
++
++
++if __name__ == '__main__':
++    parser = argparse.ArgumentParser()
++    parser.add_argument('inputdir',
++        help='Directory in which to find source .idl files.')
++    parser.add_argument('cachedir',
++        help='Directory in which to write cached lexer data, etc')
++    parser.add_argument('outdir',
++        help='Directory in which to write output.')
++    parser.add_argument('idls', nargs='+',
++        help='Source .idl file(s). Specified as basenames only.')
++
++    args = parser.parse_args()
++    process(args.inputdir, args.cachedir, args.outdir, args.idls)
++

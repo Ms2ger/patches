@@ -1,0 +1,339 @@
+# HG changeset patch
+# Parent 8d09f003e087602c58c3729edc987c4b0b2d8670
+# User Gregory Szorc <gps@mozilla.com>
+Bug 854973 - Don't perform empty deferred transactions
+
+diff --git a/toolkit/modules/Sqlite.jsm b/toolkit/modules/Sqlite.jsm
+--- a/toolkit/modules/Sqlite.jsm
++++ b/toolkit/modules/Sqlite.jsm
+@@ -202,34 +202,44 @@
+ 
+   // A map from statement index to mozIStoragePendingStatement, to allow for
+   // canceling prior to finalizing the mozIStorageStatements.
+   this._pendingStatements = new Map();
+ 
+   // Increments for each executed statement for the life of the connection.
+   this._statementCounter = 0;
+ 
++  // The deferred corresponding to the current in-progress transaction.
++  // This serves both to hold state for the existing transaction and as
++  // an indicator as to whether a transaction is currently in progress.
+   this._inProgressTransaction = null;
+ 
++  // State of in-flight deferred transaction.
++  this._deferredTransactionState = this._DEFERRED_NONE;
++
+   this._idleShrinkMS = options.shrinkMemoryOnConnectionIdleMS;
+   if (this._idleShrinkMS) {
+     this._idleShrinkTimer = Cc["@mozilla.org/timer;1"]
+                               .createInstance(Ci.nsITimer);
+     // We wait for the first statement execute to start the timer because
+     // shrinking now would not do anything.
+   }
+ }
+ 
+ OpenedConnection.prototype = Object.freeze({
+   TRANSACTION_DEFERRED: "DEFERRED",
+   TRANSACTION_IMMEDIATE: "IMMEDIATE",
+   TRANSACTION_EXCLUSIVE: "EXCLUSIVE",
+ 
+   TRANSACTION_TYPES: ["DEFERRED", "IMMEDIATE", "EXCLUSIVE"],
+ 
++  _DEFERRED_NONE: 0,
++  _DEFERRED_WAITING: 1,
++  _DEFERRED_STATEMENT_PERFORMED: 2,
++
+   get connectionReady() {
+     return this._open && this._connection.connectionReady;
+   },
+ 
+   /**
+    * The row ID from the last INSERT operation.
+    *
+    * Because all statements are executed asynchronously, this could
+@@ -547,72 +557,103 @@
+     if (this._inProgressTransaction) {
+       throw new Error("A transaction is already active. Only one transaction " +
+                       "can be active at a time.");
+     }
+ 
+     this._log.debug("Beginning transaction");
+     let deferred = Promise.defer();
+     this._inProgressTransaction = deferred;
+-    Task.spawn(function doTransaction() {
+-      // It's tempting to not yield here and rely on the implicit serial
+-      // execution of issued statements. However, the yield serves an important
+-      // purpose: catching errors in statement execution.
+-      yield this.execute("BEGIN " + type + " TRANSACTION");
++
++    let task = Task.spawn(function doTransaction() {
++      // If the transaction is deferred, SQLite does nothing until a
++      // statement is executed. We optimize away the BEGIN TRANSACTION
++      // and COMMIT if no statements are actually performed in the
++      // transaction.
++      if (type == this.TRANSACTION_DEFERRED) {
++        this._deferredTransactionState = this._DEFERRED_WAITING;
++
++        // Our temporary prototype overwrites the execute APIs and
++        // injects the BEGIN DEFERRED TRANSACTION when the first
++        // statement executes. Then, it uninstalls itself.
++        this.__proto__ = PendingDeferredTransactionConnectionProto;
++      } else {
++        // It's tempting to not yield here and rely on the implicit serial
++        // execution of issued statements. However, the yield serves an important
++        // purpose: catching errors in statement execution.
++        yield this.execute("BEGIN " + type + " TRANSACTION");
++      }
+ 
+       let result;
+       try {
+         result = yield Task.spawn(func(this));
+       } catch (ex) {
+         // It's possible that a request to close the connection caused the
+         // error.
+         // Assertion: close() will unset this._inProgressTransaction when
+         // called.
+         if (!this._inProgressTransaction) {
+           this._log.warn("Connection was closed while performing transaction. " +
+                          "Received error should be due to closed connection: " +
+                          CommonUtils.exceptionStr(ex));
+           throw ex;
+         }
+ 
+-        this._log.warn("Error during transaction. Rolling back: " +
+-                       CommonUtils.exceptionStr(ex));
+-        try {
+-          yield this.execute("ROLLBACK TRANSACTION");
+-        } catch (inner) {
+-          this._log.warn("Could not roll back transaction. This is weird: " +
+-                         CommonUtils.exceptionStr(inner));
++        this._log.warn("Error during transaction: " + CommonUtils.exceptionStr(ex));
++
++        if (this._deferredTransactionState == this._DEFERRED_WAITING) {
++          this._log.info("No statements executed. Taking no action.");
++        } else {
++          this._log.warn("Rolling back.");
++          try {
++            yield this.execute("ROLLBACK TRANSACTION");
++          } catch (inner) {
++            this._log.warn("Could not roll back transaction. This is weird: " +
++                           CommonUtils.exceptionStr(inner));
++          }
+         }
+ 
+         throw ex;
+       }
+ 
+       // See comment above about connection being closed during transaction.
+       if (!this._inProgressTransaction) {
+         this._log.warn("Connection was closed while performing transaction. " +
+                        "Unable to commit.");
+         throw new Error("Connection closed before transaction committed.");
+       }
+ 
+       try {
+-        yield this.execute("COMMIT TRANSACTION");
++        if (this._deferredTransactionState == this._DEFERRED_WAITING) {
++          this._log.info("Empty deferred transaction. Not committing.");
++        } else {
++          yield this.execute("COMMIT TRANSACTION");
++        }
+       } catch (ex) {
+         this._log.warn("Error committing transaction: " +
+                        CommonUtils.exceptionStr(ex));
+         throw ex;
+       }
+ 
+       throw new Task.Result(result);
+-    }.bind(this)).then(
++    }.bind(this));
++
++    let onFinish = () => {
++      this._inProgressTransaction = null;
++      this._deferredTransactionState = this._DEFERRED_NONE;
++      this.__proto__ = OpenedConnection.prototype;
++    };
++
++    task.then(
+       function onSuccess(result) {
+-        this._inProgressTransaction = null;
++        onFinish();
+         deferred.resolve(result);
+       }.bind(this),
+       function onError(error) {
+-        this._inProgressTransaction = null;
++        onFinish();
+         deferred.reject(error);
+       }.bind(this)
+     );
+ 
+     return deferred.promise;
+   },
+ 
+   /**
+@@ -822,11 +863,39 @@
+     }
+ 
+     this._idleShrinkTimer.initWithCallback(this.shrinkMemory.bind(this),
+                                            this._idleShrinkMS,
+                                            this._idleShrinkTimer.TYPE_ONE_SHOT);
+   },
+ });
+ 
++let PendingDeferredTransactionConnectionProto = Object.freeze({
++  __proto__: OpenedConnection.prototype,
++
++  executeCached: function (...args) {
++    return Task.spawn(function executeCachedWrapper() {
++      try {
++        yield OpenedConnection.prototype.execute.call(this, "BEGIN DEFERRED TRANSACTION");
++        this._deferredTransactionState = this._DEFERRED_STATEMENT_PERFORMED;
++        yield OpenedConnection.prototype.executeCached.apply(this, args);
++      } finally {
++        this.__proto__ = OpenedConnection.prototype;
++      }
++    }.bind(this));
++  },
++
++  execute: function (...args) {
++    return Task.spawn(function executeWrapper() {
++      try {
++        yield OpenedConnection.prototype.execute.call(this, "BEGIN DEFERRED TRANSACTION");
++        this._deferredTransactionState = this._DEFERRED_STATEMENT_PERFORMED;
++        yield OpenedConnection.prototype.execute.apply(this, args);
++      } finally {
++        this.__proto__ = OpenedConnection.prototype;
++      }
++    }.bind(this));
++  },
++});
++
+ this.Sqlite = {
+   openConnection: openConnection,
+ };
+diff --git a/toolkit/modules/tests/xpcshell/test_sqlite.js b/toolkit/modules/tests/xpcshell/test_sqlite.js
+--- a/toolkit/modules/tests/xpcshell/test_sqlite.js
++++ b/toolkit/modules/tests/xpcshell/test_sqlite.js
+@@ -273,18 +273,18 @@
+   do_check_false(c.transactionInProgress);
+   let rows = yield c.execute("SELECT * FROM dirs");
+   do_check_true(Array.isArray(rows));
+   do_check_eq(rows.length, 1);
+ 
+   yield c.close();
+ });
+ 
+-add_task(function test_execute_transaction_rollback() {
+-  let c = yield getDummyDatabase("execute_transaction_rollback");
++add_task(function test_execute_deferred_transaction_rollback() {
++  let c = yield getDummyDatabase("execute_deferred_transaction_rollback");
+ 
+   let deferred = Promise.defer();
+ 
+   c.executeTransaction(function transaction(conn) {
+     yield conn.execute("INSERT INTO dirs (path) VALUES ('foo')");
+     print("Expecting error with next statement.");
+     yield conn.execute("INSERT INTO invalid VALUES ('foo')");
+ 
+@@ -297,16 +297,41 @@
+   yield deferred.promise;
+ 
+   let rows = yield c.execute("SELECT * FROM dirs");
+   do_check_eq(rows.length, 0);
+ 
+   yield c.close();
+ });
+ 
++// Similar to above except for non-deferred transactions.
++add_task(function test_execute_immediate_transaction_rollback() {
++  let c = yield getDummyDatabase("execute_immediate_transaction_rollback");
++
++  let deferred = Promise.defer();
++
++  c.executeTransaction(function transaction(conn) {
++    yield conn.execute("INSERT INTO dirs (path) VALUES ('foo')");
++    print("Expecting error with next statement.");
++    yield conn.execute("INSERT INTO invalid VALUES ('foo')");
++
++    // We should never get here.
++    do_throw();
++  }, c.TRANSACTION_IMMEDIATE).then(do_throw, function onError(error) {
++    deferred.resolve();
++  });
++
++  yield deferred.promise;
++
++  let rows = yield c.execute("SELECT * FROM dirs");
++  do_check_eq(rows.length, 0);
++
++  yield c.close();
++});
++
+ add_task(function test_close_during_transaction() {
+   let c = yield getDummyDatabase("close_during_transaction");
+ 
+   yield c.execute("INSERT INTO dirs (path) VALUES ('foo')");
+ 
+   let errored = false;
+   try {
+     yield c.executeTransaction(function transaction(conn) {
+@@ -322,16 +347,59 @@
+ 
+   let c2 = yield getConnection("close_during_transaction");
+   let rows = yield c2.execute("SELECT * FROM dirs");
+   do_check_eq(rows.length, 1);
+ 
+   yield c2.close();
+ });
+ 
++add_task(function test_empty_deferred_transactions_eliminated() {
++  let c = yield getDummyDatabase("empty_deferred_transactions_eliminated");
++
++  let count = c._statementCounter;
++  yield c.executeTransaction(function t() {
++    yield true;
++  });
++
++  do_check_eq(c._statementCounter, count);
++
++  yield c.close();
++});
++
++add_task(function test_deferred_transaction_wait_start() {
++  let c = yield getDummyDatabase("deferred_transactions_wait_start");
++
++  let count = c._statementCounter;
++  yield c.executeTransaction(function t() {
++    do_check_eq(c._statementCounter, count);
++
++    yield c.execute("SELECT * FROM dirs");
++    do_check_eq(c._statementCounter, count + 2);
++  });
++
++  do_check_eq(c._statementCounter, count + 3);
++
++  yield c.close();
++});
++
++add_task(function test_immediate_transaction_no_wait() {
++  let c = yield getDummyDatabase("immediate_transaction_no_wait");
++
++  let count = c._statementCounter;
++  yield c.executeTransaction(function t() {
++    do_check_eq(c._statementCounter, count + 1);
++    yield true;
++  }, c.TRANSACTION_IMMEDIATE);
++
++  do_check_eq(c._statementCounter, count + 2);
++
++  yield c.close();
++});
++
+ add_task(function test_detect_multiple_transactions() {
+   let c = yield getDummyDatabase("detect_multiple_transactions");
+ 
+   yield c.executeTransaction(function main() {
+     yield c.execute("INSERT INTO dirs (path) VALUES ('foo')");
+ 
+     let errored = false;
+     try {

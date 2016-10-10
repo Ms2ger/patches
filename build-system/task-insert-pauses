@@ -1,0 +1,191 @@
+# HG changeset patch
+# Parent 69878442ae4abd179bad679f29b8fd09e7507528
+# User Gregory Szorc <gps@mozilla.com>
+Bug 846987 - Add a tick deferring mode to Task.jsm
+
+diff --git a/toolkit/content/Task.jsm b/toolkit/content/Task.jsm
+--- a/toolkit/content/Task.jsm
++++ b/toolkit/content/Task.jsm
+@@ -90,18 +90,26 @@
+ ////////////////////////////////////////////////////////////////////////////////
+ //// Globals
+ 
+ const Cc = Components.classes;
+ const Ci = Components.interfaces;
+ const Cu = Components.utils;
+ const Cr = Components.results;
+ 
++Cu.import("resource://gre/modules/Services.jsm");
+ Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js");
+ 
++/**
++ * Schedule a function to be executed on a later tick.
++ */
++function runLater(fn) {
++  Services.tm.currentThread.dispatch(fn, Ci.nsIThread.DISPATCH_NORMAL);
++}
++
+ ////////////////////////////////////////////////////////////////////////////////
+ //// Task
+ 
+ /**
+  * This object provides the public module functions.
+  */
+ this.Task = {
+   /**
+@@ -116,55 +124,70 @@
+    *          called, the generator function is also executed as a task.  This
+    *          allows you to call the function with arguments.
+    *        - If you specify a function that is not a generator, it is called
+    *          with no arguments, and its return value is used to resolve the
+    *          returned promise.
+    *        - If you specify anything else, you get a promise that is already
+    *          resolved with the specified value.
+    *
++   * @param aRunLater
++   *        If true, generator iterations and resolving of the generator are
++   *        deferred until a later tick. This is useful to prevent stack
++   *        explosion if lots of things are happening on the same tick. The
++   *        default is false (for backwards compatibility.
++   *
+    * @return A promise object where you can register completion callbacks to be
+    *         called when the task terminates.
+    */
+-  spawn: function Task_spawn(aTask) {
++  spawn: function (aTask, aRunLater=false) {
+     if (aTask && typeof(aTask) == "function") {
+       // Let's call into the function ourselves.
+       aTask = aTask();
+     }
+ 
+     if (aTask && typeof(aTask.send) == "function") {
+       // This is an iterator resulting from calling a generator function.
+-      return new TaskImpl(aTask).deferred.promise;
++      return new TaskImpl(aTask, aRunLater).deferred.promise;
+     }
+ 
+     // Just propagate the given value to the caller as a resolved promise.
+-    return Promise.resolve(aTask);
++    let deferred = Promise.defer();
++
++    if (aRunLater) {
++      runLater(deferred.resolve.bind(deferred, aTask));
++    } else {
++      deferred.resolve(aTask);
++    }
++
++    return deferred.promise;
+   },
+ 
+   /**
+    * Constructs a special exception that, when thrown inside a generator
+    * function, allows the associated task to be resolved with a specific value.
+    *
+    * Example: throw new Task.Result("Value");
+    */
+-  Result: function Task_Result(aValue) {
++  Result: function (aValue) {
+     this.value = aValue;
+   }
+ };
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ //// TaskImpl
+ 
+ /**
+  * Executes the specified iterator as a task, and gives access to the promise
+  * that is fulfilled when the task terminates.
+  */
+-function TaskImpl(iterator) {
++function TaskImpl(iterator, runLater) {
+   this.deferred = Promise.defer();
+   this._iterator = iterator;
++  this._runLater = runLater;
+   this._run(true);
+ }
+ 
+ TaskImpl.prototype = {
+   /**
+    * Includes the promise object where task completion callbacks are registered,
+    * and methods to resolve or reject the promise at task completion.
+    */
+@@ -182,45 +205,72 @@
+    *        If true, indicates that we should continue into the generator
+    *        function regularly (if we were waiting on a promise, it was
+    *        resolved). If true, indicates that we should cause an exception to
+    *        be thrown into the generator function (if we were waiting on a
+    *        promise, it was rejected).
+    * @param aSendValue
+    *        Resolution result or rejection exception, if any.
+    */
+-  _run: function TaskImpl_run(aSendResolved, aSendValue) {
++  _run: function (aSendResolved, aSendValue) {
+     try {
+       let yielded = aSendResolved ? this._iterator.send(aSendValue)
+                                   : this._iterator.throw(aSendValue);
+ 
+       // If our task yielded an iterator resulting from calling another
+       // generator function, automatically spawn a task from it, effectively
+       // turning it into a promise that is fulfilled on task completion.
+       if (yielded && typeof(yielded.send) == "function") {
+         yielded = Task.spawn(yielded);
+       }
+ 
+       if (yielded && typeof(yielded.then) == "function") {
+         // We have a promise object now. When fulfilled, call again into this
+         // function to continue the task, with either a resolution or rejection
+         // condition.
+-        yielded.then(this._run.bind(this, true),
+-                     this._run.bind(this, false));
++        if (this._runLater) {
++          yielded.then(
++            function onSuccess(value) {
++              runLater(this._run.bind(this, true, value));
++            }.bind(this),
++            function onError(error) {
++              runLater(this._run.bind(this, true, value));
++            }.bind(this)
++          );
++        } else {
++          yielded.then(this._run.bind(this, true),
++                       this._run.bind(this, false));
++        }
+       } else {
+         // If our task yielded a value that is not a promise, just continue and
+         // pass it directly as the result of the yield statement.
+-        this._run(true, yielded);
++        if (this._runLater) {
++          runLater(this._run.bind(this, true, yielded));
++        } else {
++          this._run(true, yielded);
++        }
+       }
+ 
+     } catch (ex if ex instanceof Task.Result) {
+       // The generator function threw the special exception that allows it to
+       // return a specific value on resolution.
+-      this.deferred.resolve(ex.value);
++      if (this._runLater) {
++        runLater(this.deferred.resolve.bind(this.deferred, ex.value));
++      } else {
++        this.deferred.resolve(ex.value);
++      }
+     } catch (ex if ex instanceof StopIteration) {
+       // The generator function terminated with no specific result.
+-      this.deferred.resolve();
++      if (this._runLater) {
++        runLater(this.deferred.resolve.bind(this.deferred));
++      } else {
++        this.deferred.resolve();
++      }
+     } catch (ex) {
+       // The generator function failed with an uncaught exception.
+-      this.deferred.reject(ex);
++      if (this._runLater) {
++        runLater(this.deferred.reject.bind(this.deferred, ex));
++      } else {
++        this.deferred.reject(ex);
++      }
+     }
+   }
+ };

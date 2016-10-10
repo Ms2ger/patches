@@ -1,0 +1,147 @@
+# HG changeset patch
+# Parent 118482581a6dd84cb98d074c754699af0a6c9f56
+# User Gregory Szorc <gps@mozilla.com>
+Bug XXXXXX - Rename Weave to Sync for XPCOM registration
+
+The XPCOM components for Sync have been renamed. The legacy Weave name
+has been dropped. New UUIDs have been issued.
+
+diff --git a/services/sync/Makefile.in b/services/sync/Makefile.in
+--- a/services/sync/Makefile.in
++++ b/services/sync/Makefile.in
+@@ -62,17 +62,17 @@
+   enginesync.js \
+   $(NULL)
+ 
+ DIRS += locales
+ TEST_DIRS += tests
+ 
+ EXTRA_COMPONENTS := \
+   SyncComponents.manifest \
+-  Weave.js \
++  sync.js \
+   $(NULL)
+ 
+ PREF_JS_EXPORTS := $(srcdir)/services-sync.js
+ 
+ # Install JS module files.
+ SYNC_MAIN_FILES := $(addprefix modules/,$(sync_modules))
+ SYNC_MAIN_DEST = $(FINAL_TARGET)/modules/services-sync
+ INSTALL_TARGETS += SYNC_MAIN
+diff --git a/services/sync/SyncComponents.manifest b/services/sync/SyncComponents.manifest
+--- a/services/sync/SyncComponents.manifest
++++ b/services/sync/SyncComponents.manifest
+@@ -7,18 +7,19 @@
+ #   browser:        {ec8030f7-c20a-464f-9b0e-13a3a9e97384}
+ #   mobile/android: {aa3c5121-dab2-40e2-81ca-7ea25febc110}
+ #   mobile/xul:     {a23983c0-fd0e-11dc-95ff-0800200c9a66}
+ #   suite (comm):   {92650c4d-4b8e-4d2a-b7eb-24ecf4f6b63a}
+ #
+ # In theory we should do this for all these instructions, but in practice it is
+ # sufficient to do it for the app-startup one, and the file is simpler that way.
+ 
+-# Weave.js
+-component {74b89fb0-f200-4ae8-a3ec-dd164117f6de} Weave.js
+-contract @mozilla.org/weave/service;1 {74b89fb0-f200-4ae8-a3ec-dd164117f6de}
+-category app-startup WeaveService service,@mozilla.org/weave/service;1 application={3c2e2abc-06d4-11e1-ac3b-374f68613e61} application={ec8030f7-c20a-464f-9b0e-13a3a9e97384} application={aa3c5121-dab2-40e2-81ca-7ea25febc110} application={a23983c0-fd0e-11dc-95ff-0800200c9a66} application={92650c4d-4b8e-4d2a-b7eb-24ecf4f6b63a}
+-component {d28f8a0b-95da-48f4-b712-caf37097be41} Weave.js
+-contract @mozilla.org/network/protocol/about;1?what=sync-log {d28f8a0b-95da-48f4-b712-caf37097be41}
++component {fabecfb9-4283-4ef9-a497-bc53f37479e3} sync.js
++contract @mozilla.org/sync/service;1 {fabecfb9-4283-4ef9-a497-bc53f37479e3}
++category app-startup SyncService service,@mozilla.org/weave/service;1 application={3c2e2abc-06d4-11e1-ac3b-374f68613e61} application={ec8030f7-c20a-464f-9b0e-13a3a9e97384} application={aa3c5121-dab2-40e2-81ca-7ea25febc110} application={a23983c0-fd0e-11dc-95ff-0800200c9a66} application={92650c4d-4b8e-4d2a-b7eb-24ecf4f6b63a}
++
++component {836d27cb-26ed-4183-81d4-8492ec1fcca6} sync.js
++contract @mozilla.org/network/protocol/about;1?what=sync-log {836d27cb-26ed-4183-81d4-8492ec1fcca6}
++
+ # Register resource aliases
+ resource services-sync resource:///modules/services-sync/
+ resource services-common resource:///modules/services-common/
+ resource services-crypto resource:///modules/services-crypto/
+diff --git a/services/sync/Weave.js b/services/sync/sync.js
+rename from services/sync/Weave.js
+rename to services/sync/sync.js
+--- a/services/sync/Weave.js
++++ b/services/sync/sync.js
+@@ -1,55 +1,54 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+-const Cc = Components.classes;
+-const Ci = Components.interfaces;
+-const Cu = Components.utils;
++const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
+ 
++Cu.import("resource://gre/modules/FileUtils.jsm");
++Cu.import("resource://gre/modules/Services.jsm");
+ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+-Cu.import("resource://gre/modules/Services.jsm");
+-Cu.import("resource://gre/modules/FileUtils.jsm");
+ 
+-function WeaveService() {
++function SyncService() {
+   this.wrappedJSObject = this;
+ }
+-WeaveService.prototype = {
+-  classID: Components.ID("{74b89fb0-f200-4ae8-a3ec-dd164117f6de}"),
++SyncService.prototype = {
++  classID: Components.ID("{fabecfb9-4283-4ef9-a497-bc53f37479e3}"),
+ 
+   QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
+                                          Ci.nsISupportsWeakReference]),
+ 
+-  observe: function BSS__observe(subject, topic, data) {
++  observe: function observe(subject, topic, data) {
+     switch (topic) {
+     case "app-startup":
+-      let os = Cc["@mozilla.org/observer-service;1"].
+-               getService(Ci.nsIObserverService);
++      let os = Cc["@mozilla.org/observer-service;1"]
++                 .getService(Ci.nsIObserverService);
+       os.addObserver(this, "final-ui-startup", true);
+       break;
+ 
+     case "final-ui-startup":
+-      // Force Weave service to load if it hasn't triggered from overlays
++      // Force Sync to load if it hasn't been autoloaded via user action
++      // already.
+       this.timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
+       this.timer.initWithCallback({
+-        notify: function() {
++        notify: function notify() {
+           Cu.import("resource://services-sync/main.js");
+           if (Weave.Status.checkSetup() != Weave.CLIENT_NOT_CONFIGURED)
+             Weave.Service;
+         }
+       }, 10000, Ci.nsITimer.TYPE_ONE_SHOT);
+       break;
+     }
+   }
+ };
+ 
+-function AboutWeaveLog() {}
+-AboutWeaveLog.prototype = {
+-  classID: Components.ID("{d28f8a0b-95da-48f4-b712-caf37097be41}"),
++function AboutSyncLog() {}
++AboutSyncLog.prototype = {
++  classID: Components.ID("{836d27cb-26ed-4183-81d4-8492ec1fcca6}"),
+ 
+   QueryInterface: XPCOMUtils.generateQI([Ci.nsIAboutModule,
+                                          Ci.nsISupportsWeakReference]),
+ 
+   getURIFlags: function(aURI) {
+     return 0;
+   },
+ 
+@@ -64,10 +63,10 @@
+     let ssm = Cc["@mozilla.org/scriptsecuritymanager;1"]
+                 .getService(Ci.nsIScriptSecurityManager);
+     let principal = ssm.getSimpleCodebasePrincipal(uri);
+     channel.owner = principal;
+     return channel;
+   }
+ };
+ 
+-const components = [WeaveService, AboutWeaveLog];
++const components = [SyncService, AboutSyncLog];
+ const NSGetFactory = XPCOMUtils.generateNSGetFactory(components);

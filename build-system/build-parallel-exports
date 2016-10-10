@@ -1,0 +1,174 @@
+# HG changeset patch
+# Parent e44f5e090403a2b41fbb0326b357282553df9c4f
+# User Gregory Szorc <gps@mozilla.com>
+
+diff --git a/build/exports/Makefile.in b/build/exports/Makefile.in
+new file mode 100644
+--- /dev/null
++++ b/build/exports/Makefile.in
+@@ -0,0 +1,13 @@
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++DEPTH := @DEPTH@
++topsrcdir := @top_srcdir@
++srcdir := @srcdir@
++
++include $(DEPTH)/config/autoconf.mk
++
++include $(topsrcdir)/config/rules.mk
++
++include exports.mk
+diff --git a/build/exports/moz.build b/build/exports/moz.build
+new file mode 100644
+--- /dev/null
++++ b/build/exports/moz.build
+@@ -0,0 +1,5 @@
++# vim: set filetype=python:
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
+diff --git a/moz.build b/moz.build
+--- a/moz.build
++++ b/moz.build
+@@ -1,16 +1,18 @@
+ # -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+ # vim: set filetype=python:
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ CONFIGURE_SUBST_FILES += ['tools/update-packaging/Makefile']
+ 
++add_tier_dir('exports', 'build/exports')
++
+ if CONFIG['ENABLE_CLANG_PLUGIN']:
+   add_tier_dir('base', 'build/clang-plugin', static=True)
+ 
+ add_tier_dir('base', ['config', 'build', 'probes', 'mfbt', 'python'])
+ 
+ if not CONFIG['LIBXUL_SDK']:
+     if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('android', 'gonk'):
+         add_tier_dir('base', ['other-licenses/android'])
+diff --git a/python/mozbuild/mozbuild/backend/recursivemake.py b/python/mozbuild/mozbuild/backend/recursivemake.py
+--- a/python/mozbuild/mozbuild/backend/recursivemake.py
++++ b/python/mozbuild/mozbuild/backend/recursivemake.py
+@@ -139,16 +139,17 @@
+     However, as long as there are Makefile.in files in the tree, we are tied to
+     recursive make and thus will need this backend.
+     """
+ 
+     def _init(self):
+         CommonBackend._init(self)
+ 
+         self._backend_files = {}
++        self._exports = {}
+ 
+         self.summary.managed_count = 0
+         self.summary.created_count = 0
+         self.summary.updated_count = 0
+         self.summary.unchanged_count = 0
+ 
+         def detailed(summary):
+             return '{:d} total backend files. {:d} created; {:d} updated; {:d} unchanged'.format(
+@@ -198,17 +199,17 @@
+             for k, v in sorted(obj.variables.items()):
+                 if isinstance(v, list):
+                     for item in v:
+                         backend_file.write('%s += %s\n' % (k, item))
+ 
+                 else:
+                     backend_file.write('%s := %s\n' % (k, v))
+         elif isinstance(obj, Exports):
+-            self._process_exports(obj.exports, backend_file)
++            self._process_exports(obj, obj.exports)
+ 
+         elif isinstance(obj, Program):
+             self._process_program(obj.program, backend_file)
+ 
+         elif isinstance(obj, XpcshellManifests):
+             self._process_xpcshell_manifests(obj.xpcshell_manifests, backend_file)
+ 
+         self._backend_files[obj.srcdir] = backend_file
+@@ -277,16 +278,32 @@
+         backend_deps.write('$(DEPTH)/backend.RecursiveMakeBackend.built: %s\n' %
+             ' '.join(inputs))
+         for path in inputs:
+             backend_deps.write('%s:\n' % path)
+ 
+         self._update_from_avoid_write(backend_deps.close())
+         self.summary.managed_count += 1
+ 
++        # Write out a non-recurive make file to handle exports.
++        exports = FileAvoidWrite(os.path.join(self.environment.topobjdir,
++            'build', 'exports', 'exports.mk'))
++        for target in sorted(self._exports):
++            source = self._exports[target]
++
++            if not os.path.exists(source):
++                print('Does not exist: %s' % source)
++
++            exports.write('export:: $(DIST)/include/%s\n' % target)
++            exports.write('$(DIST)/include/%s: %s\n' % (target, source))
++            exports.write('\t$(NSINSTALL) $< $(dir $@)\n')
++
++        self._update_from_avoid_write(exports.close())
++        self.summary.managed_count += 1
++
+     def _process_directory_traversal(self, obj, backend_file):
+         """Process a data.DirectoryTraversal instance."""
+         fh = backend_file.fh
+ 
+         for tier, dirs in obj.tier_dirs.iteritems():
+             fh.write('TIERS += %s\n' % tier)
+ 
+             if dirs:
+@@ -319,35 +336,30 @@
+ 
+         if len(obj.external_make_dirs):
+             fh.write('DIRS += %s\n' % ' '.join(obj.external_make_dirs))
+ 
+         if len(obj.parallel_external_make_dirs):
+             fh.write('PARALLEL_DIRS += %s\n' %
+                 ' '.join(obj.parallel_external_make_dirs))
+ 
+-    def _process_exports(self, exports, backend_file, namespace=""):
+-        strings = exports.get_strings()
+-        if namespace:
+-            if strings:
+-                backend_file.write('EXPORTS_NAMESPACES += %s\n' % namespace)
+-            export_name = 'EXPORTS_%s' % namespace
+-            namespace += '/'
+-        else:
+-            export_name = 'EXPORTS'
++    def _process_exports(self, obj, exports, namespace=""):
++        if namespace.startswith('/'):
++            namespace = namespace[1:]
+ 
+-        # Iterate over the list of export filenames, printing out an EXPORTS
+-        # declaration for each.
+-        if strings:
+-            backend_file.write('%s += %s\n' % (export_name, ' '.join(strings)))
++        for p in exports.get_strings():
++            full = os.path.normpath(os.path.join(obj.srcdir, p))
++            target = os.path.normpath(os.path.join(namespace, p))
++
++            self._exports[target] = full
+ 
+         children = exports.get_children()
+-        for subdir in sorted(children):
+-            self._process_exports(children[subdir], backend_file,
+-                                  namespace=namespace + subdir)
++        for child in children:
++            self._process_exports(obj, children[child], namespace='%s/%s' % (
++                namespace, child))
+ 
+     def _handle_idl_manager(self, manager):
+         base_dir = path.join(manager.topobjdir, 'build/xpidl')
+         stage_dir = path.join(base_dir, 'stage')
+         gen_dir = path.join(base_dir, 'gen')
+         xpt_dir = path.join(base_dir, 'xpt')
+ 
+         pruner = DirectoryPruner()

@@ -1,0 +1,82 @@
+# HG changeset patch
+# Parent a04b41e1463674fe957c0ea7c6047399819cf6e9
+# User Gregory Szorc <gps@mozilla.com>
+Bug XXXXXX - Add mach command to run Python unit tests
+
+diff --git a/mach b/mach
+--- a/mach
++++ b/mach
+@@ -38,16 +38,17 @@
+ 
+ # Individual files providing mach commands.
+ MACH_MODULES = [
+     'layout/tools/reftest/mach_commands.py',
+     'python/mozboot/mozboot/mach_commands.py',
+     'python/mozbuild/mozbuild/config.py',
+     'python/mozbuild/mozbuild/mach_commands.py',
+     'testing/mochitest/mach_commands.py',
++    'testing/moztesting/mach_commands.py',
+     'testing/xpcshell/mach_commands.py',
+ ]
+ 
+ our_dir = os.path.dirname(os.path.abspath(__file__))
+ 
+ try:
+     import mach.main
+ except ImportError:
+diff --git a/testing/moztesting/mach_commands.py b/testing/moztesting/mach_commands.py
+new file mode 100644
+--- /dev/null
++++ b/testing/moztesting/mach_commands.py
+@@ -0,0 +1,51 @@
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, # You can obtain one at http://mozilla.org/MPL/2.0/.
++
++from __future__ import print_function, unicode_literals
++
++import os
++import sys
++
++from mach.decorators import (
++    CommandArgument,
++    CommandProvider,
++    Command,
++)
++
++
++@CommandProvider
++class TestCommands(object):
++    @Command('python-test', help='Run Python unit tests.')
++    @CommandArgument('test', nargs='+',
++        help='Python module or path to Python file or directory containing tests.')
++    def python_test(self, test):
++        import unittest
++
++        master = unittest.TestSuite()
++
++        for arg in test:
++            suite = unittest.TestSuite()
++            if os.path.exists(arg):
++                if os.path.isdir(arg):
++                    suite = unittest.defaultTestLoader.discover(arg)
++                else:
++                    print('Cannot currently run tests from file name: %s' % arg)
++                    continue
++            else:
++                suite = unittest.defaultTestLoader.loadTestsFromName(arg)
++
++            if not suite.countTestCases():
++                print('Cannot find tests from argument: %s' % arg)
++                continue
++
++            master.addTests(suite)
++
++        if not master.countTestCases():
++            print('No tests found!')
++            return 1
++
++        runner = unittest.TextTestRunner(stream=sys.stdout, verbosity=2)
++        result = runner.run(master)
++
++        return int(not result.wasSuccessful())

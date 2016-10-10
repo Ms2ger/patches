@@ -1,0 +1,271 @@
+# HG changeset patch
+# Parent f6c41850a3c46cd21cb263ed0d477e7f4c7ff1e4
+# User Gregory Szorc <gps@mozilla.com>
+
+diff --git a/browser/components/nsBrowserGlue.js b/browser/components/nsBrowserGlue.js
+--- a/browser/components/nsBrowserGlue.js
++++ b/browser/components/nsBrowserGlue.js
+@@ -127,17 +127,17 @@
+     let delay = 3;
+     let browserEnum = Services.wm.getEnumerator("navigator:browser");
+     while (browserEnum.hasMoreElements()) {
+       delay += browserEnum.getNext().gBrowser.tabs.length;
+     }
+     delay = delay <= MAX_DELAY ? delay : MAX_DELAY;
+ 
+     Cu.import("resource://services-sync/main.js");
+-    Weave.Service.scheduler.delayedAutoConnect(delay);
++    SyncBrowser11.Service.scheduler.delayedAutoConnect(delay);
+   },
+ #endif
+ 
+   // nsIObserver implementation 
+   observe: function BG_observe(subject, topic, data) {
+     switch (topic) {
+       case "xpcom-shutdown":
+         this._dispose();
+diff --git a/services/sync/Makefile.in b/services/sync/Makefile.in
+--- a/services/sync/Makefile.in
++++ b/services/sync/Makefile.in
+@@ -27,16 +27,17 @@
+ sync_modules := \
+   addonsreconciler.js \
+   addonutils.js \
+   engines.js \
+   identity.js \
+   jpakeclient.js \
+   keys.js \
+   main.js \
++  manager.js \
+   notifications.js \
+   policies.js \
+   record.js \
+   resource.js \
+   rest.js \
+   service.js \
+   status.js \
+   userapi.js \
+diff --git a/services/sync/modules/main.js b/services/sync/modules/main.js
+--- a/services/sync/modules/main.js
++++ b/services/sync/modules/main.js
+@@ -1,29 +1,11 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+-const EXPORTED_SYMBOLS = ['Weave'];
++const EXPORTED_SYMBOLS = [
++  "SyncManager",
++];
+ 
+-let Weave = {};
+-Components.utils.import("resource://services-sync/constants.js", Weave);
+-let lazies = {
+-  "jpakeclient.js":       ["JPAKEClient", "SendCredentialsController"],
+-  "notifications.js":     ["Notifications", "Notification", "NotificationButton"],
+-  "service.js":           ["Service"],
+-  "status.js":            ["Status"],
+-  "util.js":              ['Utils', 'Svc']
+-};
++Components.utils.import("resource://services-sync/manager.js");
+ 
+-function lazyImport(module, dest, props) {
+-  function getter(prop) function() {
+-    let ns = {};
+-    Components.utils.import(module, ns);
+-    delete dest[prop];
+-    return dest[prop] = ns[prop];
+-  };
+-  props.forEach(function(prop) dest.__defineGetter__(prop, getter(prop)));
+-}
+-
+-for (let mod in lazies) {
+-  lazyImport("resource://services-sync/" + mod, Weave, lazies[mod]);
+-}
++const SyncManager = new SyncServiceManager();
+diff --git a/services/sync/modules/manager.js b/services/sync/modules/manager.js
+new file mode 100644
+--- /dev/null
++++ b/services/sync/modules/manager.js
+@@ -0,0 +1,138 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++const EXPORTED_SYMBOLS = [
++  "SyncService",
++  "SyncServiceManager",
++];
++
++const {utils: Cu} = Components;
++
++// Because this module is always imported, even if Sync isn't configured, we
++// keep the set of file-level imports to a minimum so we don't waste memory
++// on clients not having Sync configured.
++Cu.import("resource://services-common/preferences.js");
++
++/**
++ * Manages multiple SyncService instances.
++ *
++ * An instance of this type is instantiated as the SyncManager
++ * singleton as part of application startup. This instance is the main
++ * interaction point for the Sync API.
++ */
++function SyncServiceManager() {
++  this._browser11 = null;
++}
++SyncServiceManager.prototype = {
++  /**
++   * Obtain the Sync 1.1 service for syncing browser data.
++   */
++  get browser11() {
++    if (!this._browser11) {
++      this._browser11 = new Sync11BrowserService();
++    }
++
++    return this._browser11;
++  },
++};
++Object.freeze(SyncServiceManager.prototype);
++
++
++function Sync11BrowserService() {
++  let ns = {};
++  Cu.import("resource://services-sync/status.js", ns);
++  Cu.import("resource://services-sync/service.js", ns);
++
++  this.Status = ns.Status;
++  this.Service = ns.Service;
++
++  this._jpakeClient = null;
++  this._sendCredentials = null;
++  this._notifications = null;
++  this._notification = null;
++  this._notificationButton = null;
++  this._utils = null;
++  this._svc = null;
++}
++Sync11BrowserService.prototype = {
++  get JPAKEClient() {
++    this._ensureJPAKELoaded();
++
++    return this._jpakeClient;
++  },
++
++  get SendCredentialsController() {
++    this._ensureJPAKELoaded();
++
++    return this._sendCredentials;
++  },
++
++  get Notifications() {
++    this._ensureNotificationsLoaded();
++
++    return this._notifications;
++  },
++
++  get Notification() {
++    this._ensureNotificationsLoaded();
++
++    return this._notification;
++  },
++
++  get NotificationButton() {
++    this._ensureNotificationsLoaded();
++
++    return this._notificationButton;
++  },
++
++  get Utils() {
++    this._ensureUtilsLoaded();
++
++    return this._utils;
++  },
++
++  get Svc() {
++    this._ensureUtilsLoaded();
++
++    return this._svc;
++  },
++
++  _ensureUtilsLoaded: function _ensureUtilsLoaded() {
++    if (this._utils) {
++      return;
++    }
++
++    let ns = {};
++    Cu.import("resource://services-sync/util.js", ns);
++
++    this._utils = ns.Utils;
++    this._svc = ns.Svc;
++  },
++
++  _ensureJPAKELoaded: function _ensureJPAKELoaded() {
++    if (this._jpakeclient) {
++      return;
++    }
++
++    let ns = {};
++    Cu.import("resource://services-sync/jpakeclient.js", ns);
++
++    this._jpakeClient = ns.JPAKEClient;
++    this._sendCredentials = ns.SendCredentialsController;
++  },
++
++  _ensureNotificationsLoaded: function _ensureNotificationsLoaded() {
++    if (this._notifications) {
++      return;
++    }
++
++    let ns = {};
++    Cu.import("resource://services-sync/notifications.js");
++
++    this._notifications = ns.Notifications;
++    this._notification = ns.Notification;
++    this._notificationButton = ns.NotificationButton;
++  },
++};
++Object.freeze(Sync11BrowserService.prototype);
+diff --git a/services/sync/sync.js b/services/sync/sync.js
+--- a/services/sync/sync.js
++++ b/services/sync/sync.js
+@@ -26,17 +26,17 @@
+       break;
+ 
+     case "final-ui-startup":
+       // Force Sync to load if it hasn't been autoloaded via user action
+       // already.
+       this.timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
+       this.timer.initWithCallback({
+         notify: function notify() {
+-          Cu.import("resource://services-sync/main.js");
++          Cu.import("resource://services-sync/manager.js");
+           if (Weave.Status.checkSetup() != Weave.CLIENT_NOT_CONFIGURED)
+             Weave.Service;
+         }
+       }, 10000, Ci.nsITimer.TYPE_ONE_SHOT);
+       break;
+     }
+   }
+ };
+diff --git a/services/sync/tests/unit/test_load_modules.js b/services/sync/tests/unit/test_load_modules.js
+--- a/services/sync/tests/unit/test_load_modules.js
++++ b/services/sync/tests/unit/test_load_modules.js
+@@ -13,16 +13,17 @@
+   "engines/passwords.js",
+   "engines/prefs.js",
+   "engines/tabs.js",
+   "engines.js",
+   "identity.js",
+   "jpakeclient.js",
+   "keys.js",
+   "main.js",
++  "manager.js",
+   "notifications.js",
+   "policies.js",
+   "record.js",
+   "resource.js",
+   "rest.js",
+   "service.js",
+   "stages/cluster.js",
+   "stages/enginesync.js",

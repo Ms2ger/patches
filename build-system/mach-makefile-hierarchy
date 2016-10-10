@@ -1,0 +1,128 @@
+# HG changeset patch
+# Parent 0d373cf880fde56ed9c61a5422b13a09462344df
+# User Gregory Szorc <gps@mozilla.com>
+
+diff --git a/build/pymake/pymake/parserdata.py b/build/pymake/pymake/parserdata.py
+--- a/build/pymake/pymake/parserdata.py
++++ b/build/pymake/pymake/parserdata.py
+@@ -976,9 +976,9 @@
+     def to_source(self):
+         return '\n'.join([s.to_source() for s in self])
+ 
+ def iterstatements(stmts):
+     for s in stmts:
+         yield s
+         if isinstance(s, ConditionBlock):
+             for c, sl in s:
+-                for s2 in iterstatments(sl): yield s2
++                for s2 in iterstatements(sl): yield s2
+diff --git a/python/mozbuild/mozbuild/mach_commands.py b/python/mozbuild/mozbuild/mach_commands.py
+--- a/python/mozbuild/mozbuild/mach_commands.py
++++ b/python/mozbuild/mozbuild/mach_commands.py
+@@ -119,8 +119,106 @@
+ 
+             if warning['column'] is not None:
+                 print('%s:%d:%d [%s] %s' % (filename, warning['line'],
+                     warning['column'], warning['flag'], warning['message']))
+             else:
+                 print('%s:%d [%s] %s' % (filename, warning['line'],
+                     warning['flag'], warning['message']))
+ 
++
++@CommandProvider
++class MakefileHierarchy(MachCommandBase):
++    @Command('makefile-hierarchy',
++        help='Print JSON containing the Makefile hierarchy.')
++    def makefile_hierarchy(self):
++        import json
++        import pymake.parser
++        import pymake.parserdata
++
++        nodes = {}
++
++        for root, dirs, files in os.walk(self.topobjdir):
++            rel_root = root[len(self.topobjdir) + 1:]
++
++            if rel_root == '':
++                continue
++
++            if rel_root.startswith('_tests'):
++                continue
++
++            for f in files:
++                if f != 'Makefile':
++                    continue
++
++                node = {
++                    'cpp': set(),
++                    'c': set(),
++                    'idl': set(),
++                }
++
++                statements = pymake.parser.parsefile(os.path.join(root, f))
++
++                for statement in pymake.parserdata.iterstatements(statements):
++                    if not isinstance(statement, pymake.parserdata.SetVariable):
++                        continue
++
++                    if not statement.vnameexp.is_static_string:
++                        continue
++
++                    name = statement.vnameexp.s
++
++                    if name not in ('CPPSRCS', 'CSRCS', 'XPIDLSRCS'):
++                        continue
++
++                    key = {'CPPSRCS': 'cpp', 'CSRCS': 'c', 'XPIDLSRCS': 'idl'}.get(name)
++
++                    for s in statement.value.split():
++                        if s.startswith('$'):
++                            continue
++
++                        node[key].add(s)
++
++                nodes[rel_root] = node
++
++        j = {
++            'name': 'root',
++            'children': [],
++        }
++
++        for k in sorted(nodes.keys(), key=len):
++            node = nodes[k]
++            path_parts = k.split('/')
++
++            normalized = {
++                'name': path_parts[-1],
++            }
++
++            for a in ('c', 'cpp', 'idl'):
++                if not len(node[a]):
++                    continue
++
++                normalized[a] = [c for c in node[a]]
++
++            if len(path_parts) == 1:
++                j['children'].append(normalized)
++                continue
++
++            parent = j
++
++            for i, part in enumerate(path_parts):
++                if i == len(path_parts) - 1:
++                    break
++
++                if 'children' not in parent:
++                    parent['children'] = [{'name': part}]
++
++                for child in parent['children']:
++                    if child['name'] == part:
++                        parent = child
++                        break
++
++            if 'children' not in parent:
++                parent['children'] = []
++
++            parent['children'].append(normalized)
++
++        print(json.dumps(j, sort_keys=True, indent=2))

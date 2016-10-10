@@ -1,0 +1,213 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/layout/build/Makefile.in b/layout/build/Makefile.in
+--- a/layout/build/Makefile.in
++++ b/layout/build/Makefile.in
+@@ -8,20 +8,8 @@
+ SHELL := ksh
+ endif
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+ ifdef MOZ_GSTREAMER
+ CXXFLAGS += $(GSTREAMER_CFLAGS)
+ endif
+-
+-ifeq (gonk,$(MOZ_WIDGET_TOOLKIT))
+-CXXFLAGS += \
+-  -I$(ANDROID_SOURCE)/dalvik/libnativehelper/include/nativehelper \
+-  -I$(ANDROID_SOURCE)/frameworks/base/include/ \
+-  -I$(ANDROID_SOURCE)/frameworks/base/include/binder/ \
+-  -I$(ANDROID_SOURCE)/frameworks/base/include/utils/ \
+-  -I$(ANDROID_SOURCE)/frameworks/base/include/media/ \
+-  -I$(ANDROID_SOURCE)/frameworks/base/include/media/stagefright/openmax \
+-  -I$(ANDROID_SOURCE)/frameworks/base/media/libstagefright/include \
+-  $(NULL)
+-endif
+diff --git a/layout/build/moz.build b/layout/build/moz.build
+--- a/layout/build/moz.build
++++ b/layout/build/moz.build
+@@ -97,16 +97,25 @@
+     LOCAL_INCLUDES += [
+         '/dom/system',
+         '/dom/system/android',
+     ]
+ elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
+     LOCAL_INCLUDES += [
+         '/dom/system/gonk',
+     ]
++    ANDROID_INCLUDES = [
++        'dalvik/libnativehelper/include/nativehelper',
++        'frameworks/base/include/',
++        'frameworks/base/include/binder/',
++        'frameworks/base/include/media/',
++        'frameworks/base/include/media/stagefright/openmax',
++        'frameworks/base/include/utils/',
++        'frameworks/base/media/libstagefright/include',
++    ]
+ 
+ if CONFIG['MOZ_B2G_FM']:
+     LOCAL_INCLUDES += [
+         '/dom/fmradio',
+     ]
+ 
+ if CONFIG['MOZ_B2G_BT']:
+     LOCAL_INCLUDES += [
+diff --git a/python/mozbuild/mozbuild/backend/recursivemake.py b/python/mozbuild/mozbuild/backend/recursivemake.py
+--- a/python/mozbuild/mozbuild/backend/recursivemake.py
++++ b/python/mozbuild/mozbuild/backend/recursivemake.py
+@@ -19,16 +19,17 @@
+ from mozpack.manifests import (
+     InstallManifest,
+ )
+ import mozpack.path as mozpath
+ 
+ from .common import CommonBackend
+ from ..frontend.data import (
+     AndroidEclipseProjectData,
++    AndroidInclude,
+     ConfigFileSubstitution,
+     Defines,
+     DirectoryTraversal,
+     Exports,
+     GeneratedInclude,
+     HostProgram,
+     HostSimpleProgram,
+     InstallationTarget,
+@@ -438,16 +439,19 @@
+             self._process_host_simple_program(obj.program, backend_file)
+ 
+         elif isinstance(obj, LocalInclude):
+             self._process_local_include(obj.path, backend_file)
+ 
+         elif isinstance(obj, GeneratedInclude):
+             self._process_generated_include(obj.path, backend_file)
+ 
++        elif isinstance(obj, AndroidInclude):
++            self._process_android_include(obj.path, backend_file)
++
+         elif isinstance(obj, PerSourceFlag):
+             self._process_per_source_flag(obj, backend_file)
+ 
+         elif isinstance(obj, InstallationTarget):
+             self._process_installation_target(obj, backend_file)
+ 
+         elif isinstance(obj, SandboxWrapped):
+             # Process a rich build system object from the front-end
+@@ -1084,16 +1088,20 @@
+ 
+     def _process_generated_include(self, generated_include, backend_file):
+         if generated_include.startswith('/'):
+             path = self.environment.topobjdir.replace('\\', '/')
+         else:
+             path = ''
+         backend_file.write('LOCAL_INCLUDES += -I%s%s\n' % (path, generated_include))
+ 
++    def _process_android_include(self, generated_include, backend_file):
++        path = '$(ANDROID_SOURCE)/'
++        backend_file.write('LOCAL_INCLUDES += -I%s%s\n' % (path, generated_include))
++
+     def _process_per_source_flag(self, per_source_flag, backend_file):
+         for flag in per_source_flag.flags:
+             backend_file.write('%s_FLAGS += %s\n' % (mozpath.basename(per_source_flag.file_name), flag))
+ 
+     def _process_java_jar_data(self, jar, backend_file):
+         target = jar.name
+         backend_file.write('JAVA_JAR_TARGETS += %s\n' % target)
+         backend_file.write('%s_DEST := %s.jar\n' % (target, jar.name))
+diff --git a/python/mozbuild/mozbuild/frontend/data.py b/python/mozbuild/mozbuild/frontend/data.py
+--- a/python/mozbuild/mozbuild/frontend/data.py
++++ b/python/mozbuild/mozbuild/frontend/data.py
+@@ -444,16 +444,28 @@
+         self.manifest_obj_relpath = relpath
+         self.dupe_manifest = dupe_manifest
+         self.installs = {}
+         self.pattern_installs = []
+         self.tests = []
+         self.external_installs = set()
+ 
+ 
++class AndroidInclude(SandboxDerived):
++    """Describes an individual android include path."""
++
++    __slots__ = (
++        'path',
++    )
++
++    def __init__(self, sandbox, path):
++        SandboxDerived.__init__(self, sandbox)
++
++        self.path = path
++
+ class LocalInclude(SandboxDerived):
+     """Describes an individual local include path."""
+ 
+     __slots__ = (
+         'path',
+     )
+ 
+     def __init__(self, sandbox, path):
+diff --git a/python/mozbuild/mozbuild/frontend/emitter.py b/python/mozbuild/mozbuild/frontend/emitter.py
+--- a/python/mozbuild/mozbuild/frontend/emitter.py
++++ b/python/mozbuild/mozbuild/frontend/emitter.py
+@@ -12,16 +12,17 @@
+ import time
+ 
+ from mach.mixin.logging import LoggingMixin
+ 
+ import mozpack.path as mozpath
+ import manifestparser
+ 
+ from .data import (
++    AndroidInclude,
+     ConfigFileSubstitution,
+     Defines,
+     DirectoryTraversal,
+     Exports,
+     GeneratedEventWebIDLFile,
+     GeneratedInclude,
+     GeneratedWebIDLFile,
+     ExampleWebIDLInterface,
+@@ -341,16 +342,17 @@
+ 
+         for program in sandbox['HOST_SIMPLE_PROGRAMS']:
+             yield HostSimpleProgram(sandbox, program, sandbox['CONFIG']['HOST_BIN_SUFFIX'])
+ 
+         simple_lists = [
+             ('GENERATED_EVENTS_WEBIDL_FILES', GeneratedEventWebIDLFile),
+             ('GENERATED_WEBIDL_FILES', GeneratedWebIDLFile),
+             ('IPDL_SOURCES', IPDLFile),
++            ('ANDROID_INCLUDES', AndroidInclude),
+             ('LOCAL_INCLUDES', LocalInclude),
+             ('GENERATED_INCLUDES', GeneratedInclude),
+             ('PREPROCESSED_TEST_WEBIDL_FILES', PreprocessedTestWebIDLFile),
+             ('PREPROCESSED_WEBIDL_FILES', PreprocessedWebIDLFile),
+             ('TEST_WEBIDL_FILES', TestWebIDLFile),
+             ('WEBIDL_FILES', WebIDLFile),
+             ('WEBIDL_EXAMPLE_INTERFACES', ExampleWebIDLInterface),
+         ]
+diff --git a/python/mozbuild/mozbuild/frontend/sandbox_symbols.py b/python/mozbuild/mozbuild/frontend/sandbox_symbols.py
+--- a/python/mozbuild/mozbuild/frontend/sandbox_symbols.py
++++ b/python/mozbuild/mozbuild/frontend/sandbox_symbols.py
+@@ -320,16 +320,21 @@
+         Implies ``FORCE_STATIC_LIB`` and the ``MOZILLA_INTERNAL_API``
+         preprocessor macro.
+         """, None),
+ 
+     'LOCAL_INCLUDES': (StrictOrderingOnAppendList, list,
+         """Additional directories to be searched for include files by the compiler.
+         """, None),
+ 
++    'ANDROID_INCLUDES': (StrictOrderingOnAppendList, list,
++        """Additional directories to be searched for include files by the compiler,
++        relative to ANDROID_SOURCE.
++        """, None),
++
+     'MSVC_ENABLE_PGO': (bool, bool,
+         """Whether profile-guided optimization is enabled for MSVC in this directory.
+         """, None),
+ 
+     'NO_PGO': (bool, bool,
+         """Whether profile-guided optimization is disable in this directory.
+         """, None),
+ 

@@ -1,0 +1,96 @@
+# HG changeset patch
+# Parent a205b93931513b8d4a2f90af7e71e1c347fc9a7e
+# User Gregory Szorc <gps@mozilla.com>
+Log actual CPU times when executing xpcshell tests
+
+diff --git a/testing/xpcshell/runxpcshelltests.py b/testing/xpcshell/runxpcshelltests.py
+--- a/testing/xpcshell/runxpcshelltests.py
++++ b/testing/xpcshell/runxpcshelltests.py
+@@ -42,16 +42,17 @@
+ import xml.dom.minidom
+ from glob import glob
+ from optparse import OptionParser
+ from subprocess import Popen, PIPE, STDOUT
+ from tempfile import mkdtemp, gettempdir
+ import manifestparser
+ import mozinfo
+ import random
++import resource
+ 
+ from automationutils import *
+ 
+ #TODO: replace this with json.loads when Python 2.6 is required.
+ def parse_json(j):
+     """
+     Awful hack to parse a restricted subset of JSON strings into Python dicts.
+     """
+@@ -650,16 +651,17 @@
+ 
+       args = self.xpcsRunArgs
+       if 'debug' in test:
+           args.insert(0, '-d')
+ 
+       try:
+         self.log.info("TEST-INFO | %s | running test ..." % name)
+         startTime = time.time()
++        startResources = resource.getrusage(resource.RUSAGE_CHILDREN)
+ 
+         proc = self.launchProcess(cmdH + cmdT + args,
+                     stdout=pStdout, stderr=pStderr, env=self.env, cwd=testdir)
+ 
+         # Allow user to kill hung subprocess with SIGINT w/o killing this script
+         # - don't move this line above launchProcess, or child will inherit the SIG_IGN
+         signal.signal(signal.SIGINT, markGotSIGINT)
+         # |stderr == None| as |pStderr| was either |None| or redirected to |stdout|.
+@@ -686,16 +688,29 @@
+                       (stdout and re.search(": SyntaxError:", stdout,
+                                             re.MULTILINE)) or
+                       # if e10s test started but never finished (child process crash)
+                       (stdout and re.search("^child: CHILD-TEST-STARTED", 
+                                             stdout, re.MULTILINE) 
+                               and not re.search("^child: CHILD-TEST-COMPLETED",
+                                                 stdout, re.MULTILINE)))
+ 
++        endResources = resource.getrusage(resource.RUSAGE_CHILDREN)
++        userTime = endResources.ru_utime - startResources.ru_utime
++        systemTime = endResources.ru_stime - startResources.ru_stime
++        totalTime = userTime + systemTime
++        #self.log.info("CPU User: %f" % userTime)
++        #self.log.info("CPU System: %f" % systemTime)
++        #self.log.info("CPU Total: %f" % totalTime)
++        #now = time.time()
++        #timeTaken = now - startTime
++
++        #self.log.info('Timing difference: %f' % ( (userTime + systemTime -
++        #    timeTaken) / timeTaken * 100 ))
++
+         if result != expected:
+           failureType = "TEST-UNEXPECTED-%s" % ("FAIL" if expected else "PASS")
+           message = "%s | %s | test failed (with xpcshell return code: %d), see following log:" % (
+                         failureType, name, self.getReturnCode(proc))
+           self.log.error(message)
+           print_stdout(stdout)
+           self.failCount += 1
+           xunitResult["passed"] = False
+@@ -703,18 +718,20 @@
+           xunitResult["failure"] = {
+             "type": failureType,
+             "message": message,
+             "text": stdout
+           }
+         else:
+           now = time.time()
+           timeTaken = (now - startTime) * 1000
++          cpuTaken = totalTime * 1000
+           xunitResult["time"] = now - startTime
+-          self.log.info("TEST-%s | %s | test passed (time: %.3fms)" % ("PASS" if expected else "KNOWN-FAIL", name, timeTaken))
++          self.log.info("TEST-%s | %s | test passed (wall time: %.3fms; cpu time: %.3fms)" % (
++              "PASS" if expected else "KNOWN-FAIL", name, timeTaken, cpuTaken))
+           if verbose:
+             print_stdout(stdout)
+ 
+           xunitResult["passed"] = True
+ 
+           if expected:
+             self.passCount += 1
+           else:

@@ -1,0 +1,387 @@
+# HG changeset patch
+# Parent 225b2ca9816629cbda8726d9a672291e9649e60b
+# User Gregory Szorc <gps@mozilla.com>
+diff --git a/toolkit/logging/LoggingService.js b/toolkit/logging/LoggingService.js
+new file mode 100644
+--- /dev/null
++++ b/toolkit/logging/LoggingService.js
+@@ -0,0 +1,25 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++"use strict";
++
++const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
++
++Cu.import("resource://gre/modules/XPCOMUtils.jsm");
++
++
++this.LoggingService = function () {
++  this.wrappedJSObject = this;
++};
++
++LoggingService.prototype = {
++  classID: Components.ID("{}"),
++  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
++                                         Ci.nsISupportsWeakReference]),
++
++};
++
++Object.freeze(LoggingService.prototype);
++
++this.NSGetFactory = XPCOMUtils.generateNSGetFactory([LoggingService]);
+diff --git a/toolkit/logging/Makefile.in b/toolkit/logging/Makefile.in
+new file mode 100644
+--- /dev/null
++++ b/toolkit/logging/Makefile.in
+@@ -0,0 +1,18 @@
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++DEPTH     = @DEPTH@
++topsrcdir = @top_srcdir@
++srcdir    = @srcdir@
++VPATH     = @srcdir@
++
++include $(DEPTH)/config/autoconf.mk
++
++JS_MODULES_PATH := $(FINAL_TARGET)/modules/logging
++
++EXTRA_JS_MODULES := \
++	$(NULL)
++
++include $(topsrcdir)/config/rules.mk
++
+diff --git a/toolkit/logging/logger.jsm b/toolkit/logging/logger.jsm
+new file mode 100644
+--- /dev/null
++++ b/toolkit/logging/logger.jsm
+@@ -0,0 +1,326 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++"use strict";
++
++this.EXPORTED_SYMBOLS = [
++  "Logger",
++];
++
++
++/**
++ * This file contains code for managing loggers. It defines the type for
++ * loggers themselves as well as an entity that oversees all of them.
++ *
++ * There are some important technical design decisions worth explaining
++ * before we get into the actual code.
++ *
++ * Loggers are organized in a hierarchy. e.g.
++ *
++ *  (root)
++ *   |    \
++ *   A     B
++ *   | \    \
++ *   |  A.B  B.C
++ *   |   \
++ *   |    A.B.C
++ *   |
++ *   A.C
++ *
++ * Appenders (the things that handle written log events) are attached at
++ * specified points in the hierarchy. When attached, all messages
++ * written to child logger are written to that appender. In other words,
++ * appenders are inherited.
++ *
++ * This presents possible performance issues.
++ *
++ * In a simple implementation, when a message is written to a logger, we'd
++ * walk the hierarchy up to the root node and write the message to every
++ * encountered appender. This is suboptimal for a number of reasons,
++ * including the overhead of having to check if a seen appender has
++ * already been written to.
++ *
++ * When you consider that message writing is a very frequent operation,
++ * you want to optimize that path. So, instead of incurring a tree
++ * traversal at write time, we instead do this when appenders are added
++ * or removed. On each logger we store the list of active appenders.
++ * When we write a message, we merely need to traverse a local list. No
++ * duplication detection is required because that is performed when we
++ * modify the appenders set.
++ *
++ * This does mean that each logger needs to store a little extra
++ * information. However, the performance win at write time is worth it.
++ */
++
++this.LOG_LEVELS = {
++  fatal: 70,
++  error: 60,
++  warn: 50,
++  info: 40,
++  config: 30,
++  debug: 20,
++  trace: 10,
++  all: 0,
++};
++
++
++this.Logging = {
++  _manager: null,
++
++  getLogger: function (name) {
++    if (!this._manager) {
++      this._manager = new LoggingManager();
++    }
++
++    return this._manager.getLogger(name);
++  },
++},
++
++
++/**
++ * Entity that logged data is initially written to.
++ *
++ * This is the type that end-users will use. However, it isn't
++ * instanitiated directly. Instead, instances should be obtained by
++ * calling XXX TODO.
++ */
++function Logger(name, manager) {
++  this.name = name;
++  this._manager = manager;
++
++  // Full names of loggers that are immediate children.
++  this._children = new Set();
++
++  this._appenders = [];
++  this._ownAppenders = [];
++}
++
++Logger.prototype = {
++  log: function (level, data) {
++    let message;
++
++    for (let appender of this._appenders) {
++      if (appender.level > level) {
++        continue;
++      }
++
++      if (!message) {
++        message = new LogMessage(this.name, level, data);
++      }
++
++      appender.append(message);
++    }
++  },
++
++  fatal: function (data) {
++    this.log(LOG_LEVELS.fatal, data);
++  },
++
++  error: function (data) {
++    this.log(LOG_LEVELS.error, data);
++  },
++
++  warn: function (data) {
++    this.log(LOG_LEVELS.warn, data);
++  },
++
++  info: function (data) {
++    this.log(LOG_LEVELS.info, data);
++  },
++
++  config: function (data) {
++    this.log(LOG_LEVELS.config, data);
++  },
++
++  debug: function (data) {
++    this.log(LOG_LEVELS.debug, data);
++  },
++
++  trace: function (data) {
++    this.log(LOG_LEVELS.trace, data);
++  },
++
++  /**
++   * Add an Appender to this logger.
++   *
++   * The appender is inherited by all child loggers.
++   */
++  addAppender: function (appender) {
++    if (this._ownAppenders.indexOf(appender) != -1) {
++      return;
++    }
++
++    this._ownAppenders.push(appender);
++    this._appenders.push(appender);
++
++    for (let childName of this._children) {
++      let logger = this._manager.getLogger(childName);
++      logger._addAppender(appender);
++    }
++  },
++
++  _addAppender: function (appender) {
++    if (this._appenders.indexOf(appender) != -1) {
++      return;
++    }
++
++    this._appenders.push(appender);
++
++    for (let childName of this._children) {
++      let logger = this._manager.getLogger(childName);
++      logger._addAppender(appender);
++    }
++  },
++
++  removeAppender: function (appender) {
++    let index = this._ownAppenders.indexOf(appender);
++    if (index != -1) {
++      this._ownAppenders.splice(index, 1);
++    }
++
++    this._removeAppender(appender);
++  },
++
++  _removeAppender: function (appender) {
++    if (this._ownAppenders.indexOf(appender) != -1) {
++      return;
++    }
++
++    let index = this._appenders.indexOf(appender);
++    if (index == -1) {
++      return;
++    }
++
++    this._appenders.splice(index, 1);
++
++    for (let childName of this._children) {
++      let logger = this._manager.getLogger(childName);
++      logger._removeAppender(appender);
++    }
++  },
++};
++
++Object.freeze(Logger.prototype);
++
++
++/**
++ * Handles a collection of named `Logger` instances.
++ *
++ * Loggers form into a hierarchy based on their name. Levels of the
++ * hierarchy are delimited by periods.
++ */
++function LoggingManager(branch) {
++  this._prefs = Services.prefs.getBranch(branch);
++
++  this._loggers = new Map();
++  this._appenders = new Map();
++}
++
++LoggingManager.prototype = {
++  /**
++   * Obtain a named Logger instance.
++   */
++  getLogger: function (name) {
++    let logger = this._loggers.get(name);
++    if (logger) {
++      return logger;
++    }
++
++    let parent;
++
++    // Ensure parent exists.
++    // This will recurse as necessary all the way to the root.
++    let lastDot = name.lastIndexOf(".");
++    if (lastDot != -1) {
++      let parentName = name.substr(0, lastDot - 1);
++      parent = this.getLogger(parentName);
++
++      // We store fully-qualified name so we don't have to reassemble
++      // later.
++      parent._children.add(name);
++    }
++
++    logger = new Logger(name);
++
++    // Inherit parent's appenders.
++    logger._appenders = parent._ownAppenders.concat(parent._appenders);
++
++    this._loggers.set(name, logger);
++
++    return logger;
++  },
++
++  getAppender: function (name) {
++    let appender = this._appenders.get(name);
++    if (appender) {
++      return appender;
++    }
++
++    // Try to get it from prefs.
++    let type = this._prefs.getCharPref("appender." + name + ".type");
++    if (!type) {
++      throw new Error("Unknown appender: " + name);
++    }
++
++    let appender = new type();
++    appender.level = this._getLevelFromPref("appender." + name + ".level");
++
++    this._appenders.set(name, appender);
++
++    return appender;
++  },
++
++  _getLevelFromPref: function (pref) {
++    let value = this._prefs.getCharPref(pref);
++
++    if (!value) {
++      return LOG_LEVELS.all;
++    }
++
++    let number = parseInt(value, 10);
++    if (Number.isNumber(number)) {
++      return number;
++    }
++
++    value = value.toLowerCase();
++    if (value in LOG_LEVELS) {
++      return LOG_LEVELS[value];
++    }
++
++    return LOG_LEVELS.debug;
++  },
++
++  observe: function (subject, topic, data) {
++    switch (topic) {
++      case "nsPref:changed":
++
++      default:
++    }
++  },
++};
++
++Object.freeze(LoggingManager.prototype);
++
++
++function LogMessage(logName, level, data) {
++  this.logName = logName;
++  this.level = level;
++  this.data = data;
++  this.date = new Date();
++}
++
++
++/**
++ * An entity that receives log messages and does something with them.
++ */
++function LogAppender(formatter) {
++
++}
++
++LogAppender.prototype = {
++  writeMessage: function (message) {
++
++  },
++};
++

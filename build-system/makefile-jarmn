@@ -1,0 +1,724 @@
+# HG changeset patch
+# Parent 1e11b4f64e01ded97318555b3bf37177866a3405
+# User Gregory Szorc <gps@mozilla.com>
+Bug 774572 - Add PROCESS_JAR_MN make variable to signal jar.mn processing
+
+In the old world, make performs a $(wildcard) to look for a jar.mn. This
+incurs I/O and is wasteful. In the new world, PROCESS_JAR_MN signifies
+that a jar.mn file should be processed.
+
+Only Makefile.in's in browser/ were converted. All other directories
+with a jar.mn will emit a make warning. Once all directories are
+converted to use PROCESS_JAR_MN, the $(wildcard) will be removed.
+
+diff --git a/accessible/src/jsat/Makefile.in b/accessible/src/jsat/Makefile.in
+--- a/accessible/src/jsat/Makefile.in
++++ b/accessible/src/jsat/Makefile.in
+@@ -4,12 +4,14 @@
+ 
+ DEPTH     = @DEPTH@
+ topsrcdir = @top_srcdir@
+ srcdir    = @srcdir@
+ VPATH     = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+ 
+ libs::
+ 	$(NSINSTALL) $(srcdir)/*.jsm $(FINAL_TARGET)/modules/accessibility
+diff --git a/b2g/branding/official/content/Makefile.in b/b2g/branding/official/content/Makefile.in
+--- a/b2g/branding/official/content/Makefile.in
++++ b/b2g/branding/official/content/Makefile.in
+@@ -7,10 +7,12 @@
+ 
+ DEPTH = @DEPTH@
+ topsrcdir = @top_srcdir@
+ srcdir = @srcdir@
+ VPATH = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+ 
+diff --git a/b2g/branding/official/locales/Makefile.in b/b2g/branding/official/locales/Makefile.in
+--- a/b2g/branding/official/locales/Makefile.in
++++ b/b2g/branding/official/locales/Makefile.in
+@@ -7,9 +7,11 @@
+ srcdir         = @srcdir@
+ VPATH          = @srcdir@
+ relativesrcdir = @relativesrcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ DEFINES += -DAB_CD=$(AB_CD)
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/b2g/branding/unofficial/content/Makefile.in b/b2g/branding/unofficial/content/Makefile.in
+--- a/b2g/branding/unofficial/content/Makefile.in
++++ b/b2g/branding/unofficial/content/Makefile.in
+@@ -7,9 +7,11 @@
+ 
+ DEPTH = @DEPTH@
+ topsrcdir = @top_srcdir@
+ srcdir = @srcdir@
+ VPATH = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/b2g/branding/unofficial/locales/Makefile.in b/b2g/branding/unofficial/locales/Makefile.in
+--- a/b2g/branding/unofficial/locales/Makefile.in
++++ b/b2g/branding/unofficial/locales/Makefile.in
+@@ -7,9 +7,11 @@
+ srcdir         = @srcdir@
+ VPATH          = @srcdir@
+ relativesrcdir = @relativesrcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ DEFINES += -DAB_CD=$(AB_CD)
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/b2g/chrome/Makefile.in b/b2g/chrome/Makefile.in
+--- a/b2g/chrome/Makefile.in
++++ b/b2g/chrome/Makefile.in
+@@ -9,9 +9,11 @@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ DEFINES += -DAB_CD=$(MOZ_UI_LOCALE) \
+            -DPACKAGE=browser \
+            -DMOZ_APP_VERSION=$(MOZ_APP_VERSION) \
+            $(NULL)
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/b2g/locales/Makefile.in b/b2g/locales/Makefile.in
+--- a/b2g/locales/Makefile.in
++++ b/b2g/locales/Makefile.in
+@@ -8,16 +8,18 @@
+ srcdir		= @srcdir@
+ VPATH		= @srcdir@
+ relativesrcdir = @relativesrcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ include $(topsrcdir)/config/config.mk
+ 
++PROCESS_JAR_MN := 1
++
+ ifdef LOCALE_MERGEDIR
+ vpath crashreporter%.ini $(LOCALE_MERGEDIR)/b2g/crashreporter
+ endif
+ vpath crashreporter%.ini $(LOCALE_SRCDIR)/crashreporter
+ ifdef LOCALE_MERGEDIR
+ vpath crashreporter%.ini @srcdir@/en-US/crashreporter
+ endif
+ 
+diff --git a/browser/base/Makefile.in b/browser/base/Makefile.in
+--- a/browser/base/Makefile.in
++++ b/browser/base/Makefile.in
+@@ -13,16 +13,18 @@
+ include $(topsrcdir)/config/config.mk
+ 
+ abs_srcdir = $(call core_abspath,$(srcdir))
+ 
+ CHROME_DEPS += $(abs_srcdir)/content/overrides/app-license.html
+ 
+ TEST_DIRS += content/test
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+ 
+ PRE_RELEASE_SUFFIX := ""
+ 
+ DEFINES += \
+ 	-DMOZ_APP_VERSION=$(MOZ_APP_VERSION) \
+ 	-DAPP_LICENSE_BLOCK=$(abs_srcdir)/content/overrides/app-license.html \
+ 	-DPRE_RELEASE_SUFFIX="$(PRE_RELEASE_SUFFIX)" \
+diff --git a/browser/branding/aurora/content/Makefile.in b/browser/branding/aurora/content/Makefile.in
+--- a/browser/branding/aurora/content/Makefile.in
++++ b/browser/branding/aurora/content/Makefile.in
+@@ -7,9 +7,11 @@
+ 
+ DEPTH = @DEPTH@
+ topsrcdir = @top_srcdir@
+ srcdir = @srcdir@
+ VPATH = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/browser/branding/aurora/locales/Makefile.in b/browser/branding/aurora/locales/Makefile.in
+--- a/browser/branding/aurora/locales/Makefile.in
++++ b/browser/branding/aurora/locales/Makefile.in
+@@ -7,9 +7,11 @@
+ srcdir         = @srcdir@
+ VPATH          = @srcdir@
+ relativesrcdir = @relativesrcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ DEFINES += -DAB_CD=$(AB_CD) -DMOZ_DISTRIBUTION_ID_UNQUOTED=$(MOZ_DISTRIBUTION_ID)
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/browser/branding/nightly/content/Makefile.in b/browser/branding/nightly/content/Makefile.in
+--- a/browser/branding/nightly/content/Makefile.in
++++ b/browser/branding/nightly/content/Makefile.in
+@@ -7,9 +7,11 @@
+ 
+ DEPTH = @DEPTH@
+ topsrcdir = @top_srcdir@
+ srcdir = @srcdir@
+ VPATH = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/browser/branding/nightly/locales/Makefile.in b/browser/branding/nightly/locales/Makefile.in
+--- a/browser/branding/nightly/locales/Makefile.in
++++ b/browser/branding/nightly/locales/Makefile.in
+@@ -7,9 +7,11 @@
+ srcdir         = @srcdir@
+ VPATH          = @srcdir@
+ relativesrcdir = @relativesrcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ DEFINES += -DAB_CD=$(AB_CD) -DMOZ_DISTRIBUTION_ID_UNQUOTED=$(MOZ_DISTRIBUTION_ID)
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/browser/branding/official/content/Makefile.in b/browser/branding/official/content/Makefile.in
+--- a/browser/branding/official/content/Makefile.in
++++ b/browser/branding/official/content/Makefile.in
+@@ -7,9 +7,11 @@
+ 
+ DEPTH = @DEPTH@
+ topsrcdir = @top_srcdir@
+ srcdir = @srcdir@
+ VPATH = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/browser/branding/official/locales/Makefile.in b/browser/branding/official/locales/Makefile.in
+--- a/browser/branding/official/locales/Makefile.in
++++ b/browser/branding/official/locales/Makefile.in
+@@ -7,9 +7,11 @@
+ srcdir         = @srcdir@
+ VPATH          = @srcdir@
+ relativesrcdir = @relativesrcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ DEFINES += -DAB_CD=$(AB_CD)
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/browser/branding/unofficial/content/Makefile.in b/browser/branding/unofficial/content/Makefile.in
+--- a/browser/branding/unofficial/content/Makefile.in
++++ b/browser/branding/unofficial/content/Makefile.in
+@@ -7,9 +7,11 @@
+ 
+ DEPTH = @DEPTH@
+ topsrcdir = @top_srcdir@
+ srcdir = @srcdir@
+ VPATH = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/browser/branding/unofficial/locales/Makefile.in b/browser/branding/unofficial/locales/Makefile.in
+--- a/browser/branding/unofficial/locales/Makefile.in
++++ b/browser/branding/unofficial/locales/Makefile.in
+@@ -7,9 +7,11 @@
+ srcdir         = @srcdir@
+ VPATH          = @srcdir@
+ relativesrcdir = @relativesrcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ DEFINES += -DAB_CD=$(AB_CD) -DMOZ_DISTRIBUTION_ID_UNQUOTED=$(MOZ_DISTRIBUTION_ID)
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/browser/components/certerror/Makefile.in b/browser/components/certerror/Makefile.in
+--- a/browser/components/certerror/Makefile.in
++++ b/browser/components/certerror/Makefile.in
+@@ -8,9 +8,11 @@
+ topsrcdir = @top_srcdir@
+ srcdir    = @srcdir@
+ VPATH     = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ TEST_DIRS += test
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/browser/components/downloads/Makefile.in b/browser/components/downloads/Makefile.in
+--- a/browser/components/downloads/Makefile.in
++++ b/browser/components/downloads/Makefile.in
+@@ -8,9 +8,11 @@
+ VPATH     = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ DIRS = src
+ 
+ TEST_DIRS += test
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/browser/components/feeds/Makefile.in b/browser/components/feeds/Makefile.in
+--- a/browser/components/feeds/Makefile.in
++++ b/browser/components/feeds/Makefile.in
+@@ -8,9 +8,11 @@
+ VPATH		= @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ DIRS = public src
+ 
+ TEST_DIRS += test
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/browser/components/migration/Makefile.in b/browser/components/migration/Makefile.in
+--- a/browser/components/migration/Makefile.in
++++ b/browser/components/migration/Makefile.in
+@@ -4,13 +4,15 @@
+ 
+ DEPTH		= @DEPTH@
+ topsrcdir	= @top_srcdir@
+ srcdir		= @srcdir@
+ VPATH		= @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+-DIRS		= public src
++DIRS = public src
+ 
+ TEST_DIRS += tests
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/browser/components/places/Makefile.in b/browser/components/places/Makefile.in
+--- a/browser/components/places/Makefile.in
++++ b/browser/components/places/Makefile.in
+@@ -9,11 +9,13 @@
+ VPATH		= @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ DIRS = src
+ 
+ TEST_DIRS += tests
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+ 
+ XPIDL_FLAGS += -I$(topsrcdir)/browser/components/
+diff --git a/browser/components/preferences/Makefile.in b/browser/components/preferences/Makefile.in
+--- a/browser/components/preferences/Makefile.in
++++ b/browser/components/preferences/Makefile.in
+@@ -11,16 +11,18 @@
+ include $(DEPTH)/config/autoconf.mk
+ 
+ PARALLEL_DIRS = \
+   in-content \
+   $(NULL)
+ 
+ TEST_DIRS += tests
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+ 
+ DEFINES += \
+ 	-DMOZ_APP_NAME=$(MOZ_APP_NAME) \
+ 	-DMOZ_MACBUNDLE_NAME=$(MOZ_MACBUNDLE_NAME) \
+ 	$(NULL)
+ 
+ ifneq (,$(filter windows gtk2 cocoa, $(MOZ_WIDGET_TOOLKIT)))
+diff --git a/browser/components/preferences/in-content/Makefile.in b/browser/components/preferences/in-content/Makefile.in
+--- a/browser/components/preferences/in-content/Makefile.in
++++ b/browser/components/preferences/in-content/Makefile.in
+@@ -6,16 +6,18 @@
+ topsrcdir	= @top_srcdir@
+ srcdir		= @srcdir@
+ VPATH		= @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ TEST_DIRS += tests
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+ 
+ DEFINES += \
+ 	-DMOZ_APP_NAME=$(MOZ_APP_NAME) \
+ 	-DMOZ_MACBUNDLE_NAME=$(MOZ_MACBUNDLE_NAME) \
+ 	$(NULL)
+ 
+ ifneq (,$(filter windows gtk2 cocoa, $(MOZ_WIDGET_TOOLKIT)))
+diff --git a/browser/components/privatebrowsing/Makefile.in b/browser/components/privatebrowsing/Makefile.in
+--- a/browser/components/privatebrowsing/Makefile.in
++++ b/browser/components/privatebrowsing/Makefile.in
+@@ -10,9 +10,11 @@
+ include $(DEPTH)/config/autoconf.mk
+ 
+ MODULE = privatebrowsing
+ 
+ DIRS = src
+ 
+ TEST_DIRS += test
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/browser/components/safebrowsing/Makefile.in b/browser/components/safebrowsing/Makefile.in
+--- a/browser/components/safebrowsing/Makefile.in
++++ b/browser/components/safebrowsing/Makefile.in
+@@ -19,9 +19,11 @@
+ DEFINES += -DUSE_HISTORIC_SAFEBROWSING_ID=1
+ endif
+ endif
+ 
+ EXTRA_PP_JS_MODULES = \
+   SafeBrowsing.jsm \
+   $(NULL)
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/browser/components/search/Makefile.in b/browser/components/search/Makefile.in
+--- a/browser/components/search/Makefile.in
++++ b/browser/components/search/Makefile.in
+@@ -6,9 +6,11 @@
+ topsrcdir = @top_srcdir@
+ srcdir    = @srcdir@
+ VPATH     = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ TEST_DIRS += test
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/browser/components/sessionstore/Makefile.in b/browser/components/sessionstore/Makefile.in
+--- a/browser/components/sessionstore/Makefile.in
++++ b/browser/components/sessionstore/Makefile.in
+@@ -17,9 +17,11 @@
+ 	nsISessionStartup.idl \
+ 	nsISessionStore.idl \
+   $(NULL)
+ 
+ DIRS = src
+ 
+ TEST_DIRS = test
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/browser/components/shell/Makefile.in b/browser/components/shell/Makefile.in
+--- a/browser/components/shell/Makefile.in
++++ b/browser/components/shell/Makefile.in
+@@ -8,9 +8,11 @@
+ VPATH		= @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ DIRS = public src
+ 
+ TEST_DIRS += test
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/browser/components/tabview/Makefile.in b/browser/components/tabview/Makefile.in
+--- a/browser/components/tabview/Makefile.in
++++ b/browser/components/tabview/Makefile.in
+@@ -7,12 +7,14 @@
+ topsrcdir	= @top_srcdir@
+ srcdir		= @srcdir@
+ VPATH		= @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ TEST_DIRS += test
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+ 
+ libs::
+ 	$(NSINSTALL) $(srcdir)/modules/* $(FINAL_TARGET)/modules/tabview
+diff --git a/browser/devtools/Makefile.in b/browser/devtools/Makefile.in
+--- a/browser/devtools/Makefile.in
++++ b/browser/devtools/Makefile.in
+@@ -23,9 +23,11 @@
+   tilt \
+   scratchpad \
+   debugger \
+   layoutview \
+   shared \
+   responsivedesign \
+   $(NULL)
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+diff --git a/browser/locales/Makefile.in b/browser/locales/Makefile.in
+--- a/browser/locales/Makefile.in
++++ b/browser/locales/Makefile.in
+@@ -26,16 +26,17 @@
+ ifdef LOCALE_MERGEDIR
+ vpath book%.inc $(LOCALE_MERGEDIR)/browser/profile
+ endif
+ vpath book%.inc $(LOCALE_SRCDIR)/profile
+ ifdef LOCALE_MERGEDIR
+ vpath book%.inc @srcdir@/en-US/profile
+ endif
+ 
++PROCESS_JAR_MN := 1
+ 
+ SUBMAKEFILES += \
+ 	$(DEPTH)/$(MOZ_BRANDING_DIRECTORY)/Makefile \
+ 	$(DEPTH)/$(MOZ_BRANDING_DIRECTORY)/locales/Makefile \
+ 	$(NULL)
+ 
+ # This makefile uses variable overrides from the libs-% target to
+ # build non-default locales to non-default dist/ locations. Be aware!
+diff --git a/browser/themes/gnomestripe/Makefile.in b/browser/themes/gnomestripe/Makefile.in
+--- a/browser/themes/gnomestripe/Makefile.in
++++ b/browser/themes/gnomestripe/Makefile.in
+@@ -6,16 +6,18 @@
+ topsrcdir	= @top_srcdir@
+ srcdir		= @srcdir@
+ VPATH		= @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ DIRS = communicator
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+ 
+ FILES := \
+ 	icon.png \
+ 	$(NULL)
+ 
+ libs:: $(FILES)
+ 	$(INSTALL) $(foreach f,$^,"$f") $(DIST)/bin/extensions/{972ce4c6-7e08-4474-a285-3208198ce6fd}
+diff --git a/browser/themes/gnomestripe/communicator/Makefile.in b/browser/themes/gnomestripe/communicator/Makefile.in
+--- a/browser/themes/gnomestripe/communicator/Makefile.in
++++ b/browser/themes/gnomestripe/communicator/Makefile.in
+@@ -4,10 +4,12 @@
+ 
+ DEPTH     = @DEPTH@
+ topsrcdir = @top_srcdir@
+ srcdir    = @srcdir@
+ VPATH     = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+ 
+diff --git a/browser/themes/pinstripe/Makefile.in b/browser/themes/pinstripe/Makefile.in
+--- a/browser/themes/pinstripe/Makefile.in
++++ b/browser/themes/pinstripe/Makefile.in
+@@ -6,16 +6,18 @@
+ topsrcdir	= @top_srcdir@
+ srcdir		= @srcdir@
+ VPATH		= @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ DIRS = communicator
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+ 
+ FILES := \
+ 	icon.png \
+ 	$(NULL)
+ 
+ libs:: $(FILES)
+ 	$(INSTALL) $(foreach f,$^,"$f") $(DIST)/bin/extensions/{972ce4c6-7e08-4474-a285-3208198ce6fd}
+diff --git a/browser/themes/pinstripe/communicator/Makefile.in b/browser/themes/pinstripe/communicator/Makefile.in
+--- a/browser/themes/pinstripe/communicator/Makefile.in
++++ b/browser/themes/pinstripe/communicator/Makefile.in
+@@ -4,10 +4,12 @@
+ 
+ DEPTH     = @DEPTH@
+ topsrcdir = @top_srcdir@
+ srcdir    = @srcdir@
+ VPATH     = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+ 
+diff --git a/browser/themes/winstripe/Makefile.in b/browser/themes/winstripe/Makefile.in
+--- a/browser/themes/winstripe/Makefile.in
++++ b/browser/themes/winstripe/Makefile.in
+@@ -6,16 +6,18 @@
+ topsrcdir	= @top_srcdir@
+ srcdir		= @srcdir@
+ VPATH		= @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ DIRS = communicator
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+ 
+ FILES := \
+ 	icon.png \
+ 	$(NULL)
+ 
+ libs:: $(FILES)
+ 	$(INSTALL) $(foreach f,$^,"$f") $(DIST)/bin/extensions/{972ce4c6-7e08-4474-a285-3208198ce6fd}
+diff --git a/browser/themes/winstripe/communicator/Makefile.in b/browser/themes/winstripe/communicator/Makefile.in
+--- a/browser/themes/winstripe/communicator/Makefile.in
++++ b/browser/themes/winstripe/communicator/Makefile.in
+@@ -4,10 +4,12 @@
+ 
+ DEPTH     = @DEPTH@
+ topsrcdir = @top_srcdir@
+ srcdir    = @srcdir@
+ VPATH     = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
++PROCESS_JAR_MN := 1
++
+ include $(topsrcdir)/config/rules.mk
+ 
+diff --git a/config/rules.mk b/config/rules.mk
+--- a/config/rules.mk
++++ b/config/rules.mk
+@@ -1400,27 +1400,36 @@
+ 	$(call install_cmd,$(IFLAGS2) $^)
+ endif
+ 
+ endif # SDK_BINARY
+ 
+ ################################################################################
+ # CHROME PACKAGING
+ 
+-JAR_MANIFEST := $(srcdir)/jar.mn
+-
+ chrome::
+ 	$(MAKE) realchrome
+ 	$(LOOP_OVER_PARALLEL_DIRS)
+ 	$(LOOP_OVER_DIRS)
+ 	$(LOOP_OVER_TOOL_DIRS)
+ 
+ $(FINAL_TARGET)/chrome: $(call mkdir_deps,$(FINAL_TARGET)/chrome)
+ 
++JAR_MANIFEST := $(srcdir)/jar.mn
++
+ ifneq (,$(wildcard $(JAR_MANIFEST)))
++# We warn as a stop-gap until all Makefiles define this variable.
++ifndef PROCESS_JAR_MN
++$(warning Please add "PROCESS_JAR_MN := 1" to $(srcdir)/Makefile.in (see bug 774572))
++endif
++
++PROCESS_JAR_MN := 1
++endif
++
++ifdef PROCESS_JAR_MN
+ ifndef NO_DIST_INSTALL
+ libs realchrome:: $(CHROME_DEPS) $(FINAL_TARGET)/chrome
+ 	$(PYTHON) $(MOZILLA_DIR)/config/JarMaker.py \
+ 	  $(QUIET) -j $(FINAL_TARGET)/chrome \
+ 	  $(MAKE_JARS_FLAGS) $(XULPPFLAGS) $(DEFINES) $(ACDEFINES) \
+ 	  $(JAR_MANIFEST)
+ endif
+ endif
+diff --git a/js/src/config/rules.mk b/js/src/config/rules.mk
+--- a/js/src/config/rules.mk
++++ b/js/src/config/rules.mk
+@@ -1400,27 +1400,36 @@
+ 	$(call install_cmd,$(IFLAGS2) $^)
+ endif
+ 
+ endif # SDK_BINARY
+ 
+ ################################################################################
+ # CHROME PACKAGING
+ 
+-JAR_MANIFEST := $(srcdir)/jar.mn
+-
+ chrome::
+ 	$(MAKE) realchrome
+ 	$(LOOP_OVER_PARALLEL_DIRS)
+ 	$(LOOP_OVER_DIRS)
+ 	$(LOOP_OVER_TOOL_DIRS)
+ 
+ $(FINAL_TARGET)/chrome: $(call mkdir_deps,$(FINAL_TARGET)/chrome)
+ 
++JAR_MANIFEST := $(srcdir)/jar.mn
++
+ ifneq (,$(wildcard $(JAR_MANIFEST)))
++# We warn as a stop-gap until all Makefiles define this variable.
++ifndef PROCESS_JAR_MN
++$(warning Please add "PROCESS_JAR_MN := 1" to $(srcdir)/Makefile.in (see bug 774572))
++endif
++
++PROCESS_JAR_MN := 1
++endif
++
++ifdef PROCESS_JAR_MN
+ ifndef NO_DIST_INSTALL
+ libs realchrome:: $(CHROME_DEPS) $(FINAL_TARGET)/chrome
+ 	$(PYTHON) $(MOZILLA_DIR)/config/JarMaker.py \
+ 	  $(QUIET) -j $(FINAL_TARGET)/chrome \
+ 	  $(MAKE_JARS_FLAGS) $(XULPPFLAGS) $(DEFINES) $(ACDEFINES) \
+ 	  $(JAR_MANIFEST)
+ endif
+ endif

@@ -1,0 +1,202 @@
+# HG changeset patch
+# Parent f0069be1cca35b4621f9b0bbf990fd5e21e8d34c
+# User Gregory Szorc <gps@mozilla.com>
+Bug 786534 - Convert install export targets to generic rule
+
+diff --git a/xpcom/build/Makefile.in b/xpcom/build/Makefile.in
+--- a/xpcom/build/Makefile.in
++++ b/xpcom/build/Makefile.in
+@@ -107,16 +107,19 @@
+   FileLocation.h \
+   mozPoisonWrite.h \
+   $(NULL)
+ 
+ ifeq ($(OS_ARCH),WINNT)
+ EXPORTS_mozilla += perfprobe.h
+ endif
+ 
++XPCOM_GLUE_INSTALL_FILES := $(XPCOM_GLUE_SRC_CPPSRCS) $(XPCOM_GLUENS_SRC_CPPSRCS)
++XPCOM_GLUE_INSTALL_DEST := .
++INSTALL_TARGETS += XPCOM_GLUE_INSTALL
+ 
+ GARBAGE         += $(XPCOM_GLUE_SRC_LCPPSRCS) $(XPCOM_GLUENS_SRC_LCPPSRCS)
+ 
+ include $(topsrcdir)/config/config.mk
+ include $(topsrcdir)/ipc/chromium/chromium-config.mk
+ include $(topsrcdir)/config/rules.mk
+ 
+ DEFINES		+= \
+@@ -129,11 +132,8 @@
+ 
+ ifdef TARGET_XPCOM_ABI
+ DEFINES += -DTARGET_XPCOM_ABI=\"$(TARGET_XPCOM_ABI)\"
+ endif
+ 
+ ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
+ CXXFLAGS	+= $(TK_CFLAGS)
+ endif
+-
+-export:: $(XPCOM_GLUE_SRC_CPPSRCS) $(XPCOM_GLUENS_SRC_CPPSRCS)
+-	$(INSTALL) $^ .
+diff --git a/xpcom/glue/nomozalloc/Makefile.in b/xpcom/glue/nomozalloc/Makefile.in
+--- a/xpcom/glue/nomozalloc/Makefile.in
++++ b/xpcom/glue/nomozalloc/Makefile.in
+@@ -40,25 +40,34 @@
+ # Pretend we're statically linking the CRT, even though we might not be: this
+ # avoids "msvcrp" and assembly dependencies from creeping into the directives
+ # for this library on Windows.
+ USE_STATIC_LIBS = 1
+ 
+ # Don't use STL wrappers here (i.e. wrapped <new>); they require mozalloc
+ STL_FLAGS       =
+ 
++XPCOM_GLUE_INSTALL_FILES += \
++  $(XPCOM_GLUE_SRC_CPPSRCS) \
++  $(XPCOM_GLUENS_SRC_CPPSRCS) \
++  $(topsrcdir)/xpcom/glue/nsStringAPI.cpp \
++  $(topsrcdir)/xpcom/glue/GenericModule.cpp \
++  $(topsrcdir)/xpcom/glue/DeadlockDetector.h \
++  $(topsrcdir)/xpcom/glue/SSE.h \
++  $(topsrcdir)/xpcom/glue/arm.h \
++  $(NULL)
++XPCOM_GLUE_INSTALL_DEST = .
++INSTALL_TARGETS += XPCOM_GLUE_INSTALL
++
+ include $(topsrcdir)/config/rules.mk
+ 
+ ifdef _MSC_VER
+ # Don't include directives about which CRT to use
+ OS_COMPILE_CXXFLAGS += -Zl
+ OS_COMPILE_CFLAGS += -Zl
+ DEFINES += -D_USE_ANSI_CPP
+ endif
+ 
+-export:: $(XPCOM_GLUE_SRC_CPPSRCS) $(XPCOM_GLUENS_SRC_CPPSRCS) $(topsrcdir)/xpcom/glue/nsStringAPI.cpp $(topsrcdir)/xpcom/glue/GenericModule.cpp $(topsrcdir)/xpcom/glue/DeadlockDetector.h $(topsrcdir)/xpcom/glue/SSE.h $(topsrcdir)/xpcom/glue/arm.h
+-	$(INSTALL) $^ .
+-
+ ifdef TARGET_XPCOM_ABI
+ DEFINES += -DTARGET_XPCOM_ABI=\"$(TARGET_XPCOM_ABI)\"
+ endif
+ 
+ DEFINES += -DMOZ_NO_MOZALLOC
+diff --git a/xpcom/glue/standalone/Makefile.in b/xpcom/glue/standalone/Makefile.in
+--- a/xpcom/glue/standalone/Makefile.in
++++ b/xpcom/glue/standalone/Makefile.in
+@@ -69,28 +69,32 @@
+ 
+ # Don't use STL wrappers here (i.e. wrapped <new>); they require mozalloc
+ STL_FLAGS	=
+ 
+ GARBAGE         += $(XPCOM_GLUE_SRC_LCPPSRCS)
+ 
+ SRCS_IN_OBJDIR	= 1
+ 
++XPCOM_GLUE_INSTALL_FILES := \
++  $(XPCOM_GLUE_SRC_CPPSRCS) \
++  $(topsrcdir)/xpcom/glue/nsStringAPI.cpp \
++  $(NULL)
++XPCOM_GLUE_INSTALL_DEST := .
++INSTALL_TARGETS += XPCOM_GLUE_INSTALL
++
+ include $(topsrcdir)/config/rules.mk
+ 
+ ifdef _MSC_VER
+ # Don't include directives in obj files about which CRT to use
+ OS_COMPILE_CXXFLAGS += -Zl
+ OS_COMPILE_CFLAGS += -Zl
+ DEFINES += -D_USE_ANSI_CPP
+ endif
+ 
+-export:: $(XPCOM_GLUE_SRC_CPPSRCS) $(topsrcdir)/xpcom/glue/nsStringAPI.cpp
+-	$(INSTALL) $^ .
+-
+ GARBAGE += nsStringAPI.cpp
+ 
+ DEFINES		+= -DXPCOM_GLUE
+ 
+ ifdef TARGET_XPCOM_ABI
+ DEFINES += -DTARGET_XPCOM_ABI=\"$(TARGET_XPCOM_ABI)\"
+ endif
+ 
+diff --git a/xpcom/glue/standalone/staticruntime/Makefile.in b/xpcom/glue/standalone/staticruntime/Makefile.in
+--- a/xpcom/glue/standalone/staticruntime/Makefile.in
++++ b/xpcom/glue/standalone/staticruntime/Makefile.in
+@@ -62,28 +62,35 @@
+ 
+ # Don't use STL wrappers here (i.e. wrapped <new>); they require mozalloc
+ STL_FLAGS	=
+ 
+ GARBAGE         += $(XPCOM_GLUE_SRC_LCPPSRCS)
+ 
+ SRCS_IN_OBJDIR	= 1
+ 
++XPCOM_GLUE_INSTALL_FILES := \
++  $(XPCOM_GLUE_SRC_CPPSRCS) \
++  $(topsrcdir)/xpcom/glue/nsStringAPI.cpp \
++  ../nsXPCOMGlue.cpp \
++  ../nsGlueLinking.h \
++  ../$(LINKSRC) \
++  $(NULL)
++XPCOM_GLUE_INSTALL_DEST := .
++INSTALL_TARGETS += XPCOM_GLUE_INSTALL
++
+ include $(topsrcdir)/config/rules.mk
+ 
+ ifdef _MSC_VER
+ # Don't include directives in obj files about which CRT to use
+ OS_COMPILE_CXXFLAGS += -Zl
+ OS_COMPILE_CFLAGS += -Zl
+ DEFINES += -D_USE_ANSI_CPP
+ endif
+ 
+-export:: $(XPCOM_GLUE_SRC_CPPSRCS) $(topsrcdir)/xpcom/glue/nsStringAPI.cpp ../nsXPCOMGlue.cpp ../nsGlueLinking.h ../$(LINKSRC)
+-	$(INSTALL) $^ .
+-
+ GARBAGE += nsStringAPI.cpp nsXPCOMGlue.cpp nsGlueLinking.h $(LINKSRC)
+ 
+ DEFINES		+= -DXPCOM_GLUE
+ 
+ ifdef TARGET_XPCOM_ABI
+ DEFINES += -DTARGET_XPCOM_ABI=\"$(TARGET_XPCOM_ABI)\"
+ endif
+ 
+diff --git a/xpcom/glue/staticruntime/Makefile.in b/xpcom/glue/staticruntime/Makefile.in
+--- a/xpcom/glue/staticruntime/Makefile.in
++++ b/xpcom/glue/staticruntime/Makefile.in
+@@ -37,24 +37,33 @@
+ FORCE_STATIC_LIB = 1
+ 
+ # Statically link to the CRT on Windows
+ USE_STATIC_LIBS = 1
+ 
+ # Don't use STL wrappers here (i.e. wrapped <new>); they require mozalloc
+ STL_FLAGS	=
+ 
++XPCOM_GLUE_INSTALL_FILES := \
++  $(XPCOM_GLUE_SRC_CPPSRCS) \
++  $(XPCOM_GLUENS_SRC_CPPSRCS) \
++  $(topsrcdir)/xpcom/glue/nsStringAPI.cpp \
++  $(topsrcdir)/xpcom/glue/GenericModule.cpp \
++  $(topsrcdir)/xpcom/glue/DeadlockDetector.h \
++  $(topsrcdir)/xpcom/glue/SSE.h \
++  $(topsrcdir)/xpcom/glue/arm.h \
++  $(NULL)
++XPCOM_GLUE_INSTALL_DEST := .
++INSTALL_TARGETS += XPCOM_GLUE_INSTALL
++
+ include $(topsrcdir)/config/rules.mk
+ 
+ ifdef _MSC_VER
+ # Don't include directives about which CRT to use
+ OS_COMPILE_CXXFLAGS += -Zl
+ OS_COMPILE_CFLAGS += -Zl
+ DEFINES += -D_USE_ANSI_CPP
+ endif
+ 
+-export:: $(XPCOM_GLUE_SRC_CPPSRCS) $(XPCOM_GLUENS_SRC_CPPSRCS) $(topsrcdir)/xpcom/glue/nsStringAPI.cpp $(topsrcdir)/xpcom/glue/GenericModule.cpp $(topsrcdir)/xpcom/glue/DeadlockDetector.h $(topsrcdir)/xpcom/glue/SSE.h $(topsrcdir)/xpcom/glue/arm.h
+-	$(INSTALL) $^ .
+-
+ ifdef TARGET_XPCOM_ABI
+ DEFINES += -DTARGET_XPCOM_ABI=\"$(TARGET_XPCOM_ABI)\"
+ endif
+ 

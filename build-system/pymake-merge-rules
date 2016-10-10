@@ -1,0 +1,62 @@
+# HG changeset patch
+# Parent 4ff1e574e509f010eba959897491518334689db7
+# User Gregory Szorc <gps@mozilla.com>
+Bug 751076 - Merge prerequisites for targets with multiple rules
+
+diff --git a/build/pymake/pymake/data.py b/build/pymake/pymake/data.py
+--- a/build/pymake/pymake/data.py
++++ b/build/pymake/pymake/data.py
+@@ -1470,17 +1470,27 @@
+ 
+     def addcommand(self, c):
+         assert isinstance(c, (Expansion, StringExpansion))
+         self.commands.append(c)
+ 
+     def getcommands(self, target, makefile):
+         assert isinstance(target, Target)
+ 
+-        return getcommandsforrule(self, target, makefile, self.prerequisites, stem=None)
++        # Prerequisites are merged if the target contains multiple rules and is
++        # not a terminal (double colon) rule. See
++        # https://www.gnu.org/software/make/manual/make.html#Multiple-Targets.
++        prereqs = self.prerequisites
++
++        if not self.doublecolon:
++            prereqs = []
++            for rule in target.rules:
++                prereqs.extend(rule.prerequisites)
++
++        return getcommandsforrule(self, target, makefile, prereqs, stem=None)
+         # TODO: $* in non-pattern rules?
+ 
+ class PatternRuleInstance(object):
+     weakdeps = False
+ 
+     """
+     A pattern rule instantiated for a particular target. It has the same API as Rule, but
+     different internals, forwarding most information on to the PatternRule.
+diff --git a/build/pymake/tests/multiple-rules-prerequisite-merge.mk b/build/pymake/tests/multiple-rules-prerequisite-merge.mk
+new file mode 100644
+--- /dev/null
++++ b/build/pymake/tests/multiple-rules-prerequisite-merge.mk
+@@ -0,0 +1,20 @@
++# When a target is defined multiple times, the prerequisites should get
++# merged.
++
++default: foo bar
++
++foo:
++	test "$<" = "foo.in1"
++	@echo TEST-PASS
++
++foo: foo.in1
++
++bar: bar.in1
++	test "$<" = "bar.in1"
++	test "$^" = "bar.in1 bar.in2"
++	@echo TEST-PASS
++
++bar: bar.in2
++
++foo.in1 bar.in1 bar.in2:
++

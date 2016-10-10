@@ -1,0 +1,130 @@
+# HG changeset patch
+# Parent 7e5fee8e5ba03ad9083e55d8ffd7e195250dddc6
+# User Gregory Szorc <gps@mozilla.com>
+Bug 752243 - Use mozfile.rmtree instead of shutil.rmtree
+
+diff --git a/testing/mozbase/mozfile/mozfile/mozfile.py b/testing/mozbase/mozfile/mozfile/mozfile.py
+--- a/testing/mozbase/mozfile/mozfile/mozfile.py
++++ b/testing/mozbase/mozfile/mozfile/mozfile.py
+@@ -101,20 +101,22 @@
+     # Verify the directory is read/write/execute for the current user
+     os.chmod(dir, 0700)
+ 
+     # os.listdir below only returns a list of unicode filenames
+     # if the parameter is unicode.
+     # If a non-unicode-named dir contains a unicode filename,
+     # that filename will get garbled.
+     # So force dir to be unicode.
+-    try:
+-        dir = unicode(dir, "utf-8")
+-    except:
+-        print("rmtree: decoding from UTF-8 failed")
++    if not isinstance(dir, unicode):
++        try:
++            dir = unicode(dir, "utf-8")
++        except UnicodeDecodeError:
++            if os.environ.get('DEBUG') == '1':
++                print("rmtree: decoding from UTF-8 failed for directory: %s" %s)
+ 
+     for name in os.listdir(dir):
+         full_name = os.path.join(dir, name)
+         # on Windows, if we don't have write permission we can't remove
+         # the file/directory either, so turn that on
+         if os.name == 'nt':
+             if not os.access(full_name, os.W_OK):
+                 # I think this is now redundant, but I don't have an NT
+diff --git a/testing/xpcshell/runxpcshelltests.py b/testing/xpcshell/runxpcshelltests.py
+--- a/testing/xpcshell/runxpcshelltests.py
++++ b/testing/xpcshell/runxpcshelltests.py
+@@ -1,21 +1,22 @@
+ #!/usr/bin/env python
+ #
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+-import re, sys, os, os.path, logging, shutil, signal, math, time, traceback
++import re, sys, os, os.path, logging, signal, math, time, traceback
+ import xml.dom.minidom
+ from glob import glob
+ from optparse import OptionParser
+ from subprocess import Popen, PIPE, STDOUT
+ from tempfile import mkdtemp, gettempdir
+ import manifestparser
++import mozfile
+ import mozinfo
+ import random
+ import socket
+ import time
+ 
+ from automationutils import *
+ 
+ #TODO: replace this with json.loads when Python 2.6 is required.
+@@ -336,17 +337,17 @@
+     """
+     return proc.kill()
+ 
+   def removeDir(self, dirname):
+     """
+       Simple wrapper to remove (recursively) a given directory.
+       On a remote system, we need to overload this to work on the remote filesystem.
+     """
+-    shutil.rmtree(dirname)
++    mozfile.mozfile.rmtree(dirname)
+ 
+   def verifyDirPath(self, dirname):
+     """
+       Simple wrapper to get the absolute path for a given directory name.
+       On a remote system, we need to overload this to work on the remote filesystem.
+     """
+     return os.path.abspath(dirname)
+ 
+@@ -924,37 +925,28 @@
+           }
+           self.kill(proc)
+         # We don't want to delete the profile when running check-interactive
+         # or check-one.
+         if self.profileDir and not self.interactive and not self.singleFile:
+           try:
+             self.removeDir(self.profileDir)
+           except Exception:
+-            self.log.info("TEST-INFO | Failed to remove profile directory. Waiting.")
++            message = "TEST-UNEXPECTED-FAIL | %s | Failed to clean up the test profile directory: %s" % (name, sys.exc_info()[1])
++            self.log.error(message)
++            print_stdout(stdout)
++            print_stdout(traceback.format_exc())
+ 
+-            # We suspect the filesystem may still be making changes. Wait a
+-            # little bit and try again.
+-            time.sleep(5)
+-
+-            try:
+-                self.removeDir(self.profileDir)
+-            except Exception:
+-                message = "TEST-UNEXPECTED-FAIL | %s | Failed to clean up the test profile directory: %s" % (name, sys.exc_info()[1])
+-                self.log.error(message)
+-                print_stdout(stdout)
+-                print_stdout(traceback.format_exc())
+-
+-                self.failCount += 1
+-                xunitResult["passed"] = False
+-                xunitResult["failure"] = {
+-                    "type": "TEST-UNEXPECTED-FAIL",
+-                    "message": message,
+-                    "text": "%s\n%s" % (stdout, traceback.format_exc())
+-                }
++            self.failCount += 1
++            xunitResult["passed"] = False
++            xunitResult["failure"] = {
++                "type": "TEST-UNEXPECTED-FAIL",
++                "message": message,
++                "text": "%s\n%s" % (stdout, traceback.format_exc())
++            }
+ 
+       if gotSIGINT:
+         xunitResult["passed"] = False
+         xunitResult["time"] = "0.0"
+         xunitResult["failure"] = {
+           "type": "SIGINT",
+           "message": "Received SIGINT",
+           "text": "Received SIGINT (control-C) during test execution."
