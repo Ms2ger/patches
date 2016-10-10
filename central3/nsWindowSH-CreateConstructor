@@ -1,0 +1,133 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -1410,16 +1410,30 @@ private:
+       aNameStruct->mType == nsGlobalNameStruct::eTypeExternalConstructorAlias;
+   }
+ 
+   const char16_t*   mClassName;
+   const bool mConstructable;
+   nsWeakPtr          mWeakOwner;
+ };
+ 
++/* static */ nsresult
++nsDOMClassInfo::CreateConstructor(const char16_t* aName,
++                                  const nsDOMClassInfoData* aData,
++                                  const nsGlobalNameStruct* aNameStruct,
++                                  nsPIDOMWindow* aOwner,
++                                  nsIDOMDOMConstructor** aResult)
++{
++  nsRefPtr<nsDOMConstructor> constructor;
++  nsresult rv = nsDOMConstructor::Create(aName, aData, aNameStruct, aOwner,
++                                         getter_AddRefs(constructor));
++  constructor.forget(aResult);
++  return rv;
++}
++
+ //static
+ nsresult
+ nsDOMConstructor::Create(const char16_t* aName,
+                          const nsDOMClassInfoData* aData,
+                          const nsGlobalNameStruct* aNameStruct,
+                          nsPIDOMWindow* aOwner,
+                          nsDOMConstructor** aResult)
+ {
+@@ -2118,22 +2132,22 @@ nsGlobalWindow::GlobalResolve(JSContext*
+ 
+       return NS_OK;
+     }
+   }
+ 
+   if (name_struct->mType == nsGlobalNameStruct::eTypeInterface) {
+     // We're resolving a name of a DOM interface for which there is no
+     // direct DOM class, create a constructor object...
+-    nsRefPtr<nsDOMConstructor> constructor;
+-    rv = nsDOMConstructor::Create(class_name,
+-                                  nullptr,
+-                                  name_struct,
+-                                  this,
+-                                  getter_AddRefs(constructor));
++    nsCOMPtr<nsIDOMDOMConstructor> constructor;
++    rv = nsDOMClassInfo::CreateConstructor(class_name,
++                                           nullptr,
++                                           name_struct,
++                                           this,
++                                           getter_AddRefs(constructor));
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     JS::Rooted<JS::Value> v(cx);
+     js::AssertSameCompartment(cx, obj);
+     rv = nsContentUtils::WrapNative(cx, constructor,
+                                     &NS_GET_IID(nsIDOMDOMConstructor), &v,
+                                     false);
+     NS_ENSURE_SUCCESS(rv, rv);
+@@ -2227,20 +2241,19 @@ nsGlobalWindow::GlobalResolve(JSContext*
+     }
+ 
+     return nsDOMClassInfo::ResolvePrototype(this, cx, obj, class_name,
+                                             ci_data, name_struct,
+                                             nameSpaceManager, nullptr, desc);
+   }
+ 
+   if (name_struct->mType == nsGlobalNameStruct::eTypeExternalConstructor) {
+-    nsRefPtr<nsDOMConstructor> constructor;
+-    rv = nsDOMConstructor::Create(class_name, nullptr, name_struct,
+-                                  this,
+-                                  getter_AddRefs(constructor));
++    nsCOMPtr<nsIDOMDOMConstructor> constructor;
++    rv = nsDOMClassInfo::CreateConstructor(class_name, nullptr, name_struct,
++                                           this, getter_AddRefs(constructor));
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     JS::Rooted<JS::Value> val(cx);
+     js::AssertSameCompartment(cx, obj);
+     rv = nsContentUtils::WrapNative(cx, constructor,
+                                     &NS_GET_IID(nsIDOMDOMConstructor), &val,
+                                     true);
+     NS_ENSURE_SUCCESS(rv, rv);
+diff --git a/dom/base/nsDOMClassInfo.h b/dom/base/nsDOMClassInfo.h
+--- a/dom/base/nsDOMClassInfo.h
++++ b/dom/base/nsDOMClassInfo.h
+@@ -18,16 +18,17 @@
+ #undef GetClassName
+ #endif
+ 
+ class nsContentList;
+ class nsDocument;
+ struct nsGlobalNameStruct;
+ class nsGlobalWindow;
+ class nsIScriptSecurityManager;
++class nsIDOMDOMConstructor;
+ 
+ struct nsDOMClassInfoData;
+ 
+ typedef nsIClassInfo* (*nsDOMClassInfoConstructorFnc)
+   (nsDOMClassInfoData* aData);
+ 
+ typedef nsresult (*nsDOMConstructorFunc)(nsISupports** aNewObject);
+ 
+@@ -127,16 +128,22 @@ public:
+                                    JS::Handle<JSObject*> aObject,
+                                    const char16_t* aName,
+                                    const nsDOMClassInfoData* aCIData,
+                                    const nsGlobalNameStruct* aNameStruct,
+                                    nsScriptNameSpaceManager* aNameSpaceManager,
+                                    JSObject* aDotPrototype,
+                                    JS::MutableHandle<JSPropertyDescriptor> aCtorDesc);
+ 
++  static nsresult CreateConstructor(const char16_t* aName,
++                                    const nsDOMClassInfoData* aData,
++                                    const nsGlobalNameStruct* aNameStruct,
++                                    nsPIDOMWindow* aOwner,
++                                    nsIDOMDOMConstructor** aResult);
++
+ protected:
+   friend nsIClassInfo* NS_GetDOMClassInfoInstance(nsDOMClassInfoID aID);
+ 
+   const nsDOMClassInfoData* mData;
+ 
+   virtual void PreserveWrapper(nsISupports *aNative) override
+   {
+   }

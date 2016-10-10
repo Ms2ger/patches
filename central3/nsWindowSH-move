@@ -1,0 +1,1237 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -116,18 +116,16 @@
+ 
+ #ifdef MOZ_TIME_MANAGER
+ #include "TimeManager.h"
+ #endif
+ 
+ using namespace mozilla;
+ using namespace mozilla::dom;
+ 
+-static NS_DEFINE_CID(kDOMSOF_CID, NS_DOM_SCRIPT_OBJECT_FACTORY_CID);
+-
+ // NOTE: DEFAULT_SCRIPTABLE_FLAGS and DOM_DEFAULT_SCRIPTABLE_FLAGS
+ //       are defined in nsIDOMClassInfo.h.
+ 
+ #define ARRAY_SCRIPTABLE_FLAGS                                                \
+   (DOM_DEFAULT_SCRIPTABLE_FLAGS       |                                       \
+    nsIXPCScriptable::WANT_GETPROPERTY |                                       \
+    nsIXPCScriptable::WANT_ENUMERATE)
+ 
+@@ -1026,51 +1024,16 @@ nsDOMClassInfo::HasInstance(nsIXPConnect
+                             JSObject *obj, JS::Handle<JS::Value> val, bool *bp,
+                             bool *_retval)
+ {
+   NS_WARNING("nsDOMClassInfo::HasInstance Don't call me!");
+ 
+   return NS_ERROR_UNEXPECTED;
+ }
+ 
+-static nsresult
+-GetExternalClassInfo(nsScriptNameSpaceManager *aNameSpaceManager,
+-                     const nsAString &aName,
+-                     const nsGlobalNameStruct *aStruct,
+-                     const nsGlobalNameStruct **aResult)
+-{
+-  NS_ASSERTION(aStruct->mType ==
+-                 nsGlobalNameStruct::eTypeExternalClassInfoCreator,
+-               "Wrong type!");
+-
+-  nsresult rv;
+-  nsCOMPtr<nsIDOMCIExtension> creator(do_CreateInstance(aStruct->mCID, &rv));
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  nsCOMPtr<nsIDOMScriptObjectFactory> sof(do_GetService(kDOMSOF_CID));
+-  NS_ENSURE_TRUE(sof, NS_ERROR_FAILURE);
+-
+-  rv = creator->RegisterDOMCI(NS_ConvertUTF16toUTF8(aName).get(), sof);
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  const nsGlobalNameStruct *name_struct = aNameSpaceManager->LookupName(aName);
+-  if (name_struct &&
+-      name_struct->mType == nsGlobalNameStruct::eTypeExternalClassInfo) {
+-    *aResult = name_struct;
+-  }
+-  else {
+-    NS_ERROR("Couldn't get the DOM ClassInfo data.");
+-
+-    *aResult = nullptr;
+-  }
+-
+-  return NS_OK;
+-}
+-
+-
+ NS_IMETHODIMP
+ nsDOMClassInfo::PostCreatePrototype(JSContext * cx, JSObject * aProto)
+ {
+   JS::Rooted<JSObject*> proto(cx, aProto);
+ 
+   // This is called before any other location that requires
+   // sObjectClass, so compute it here. We assume that nobody has had a
+   // chance to monkey around with proto's prototype chain before this.
+@@ -1717,51 +1680,16 @@ nsDOMConstructor::ToString(nsAString &aR
+ {
+   aResult.AssignLiteral("[object ");
+   aResult.Append(mClassName);
+   aResult.Append(char16_t(']'));
+ 
+   return NS_OK;
+ }
+ 
+-
+-nsresult
+-nsGlobalWindow::GetXPCProto(nsIXPConnect* aXPConnect, JSContext* cx,
+-                            const nsGlobalNameStruct* aNameStruct,
+-                            JS::MutableHandle<JSObject*> aProto)
+-{
+-  NS_ASSERTION(aNameStruct->mType ==
+-                 nsGlobalNameStruct::eTypeClassConstructor ||
+-               aNameStruct->mType == nsGlobalNameStruct::eTypeExternalClassInfo,
+-               "Wrong type!");
+-
+-  nsCOMPtr<nsIClassInfo> ci;
+-  if (aNameStruct->mType == nsGlobalNameStruct::eTypeClassConstructor) {
+-    int32_t id = aNameStruct->mDOMClassInfoID;
+-    MOZ_ASSERT(id >= 0, "Negative DOM classinfo?!?");
+-
+-    nsDOMClassInfoID ci_id = (nsDOMClassInfoID)id;
+-
+-    ci = NS_GetDOMClassInfoInstance(ci_id);
+-  }
+-  else {
+-    ci = nsDOMClassInfo::GetClassInfoInstance(aNameStruct->mData);
+-  }
+-  NS_ENSURE_TRUE(ci, NS_ERROR_UNEXPECTED);
+-
+-  nsCOMPtr<nsIXPConnectJSObjectHolder> proto_holder;
+-  nsresult rv =
+-    aXPConnect->GetWrappedNativePrototype(cx, GetGlobalJSObject(), ci,
+-                                          getter_AddRefs(proto_holder));
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  aProto.set(proto_holder->GetJSObject());
+-  return JS_WrapObject(cx, aProto) ? NS_OK : NS_ERROR_FAILURE;
+-}
+-
+ // Either ci_data must be non-null or name_struct must be non-null and of type
+ // eTypeClassProto.
+ /* static */ nsresult
+ nsDOMClassInfo::ResolvePrototype(nsGlobalWindow* aWin, JSContext* cx,
+                                  JS::Handle<JSObject*> obj,
+                                  const char16_t* name,
+                                  const nsDOMClassInfoData *ci_data,
+                                  const nsGlobalNameStruct *name_struct,
+@@ -1919,490 +1847,16 @@ nsDOMClassInfo::ResolvePrototype(nsGloba
+                          JSPROP_PERMANENT | JSPROP_READONLY,
+                          JS_STUBGETTER, JS_STUBSETTER)) {
+     return NS_ERROR_UNEXPECTED;
+   }
+ 
+   return NS_OK;
+ }
+ 
+-bool
+-nsGlobalWindow::OldBindingConstructorEnabled(const nsGlobalNameStruct* aStruct,
+-                                             JSContext* cx)
+-{
+-  MOZ_ASSERT(aStruct->mType == nsGlobalNameStruct::eTypeProperty ||
+-             aStruct->mType == nsGlobalNameStruct::eTypeClassConstructor ||
+-             aStruct->mType == nsGlobalNameStruct::eTypeExternalClassInfo);
+-
+-  // Don't expose chrome only constructors to content windows.
+-  if (aStruct->mChromeOnly) {
+-    bool expose;
+-    if (aStruct->mAllowXBL) {
+-      expose = IsChromeOrXBL(cx, nullptr);
+-    } else {
+-      expose = nsContentUtils::IsSystemPrincipal(GetPrincipal());
+-    }
+-
+-    if (!expose) {
+-      return false;
+-    }
+-  }
+-
+-  return true;
+-}
+-
+-bool
+-nsGlobalWindow::NameStructEnabled(JSContext* aCx, const nsAString& aName,
+-                                  const nsGlobalNameStruct& aNameStruct)
+-{
+-  const nsGlobalNameStruct* nameStruct = &aNameStruct;
+-  if (nameStruct->mType == nsGlobalNameStruct::eTypeExternalClassInfoCreator) {
+-    nsresult rv = GetExternalClassInfo(GetNameSpaceManager(), aName, nameStruct,
+-                                       &nameStruct);
+-    if (NS_FAILED(rv) || !nameStruct) {
+-      return false;
+-    }
+-  }
+-
+-  return (nameStruct->mType != nsGlobalNameStruct::eTypeProperty &&
+-          nameStruct->mType != nsGlobalNameStruct::eTypeClassConstructor &&
+-          nameStruct->mType != nsGlobalNameStruct::eTypeExternalClassInfo) ||
+-         OldBindingConstructorEnabled(nameStruct, aCx);
+-}
+-
+-#ifdef RELEASE_BUILD
+-#define USE_CONTROLLERS_SHIM
+-#endif
+-
+-#ifdef USE_CONTROLLERS_SHIM
+-static const JSClass ControllersShimClass = {
+-    "XULControllers", 0
+-};
+-#endif
+-
+-nsresult
+-nsGlobalWindow::GlobalResolve(JSContext* cx, JS::Handle<JSObject*> obj,
+-                              JS::Handle<jsid> id,
+-                              JS::MutableHandle<JSPropertyDescriptor> desc)
+-{
+-  if (id == XPCJSRuntime::Get()->GetStringID(XPCJSRuntime::IDX_COMPONENTS)) {
+-    return LookupComponentsShim(cx, obj, desc);
+-  }
+-
+-#ifdef USE_CONTROLLERS_SHIM
+-  // Note: We use |obj| rather than |this| to get the principal here, because
+-  // this is called during Window setup when the Document isn't necessarily
+-  // hooked up yet.
+-  if (id == XPCJSRuntime::Get()->GetStringID(XPCJSRuntime::IDX_CONTROLLERS) &&
+-      !xpc::IsXrayWrapper(obj) &&
+-      !nsContentUtils::IsSystemPrincipal(nsContentUtils::ObjectPrincipal(obj)))
+-  {
+-    if (GetDoc()) {
+-      GetDoc()->WarnOnceAbout(nsIDocument::eWindow_Controllers);
+-    }
+-    MOZ_ASSERT(JS_IsGlobalObject(obj));
+-    JS::Rooted<JSObject*> shim(cx, JS_NewObject(cx, &ControllersShimClass));
+-    if (NS_WARN_IF(!shim)) {
+-      return NS_ERROR_OUT_OF_MEMORY;
+-    }
+-    FillPropertyDescriptor(desc, obj, JS::ObjectValue(*shim), /* readOnly = */ false);
+-    return NS_OK;
+-  }
+-#endif
+-
+-  nsScriptNameSpaceManager *nameSpaceManager = GetNameSpaceManager();
+-  NS_ENSURE_TRUE(nameSpaceManager, NS_ERROR_NOT_INITIALIZED);
+-
+-  // Note - Our only caller is nsGlobalWindow::DoResolve, which checks that
+-  // JSID_IS_STRING(id) is true.
+-  nsAutoJSString name;
+-  if (!name.init(cx, JSID_TO_STRING(id))) {
+-    return NS_ERROR_OUT_OF_MEMORY;
+-  }
+-
+-  const char16_t *class_name = nullptr;
+-  const nsGlobalNameStruct *name_struct =
+-    nameSpaceManager->LookupName(name, &class_name);
+-
+-  if (!name_struct) {
+-    return NS_OK;
+-  }
+-
+-  // The class_name had better match our name
+-  MOZ_ASSERT(name.Equals(class_name));
+-
+-  NS_ENSURE_TRUE(class_name, NS_ERROR_UNEXPECTED);
+-
+-  nsresult rv = NS_OK;
+-
+-  if (name_struct->mType == nsGlobalNameStruct::eTypeExternalClassInfoCreator) {
+-    rv = GetExternalClassInfo(nameSpaceManager, name, name_struct,
+-                              &name_struct);
+-    if (NS_FAILED(rv) || !name_struct) {
+-      return rv;
+-    }
+-  }
+-
+-  if (name_struct->mType == nsGlobalNameStruct::eTypeNewDOMBinding ||
+-      name_struct->mType == nsGlobalNameStruct::eTypeInterface ||
+-      name_struct->mType == nsGlobalNameStruct::eTypeClassProto ||
+-      name_struct->mType == nsGlobalNameStruct::eTypeClassConstructor) {
+-    // Lookup new DOM bindings.
+-    DefineInterface getOrCreateInterfaceObject =
+-      name_struct->mDefineDOMInterface;
+-    if (getOrCreateInterfaceObject) {
+-      if (name_struct->mType == nsGlobalNameStruct::eTypeClassConstructor &&
+-          !OldBindingConstructorEnabled(name_struct, cx)) {
+-        return NS_OK;
+-      }
+-
+-      ConstructorEnabled* checkEnabledForScope = name_struct->mConstructorEnabled;
+-      // We do the enabled check on the current compartment of cx, but for the
+-      // actual object we pass in the underlying object in the Xray case.  That
+-      // way the callee can decide whether to allow access based on the caller
+-      // or the window being touched.
+-      JS::Rooted<JSObject*> global(cx,
+-        js::CheckedUnwrap(obj, /* stopAtOuter = */ false));
+-      if (!global) {
+-        return NS_ERROR_DOM_SECURITY_ERR;
+-      }
+-      if (checkEnabledForScope && !checkEnabledForScope(cx, global)) {
+-        return NS_OK;
+-      }
+-
+-      // The DOM constructor resolve machinery interacts with Xrays in tricky
+-      // ways, and there are some asymmetries that are important to understand.
+-      //
+-      // In the regular (non-Xray) case, we only want to resolve constructors
+-      // once (so that if they're deleted, they don't reappear). We do this by
+-      // stashing the constructor in a slot on the global, such that we can see
+-      // during resolve whether we've created it already. This is rather
+-      // memory-intensive, so we don't try to maintain these semantics when
+-      // manipulating a global over Xray (so the properties just re-resolve if
+-      // they've been deleted).
+-      //
+-      // Unfortunately, there's a bit of an impedance-mismatch between the Xray
+-      // and non-Xray machinery. The Xray machinery wants an API that returns a
+-      // JSPropertyDescriptor, so that the resolve hook doesn't have to get
+-      // snared up with trying to define a property on the Xray holder. At the
+-      // same time, the DefineInterface callbacks are set up to define things
+-      // directly on the global.  And re-jiggering them to return property
+-      // descriptors is tricky, because some DefineInterface callbacks define
+-      // multiple things (like the Image() alias for HTMLImageElement).
+-      //
+-      // So the setup is as-follows:
+-      //
+-      // * The resolve function takes a JSPropertyDescriptor, but in the
+-      //   non-Xray case, callees may define things directly on the global, and
+-      //   set the value on the property descriptor to |undefined| to indicate
+-      //   that there's nothing more for the caller to do. We assert against
+-      //   this behavior in the Xray case.
+-      //
+-      // * We make sure that we do a non-Xray resolve first, so that all the
+-      //   slots are set up. In the Xray case, this means unwrapping and doing
+-      //   a non-Xray resolve before doing the Xray resolve.
+-      //
+-      // This all could use some grand refactoring, but for now we just limp
+-      // along.
+-      if (xpc::WrapperFactory::IsXrayWrapper(obj)) {
+-        JS::Rooted<JSObject*> interfaceObject(cx);
+-        {
+-          JSAutoCompartment ac(cx, global);
+-          interfaceObject = getOrCreateInterfaceObject(cx, global, id, false);
+-        }
+-        if (NS_WARN_IF(!interfaceObject)) {
+-          return NS_ERROR_FAILURE;
+-        }
+-        if (!JS_WrapObject(cx, &interfaceObject)) {
+-          return NS_ERROR_FAILURE;
+-        }
+-
+-        FillPropertyDescriptor(desc, obj, 0, JS::ObjectValue(*interfaceObject));
+-      } else {
+-        JS::Rooted<JSObject*> interfaceObject(cx,
+-          getOrCreateInterfaceObject(cx, obj, id, true));
+-        if (NS_WARN_IF(!interfaceObject)) {
+-          return NS_ERROR_FAILURE;
+-        }
+-        // We've already defined the property.  We indicate this to the caller
+-        // by filling a property descriptor with JS::UndefinedValue() as the
+-        // value.  We still have to fill in a property descriptor, though, so
+-        // that the caller knows the property is in fact on this object.  It
+-        // doesn't matter what we pass for the "readonly" argument here.
+-        FillPropertyDescriptor(desc, obj, JS::UndefinedValue(), false);
+-      }
+-
+-      return NS_OK;
+-    }
+-  }
+-
+-  if (name_struct->mType == nsGlobalNameStruct::eTypeInterface) {
+-    // We're resolving a name of a DOM interface for which there is no
+-    // direct DOM class, create a constructor object...
+-    nsCOMPtr<nsIDOMDOMConstructor> constructor;
+-    rv = nsDOMClassInfo::CreateConstructor(class_name,
+-                                           nullptr,
+-                                           name_struct,
+-                                           this,
+-                                           getter_AddRefs(constructor));
+-    NS_ENSURE_SUCCESS(rv, rv);
+-
+-    JS::Rooted<JS::Value> v(cx);
+-    js::AssertSameCompartment(cx, obj);
+-    rv = nsContentUtils::WrapNative(cx, constructor,
+-                                    &NS_GET_IID(nsIDOMDOMConstructor), &v,
+-                                    false);
+-    NS_ENSURE_SUCCESS(rv, rv);
+-
+-    JS::Rooted<JSObject*> class_obj(cx, &v.toObject());
+-
+-    // ... and define the constants from the DOM interface on that
+-    // constructor object.
+-
+-    {
+-      JSAutoCompartment ac(cx, class_obj);
+-      rv = DefineInterfaceConstants(cx, class_obj, &name_struct->mIID);
+-      NS_ENSURE_SUCCESS(rv, rv);
+-    }
+-
+-    if (!JS_WrapValue(cx, &v)) {
+-      return NS_ERROR_UNEXPECTED;
+-    }
+-
+-    FillPropertyDescriptor(desc, obj, 0, v);
+-    return NS_OK;
+-  }
+-
+-  if (name_struct->mType == nsGlobalNameStruct::eTypeClassConstructor ||
+-      name_struct->mType == nsGlobalNameStruct::eTypeExternalClassInfo) {
+-    if (!OldBindingConstructorEnabled(name_struct, cx)) {
+-      return NS_OK;
+-    }
+-
+-    // Create the XPConnect prototype for our classinfo, PostCreateProto will
+-    // set up the prototype chain.  This will go ahead and define things on the
+-    // actual window's global.
+-    JS::Rooted<JSObject*> dot_prototype(cx);
+-    rv = GetXPCProto(nsDOMClassInfo::sXPConnect, cx, name_struct,
+-                     &dot_prototype);
+-    NS_ENSURE_SUCCESS(rv, rv);
+-    MOZ_ASSERT(dot_prototype);
+-
+-    bool isXray = xpc::WrapperFactory::IsXrayWrapper(obj);
+-    MOZ_ASSERT_IF(obj != GetGlobalJSObject(), isXray);
+-    if (!isXray) {
+-      // GetXPCProto already defined the property for us
+-      FillPropertyDescriptor(desc, obj, JS::UndefinedValue(), false);
+-      return NS_OK;
+-    }
+-
+-    // This is the Xray case.  Look up the constructor object for this
+-    // prototype.
+-    const nsDOMClassInfoData *ci_data;
+-    if (name_struct->mType == nsGlobalNameStruct::eTypeClassConstructor) {
+-      ci_data = &sClassInfoData[name_struct->mDOMClassInfoID];
+-    } else {
+-      ci_data = name_struct->mData;
+-    }
+-
+-    return nsDOMClassInfo::ResolvePrototype(this, cx, obj, class_name,
+-                                            ci_data, name_struct,
+-                                            nameSpaceManager, dot_prototype,
+-                                            desc);
+-  }
+-
+-  if (name_struct->mType == nsGlobalNameStruct::eTypeClassProto) {
+-    // We don't have a XPConnect prototype object, let ResolvePrototype create
+-    // one.
+-    return nsDOMClassInfo::ResolvePrototype(this, cx, obj, class_name,
+-                                            nullptr, name_struct,
+-                                            nameSpaceManager, nullptr, desc);
+-  }
+-
+-  if (name_struct->mType == nsGlobalNameStruct::eTypeExternalConstructorAlias) {
+-    const nsGlobalNameStruct *alias_struct =
+-      nameSpaceManager->GetConstructorProto(name_struct);
+-    NS_ENSURE_TRUE(alias_struct, NS_ERROR_UNEXPECTED);
+-
+-    // We need to use the XPConnect prototype for the DOM class that this
+-    // constructor is an alias for (for example for Image we need the prototype
+-    // for HTMLImageElement).
+-    JS::Rooted<JSObject*> dot_prototype(cx);
+-    rv = GetXPCProto(nsDOMClassInfo::sXPConnect, cx, alias_struct,
+-                     &dot_prototype);
+-    NS_ENSURE_SUCCESS(rv, rv);
+-    MOZ_ASSERT(dot_prototype);
+-
+-    const nsDOMClassInfoData *ci_data;
+-    if (alias_struct->mType == nsGlobalNameStruct::eTypeClassConstructor) {
+-      ci_data = &sClassInfoData[alias_struct->mDOMClassInfoID];
+-    } else if (alias_struct->mType == nsGlobalNameStruct::eTypeExternalClassInfo) {
+-      ci_data = alias_struct->mData;
+-    } else {
+-      return NS_ERROR_UNEXPECTED;
+-    }
+-
+-    return nsDOMClassInfo::ResolvePrototype(this, cx, obj, class_name,
+-                                            ci_data, name_struct,
+-                                            nameSpaceManager, nullptr, desc);
+-  }
+-
+-  if (name_struct->mType == nsGlobalNameStruct::eTypeExternalConstructor) {
+-    nsCOMPtr<nsIDOMDOMConstructor> constructor;
+-    rv = nsDOMClassInfo::CreateConstructor(class_name, nullptr, name_struct,
+-                                           this, getter_AddRefs(constructor));
+-    NS_ENSURE_SUCCESS(rv, rv);
+-
+-    JS::Rooted<JS::Value> val(cx);
+-    js::AssertSameCompartment(cx, obj);
+-    rv = nsContentUtils::WrapNative(cx, constructor,
+-                                    &NS_GET_IID(nsIDOMDOMConstructor), &val,
+-                                    true);
+-    NS_ENSURE_SUCCESS(rv, rv);
+-
+-    NS_ASSERTION(val.isObject(), "Why didn't we get a JSObject?");
+-
+-    FillPropertyDescriptor(desc, obj, 0, val);
+-
+-    return NS_OK;
+-  }
+-
+-  if (name_struct->mType == nsGlobalNameStruct::eTypeProperty) {
+-    if (!OldBindingConstructorEnabled(name_struct, cx))
+-      return NS_OK;
+-
+-    // Before defining a global property, check for a named subframe of the
+-    // same name. If it exists, we don't want to shadow it.
+-    nsCOMPtr<nsIDOMWindow> childWin = GetChildWindow(name);
+-    if (childWin)
+-      return NS_OK;
+-
+-    nsCOMPtr<nsISupports> native(do_CreateInstance(name_struct->mCID, &rv));
+-    NS_ENSURE_SUCCESS(rv, rv);
+-
+-    JS::Rooted<JS::Value> prop_val(cx, JS::UndefinedValue()); // Property value.
+-
+-    nsCOMPtr<nsIDOMGlobalPropertyInitializer> gpi(do_QueryInterface(native));
+-    if (gpi) {
+-      rv = gpi->Init(this, &prop_val);
+-      NS_ENSURE_SUCCESS(rv, rv);
+-    }
+-
+-    if (prop_val.isPrimitive() && !prop_val.isNull()) {
+-      if (IsOuterWindow()) {
+-        nsGlobalWindow *inner = GetCurrentInnerWindowInternal();
+-        NS_ENSURE_TRUE(inner, NS_ERROR_UNEXPECTED);
+-      }
+-
+-      rv = nsContentUtils::WrapNative(cx, native, &prop_val, true);
+-    }
+-
+-    NS_ENSURE_SUCCESS(rv, rv);
+-
+-    if (!JS_WrapValue(cx, &prop_val)) {
+-      return NS_ERROR_UNEXPECTED;
+-    }
+-
+-    FillPropertyDescriptor(desc, obj, prop_val, false);
+-
+-    return NS_OK;
+-  }
+-
+-  return rv;
+-}
+-
+-struct InterfaceShimEntry {
+-  const char *geckoName;
+-  const char *domName;
+-};
+-
+-// We add shims from Components.interfaces.nsIDOMFoo to window.Foo for each
+-// interface that has interface constants that sites might be getting off
+-// of Ci.
+-const InterfaceShimEntry kInterfaceShimMap[] =
+-{ { "nsIDOMFileReader", "FileReader" },
+-  { "nsIXMLHttpRequest", "XMLHttpRequest" },
+-  { "nsIDOMDOMException", "DOMException" },
+-  { "nsIDOMNode", "Node" },
+-  { "nsIDOMCSSPrimitiveValue", "CSSPrimitiveValue" },
+-  { "nsIDOMCSSRule", "CSSRule" },
+-  { "nsIDOMCSSValue", "CSSValue" },
+-  { "nsIDOMEvent", "Event" },
+-  { "nsIDOMNSEvent", "Event" },
+-  { "nsIDOMKeyEvent", "KeyEvent" },
+-  { "nsIDOMMouseEvent", "MouseEvent" },
+-  { "nsIDOMMouseScrollEvent", "MouseScrollEvent" },
+-  { "nsIDOMMutationEvent", "MutationEvent" },
+-  { "nsIDOMSimpleGestureEvent", "SimpleGestureEvent" },
+-  { "nsIDOMUIEvent", "UIEvent" },
+-  { "nsIDOMHTMLMediaElement", "HTMLMediaElement" },
+-  { "nsIDOMMediaError", "MediaError" },
+-  { "nsIDOMOfflineResourceList", "OfflineResourceList" },
+-  { "nsIDOMRange", "Range" },
+-  { "nsIDOMSVGLength", "SVGLength" },
+-  { "nsIDOMNodeFilter", "NodeFilter" },
+-  { "nsIDOMXPathResult", "XPathResult" } };
+-
+-nsresult
+-nsGlobalWindow::LookupComponentsShim(JSContext* cx,
+-                                     JS::Handle<JSObject*> global,
+-                                     JS::MutableHandle<JSPropertyDescriptor> desc)
+-{
+-  // Keep track of how often this happens.
+-  Telemetry::Accumulate(Telemetry::COMPONENTS_SHIM_ACCESSED_BY_CONTENT, true);
+-
+-  // Warn once.
+-  nsCOMPtr<nsIDocument> doc = GetExtantDoc();
+-  if (doc) {
+-    doc->WarnOnceAbout(nsIDocument::eComponents, /* asError = */ true);
+-  }
+-
+-  // Create a fake Components object.
+-  AssertSameCompartment(cx, global);
+-  JS::Rooted<JSObject*> components(cx, JS_NewPlainObject(cx));
+-  NS_ENSURE_TRUE(components, NS_ERROR_OUT_OF_MEMORY);
+-
+-  // Create a fake interfaces object.
+-  JS::Rooted<JSObject*> interfaces(cx, JS_NewPlainObject(cx));
+-  NS_ENSURE_TRUE(interfaces, NS_ERROR_OUT_OF_MEMORY);
+-  bool ok =
+-    JS_DefineProperty(cx, components, "interfaces", interfaces,
+-                      JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_READONLY,
+-                      JS_STUBGETTER, JS_STUBSETTER);
+-  NS_ENSURE_TRUE(ok, NS_ERROR_OUT_OF_MEMORY);
+-
+-  // Define a bunch of shims from the Ci.nsIDOMFoo to window.Foo for DOM
+-  // interfaces with constants.
+-  for (uint32_t i = 0; i < ArrayLength(kInterfaceShimMap); ++i) {
+-
+-    // Grab the names from the table.
+-    const char *geckoName = kInterfaceShimMap[i].geckoName;
+-    const char *domName = kInterfaceShimMap[i].domName;
+-
+-    // Look up the appopriate interface object on the global.
+-    JS::Rooted<JS::Value> v(cx, JS::UndefinedValue());
+-    ok = JS_GetProperty(cx, global, domName, &v);
+-    NS_ENSURE_TRUE(ok, NS_ERROR_OUT_OF_MEMORY);
+-    if (!v.isObject()) {
+-      NS_WARNING("Unable to find interface object on global");
+-      continue;
+-    }
+-
+-    // Define the shim on the interfaces object.
+-    ok = JS_DefineProperty(cx, interfaces, geckoName, v,
+-                           JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_READONLY,
+-                           JS_STUBGETTER, JS_STUBSETTER);
+-    NS_ENSURE_TRUE(ok, NS_ERROR_OUT_OF_MEMORY);
+-  }
+-
+-  FillPropertyDescriptor(desc, global, JS::ObjectValue(*components), false);
+-
+-  return NS_OK;
+-}
+-
+ // EventTarget helper
+ 
+ NS_IMETHODIMP
+ nsEventTargetSH::PreCreate(nsISupports *nativeObj, JSContext *cx,
+                            JSObject *aGlobalObj, JSObject **parentObj)
+ {
+   JS::Rooted<JSObject*> globalObj(cx, aGlobalObj);
+   DOMEventTargetHelper* target = DOMEventTargetHelper::FromSupports(nativeObj);
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -215,16 +215,18 @@
+ #include "mozilla/dom/MozSelfSupportBinding.h"
+ #include "mozilla/dom/PopStateEvent.h"
+ #include "mozilla/dom/PopupBlockedEvent.h"
+ #include "mozilla/dom/WindowBinding.h"
+ #include "nsITabChild.h"
+ #include "mozilla/dom/MediaQueryList.h"
+ #include "mozilla/dom/ScriptSettings.h"
+ #include "mozilla/dom/NavigatorBinding.h"
++#include "nsIDOMConstructor.h"
++
+ #ifdef HAVE_SIDEBAR
+ #include "mozilla/dom/ExternalBinding.h"
+ #endif
+ 
+ #ifdef MOZ_WEBSPEECH
+ #include "mozilla/dom/SpeechSynthesis.h"
+ #endif
+ 
+@@ -233,16 +235,17 @@
+ #endif
+ 
+ // Apple system headers seem to have a check() macro.  <sigh>
+ #ifdef check
+ class nsIScriptTimeoutHandler;
+ #undef check
+ #endif // check
+ #include "AccessCheck.h"
++#include "WrapperFactory.h"
+ 
+ #ifdef ANDROID
+ #include <android/log.h>
+ #endif
+ 
+ #ifdef PR_LOGGING
+ static PRLogModuleInfo* gDOMLeakPRLog;
+ #endif
+@@ -251,16 +254,18 @@ static PRLogModuleInfo* gDOMLeakPRLog;
+ #include <process.h>
+ #define getpid _getpid
+ #else
+ #include <unistd.h> // for getpid()
+ #endif
+ 
+ static const char kStorageEnabled[] = "dom.storage.enabled";
+ 
++static NS_DEFINE_CID(kDOMSOF_CID, NS_DOM_SCRIPT_OBJECT_FACTORY_CID);
++
+ using namespace mozilla;
+ using namespace mozilla::dom;
+ using namespace mozilla::dom::ipc;
+ using mozilla::TimeStamp;
+ using mozilla::TimeDuration;
+ using mozilla::dom::cache::CacheStorage;
+ using mozilla::dom::indexedDB::IDBFactory;
+ 
+@@ -4247,16 +4252,558 @@ nsGlobalWindow::GetSupportedNames(nsTArr
+       nsCOMPtr<nsIDocShellTreeItem> item =
+         windows->GetDocShellTreeItemAt(i);
+       item->GetName(*name);
+     }
+   }
+ }
+ 
+ bool
++nsGlobalWindow::OldBindingConstructorEnabled(const nsGlobalNameStruct* aStruct,
++                                             JSContext* cx)
++{
++  MOZ_ASSERT(aStruct->mType == nsGlobalNameStruct::eTypeProperty ||
++             aStruct->mType == nsGlobalNameStruct::eTypeClassConstructor ||
++             aStruct->mType == nsGlobalNameStruct::eTypeExternalClassInfo);
++
++  // Don't expose chrome only constructors to content windows.
++  if (aStruct->mChromeOnly) {
++    bool expose;
++    if (aStruct->mAllowXBL) {
++      expose = IsChromeOrXBL(cx, nullptr);
++    } else {
++      expose = nsContentUtils::IsSystemPrincipal(GetPrincipal());
++    }
++
++    if (!expose) {
++      return false;
++    }
++  }
++
++  return true;
++}
++
++static nsresult
++GetExternalClassInfo(nsScriptNameSpaceManager *aNameSpaceManager,
++                     const nsAString &aName,
++                     const nsGlobalNameStruct *aStruct,
++                     const nsGlobalNameStruct **aResult)
++{
++  NS_ASSERTION(aStruct->mType ==
++                 nsGlobalNameStruct::eTypeExternalClassInfoCreator,
++               "Wrong type!");
++
++  nsresult rv;
++  nsCOMPtr<nsIDOMCIExtension> creator(do_CreateInstance(aStruct->mCID, &rv));
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  nsCOMPtr<nsIDOMScriptObjectFactory> sof(do_GetService(kDOMSOF_CID));
++  NS_ENSURE_TRUE(sof, NS_ERROR_FAILURE);
++
++  rv = creator->RegisterDOMCI(NS_ConvertUTF16toUTF8(aName).get(), sof);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  const nsGlobalNameStruct *name_struct = aNameSpaceManager->LookupName(aName);
++  if (name_struct &&
++      name_struct->mType == nsGlobalNameStruct::eTypeExternalClassInfo) {
++    *aResult = name_struct;
++  }
++  else {
++    NS_ERROR("Couldn't get the DOM ClassInfo data.");
++
++    *aResult = nullptr;
++  }
++
++  return NS_OK;
++}
++
++bool
++nsGlobalWindow::NameStructEnabled(JSContext* aCx, const nsAString& aName,
++                                  const nsGlobalNameStruct& aNameStruct)
++{
++  const nsGlobalNameStruct* nameStruct = &aNameStruct;
++  if (nameStruct->mType == nsGlobalNameStruct::eTypeExternalClassInfoCreator) {
++    nsresult rv = GetExternalClassInfo(GetNameSpaceManager(), aName, nameStruct,
++                                       &nameStruct);
++    if (NS_FAILED(rv) || !nameStruct) {
++      return false;
++    }
++  }
++
++  return (nameStruct->mType != nsGlobalNameStruct::eTypeProperty &&
++          nameStruct->mType != nsGlobalNameStruct::eTypeClassConstructor &&
++          nameStruct->mType != nsGlobalNameStruct::eTypeExternalClassInfo) ||
++         OldBindingConstructorEnabled(nameStruct, aCx);
++}
++
++struct InterfaceShimEntry {
++  const char* geckoName;
++  const char* domName;
++};
++
++// We add shims from Components.interfaces.nsIDOMFoo to window.Foo for each
++// interface that has interface constants that sites might be getting off
++// of Ci.
++const InterfaceShimEntry kInterfaceShimMap[] =
++{ { "nsIDOMFileReader", "FileReader" },
++  { "nsIXMLHttpRequest", "XMLHttpRequest" },
++  { "nsIDOMDOMException", "DOMException" },
++  { "nsIDOMNode", "Node" },
++  { "nsIDOMCSSPrimitiveValue", "CSSPrimitiveValue" },
++  { "nsIDOMCSSRule", "CSSRule" },
++  { "nsIDOMCSSValue", "CSSValue" },
++  { "nsIDOMEvent", "Event" },
++  { "nsIDOMNSEvent", "Event" },
++  { "nsIDOMKeyEvent", "KeyEvent" },
++  { "nsIDOMMouseEvent", "MouseEvent" },
++  { "nsIDOMMouseScrollEvent", "MouseScrollEvent" },
++  { "nsIDOMMutationEvent", "MutationEvent" },
++  { "nsIDOMSimpleGestureEvent", "SimpleGestureEvent" },
++  { "nsIDOMUIEvent", "UIEvent" },
++  { "nsIDOMHTMLMediaElement", "HTMLMediaElement" },
++  { "nsIDOMMediaError", "MediaError" },
++  { "nsIDOMOfflineResourceList", "OfflineResourceList" },
++  { "nsIDOMRange", "Range" },
++  { "nsIDOMSVGLength", "SVGLength" },
++  { "nsIDOMNodeFilter", "NodeFilter" },
++  { "nsIDOMXPathResult", "XPathResult" } };
++
++nsresult
++nsGlobalWindow::LookupComponentsShim(JSContext* cx,
++                                     JS::Handle<JSObject*> global,
++                                     JS::MutableHandle<JSPropertyDescriptor> desc)
++{
++  // Keep track of how often this happens.
++  Telemetry::Accumulate(Telemetry::COMPONENTS_SHIM_ACCESSED_BY_CONTENT, true);
++
++  // Warn once.
++  nsCOMPtr<nsIDocument> doc = GetExtantDoc();
++  if (doc) {
++    doc->WarnOnceAbout(nsIDocument::eComponents, /* asError = */ true);
++  }
++
++  // Create a fake Components object.
++  AssertSameCompartment(cx, global);
++  JS::Rooted<JSObject*> components(cx, JS_NewPlainObject(cx));
++  NS_ENSURE_TRUE(components, NS_ERROR_OUT_OF_MEMORY);
++
++  // Create a fake interfaces object.
++  JS::Rooted<JSObject*> interfaces(cx, JS_NewPlainObject(cx));
++  NS_ENSURE_TRUE(interfaces, NS_ERROR_OUT_OF_MEMORY);
++  bool ok =
++    JS_DefineProperty(cx, components, "interfaces", interfaces,
++                      JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_READONLY,
++                      JS_STUBGETTER, JS_STUBSETTER);
++  NS_ENSURE_TRUE(ok, NS_ERROR_OUT_OF_MEMORY);
++
++  // Define a bunch of shims from the Ci.nsIDOMFoo to window.Foo for DOM
++  // interfaces with constants.
++  for (uint32_t i = 0; i < ArrayLength(kInterfaceShimMap); ++i) {
++
++    // Grab the names from the table.
++    const char *geckoName = kInterfaceShimMap[i].geckoName;
++    const char *domName = kInterfaceShimMap[i].domName;
++
++    // Look up the appopriate interface object on the global.
++    JS::Rooted<JS::Value> v(cx, JS::UndefinedValue());
++    ok = JS_GetProperty(cx, global, domName, &v);
++    NS_ENSURE_TRUE(ok, NS_ERROR_OUT_OF_MEMORY);
++    if (!v.isObject()) {
++      NS_WARNING("Unable to find interface object on global");
++      continue;
++    }
++
++    // Define the shim on the interfaces object.
++    ok = JS_DefineProperty(cx, interfaces, geckoName, v,
++                           JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_READONLY,
++                           JS_STUBGETTER, JS_STUBSETTER);
++    NS_ENSURE_TRUE(ok, NS_ERROR_OUT_OF_MEMORY);
++  }
++
++  FillPropertyDescriptor(desc, global, JS::ObjectValue(*components), false);
++
++  return NS_OK;
++}
++
++nsresult
++nsGlobalWindow::GetXPCProto(nsIXPConnect* aXPConnect, JSContext* cx,
++                            const nsGlobalNameStruct* aNameStruct,
++                            JS::MutableHandle<JSObject*> aProto)
++{
++  NS_ASSERTION(aNameStruct->mType ==
++                 nsGlobalNameStruct::eTypeClassConstructor ||
++               aNameStruct->mType == nsGlobalNameStruct::eTypeExternalClassInfo,
++               "Wrong type!");
++
++  nsCOMPtr<nsIClassInfo> ci;
++  if (aNameStruct->mType == nsGlobalNameStruct::eTypeClassConstructor) {
++    int32_t id = aNameStruct->mDOMClassInfoID;
++    MOZ_ASSERT(id >= 0, "Negative DOM classinfo?!?");
++
++    nsDOMClassInfoID ci_id = (nsDOMClassInfoID)id;
++
++    ci = NS_GetDOMClassInfoInstance(ci_id);
++  }
++  else {
++    ci = nsDOMClassInfo::GetClassInfoInstance(aNameStruct->mData);
++  }
++  NS_ENSURE_TRUE(ci, NS_ERROR_UNEXPECTED);
++
++  nsCOMPtr<nsIXPConnectJSObjectHolder> proto_holder;
++  nsresult rv =
++    aXPConnect->GetWrappedNativePrototype(cx, GetGlobalJSObject(), ci,
++                                          getter_AddRefs(proto_holder));
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  aProto.set(proto_holder->GetJSObject());
++  return JS_WrapObject(cx, aProto) ? NS_OK : NS_ERROR_FAILURE;
++}
++
++#ifdef RELEASE_BUILD
++#define USE_CONTROLLERS_SHIM
++#endif
++
++#ifdef USE_CONTROLLERS_SHIM
++static const JSClass ControllersShimClass = {
++    "XULControllers", 0
++};
++#endif
++
++nsresult
++nsGlobalWindow::GlobalResolve(JSContext* cx, JS::Handle<JSObject*> obj,
++                              JS::Handle<jsid> id,
++                              JS::MutableHandle<JSPropertyDescriptor> desc)
++{
++  if (id == XPCJSRuntime::Get()->GetStringID(XPCJSRuntime::IDX_COMPONENTS)) {
++    return LookupComponentsShim(cx, obj, desc);
++  }
++
++#ifdef USE_CONTROLLERS_SHIM
++  // Note: We use |obj| rather than |this| to get the principal here, because
++  // this is called during Window setup when the Document isn't necessarily
++  // hooked up yet.
++  if (id == XPCJSRuntime::Get()->GetStringID(XPCJSRuntime::IDX_CONTROLLERS) &&
++      !xpc::IsXrayWrapper(obj) &&
++      !nsContentUtils::IsSystemPrincipal(nsContentUtils::ObjectPrincipal(obj)))
++  {
++    if (GetDoc()) {
++      GetDoc()->WarnOnceAbout(nsIDocument::eWindow_Controllers);
++    }
++    MOZ_ASSERT(JS_IsGlobalObject(obj));
++    JS::Rooted<JSObject*> shim(cx, JS_NewObject(cx, &ControllersShimClass));
++    if (NS_WARN_IF(!shim)) {
++      return NS_ERROR_OUT_OF_MEMORY;
++    }
++    FillPropertyDescriptor(desc, obj, JS::ObjectValue(*shim), /* readOnly = */ false);
++    return NS_OK;
++  }
++#endif
++
++  nsScriptNameSpaceManager *nameSpaceManager = GetNameSpaceManager();
++  NS_ENSURE_TRUE(nameSpaceManager, NS_ERROR_NOT_INITIALIZED);
++
++  // Note - Our only caller is nsGlobalWindow::DoResolve, which checks that
++  // JSID_IS_STRING(id) is true.
++  nsAutoJSString name;
++  if (!name.init(cx, JSID_TO_STRING(id))) {
++    return NS_ERROR_OUT_OF_MEMORY;
++  }
++
++  const char16_t *class_name = nullptr;
++  const nsGlobalNameStruct *name_struct =
++    nameSpaceManager->LookupName(name, &class_name);
++
++  if (!name_struct) {
++    return NS_OK;
++  }
++
++  // The class_name had better match our name
++  MOZ_ASSERT(name.Equals(class_name));
++
++  NS_ENSURE_TRUE(class_name, NS_ERROR_UNEXPECTED);
++
++  nsresult rv = NS_OK;
++
++  if (name_struct->mType == nsGlobalNameStruct::eTypeExternalClassInfoCreator) {
++    rv = GetExternalClassInfo(nameSpaceManager, name, name_struct,
++                              &name_struct);
++    if (NS_FAILED(rv) || !name_struct) {
++      return rv;
++    }
++  }
++
++  if (name_struct->mType == nsGlobalNameStruct::eTypeNewDOMBinding ||
++      name_struct->mType == nsGlobalNameStruct::eTypeInterface ||
++      name_struct->mType == nsGlobalNameStruct::eTypeClassProto ||
++      name_struct->mType == nsGlobalNameStruct::eTypeClassConstructor) {
++    // Lookup new DOM bindings.
++    DefineInterface getOrCreateInterfaceObject =
++      name_struct->mDefineDOMInterface;
++    if (getOrCreateInterfaceObject) {
++      if (name_struct->mType == nsGlobalNameStruct::eTypeClassConstructor &&
++          !OldBindingConstructorEnabled(name_struct, cx)) {
++        return NS_OK;
++      }
++
++      ConstructorEnabled* checkEnabledForScope = name_struct->mConstructorEnabled;
++      // We do the enabled check on the current compartment of cx, but for the
++      // actual object we pass in the underlying object in the Xray case.  That
++      // way the callee can decide whether to allow access based on the caller
++      // or the window being touched.
++      JS::Rooted<JSObject*> global(cx,
++        js::CheckedUnwrap(obj, /* stopAtOuter = */ false));
++      if (!global) {
++        return NS_ERROR_DOM_SECURITY_ERR;
++      }
++      if (checkEnabledForScope && !checkEnabledForScope(cx, global)) {
++        return NS_OK;
++      }
++
++      // The DOM constructor resolve machinery interacts with Xrays in tricky
++      // ways, and there are some asymmetries that are important to understand.
++      //
++      // In the regular (non-Xray) case, we only want to resolve constructors
++      // once (so that if they're deleted, they don't reappear). We do this by
++      // stashing the constructor in a slot on the global, such that we can see
++      // during resolve whether we've created it already. This is rather
++      // memory-intensive, so we don't try to maintain these semantics when
++      // manipulating a global over Xray (so the properties just re-resolve if
++      // they've been deleted).
++      //
++      // Unfortunately, there's a bit of an impedance-mismatch between the Xray
++      // and non-Xray machinery. The Xray machinery wants an API that returns a
++      // JSPropertyDescriptor, so that the resolve hook doesn't have to get
++      // snared up with trying to define a property on the Xray holder. At the
++      // same time, the DefineInterface callbacks are set up to define things
++      // directly on the global.  And re-jiggering them to return property
++      // descriptors is tricky, because some DefineInterface callbacks define
++      // multiple things (like the Image() alias for HTMLImageElement).
++      //
++      // So the setup is as-follows:
++      //
++      // * The resolve function takes a JSPropertyDescriptor, but in the
++      //   non-Xray case, callees may define things directly on the global, and
++      //   set the value on the property descriptor to |undefined| to indicate
++      //   that there's nothing more for the caller to do. We assert against
++      //   this behavior in the Xray case.
++      //
++      // * We make sure that we do a non-Xray resolve first, so that all the
++      //   slots are set up. In the Xray case, this means unwrapping and doing
++      //   a non-Xray resolve before doing the Xray resolve.
++      //
++      // This all could use some grand refactoring, but for now we just limp
++      // along.
++      if (xpc::WrapperFactory::IsXrayWrapper(obj)) {
++        JS::Rooted<JSObject*> interfaceObject(cx);
++        {
++          JSAutoCompartment ac(cx, global);
++          interfaceObject = getOrCreateInterfaceObject(cx, global, id, false);
++        }
++        if (NS_WARN_IF(!interfaceObject)) {
++          return NS_ERROR_FAILURE;
++        }
++        if (!JS_WrapObject(cx, &interfaceObject)) {
++          return NS_ERROR_FAILURE;
++        }
++
++        FillPropertyDescriptor(desc, obj, 0, JS::ObjectValue(*interfaceObject));
++      } else {
++        JS::Rooted<JSObject*> interfaceObject(cx,
++          getOrCreateInterfaceObject(cx, obj, id, true));
++        if (NS_WARN_IF(!interfaceObject)) {
++          return NS_ERROR_FAILURE;
++        }
++        // We've already defined the property.  We indicate this to the caller
++        // by filling a property descriptor with JS::UndefinedValue() as the
++        // value.  We still have to fill in a property descriptor, though, so
++        // that the caller knows the property is in fact on this object.  It
++        // doesn't matter what we pass for the "readonly" argument here.
++        FillPropertyDescriptor(desc, obj, JS::UndefinedValue(), false);
++      }
++
++      return NS_OK;
++    }
++  }
++
++  if (name_struct->mType == nsGlobalNameStruct::eTypeInterface) {
++    // We're resolving a name of a DOM interface for which there is no
++    // direct DOM class, create a constructor object...
++    nsCOMPtr<nsIDOMDOMConstructor> constructor;
++    rv = nsDOMClassInfo::CreateConstructor(class_name,
++                                           nullptr,
++                                           name_struct,
++                                           this,
++                                           getter_AddRefs(constructor));
++    NS_ENSURE_SUCCESS(rv, rv);
++
++    JS::Rooted<JS::Value> v(cx);
++    js::AssertSameCompartment(cx, obj);
++    rv = nsContentUtils::WrapNative(cx, constructor,
++                                    &NS_GET_IID(nsIDOMDOMConstructor), &v,
++                                    false);
++    NS_ENSURE_SUCCESS(rv, rv);
++
++    JS::Rooted<JSObject*> class_obj(cx, &v.toObject());
++
++    // ... and define the constants from the DOM interface on that
++    // constructor object.
++
++    {
++      JSAutoCompartment ac(cx, class_obj);
++      rv = DefineInterfaceConstants(cx, class_obj, &name_struct->mIID);
++      NS_ENSURE_SUCCESS(rv, rv);
++    }
++
++    if (!JS_WrapValue(cx, &v)) {
++      return NS_ERROR_UNEXPECTED;
++    }
++
++    FillPropertyDescriptor(desc, obj, 0, v);
++    return NS_OK;
++  }
++
++  if (name_struct->mType == nsGlobalNameStruct::eTypeClassConstructor ||
++      name_struct->mType == nsGlobalNameStruct::eTypeExternalClassInfo) {
++    if (!OldBindingConstructorEnabled(name_struct, cx)) {
++      return NS_OK;
++    }
++
++    // Create the XPConnect prototype for our classinfo, PostCreateProto will
++    // set up the prototype chain.  This will go ahead and define things on the
++    // actual window's global.
++    JS::Rooted<JSObject*> dot_prototype(cx);
++    rv = GetXPCProto(nsDOMClassInfo::sXPConnect, cx, name_struct,
++                     &dot_prototype);
++    NS_ENSURE_SUCCESS(rv, rv);
++    MOZ_ASSERT(dot_prototype);
++
++    bool isXray = xpc::WrapperFactory::IsXrayWrapper(obj);
++    MOZ_ASSERT_IF(obj != GetGlobalJSObject(), isXray);
++    if (!isXray) {
++      // GetXPCProto already defined the property for us
++      FillPropertyDescriptor(desc, obj, JS::UndefinedValue(), false);
++      return NS_OK;
++    }
++
++    // This is the Xray case.  Look up the constructor object for this
++    // prototype.
++    const nsDOMClassInfoData *ci_data;
++    if (name_struct->mType == nsGlobalNameStruct::eTypeClassConstructor) {
++      ci_data = &sClassInfoData[name_struct->mDOMClassInfoID];
++    } else {
++      ci_data = name_struct->mData;
++    }
++
++    return nsDOMClassInfo::ResolvePrototype(this, cx, obj, class_name,
++                                            ci_data, name_struct,
++                                            nameSpaceManager, dot_prototype,
++                                            desc);
++  }
++
++  if (name_struct->mType == nsGlobalNameStruct::eTypeClassProto) {
++    // We don't have a XPConnect prototype object, let ResolvePrototype create
++    // one.
++    return nsDOMClassInfo::ResolvePrototype(this, cx, obj, class_name,
++                                            nullptr, name_struct,
++                                            nameSpaceManager, nullptr, desc);
++  }
++
++  if (name_struct->mType == nsGlobalNameStruct::eTypeExternalConstructorAlias) {
++    const nsGlobalNameStruct *alias_struct =
++      nameSpaceManager->GetConstructorProto(name_struct);
++    NS_ENSURE_TRUE(alias_struct, NS_ERROR_UNEXPECTED);
++
++    // We need to use the XPConnect prototype for the DOM class that this
++    // constructor is an alias for (for example for Image we need the prototype
++    // for HTMLImageElement).
++    JS::Rooted<JSObject*> dot_prototype(cx);
++    rv = GetXPCProto(nsDOMClassInfo::sXPConnect, cx, alias_struct,
++                     &dot_prototype);
++    NS_ENSURE_SUCCESS(rv, rv);
++    MOZ_ASSERT(dot_prototype);
++
++    const nsDOMClassInfoData *ci_data;
++    if (alias_struct->mType == nsGlobalNameStruct::eTypeClassConstructor) {
++      ci_data = &sClassInfoData[alias_struct->mDOMClassInfoID];
++    } else if (alias_struct->mType == nsGlobalNameStruct::eTypeExternalClassInfo) {
++      ci_data = alias_struct->mData;
++    } else {
++      return NS_ERROR_UNEXPECTED;
++    }
++
++    return nsDOMClassInfo::ResolvePrototype(this, cx, obj, class_name,
++                                            ci_data, name_struct,
++                                            nameSpaceManager, nullptr, desc);
++  }
++
++  if (name_struct->mType == nsGlobalNameStruct::eTypeExternalConstructor) {
++    nsCOMPtr<nsIDOMDOMConstructor> constructor;
++    rv = nsDOMClassInfo::CreateConstructor(class_name, nullptr, name_struct,
++                                           this, getter_AddRefs(constructor));
++    NS_ENSURE_SUCCESS(rv, rv);
++
++    JS::Rooted<JS::Value> val(cx);
++    js::AssertSameCompartment(cx, obj);
++    rv = nsContentUtils::WrapNative(cx, constructor,
++                                    &NS_GET_IID(nsIDOMDOMConstructor), &val,
++                                    true);
++    NS_ENSURE_SUCCESS(rv, rv);
++
++    NS_ASSERTION(val.isObject(), "Why didn't we get a JSObject?");
++
++    FillPropertyDescriptor(desc, obj, 0, val);
++
++    return NS_OK;
++  }
++
++  if (name_struct->mType == nsGlobalNameStruct::eTypeProperty) {
++    if (!OldBindingConstructorEnabled(name_struct, cx))
++      return NS_OK;
++
++    // Before defining a global property, check for a named subframe of the
++    // same name. If it exists, we don't want to shadow it.
++    nsCOMPtr<nsIDOMWindow> childWin = GetChildWindow(name);
++    if (childWin)
++      return NS_OK;
++
++    nsCOMPtr<nsISupports> native(do_CreateInstance(name_struct->mCID, &rv));
++    NS_ENSURE_SUCCESS(rv, rv);
++
++    JS::Rooted<JS::Value> prop_val(cx, JS::UndefinedValue()); // Property value.
++
++    nsCOMPtr<nsIDOMGlobalPropertyInitializer> gpi(do_QueryInterface(native));
++    if (gpi) {
++      rv = gpi->Init(this, &prop_val);
++      NS_ENSURE_SUCCESS(rv, rv);
++    }
++
++    if (prop_val.isPrimitive() && !prop_val.isNull()) {
++      if (IsOuterWindow()) {
++        nsGlobalWindow *inner = GetCurrentInnerWindowInternal();
++        NS_ENSURE_TRUE(inner, NS_ERROR_UNEXPECTED);
++      }
++
++      rv = nsContentUtils::WrapNative(cx, native, &prop_val, true);
++    }
++
++    NS_ENSURE_SUCCESS(rv, rv);
++
++    if (!JS_WrapValue(cx, &prop_val)) {
++      return NS_ERROR_UNEXPECTED;
++    }
++
++    FillPropertyDescriptor(desc, obj, prop_val, false);
++
++    return NS_OK;
++  }
++
++  return rv;
++}
++
++bool
+ nsGlobalWindow::DoResolve(JSContext* aCx, JS::Handle<JSObject*> aObj,
+                           JS::Handle<jsid> aId,
+                           JS::MutableHandle<JSPropertyDescriptor> aDesc)
+ {
+   MOZ_ASSERT(IsInnerWindow());
+ 
+   // Note: The infallibleInit call in GlobalResolve depends on this check.
+   if (!JSID_IS_STRING(aId)) {

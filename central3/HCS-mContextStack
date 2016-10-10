@@ -1,0 +1,137 @@
+From: Ms2ger <ms2ger@gmail.com>
+Turn HTMLContentSink's mContextStack member field into a single pointer.
+
+The array only ever has zero or one elements.
+
+diff --git a/dom/html/nsHTMLContentSink.cpp b/dom/html/nsHTMLContentSink.cpp
+--- a/dom/html/nsHTMLContentSink.cpp
++++ b/dom/html/nsHTMLContentSink.cpp
+@@ -151,17 +151,17 @@ public:
+ protected:
+   virtual ~HTMLContentSink();
+ 
+   nsCOMPtr<nsIHTMLDocument> mHTMLDocument;
+ 
+   nsRefPtr<nsGenericHTMLElement> mRoot;
+   nsRefPtr<nsGenericHTMLElement> mBody;
+ 
+-  nsAutoTArray<SinkContext*, 8> mContextStack;
++  SinkContext* mContextStack;
+   SinkContext* mCurrentContext;
+ 
+   // Boolean indicating whether we've notified insertion of our root content
+   // yet.  We want to make sure to only do this once.
+   bool mNotifiedRootInsertion;
+ 
+   nsresult FlushTags() override;
+ 
+@@ -629,33 +629,27 @@ HTMLContentSink::HTMLContentSink()
+ }
+ 
+ HTMLContentSink::~HTMLContentSink()
+ {
+   if (mNotificationTimer) {
+     mNotificationTimer->Cancel();
+   }
+ 
+-  int32_t numContexts = mContextStack.Length();
+-
+-  if (!mCurrentContext && numContexts > 0) {
+-    // Pop off the second html context if it's not done earlier
+-    mContextStack.RemoveElementAt(--numContexts);
+-  }
+-
+-  int32_t i;
+-  for (i = 0; i < numContexts; i++) {
+-    SinkContext* sc = mContextStack.ElementAt(i);
+-    if (sc) {
+-      sc->End();
+-      if (sc == mCurrentContext) {
++  if (mContextStack) {
++    if (!mCurrentContext) {
++      // Pop off the second html context if it's not done earlier
++      mContextStack = nullptr;
++    } else {
++      mContextStack->End();
++      if (mContextStack == mCurrentContext) {
+         mCurrentContext = nullptr;
+       }
+ 
+-      delete sc;
++      delete mContextStack;
+     }
+   }
+ 
+   delete mCurrentContext;
+ }
+ 
+ NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLContentSink)
+ 
+@@ -725,17 +719,17 @@ HTMLContentSink::Init(nsIDocument* aDoc,
+   if (NS_FAILED(rv)) {
+     return NS_ERROR_OUT_OF_MEMORY;
+   }
+ 
+   mRoot->AppendChildTo(head, false);
+ 
+   mCurrentContext = new SinkContext(this);
+   mCurrentContext->Begin(eHTMLTag_html, mRoot, 0, -1);
+-  mContextStack.AppendElement(mCurrentContext);
++  mContextStack = mCurrentContext;
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ HTMLContentSink::WillParse(void)
+ {
+   return WillParseImpl();
+@@ -935,21 +929,19 @@ HTMLContentSink::CloseHeadContext()
+ {
+   if (mCurrentContext) {
+     if (!mCurrentContext->IsCurrentContainer(eHTMLTag_head))
+       return;
+ 
+     mCurrentContext->FlushTags();
+   }
+ 
+-  if (!mContextStack.IsEmpty())
+-  {
+-    uint32_t n = mContextStack.Length() - 1;
+-    mCurrentContext = mContextStack.ElementAt(n);
+-    mContextStack.RemoveElementAt(n);
++  if (mContextStack) {
++    mCurrentContext = mContextStack;
++    mContextStack = nullptr;
+   }
+ }
+ 
+ void
+ HTMLContentSink::NotifyInsert(nsIContent* aContent,
+                               nsIContent* aChildContent,
+                               int32_t aIndexInContainer)
+ {
+@@ -994,21 +986,18 @@ HTMLContentSink::NotifyRootInsertion()
+   // contexts, since we just inserted the root and notified on
+   // our whole tree
+   UpdateChildCounts();
+ }
+ 
+ void
+ HTMLContentSink::UpdateChildCounts()
+ {
+-  uint32_t numContexts = mContextStack.Length();
+-  for (uint32_t i = 0; i < numContexts; i++) {
+-    SinkContext* sc = mContextStack.ElementAt(i);
+-
+-    sc->UpdateChildCounts();
++  if (mContextStack) {
++    mContextStack->UpdateChildCounts();
+   }
+ 
+   mCurrentContext->UpdateChildCounts();
+ }
+ 
+ void
+ HTMLContentSink::FlushPendingNotifications(mozFlushType aType)
+ {

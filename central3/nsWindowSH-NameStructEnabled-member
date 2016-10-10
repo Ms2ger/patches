@@ -1,0 +1,143 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -1938,35 +1938,33 @@ OldBindingConstructorEnabled(const nsGlo
+     if (!expose) {
+       return false;
+     }
+   }
+ 
+   return true;
+ }
+ 
+-// static
+ bool
+-nsWindowSH::NameStructEnabled(JSContext* aCx, nsGlobalWindow *aWin,
+-                              const nsAString& aName,
+-                              const nsGlobalNameStruct& aNameStruct)
++nsGlobalWindow::NameStructEnabled(JSContext* aCx, const nsAString& aName,
++                                  const nsGlobalNameStruct& aNameStruct)
+ {
+   const nsGlobalNameStruct* nameStruct = &aNameStruct;
+   if (nameStruct->mType == nsGlobalNameStruct::eTypeExternalClassInfoCreator) {
+     nsresult rv = GetExternalClassInfo(GetNameSpaceManager(), aName, nameStruct,
+                                        &nameStruct);
+     if (NS_FAILED(rv) || !nameStruct) {
+       return false;
+     }
+   }
+ 
+   return (nameStruct->mType != nsGlobalNameStruct::eTypeProperty &&
+           nameStruct->mType != nsGlobalNameStruct::eTypeClassConstructor &&
+           nameStruct->mType != nsGlobalNameStruct::eTypeExternalClassInfo) ||
+-         OldBindingConstructorEnabled(nameStruct, aWin, aCx);
++         OldBindingConstructorEnabled(nameStruct, this, aCx);
+ }
+ 
+ #ifdef RELEASE_BUILD
+ #define USE_CONTROLLERS_SHIM
+ #endif
+ 
+ #ifdef USE_CONTROLLERS_SHIM
+ static const JSClass ControllersShimClass = {
+diff --git a/dom/base/nsDOMClassInfo.h b/dom/base/nsDOMClassInfo.h
+--- a/dom/base/nsDOMClassInfo.h
++++ b/dom/base/nsDOMClassInfo.h
+@@ -62,22 +62,18 @@ struct nsExternalDOMClassInfoData : publ
+ 
+ // To be used with the nsDOMClassInfoData::mCachedClassInfo pointer.
+ // The low bit is set when we created a generic helper for an external
+ // (which holds on to the nsDOMClassInfoData).
+ #define GET_CLEAN_CI_PTR(_ptr) (nsIClassInfo*)(uintptr_t(_ptr) & ~0x1)
+ #define MARK_EXTERNAL(_ptr) (nsIClassInfo*)(uintptr_t(_ptr) | 0x1)
+ #define IS_EXTERNAL(_ptr) (uintptr_t(_ptr) & 0x1)
+ 
+-class nsWindowSH;
+-
+ class nsDOMClassInfo : public nsXPCClassInfo
+ {
+-  friend class nsWindowSH;
+-
+ protected:
+   virtual ~nsDOMClassInfo();
+ 
+ public:
+   explicit nsDOMClassInfo(nsDOMClassInfoData* aData);
+ 
+   NS_DECL_NSIXPCSCRIPTABLE
+ 
+@@ -213,27 +209,16 @@ public:
+   virtual void PreserveWrapper(nsISupports *aNative) override;
+ 
+   static nsIClassInfo *doCreate(nsDOMClassInfoData* aData)
+   {
+     return new nsEventTargetSH(aData);
+   }
+ };
+ 
+-// A place to hang some static methods that we should really consider
+-// moving to be nsGlobalWindow member methods.  See bug 1062418.
+-class nsWindowSH
+-{
+-public:
+-  static bool NameStructEnabled(JSContext* aCx, nsGlobalWindow *aWin,
+-                                const nsAString& aName,
+-                                const nsGlobalNameStruct& aNameStruct);
+-};
+-
+-
+ // Event handler 'this' translator class, this is called by XPConnect
+ // when a "function interface" (nsIDOMEventListener) is called, this
+ // class extracts 'this' fomr the first argument to the called
+ // function (nsIDOMEventListener::HandleEvent(in nsIDOMEvent)), this
+ // class will pass back nsIDOMEvent::currentTarget to be used as
+ // 'this'.
+ 
+ class nsEventListenerThisTranslator : public nsIXPCFunctionThisTranslator
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -4291,18 +4291,17 @@ struct GlobalNameEnumeratorClosure
+ static PLDHashOperator
+ EnumerateGlobalName(const nsAString& aName,
+                     const nsGlobalNameStruct& aNameStruct,
+                     void* aClosure)
+ {
+   GlobalNameEnumeratorClosure* closure =
+     static_cast<GlobalNameEnumeratorClosure*>(aClosure);
+ 
+-  if (nsWindowSH::NameStructEnabled(closure->mCx, closure->mWindow, aName,
+-                                    aNameStruct) &&
++  if (closure->mWindow->NameStructEnabled(closure->mCx, aName, aNameStruct) &&
+       (!aNameStruct.mConstructorEnabled ||
+        aNameStruct.mConstructorEnabled(closure->mCx, closure->mWrapper))) {
+     closure->mNames.AppendElement(aName);
+   }
+   return PL_DHASH_NEXT;
+ }
+ 
+ void
+diff --git a/dom/base/nsGlobalWindow.h b/dom/base/nsGlobalWindow.h
+--- a/dom/base/nsGlobalWindow.h
++++ b/dom/base/nsGlobalWindow.h
+@@ -501,16 +501,18 @@ private:
+   nsresult LookupComponentsShim(JSContext* aCx, JS::Handle<JSObject*> aGlobal,
+                                 JS::MutableHandle<JSPropertyDescriptor> aDesc);
+   nsresult GetXPCProto(nsIXPConnect* aXPConnect, JSContext* aCx,
+                        const nsGlobalNameStruct* aNameStruct,
+                        JS::MutableHandle<JSObject*> aProto);
+   nsresult GlobalResolve(JSContext* aCx, JS::Handle<JSObject*> aObj,
+                          JS::Handle<jsid> aId,
+                          JS::MutableHandle<JSPropertyDescriptor> aDesc);
++  bool NameStructEnabled(JSContext* aCx, const nsAString& aName,
++                         const nsGlobalNameStruct& aNameStruct);
+ 
+ public:
+   bool DoResolve(JSContext* aCx, JS::Handle<JSObject*> aObj,
+                  JS::Handle<jsid> aId,
+                  JS::MutableHandle<JSPropertyDescriptor> aDesc);
+ 
+   void GetOwnPropertyNames(JSContext* aCx, nsTArray<nsString>& aNames,
+                            mozilla::ErrorResult& aRv);

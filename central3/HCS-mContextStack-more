@@ -1,0 +1,41 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+Simplify HTMLContentSink's destructor.
+
+If mContextStack and mCurrentContext are both non-null, they point to the same
+object.
+
+diff --git a/dom/html/nsHTMLContentSink.cpp b/dom/html/nsHTMLContentSink.cpp
+--- a/dom/html/nsHTMLContentSink.cpp
++++ b/dom/html/nsHTMLContentSink.cpp
+@@ -629,28 +629,18 @@ HTMLContentSink::HTMLContentSink()
+ }
+ 
+ HTMLContentSink::~HTMLContentSink()
+ {
+   if (mNotificationTimer) {
+     mNotificationTimer->Cancel();
+   }
+ 
+-  if (mContextStack) {
+-    if (!mCurrentContext) {
+-      // Pop off the second html context if it's not done earlier
+-      mContextStack = nullptr;
+-    } else {
+-      mContextStack->End();
+-      if (mContextStack == mCurrentContext) {
+-        mCurrentContext = nullptr;
+-      }
+-
+-      delete mContextStack;
+-    }
++  if (mContextStack && mCurrentContext) {
++    mContextStack->End();
+   }
+ 
+   delete mCurrentContext;
+ }
+ 
+ NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLContentSink)
+ 
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLContentSink, nsContentSink)

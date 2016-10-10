@@ -1,0 +1,172 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -1061,25 +1061,16 @@ GetExternalClassInfo(nsScriptNameSpaceMa
+ 
+     *aResult = nullptr;
+   }
+ 
+   return NS_OK;
+ }
+ 
+ 
+-static nsresult
+-ResolvePrototype(nsIXPConnect *aXPConnect, nsGlobalWindow *aWin, JSContext *cx,
+-                 JS::Handle<JSObject*> obj, const char16_t *name,
+-                 const nsDOMClassInfoData *ci_data,
+-                 const nsGlobalNameStruct *name_struct,
+-                 nsScriptNameSpaceManager *nameSpaceManager,
+-                 JSObject *dot_prototype,
+-                 JS::MutableHandle<JSPropertyDescriptor> ctorDesc);
+-
+ NS_IMETHODIMP
+ nsDOMClassInfo::PostCreatePrototype(JSContext * cx, JSObject * aProto)
+ {
+   JS::Rooted<JSObject*> proto(cx, aProto);
+ 
+   // This is called before any other location that requires
+   // sObjectClass, so compute it here. We assume that nobody has had a
+   // chance to monkey around with proto's prototype chain before this.
+@@ -1163,17 +1154,17 @@ nsDOMClassInfo::PostCreatePrototype(JSCo
+                                     &contentDefinedProperty)) {
+     return NS_ERROR_FAILURE;
+   }
+ 
+   nsScriptNameSpaceManager *nameSpaceManager = GetNameSpaceManager();
+   NS_ENSURE_TRUE(nameSpaceManager, NS_OK);
+ 
+   JS::Rooted<JSPropertyDescriptor> desc(cx);
+-  nsresult rv = ResolvePrototype(sXPConnect, win, cx, global, mData->mNameUTF16,
++  nsresult rv = ResolvePrototype(win, cx, global, mData->mNameUTF16,
+                                  mData, nullptr, nameSpaceManager, proto,
+                                  &desc);
+   NS_ENSURE_SUCCESS(rv, rv);
+   if (!contentDefinedProperty && desc.object() && !desc.value().isUndefined() &&
+       !JS_DefineUCProperty(cx, global, mData->mNameUTF16,
+                            NS_strlen(mData->mNameUTF16), desc)) {
+     return NS_ERROR_UNEXPECTED;
+   }
+@@ -1749,24 +1740,25 @@ nsGlobalWindow::GetXPCProto(nsIXPConnect
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   aProto.set(proto_holder->GetJSObject());
+   return JS_WrapObject(cx, aProto) ? NS_OK : NS_ERROR_FAILURE;
+ }
+ 
+ // Either ci_data must be non-null or name_struct must be non-null and of type
+ // eTypeClassProto.
+-static nsresult
+-ResolvePrototype(nsIXPConnect *aXPConnect, nsGlobalWindow *aWin, JSContext *cx,
+-                 JS::Handle<JSObject*> obj, const char16_t *name,
+-                 const nsDOMClassInfoData *ci_data,
+-                 const nsGlobalNameStruct *name_struct,
+-                 nsScriptNameSpaceManager *nameSpaceManager,
+-                 JSObject* aDot_prototype,
+-                 JS::MutableHandle<JSPropertyDescriptor> ctorDesc)
++/* static */ nsresult
++nsDOMClassInfo::ResolvePrototype(nsGlobalWindow* aWin, JSContext* cx,
++                                 JS::Handle<JSObject*> obj,
++                                 const char16_t* name,
++                                 const nsDOMClassInfoData *ci_data,
++                                 const nsGlobalNameStruct *name_struct,
++                                 nsScriptNameSpaceManager *nameSpaceManager,
++                                 JSObject* aDot_prototype,
++                                 JS::MutableHandle<JSPropertyDescriptor> ctorDesc)
+ {
+   JS::Rooted<JSObject*> dot_prototype(cx, aDot_prototype);
+   NS_ASSERTION(ci_data ||
+                (name_struct &&
+                 name_struct->mType == nsGlobalNameStruct::eTypeClassProto),
+                "Wrong type or missing ci_data!");
+ 
+   nsRefPtr<nsDOMConstructor> constructor;
+@@ -2192,28 +2184,28 @@ nsGlobalWindow::GlobalResolve(JSContext*
+     // prototype.
+     const nsDOMClassInfoData *ci_data;
+     if (name_struct->mType == nsGlobalNameStruct::eTypeClassConstructor) {
+       ci_data = &sClassInfoData[name_struct->mDOMClassInfoID];
+     } else {
+       ci_data = name_struct->mData;
+     }
+ 
+-    return ResolvePrototype(nsDOMClassInfo::sXPConnect, this, cx, obj,
+-                            class_name, ci_data,
+-                            name_struct, nameSpaceManager, dot_prototype,
+-                            desc);
++    return nsDOMClassInfo::ResolvePrototype(this, cx, obj, class_name,
++                                            ci_data, name_struct,
++                                            nameSpaceManager, dot_prototype,
++                                            desc);
+   }
+ 
+   if (name_struct->mType == nsGlobalNameStruct::eTypeClassProto) {
+     // We don't have a XPConnect prototype object, let ResolvePrototype create
+     // one.
+-    return ResolvePrototype(nsDOMClassInfo::sXPConnect, this, cx, obj,
+-                            class_name, nullptr,
+-                            name_struct, nameSpaceManager, nullptr, desc);
++    return nsDOMClassInfo::ResolvePrototype(this, cx, obj, class_name,
++                                            nullptr, name_struct,
++                                            nameSpaceManager, nullptr, desc);
+   }
+ 
+   if (name_struct->mType == nsGlobalNameStruct::eTypeExternalConstructorAlias) {
+     const nsGlobalNameStruct *alias_struct =
+       nameSpaceManager->GetConstructorProto(name_struct);
+     NS_ENSURE_TRUE(alias_struct, NS_ERROR_UNEXPECTED);
+ 
+     // We need to use the XPConnect prototype for the DOM class that this
+@@ -2229,19 +2221,19 @@ nsGlobalWindow::GlobalResolve(JSContext*
+     if (alias_struct->mType == nsGlobalNameStruct::eTypeClassConstructor) {
+       ci_data = &sClassInfoData[alias_struct->mDOMClassInfoID];
+     } else if (alias_struct->mType == nsGlobalNameStruct::eTypeExternalClassInfo) {
+       ci_data = alias_struct->mData;
+     } else {
+       return NS_ERROR_UNEXPECTED;
+     }
+ 
+-    return ResolvePrototype(nsDOMClassInfo::sXPConnect, this, cx, obj,
+-                            class_name, ci_data,
+-                            name_struct, nameSpaceManager, nullptr, desc);
++    return nsDOMClassInfo::ResolvePrototype(this, cx, obj, class_name,
++                                            ci_data, name_struct,
++                                            nameSpaceManager, nullptr, desc);
+   }
+ 
+   if (name_struct->mType == nsGlobalNameStruct::eTypeExternalConstructor) {
+     nsRefPtr<nsDOMConstructor> constructor;
+     rv = nsDOMConstructor::Create(class_name, nullptr, name_struct,
+                                   this,
+                                   getter_AddRefs(constructor));
+     NS_ENSURE_SUCCESS(rv, rv);
+diff --git a/dom/base/nsDOMClassInfo.h b/dom/base/nsDOMClassInfo.h
+--- a/dom/base/nsDOMClassInfo.h
++++ b/dom/base/nsDOMClassInfo.h
+@@ -118,16 +118,25 @@ public:
+ 
+   static nsISupports *GetNative(nsIXPConnectWrappedNative *wrapper, JSObject *obj);
+ 
+   static nsIXPConnect *XPConnect()
+   {
+     return sXPConnect;
+   }
+ 
++  static nsresult ResolvePrototype(nsGlobalWindow* aWin, JSContext* aCx,
++                                   JS::Handle<JSObject*> aObject,
++                                   const char16_t* aName,
++                                   const nsDOMClassInfoData* aCIData,
++                                   const nsGlobalNameStruct* aNameStruct,
++                                   nsScriptNameSpaceManager* aNameSpaceManager,
++                                   JSObject* aDotPrototype,
++                                   JS::MutableHandle<JSPropertyDescriptor> aCtorDesc);
++
+ protected:
+   friend nsIClassInfo* NS_GetDOMClassInfoInstance(nsDOMClassInfoID aID);
+ 
+   const nsDOMClassInfoData* mData;
+ 
+   virtual void PreserveWrapper(nsISupports *aNative) override
+   {
+   }

@@ -1,0 +1,59 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/ipc/chromium/src/base/time.cc b/ipc/chromium/src/base/time.cc
+--- a/ipc/chromium/src/base/time.cc
++++ b/ipc/chromium/src/base/time.cc
+@@ -78,25 +78,9 @@ Time Time::LocalMidnight() const {
+   LocalExplode(&exploded);
+   exploded.hour = 0;
+   exploded.minute = 0;
+   exploded.second = 0;
+   exploded.millisecond = 0;
+   return FromLocalExploded(exploded);
+ }
+ 
+-// static
+-bool Time::FromString(const wchar_t* time_string, Time* parsed_time) {
+-  DCHECK((time_string != NULL) && (parsed_time != NULL));
+-  std::string ascii_time_string = SysWideToUTF8(time_string);
+-  if (ascii_time_string.length() == 0)
+-    return false;
+-  PRTime result_time = 0;
+-  PRStatus result = PR_ParseTimeString(ascii_time_string.c_str(), PR_FALSE,
+-                                       &result_time);
+-  if (PR_SUCCESS != result)
+-    return false;
+-  result_time += kTimeTToMicrosecondsOffset;
+-  *parsed_time = Time(result_time);
+-  return true;
+-}
+-
+ }  // namespace base
+diff --git a/ipc/chromium/src/base/time.h b/ipc/chromium/src/base/time.h
+--- a/ipc/chromium/src/base/time.h
++++ b/ipc/chromium/src/base/time.h
+@@ -242,24 +242,16 @@ class Time {
+   // Converts an integer value representing Time to a class. This is used
+   // when deserializing a |Time| structure, using a value known to be
+   // compatible. It is not provided as a constructor because the integer type
+   // may be unclear from the perspective of a caller.
+   static Time FromInternalValue(int64_t us) {
+     return Time(us);
+   }
+ 
+-  // Converts a string representation of time to a Time object.
+-  // An example of a time string which is converted is as below:-
+-  // "Tue, 15 Nov 1994 12:45:26 GMT". If the timezone is not specified
+-  // in the input string, we assume local time.
+-  // TODO(iyengar) Move the FromString/FromTimeT/ToTimeT/FromFileTime to
+-  // a new time converter class.
+-  static bool FromString(const wchar_t* time_string, Time* parsed_time);
+-
+   // For serializing, use FromInternalValue to reconstitute. Please don't use
+   // this and do arithmetic on it, as it is more error prone than using the
+   // provided operators.
+   int64_t ToInternalValue() const {
+     return us_;
+   }
+ 
+   // Fills the given exploded structure with either the local time or UTC from

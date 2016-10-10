@@ -1,0 +1,55 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/bindings/parser/WebIDL.py b/dom/bindings/parser/WebIDL.py
+--- a/dom/bindings/parser/WebIDL.py
++++ b/dom/bindings/parser/WebIDL.py
+@@ -1091,36 +1091,34 @@ class IDLInterface(IDLObjectWithScope, I
+                 if putForwards and self.isCallback():
+                     raise WebIDLError("[PutForwards] used on an attribute "
+                                       "on interface %s which is a callback "
+                                       "interface" % self.identifier.name,
+                                       [self.location, member.location])
+ 
+                 while putForwards is not None:
+                     forwardIface = attr.type.unroll().inner
++
+                     fowardAttr = None
+-
+-                    for forwardedMember in forwardIface.members:
+-                        if (not forwardedMember.isAttr() or
+-                            forwardedMember.identifier.name != putForwards[0]):
+-                            continue
+-                        if forwardedMember == member:
+-                            raise WebIDLError("Cycle detected in forwarded "
+-                                              "assignments for attribute %s on "
+-                                              "%s" %
+-                                              (member.identifier.name, self),
+-                                              [member.location])
+-                        fowardAttr = forwardedMember
+-                        break
++                    for m in forwardIface.members:
++                        if m.isAttr() and m.identifier.name == putForwards[0]:
++                            fowardAttr = m
++                            break
+ 
+                     if fowardAttr is None:
+                         raise WebIDLError("Attribute %s on %s forwards to "
+                                           "missing attribute %s" %
+-                              (attr.identifier.name, iface, putForwards),
+-                              [attr.location])
++                                          (attr.identifier.name, iface, putForwards),
++                                          [attr.location])
++                    if fowardAttr == member:
++                        raise WebIDLError("Cycle detected in forwarded "
++                                          "assignments for attribute %s on "
++                                          "%s" %
++                                          (member.identifier.name, self),
++                                          [member.location])
+ 
+                     iface = forwardIface
+                     attr = fowardAttr
+                     putForwards = attr.getExtendedAttribute("PutForwards")
+ 
+             # Check that the name of an [Alias] doesn't conflict with an
+             # interface member.
+             if member.isMethod():

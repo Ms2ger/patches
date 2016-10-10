@@ -1,0 +1,49 @@
+From: Ms2ger <ms2ger@gmail.com>
+Remove HTMLContentSink's mMaxTextRun member field.
+
+It is never read.
+
+diff --git a/dom/html/nsHTMLContentSink.cpp b/dom/html/nsHTMLContentSink.cpp
+--- a/dom/html/nsHTMLContentSink.cpp
++++ b/dom/html/nsHTMLContentSink.cpp
+@@ -148,19 +148,16 @@ public:
+   NS_IMETHOD OpenContainer(ElementType aNodeType) override;
+   NS_IMETHOD CloseContainer(ElementType aTag) override;
+ 
+ protected:
+   virtual ~HTMLContentSink();
+ 
+   nsCOMPtr<nsIHTMLDocument> mHTMLDocument;
+ 
+-  // The maximum length of a text run
+-  int32_t mMaxTextRun;
+-
+   nsRefPtr<nsGenericHTMLElement> mRoot;
+   nsRefPtr<nsGenericHTMLElement> mBody;
+   nsRefPtr<nsGenericHTMLElement> mHead;
+ 
+   nsAutoTArray<SinkContext*, 8> mContextStack;
+   SinkContext* mCurrentContext;
+   SinkContext* mHeadContext;
+ 
+@@ -709,20 +706,16 @@ HTMLContentSink::Init(nsIDocument* aDoc,
+   }
+ 
+   aDoc->AddObserver(this);
+   mIsDocumentObserver = true;
+   mHTMLDocument = do_QueryInterface(aDoc);
+ 
+   NS_ASSERTION(mDocShell, "oops no docshell!");
+ 
+-  // Changed from 8192 to greatly improve page loading performance on
+-  // large pages.  See bugzilla bug 77540.
+-  mMaxTextRun = Preferences::GetInt("content.maxtextrun", 8191);
+-
+   nsRefPtr<mozilla::dom::NodeInfo> nodeInfo;
+   nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::html, nullptr,
+                                            kNameSpaceID_XHTML,
+                                            nsIDOMNode::ELEMENT_NODE);
+ 
+   // Make root part
+   mRoot = NS_NewHTMLHtmlElement(nodeInfo.forget());
+   if (!mRoot) {

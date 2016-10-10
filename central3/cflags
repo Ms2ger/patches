@@ -1,0 +1,118 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/src/Makefile.in b/js/src/Makefile.in
+--- a/js/src/Makefile.in
++++ b/js/src/Makefile.in
+@@ -134,46 +134,16 @@ DIST_GARBAGE = config.cache config.log c
+    backend.mk config/backend.mk devtools/backend.mk editline/backend.mk \
+    gdb/backend.mk jsapi-tests/backend.mk shell/backend.mk tests/backend.mk \
+    backend.RecursiveMakeBackend backend.RecursiveMakeBackend.pp \
+    devtools/rootAnalysis/Makefile
+ 
+ distclean::
+ 	$(RM) $(DIST_GARBAGE)
+ 
+-CFLAGS += $(MOZ_ZLIB_CFLAGS)
+-
+-# Silence warnings on AIX/HP-UX from non-GNU compilers
+-ifndef GNU_CC
+-ifeq ($(OS_ARCH),AIX)
+-# Suppress warnings from xlC
+-# 1540-1281: offsetof() on null non-POD types
+-# 1540-1608: anonymous unions using static data members
+-CFLAGS		+= -qsuppress=1540-1281 -qsuppress=1540-1608
+-CXXFLAGS	+= -qsuppress=1540-1281 -qsuppress=1540-1608
+-endif
+-ifeq ($(OS_ARCH),HP-UX)
+-# Suppress warnings from aCC
+-# 3055: anonymous unions declaring types
+-# 4189: offsetof() on non-POD types
+-CFLAGS		+= +W3055,4189
+-CXXFLAGS	+= +W3055,4189
+-endif
+-endif
+-ifeq ($(OS_ARCH),SunOS)
+-ifeq ($(TARGET_CPU),sparc)
+-
+-ifdef GNU_CC
+-CFLAGS   += -mcpu=v9
+-CXXFLAGS += -mcpu=v9
+-endif # GNU_CC
+-
+-endif
+-endif
+-
+ SCRIPTS = $(JS_CONFIG_NAME)
+ SDK_BINARY = $(JS_CONFIG_NAME)
+ 
+ $(LIBRARY_NAME).pc: js.pc
+ 	cp $^ $@
+ 
+ install:: $(LIBRARY_NAME).pc
+ 	$(SYSINSTALL) $^ $(DESTDIR)$(libdir)/pkgconfig
+diff --git a/js/src/moz.build b/js/src/moz.build
+--- a/js/src/moz.build
++++ b/js/src/moz.build
+@@ -544,16 +544,18 @@ if CONFIG['ENABLE_INTL_API']:
+         'icu',
+     ]
+ 
+ USE_LIBS += [
+     'nspr',
+     'zlib',
+ ]
+ 
++CFLAGS += CONFIG['MOZ_ZLIB_CFLAGS'].split()
++
+ if CONFIG['MOZ_ETW']:
+     GENERATED_FILES = [
+         'ETWProvider.h',
+     ]
+     # This will get the ETW provider resources into the library mozjs.dll
+     RESFILE = 'ETWProvider.res'
+ 
+ if CONFIG['NIGHTLY_BUILD']:
+@@ -602,17 +604,43 @@ if CONFIG['OS_ARCH'] == 'Linux':
+ if CONFIG['OS_ARCH'] == 'SunOS':
+     OS_LIBS += [
+         'posix4',
+         'dl',
+         'nsl',
+         'socket',
+     ]
+ 
++    if CONFIG['TARGET_CPU'] == 'sparc' and CONFIG['GNU_CC']:
++        CFLAGS += ['-mcpu=v9']
++        CXXFLAGS += ['-mcpu=v9']
++
+ CFLAGS += CONFIG['MOZ_ICU_CFLAGS']
+ CXXFLAGS += CONFIG['MOZ_ICU_CFLAGS']
+ 
+ if CONFIG['GNU_CXX']:
+     FAIL_ON_WARNINGS = True
+ 
++# Silence warnings on AIX/HP-UX from non-GNU compilers
++if not CONFIG['GNU_CC']:
++    if CONFIG['OS_ARCH'] == 'AIX':
++        # Suppress warnings from xlC
++        # 1540-1281: offsetof() on null non-POD types
++        # 1540-1608: anonymous unions using static data members
++        CFLAGS += [
++            '-qsuppress=1540-1281',
++            '-qsuppress=1540-1608',
++        ]
++        CXXFLAGS += [
++            '-qsuppress=1540-1281',
++            '-qsuppress=1540-1608',
++        ]
++
++    elif CONFIG['OS_ARCH'] == 'HP-UX':
++        # Suppress warnings from aCC
++        # 3055: anonymous unions declaring types
++        # 4189: offsetof() on non-POD types
++        CFLAGS += ['+W3055,4189']
++        CXXFLAGS += ['+W3055,4189']
++
+ NO_EXPAND_LIBS = True
+ 
+ DIST_INSTALL = True

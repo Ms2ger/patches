@@ -1,0 +1,100 @@
+From: Ms2ger <ms2ger@gmail.com>
+I'm not sure about this; nsHTMLDocument::SetCompatibilityMode does some things unconditionally.
+
+diff --git a/dom/html/nsHTMLContentSink.cpp b/dom/html/nsHTMLContentSink.cpp
+--- a/dom/html/nsHTMLContentSink.cpp
++++ b/dom/html/nsHTMLContentSink.cpp
+@@ -147,18 +147,16 @@ public:
+ 
+   // nsIHTMLContentSink
+   NS_IMETHOD OpenContainer(ElementType aNodeType);
+   NS_IMETHOD CloseContainer(ElementType aTag);
+ 
+ protected:
+   virtual ~HTMLContentSink();
+ 
+-  nsCOMPtr<nsIHTMLDocument> mHTMLDocument;
+-
+   nsRefPtr<nsGenericHTMLElement> mRoot;
+   nsRefPtr<nsGenericHTMLElement> mBody;
+   nsRefPtr<nsGenericHTMLElement> mHead;
+ 
+   nsAutoTArray<SinkContext*, 8> mContextStack;
+   SinkContext* mCurrentContext;
+ 
+   // Boolean indicating whether we've notified insertion of our root content
+@@ -663,24 +661,22 @@ HTMLContentSink::~HTMLContentSink()
+   }
+ 
+   delete mCurrentContext;
+ }
+ 
+ NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLContentSink)
+ 
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLContentSink, nsContentSink)
+-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mHTMLDocument)
+   NS_IMPL_CYCLE_COLLECTION_UNLINK(mRoot)
+   NS_IMPL_CYCLE_COLLECTION_UNLINK(mBody)
+   NS_IMPL_CYCLE_COLLECTION_UNLINK(mHead)
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLContentSink,
+                                                   nsContentSink)
+-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mHTMLDocument)
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRoot)
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBody)
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mHead)
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+ 
+ NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLContentSink)
+   NS_INTERFACE_TABLE_BEGIN
+     NS_INTERFACE_TABLE_ENTRY(HTMLContentSink, nsIContentSink)
+@@ -701,17 +697,16 @@ HTMLContentSink::Init(nsIDocument* aDoc,
+   
+   nsresult rv = nsContentSink::Init(aDoc, aURI, aContainer, aChannel);
+   if (NS_FAILED(rv)) {
+     return rv;
+   }
+ 
+   aDoc->AddObserver(this);
+   mIsDocumentObserver = true;
+-  mHTMLDocument = do_QueryInterface(aDoc);
+ 
+   NS_ASSERTION(mDocShell, "oops no docshell!");
+ 
+   nsRefPtr<mozilla::dom::NodeInfo> nodeInfo;
+   nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::html, nullptr,
+                                            kNameSpaceID_XHTML,
+                                            nsIDOMNode::ELEMENT_NODE);
+ 
+@@ -751,31 +746,16 @@ HTMLContentSink::WillParse(void)
+   return WillParseImpl();
+ }
+ 
+ NS_IMETHODIMP
+ HTMLContentSink::WillBuildModel(nsDTDMode aDTDMode)
+ {
+   WillBuildModelImpl();
+ 
+-  if (mHTMLDocument) {
+-    nsCompatibility mode = eCompatibility_NavQuirks;
+-    switch (aDTDMode) {
+-      case eDTDMode_full_standards:
+-        mode = eCompatibility_FullStandards;
+-        break;
+-      case eDTDMode_almost_standards:
+-        mode = eCompatibility_AlmostStandards;
+-        break;
+-      default:
+-        break;
+-    }
+-    mHTMLDocument->SetCompatibilityMode(mode);
+-  }
+-
+   // Notify document that the load is beginning
+   mDocument->BeginLoad();
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ HTMLContentSink::DidBuildModel(bool aTerminated)

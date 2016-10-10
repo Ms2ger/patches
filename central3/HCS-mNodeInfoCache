@@ -1,0 +1,72 @@
+From: Ms2ger <ms2ger@gmail.com>
+Remove HTMLContentSink's mNodeInfoCache member field.
+
+It is never set.
+
+diff --git a/dom/html/nsHTMLContentSink.cpp b/dom/html/nsHTMLContentSink.cpp
+--- a/dom/html/nsHTMLContentSink.cpp
++++ b/dom/html/nsHTMLContentSink.cpp
+@@ -163,18 +163,16 @@ protected:
+   nsAutoTArray<SinkContext*, 8> mContextStack;
+   SinkContext* mCurrentContext;
+   SinkContext* mHeadContext;
+ 
+   // Boolean indicating whether we've notified insertion of our root content
+   // yet.  We want to make sure to only do this once.
+   bool mNotifiedRootInsertion;
+ 
+-  mozilla::dom::NodeInfo* mNodeInfoCache[NS_HTML_TAG_MAX + 1];
+-
+   nsresult FlushTags() override;
+ 
+   // Routines for tags that require special handling
+   nsresult CloseHTML();
+   nsresult OpenBody();
+   nsresult CloseBody();
+ 
+   void CloseHeadContext();
+@@ -664,44 +662,32 @@ HTMLContentSink::~HTMLContentSink()
+ 
+   if (mCurrentContext == mHeadContext) {
+     mCurrentContext = nullptr;
+   }
+ 
+   delete mCurrentContext;
+ 
+   delete mHeadContext;
+-
+-  for (i = 0; uint32_t(i) < ArrayLength(mNodeInfoCache); ++i) {
+-    NS_IF_RELEASE(mNodeInfoCache[i]);
+-  }
+ }
+ 
+ NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLContentSink)
+ 
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLContentSink, nsContentSink)
+   NS_IMPL_CYCLE_COLLECTION_UNLINK(mHTMLDocument)
+   NS_IMPL_CYCLE_COLLECTION_UNLINK(mRoot)
+   NS_IMPL_CYCLE_COLLECTION_UNLINK(mBody)
+   NS_IMPL_CYCLE_COLLECTION_UNLINK(mHead)
+-  for (uint32_t i = 0; i < ArrayLength(tmp->mNodeInfoCache); ++i) {
+-    NS_IF_RELEASE(tmp->mNodeInfoCache[i]);
+-  }
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLContentSink,
+                                                   nsContentSink)
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mHTMLDocument)
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRoot)
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBody)
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mHead)
+-  for (uint32_t i = 0; i < ArrayLength(tmp->mNodeInfoCache); ++i) {
+-    NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mNodeInfoCache[i]");
+-    cb.NoteNativeChild(tmp->mNodeInfoCache[i],
+-                       NS_CYCLE_COLLECTION_PARTICIPANT(NodeInfo));
+-  }
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+ 
+ NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLContentSink)
+   NS_INTERFACE_TABLE_BEGIN
+     NS_INTERFACE_TABLE_ENTRY(HTMLContentSink, nsIContentSink)
+     NS_INTERFACE_TABLE_ENTRY(HTMLContentSink, nsIHTMLContentSink)
+   NS_INTERFACE_TABLE_END
+ NS_INTERFACE_TABLE_TAIL_INHERITING(nsContentSink)

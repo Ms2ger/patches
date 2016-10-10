@@ -1,0 +1,112 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/src/Makefile.in b/js/src/Makefile.in
+--- a/js/src/Makefile.in
++++ b/js/src/Makefile.in
+@@ -9,28 +9,16 @@ ifeq (,$(MAKE_VERSION))
+ endif
+ make_min_ver := 3.81
+ ifneq ($(make_min_ver),$(firstword $(sort $(make_min_ver) $(MAKE_VERSION))))
+ $(error GNU Make $(make_min_ver) or higher is required)
+ endif
+ 
+ run_for_side_effects := $(shell echo 'MAKE: $(MAKE)')
+ 
+-ifdef JS_HAS_CTYPES
+-ifdef MOZ_NATIVE_FFI
+-LOCAL_INCLUDES = $(MOZ_FFI_CFLAGS)
+-endif
+-
+-# Windows needs this to be linked with a static library.
+-ifndef MOZ_NATIVE_FFI
+-DEFINES += -DFFI_BUILDING
+-endif
+-
+-endif # JS_HAS_CTYPES
+-
+ DASH_R		= -r
+ 
+ # Define keyword generator before rules.mk, see bug 323979 comment 50
+ 
+ GARBAGE += jsautokw.h host_jskwgen$(HOST_BIN_SUFFIX)
+ 
+ GARBAGE += selfhosted.out.h
+ 
+diff --git a/js/src/moz.build b/js/src/moz.build
+--- a/js/src/moz.build
++++ b/js/src/moz.build
+@@ -480,17 +480,29 @@ else:
+         'jit/ExecutableAllocatorPosix.cpp',
+     ]
+ 
+ if CONFIG['JS_HAS_CTYPES']:
+     SOURCES += [
+         'ctypes/CTypes.cpp',
+         'ctypes/Library.cpp',
+     ]
+-    if not CONFIG['MOZ_NATIVE_FFI']:
++
++    DEFINES['JS_HAS_CTYPES'] = True
++    for var in ('DLL_PREFIX', 'DLL_SUFFIX'):
++        DEFINES[var] = '"%s"' % CONFIG[var]
++
++    USE_LIBS += [
++        'ffi',
++    ]
++
++    if CONFIG['MOZ_NATIVE_FFI']:
++        CXXFLAGS += CONFIG['MOZ_FFI_CFLAGS']
++    else:
++        DEFINES['FFI_BUILDING'] = True
+         GENERATED_INCLUDES += [
+             'ctypes/libffi/include',
+         ]
+ 
+ if CONFIG['MOZ_VTUNE']:
+     SOURCES += [
+         'vtune/jitprofiling.c'
+     ]
+@@ -522,21 +534,16 @@ if CONFIG['JS_SHARED_LIBRARY']:
+     SHARED_LIBRARY_NAME = CONFIG['JS_LIBRARY_NAME']
+     SDK_LIBRARY = True
+ else:
+     Library('js')
+ 
+ FORCE_STATIC_LIB = True
+ STATIC_LIBRARY_NAME = 'js_static'
+ 
+-if CONFIG['JS_HAS_CTYPES']:
+-    USE_LIBS += [
+-        'ffi',
+-    ]
+-
+ if CONFIG['ENABLE_INTL_API']:
+     USE_LIBS += [
+         'icu',
+     ]
+ 
+ USE_LIBS += [
+     'nspr',
+     'zlib',
+@@ -550,21 +557,16 @@ if CONFIG['MOZ_ETW']:
+     RESFILE = 'ETWProvider.res'
+ 
+ if CONFIG['NIGHTLY_BUILD']:
+     DEFINES['ENABLE_BINARYDATA'] = True
+     DEFINES['ENABLE_SHARED_ARRAY_BUFFER'] = True
+ 
+ DEFINES['EXPORT_JS_API'] = True
+ 
+-if CONFIG['JS_HAS_CTYPES']:
+-    DEFINES['JS_HAS_CTYPES'] = True
+-    for var in ('DLL_PREFIX', 'DLL_SUFFIX'):
+-        DEFINES[var] = '"%s"' % CONFIG[var]
+-
+ if CONFIG['MOZ_LINKER']:
+     DEFINES['MOZ_LINKER'] = True
+ 
+ if CONFIG['_MSC_VER']:
+     if CONFIG['CPU_ARCH'] == 'x86':
+         SOURCES['builtin/RegExp.cpp'].no_pgo = True # Bug 772303
+     elif CONFIG['CPU_ARCH'] == 'x86_64' and CONFIG['JS_HAS_CTYPES']:
+         SOURCES['ctypes/CTypes.cpp'].no_pgo = True # Bug 810661

@@ -1,0 +1,100 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -1938,21 +1938,16 @@ OldBindingConstructorEnabled(const nsGlo
+     if (!expose) {
+       return false;
+     }
+   }
+ 
+   return true;
+ }
+ 
+-static nsresult
+-LookupComponentsShim(JSContext *cx, JS::Handle<JSObject*> global,
+-                     nsPIDOMWindow *win,
+-                     JS::MutableHandle<JSPropertyDescriptor> desc);
+-
+ // static
+ bool
+ nsWindowSH::NameStructEnabled(JSContext* aCx, nsGlobalWindow *aWin,
+                               const nsAString& aName,
+                               const nsGlobalNameStruct& aNameStruct)
+ {
+   const nsGlobalNameStruct* nameStruct = &aNameStruct;
+   if (nameStruct->mType == nsGlobalNameStruct::eTypeExternalClassInfoCreator) {
+@@ -1980,17 +1975,17 @@ static const JSClass ControllersShimClas
+ #endif
+ 
+ nsresult
+ nsGlobalWindow::GlobalResolve(JSContext* cx, JS::Handle<JSObject*> obj,
+                               JS::Handle<jsid> id,
+                               JS::MutableHandle<JSPropertyDescriptor> desc)
+ {
+   if (id == XPCJSRuntime::Get()->GetStringID(XPCJSRuntime::IDX_COMPONENTS)) {
+-    return LookupComponentsShim(cx, obj, this, desc);
++    return LookupComponentsShim(cx, obj, desc);
+   }
+ 
+ #ifdef USE_CONTROLLERS_SHIM
+   // Note: We use |obj| rather than |this| to get the principal here, because
+   // this is called during Window setup when the Document isn't necessarily
+   // hooked up yet.
+   if (id == XPCJSRuntime::Get()->GetStringID(XPCJSRuntime::IDX_CONTROLLERS) &&
+       !xpc::IsXrayWrapper(obj) &&
+@@ -2338,26 +2333,26 @@ const InterfaceShimEntry kInterfaceShimM
+   { "nsIDOMHTMLMediaElement", "HTMLMediaElement" },
+   { "nsIDOMMediaError", "MediaError" },
+   { "nsIDOMOfflineResourceList", "OfflineResourceList" },
+   { "nsIDOMRange", "Range" },
+   { "nsIDOMSVGLength", "SVGLength" },
+   { "nsIDOMNodeFilter", "NodeFilter" },
+   { "nsIDOMXPathResult", "XPathResult" } };
+ 
+-static nsresult
+-LookupComponentsShim(JSContext *cx, JS::Handle<JSObject*> global,
+-                     nsPIDOMWindow *win,
+-                     JS::MutableHandle<JSPropertyDescriptor> desc)
++nsresult
++nsGlobalWindow::LookupComponentsShim(JSContext* cx,
++                                     JS::Handle<JSObject*> global,
++                                     JS::MutableHandle<JSPropertyDescriptor> desc)
+ {
+   // Keep track of how often this happens.
+   Telemetry::Accumulate(Telemetry::COMPONENTS_SHIM_ACCESSED_BY_CONTENT, true);
+ 
+   // Warn once.
+-  nsCOMPtr<nsIDocument> doc = win->GetExtantDoc();
++  nsCOMPtr<nsIDocument> doc = GetExtantDoc();
+   if (doc) {
+     doc->WarnOnceAbout(nsIDocument::eComponents, /* asError = */ true);
+   }
+ 
+   // Create a fake Components object.
+   AssertSameCompartment(cx, global);
+   JS::Rooted<JSObject*> components(cx, JS_NewPlainObject(cx));
+   NS_ENSURE_TRUE(components, NS_ERROR_OUT_OF_MEMORY);
+diff --git a/dom/base/nsGlobalWindow.h b/dom/base/nsGlobalWindow.h
+--- a/dom/base/nsGlobalWindow.h
++++ b/dom/base/nsGlobalWindow.h
+@@ -492,16 +492,18 @@ public:
+   void GetSupportedNames(nsTArray<nsString>& aNames);
+ 
+   static bool IsPrivilegedChromeWindow(JSContext* /* unused */, JSObject* aObj);
+ 
+   static bool IsShowModalDialogEnabled(JSContext* /* unused */ = nullptr,
+                                        JSObject* /* unused */ = nullptr);
+ 
+ private:
++  nsresult LookupComponentsShim(JSContext* aCx, JS::Handle<JSObject*> aGlobal,
++                                JS::MutableHandle<JSPropertyDescriptor> aDesc);
+   nsresult GlobalResolve(JSContext* aCx, JS::Handle<JSObject*> aObj,
+                          JS::Handle<jsid> aId,
+                          JS::MutableHandle<JSPropertyDescriptor> aDesc);
+ 
+ public:
+   bool DoResolve(JSContext* aCx, JS::Handle<JSObject*> aObj,
+                  JS::Handle<jsid> aId,
+                  JS::MutableHandle<JSPropertyDescriptor> aDesc);

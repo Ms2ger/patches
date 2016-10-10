@@ -1,0 +1,219 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/html/nsHTMLContentSink.cpp b/dom/html/nsHTMLContentSink.cpp
+--- a/dom/html/nsHTMLContentSink.cpp
++++ b/dom/html/nsHTMLContentSink.cpp
+@@ -150,18 +150,19 @@ public:
+   NS_IMETHOD CloseContainer(ElementType aTag);
+ 
+ protected:
+   virtual ~HTMLContentSink();
+ 
+   nsRefPtr<nsGenericHTMLElement> mRoot;
+   nsRefPtr<nsGenericHTMLElement> mBody;
+ 
+-  SinkContext* mContextStack;
+-  SinkContext* mCurrentContext;
++  SinkContext* mContext;
++  bool mContextStack;
++  bool mCurrentContext;
+ 
+   // Boolean indicating whether we've notified insertion of our root content
+   // yet.  We want to make sure to only do this once.
+   bool mNotifiedRootInsertion;
+ 
+   nsresult FlushTags();
+ 
+   // Routines for tags that require special handling
+@@ -719,19 +720,20 @@ HTMLContentSink::Init(nsIDocument* aDoc,
+ 
+   nsRefPtr<nsGenericHTMLElement> head = NS_NewHTMLHeadElement(nodeInfo.forget());
+   if (NS_FAILED(rv)) {
+     return NS_ERROR_OUT_OF_MEMORY;
+   }
+ 
+   mRoot->AppendChildTo(head, false);
+ 
+-  mCurrentContext = new SinkContext(this);
+-  mCurrentContext->Begin(eHTMLTag_html, mRoot, 0, -1);
+-  mContextStack = mCurrentContext;
++  mContext = new SinkContext(this);
++  mContext->Begin(eHTMLTag_html, mRoot, 0, -1);
++  mCurrentContext = true;
++  mContextStack = true;
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ HTMLContentSink::WillParse(void)
+ {
+   return WillParseImpl();
+@@ -750,17 +752,18 @@ HTMLContentSink::WillBuildModel(nsDTDMod
+ 
+ NS_IMETHODIMP
+ HTMLContentSink::DidBuildModel(bool aTerminated)
+ {
+   DidBuildModelImpl(aTerminated);
+ 
+   // Reflow the last batch of content
+   if (mBody) {
+-    mCurrentContext->FlushTags();
++    MOZ_ASSERT(mCurrentContext);
++    mContext->FlushTags();
+   } else if (!mLayoutStarted) {
+     // We never saw the body, and layout never got started. Force
+     // layout *now*, to get an initial reflow.
+     // NOTE: only force the layout if we are NOT destroying the
+     // docshell. If we are destroying it, then starting layout will
+     // likely cause us to crash, or at best waste a lot of time as we
+     // are just going to tear it down anyway.
+     bool bDestroying = true;
+@@ -804,63 +807,65 @@ HTMLContentSink::OpenBody()
+ {
+   CloseHeadContext();  // do this just in case if the HEAD was left open!
+ 
+   // if we already have a body we're done
+   if (mBody) {
+     return NS_OK;
+   }
+ 
+-  nsresult rv = mCurrentContext->OpenBody();
++  MOZ_ASSERT(mCurrentContext);
++  nsresult rv = mContext->OpenBody();
+ 
+   if (NS_FAILED(rv)) {
+     return rv;
+   }
+ 
+-  mBody = mCurrentContext->mStack[mCurrentContext->mStackPos - 1].mContent;
++  mBody = mContext->mStack[mCurrentContext->mStackPos - 1].mContent;
+ 
+-  if (mCurrentContext->mStackPos > 1) {
+-    int32_t parentIndex    = mCurrentContext->mStackPos - 2;
+-    nsGenericHTMLElement *parent = mCurrentContext->mStack[parentIndex].mContent;
+-    int32_t numFlushed     = mCurrentContext->mStack[parentIndex].mNumFlushed;
++  if (mContext->mStackPos > 1) {
++    int32_t parentIndex    = mContext->mStackPos - 2;
++    nsGenericHTMLElement *parent = mContext->mStack[parentIndex].mContent;
++    int32_t numFlushed     = mContext->mStack[parentIndex].mNumFlushed;
+     int32_t childCount = parent->GetChildCount();
+     NS_ASSERTION(numFlushed < childCount, "Already notified on the body?");
+     
+     int32_t insertionPoint =
+-      mCurrentContext->mStack[parentIndex].mInsertionPoint;
++      mContext->mStack[parentIndex].mInsertionPoint;
+ 
+     // XXX: I have yet to see a case where numFlushed is non-zero and
+     // insertionPoint is not -1, but this code will try to handle
+     // those cases too.
+ 
+     uint32_t oldUpdates = mUpdatesInNotification;
+     mUpdatesInNotification = 0;
+     if (insertionPoint != -1) {
+       NotifyInsert(parent, mBody, insertionPoint - 1);
+     } else {
+       NotifyAppend(parent, numFlushed);
+     }
+-    mCurrentContext->mStack[parentIndex].mNumFlushed = childCount;
++    mContext->mStack[parentIndex].mNumFlushed = childCount;
+     if (mUpdatesInNotification > 1) {
+       UpdateChildCounts();
+     }
+     mUpdatesInNotification = oldUpdates;
+   }
+ 
+   StartLayout(false);
+ 
+   return NS_OK;
+ }
+ 
+ nsresult
+ HTMLContentSink::CloseBody()
+ {
+   // Flush out anything that's left
+-  mCurrentContext->FlushTags();
+-  mCurrentContext->CloseBody();
++  MOZ_ASSERT(mCurrentContext);
++  mContext->FlushTags();
++  mContext->CloseBody();
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ HTMLContentSink::OpenContainer(ElementType aElementType)
+ {
+   nsresult rv = NS_OK;
+@@ -908,25 +913,25 @@ HTMLContentSink::WillResume()
+ {
+   return WillResumeImpl();
+ }
+ 
+ void
+ HTMLContentSink::CloseHeadContext()
+ {
+   if (mCurrentContext) {
+-    if (!mCurrentContext->IsCurrentContainer(eHTMLTag_head))
++    if (!mContext->IsCurrentContainer(eHTMLTag_head))
+       return;
+ 
+-    mCurrentContext->FlushTags();
++    mContext->FlushTags();
+   }
+ 
+   if (mContextStack) {
+-    mCurrentContext = mContextStack;
+-    mContextStack = nullptr;
++    mCurrentContext = true;
++    mContextStack = false;
+   }
+ }
+ 
+ void
+ HTMLContentSink::NotifyInsert(nsIContent* aContent,
+                               nsIContent* aChildContent,
+                               int32_t aIndexInContainer)
+ {
+@@ -972,20 +977,20 @@ HTMLContentSink::NotifyRootInsertion()
+   // our whole tree
+   UpdateChildCounts();
+ }
+ 
+ void
+ HTMLContentSink::UpdateChildCounts()
+ {
+   if (mContextStack) {
+-    mContextStack->UpdateChildCounts();
++    mContext->UpdateChildCounts();
+   }
+ 
+-  mCurrentContext->UpdateChildCounts();
++  mContext->UpdateChildCounts();
+ }
+ 
+ void
+ HTMLContentSink::FlushPendingNotifications(mozFlushType aType)
+ {
+   // Only flush tags if we're not doing the notification ourselves
+   // (since we aren't reentrant)
+   if (!mInNotification) {
+@@ -1007,17 +1012,17 @@ HTMLContentSink::FlushPendingNotificatio
+ nsresult
+ HTMLContentSink::FlushTags()
+ {
+   if (!mNotifiedRootInsertion) {
+     NotifyRootInsertion();
+     return NS_OK;
+   }
+   
+-  return mCurrentContext ? mCurrentContext->FlushTags() : NS_OK;
++  return mCurrentContext ? mContext->FlushTags() : NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ HTMLContentSink::SetDocumentCharset(nsACString& aCharset)
+ {
+   MOZ_ASSERT_UNREACHABLE("<meta charset> case doesn't occur with about:blank");
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }

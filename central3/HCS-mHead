@@ -1,0 +1,76 @@
+From: Ms2ger <ms2ger@gmail.com>
+Remove HTMLContentSink's mHead member field.
+
+It is never used outside HTMLContentSink::Init.
+
+diff --git a/dom/html/nsHTMLContentSink.cpp b/dom/html/nsHTMLContentSink.cpp
+--- a/dom/html/nsHTMLContentSink.cpp
++++ b/dom/html/nsHTMLContentSink.cpp
+@@ -150,17 +150,16 @@ public:
+ 
+ protected:
+   virtual ~HTMLContentSink();
+ 
+   nsCOMPtr<nsIHTMLDocument> mHTMLDocument;
+ 
+   nsRefPtr<nsGenericHTMLElement> mRoot;
+   nsRefPtr<nsGenericHTMLElement> mBody;
+-  nsRefPtr<nsGenericHTMLElement> mHead;
+ 
+   nsAutoTArray<SinkContext*, 8> mContextStack;
+   SinkContext* mCurrentContext;
+ 
+   // Boolean indicating whether we've notified insertion of our root content
+   // yet.  We want to make sure to only do this once.
+   bool mNotifiedRootInsertion;
+ 
+@@ -659,24 +658,22 @@ HTMLContentSink::~HTMLContentSink()
+ }
+ 
+ NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLContentSink)
+ 
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLContentSink, nsContentSink)
+   NS_IMPL_CYCLE_COLLECTION_UNLINK(mHTMLDocument)
+   NS_IMPL_CYCLE_COLLECTION_UNLINK(mRoot)
+   NS_IMPL_CYCLE_COLLECTION_UNLINK(mBody)
+-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mHead)
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLContentSink,
+                                                   nsContentSink)
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mHTMLDocument)
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRoot)
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBody)
+-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mHead)
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+ 
+ NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLContentSink)
+   NS_INTERFACE_TABLE_BEGIN
+     NS_INTERFACE_TABLE_ENTRY(HTMLContentSink, nsIContentSink)
+     NS_INTERFACE_TABLE_ENTRY(HTMLContentSink, nsIHTMLContentSink)
+   NS_INTERFACE_TABLE_END
+ NS_INTERFACE_TABLE_TAIL_INHERITING(nsContentSink)
+@@ -719,22 +716,22 @@ HTMLContentSink::Init(nsIDocument* aDoc,
+   rv = mDocument->AppendChildTo(mRoot, false);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   // Make head part
+   nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::head,
+                                            nullptr, kNameSpaceID_XHTML,
+                                            nsIDOMNode::ELEMENT_NODE);
+ 
+-  mHead = NS_NewHTMLHeadElement(nodeInfo.forget());
++  nsRefPtr<nsGenericHTMLElement> head = NS_NewHTMLHeadElement(nodeInfo.forget());
+   if (NS_FAILED(rv)) {
+     return NS_ERROR_OUT_OF_MEMORY;
+   }
+ 
+-  mRoot->AppendChildTo(mHead, false);
++  mRoot->AppendChildTo(head, false);
+ 
+   mCurrentContext = new SinkContext(this);
+   mCurrentContext->Begin(eHTMLTag_html, mRoot, 0, -1);
+   mContextStack.AppendElement(mCurrentContext);
+ 
+   return NS_OK;
+ }
+ 

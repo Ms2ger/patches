@@ -1,0 +1,128 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -1713,20 +1713,20 @@ nsDOMConstructor::ToString(nsAString &aR
+   aResult.AssignLiteral("[object ");
+   aResult.Append(mClassName);
+   aResult.Append(char16_t(']'));
+ 
+   return NS_OK;
+ }
+ 
+ 
+-static nsresult
+-GetXPCProto(nsIXPConnect *aXPConnect, JSContext *cx, nsGlobalWindow *aWin,
+-            const nsGlobalNameStruct *aNameStruct,
+-            JS::MutableHandle<JSObject*> aProto)
++nsresult
++nsGlobalWindow::GetXPCProto(nsIXPConnect* aXPConnect, JSContext* cx,
++                            const nsGlobalNameStruct* aNameStruct,
++                            JS::MutableHandle<JSObject*> aProto)
+ {
+   NS_ASSERTION(aNameStruct->mType ==
+                  nsGlobalNameStruct::eTypeClassConstructor ||
+                aNameStruct->mType == nsGlobalNameStruct::eTypeExternalClassInfo,
+                "Wrong type!");
+ 
+   nsCOMPtr<nsIClassInfo> ci;
+   if (aNameStruct->mType == nsGlobalNameStruct::eTypeClassConstructor) {
+@@ -1739,17 +1739,17 @@ GetXPCProto(nsIXPConnect *aXPConnect, JS
+   }
+   else {
+     ci = nsDOMClassInfo::GetClassInfoInstance(aNameStruct->mData);
+   }
+   NS_ENSURE_TRUE(ci, NS_ERROR_UNEXPECTED);
+ 
+   nsCOMPtr<nsIXPConnectJSObjectHolder> proto_holder;
+   nsresult rv =
+-    aXPConnect->GetWrappedNativePrototype(cx, aWin->GetGlobalJSObject(), ci,
++    aXPConnect->GetWrappedNativePrototype(cx, GetGlobalJSObject(), ci,
+                                           getter_AddRefs(proto_holder));
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   aProto.set(proto_holder->GetJSObject());
+   return JS_WrapObject(cx, aProto) ? NS_OK : NS_ERROR_FAILURE;
+ }
+ 
+ // Either ci_data must be non-null or name_struct must be non-null and of type
+@@ -2172,17 +2172,17 @@ nsGlobalWindow::GlobalResolve(JSContext*
+     if (!OldBindingConstructorEnabled(name_struct, this, cx)) {
+       return NS_OK;
+     }
+ 
+     // Create the XPConnect prototype for our classinfo, PostCreateProto will
+     // set up the prototype chain.  This will go ahead and define things on the
+     // actual window's global.
+     JS::Rooted<JSObject*> dot_prototype(cx);
+-    rv = GetXPCProto(nsDOMClassInfo::sXPConnect, cx, this, name_struct,
++    rv = GetXPCProto(nsDOMClassInfo::sXPConnect, cx, name_struct,
+                      &dot_prototype);
+     NS_ENSURE_SUCCESS(rv, rv);
+     MOZ_ASSERT(dot_prototype);
+ 
+     bool isXray = xpc::WrapperFactory::IsXrayWrapper(obj);
+     MOZ_ASSERT_IF(obj != GetGlobalJSObject(), isXray);
+     if (!isXray) {
+       // GetXPCProto already defined the property for us
+@@ -2217,17 +2217,17 @@ nsGlobalWindow::GlobalResolve(JSContext*
+     const nsGlobalNameStruct *alias_struct =
+       nameSpaceManager->GetConstructorProto(name_struct);
+     NS_ENSURE_TRUE(alias_struct, NS_ERROR_UNEXPECTED);
+ 
+     // We need to use the XPConnect prototype for the DOM class that this
+     // constructor is an alias for (for example for Image we need the prototype
+     // for HTMLImageElement).
+     JS::Rooted<JSObject*> dot_prototype(cx);
+-    rv = GetXPCProto(nsDOMClassInfo::sXPConnect, cx, this, alias_struct,
++    rv = GetXPCProto(nsDOMClassInfo::sXPConnect, cx, alias_struct,
+                      &dot_prototype);
+     NS_ENSURE_SUCCESS(rv, rv);
+     MOZ_ASSERT(dot_prototype);
+ 
+     const nsDOMClassInfoData *ci_data;
+     if (alias_struct->mType == nsGlobalNameStruct::eTypeClassConstructor) {
+       ci_data = &sClassInfoData[alias_struct->mDOMClassInfoID];
+     } else if (alias_struct->mType == nsGlobalNameStruct::eTypeExternalClassInfo) {
+diff --git a/dom/base/nsGlobalWindow.h b/dom/base/nsGlobalWindow.h
+--- a/dom/base/nsGlobalWindow.h
++++ b/dom/base/nsGlobalWindow.h
+@@ -85,16 +85,17 @@ class nsIWebBrowserChrome;
+ class nsDOMWindowList;
+ class nsLocation;
+ class nsScreen;
+ class nsHistory;
+ class nsGlobalWindowObserver;
+ class nsGlobalWindow;
+ class nsDOMWindowUtils;
+ class nsIIdleService;
++struct nsGlobalNameStruct;
+ struct nsIntSize;
+ struct nsRect;
+ 
+ class nsWindowSizes;
+ 
+ namespace mozilla {
+ class DOMEventTargetHelper;
+ namespace dom {
+@@ -494,16 +495,19 @@ public:
+   static bool IsPrivilegedChromeWindow(JSContext* /* unused */, JSObject* aObj);
+ 
+   static bool IsShowModalDialogEnabled(JSContext* /* unused */ = nullptr,
+                                        JSObject* /* unused */ = nullptr);
+ 
+ private:
+   nsresult LookupComponentsShim(JSContext* aCx, JS::Handle<JSObject*> aGlobal,
+                                 JS::MutableHandle<JSPropertyDescriptor> aDesc);
++  nsresult GetXPCProto(nsIXPConnect* aXPConnect, JSContext* aCx,
++                       const nsGlobalNameStruct* aNameStruct,
++                       JS::MutableHandle<JSObject*> aProto);
+   nsresult GlobalResolve(JSContext* aCx, JS::Handle<JSObject*> aObj,
+                          JS::Handle<jsid> aId,
+                          JS::MutableHandle<JSPropertyDescriptor> aDesc);
+ 
+ public:
+   bool DoResolve(JSContext* aCx, JS::Handle<JSObject*> aObj,
+                  JS::Handle<jsid> aId,
+                  JS::MutableHandle<JSPropertyDescriptor> aDesc);

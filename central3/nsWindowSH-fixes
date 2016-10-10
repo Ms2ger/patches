@@ -1,0 +1,225 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -1230,18 +1230,20 @@ BaseStubConstructor(nsIWeakReference* aW
+     NS_ERROR("Failed to create the object");
+     return rv;
+   }
+ 
+   js::AssertSameCompartment(cx, obj);
+   return nsContentUtils::WrapNative(cx, native, args.rval(), true);
+ }
+ 
+-static nsresult
+-DefineInterfaceConstants(JSContext *cx, JS::Handle<JSObject*> obj, const nsIID *aIID)
++/* static */ nsresult
++nsDOMClassInfo::DefineInterfaceConstants(JSContext* cx,
++                                         JS::Handle<JSObject*> obj,
++                                         const nsIID* aIID)
+ {
+   nsCOMPtr<nsIInterfaceInfoManager>
+     iim(do_GetService(NS_INTERFACEINFOMANAGER_SERVICE_CONTRACTID));
+   NS_ENSURE_TRUE(iim, NS_ERROR_UNEXPECTED);
+ 
+   nsCOMPtr<nsIInterfaceInfo> if_info;
+ 
+   nsresult rv = iim->GetInfoForIID(aIID, getter_AddRefs(if_info));
+@@ -1664,17 +1666,17 @@ nsDOMConstructor::ResolveInterfaceConsta
+     class_iid =
+       sClassInfoData[class_name_struct->mDOMClassInfoID].mProtoChainInterface;
+   } else if (class_name_struct->mType == nsGlobalNameStruct::eTypeExternalClassInfo) {
+     class_iid = class_name_struct->mData->mProtoChainInterface;
+   } else {
+     return NS_OK;
+   }
+ 
+-  nsresult rv = DefineInterfaceConstants(cx, obj, class_iid);
++  nsresult rv = nsDOMClassInfo::DefineInterfaceConstants(cx, obj, class_iid);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsDOMConstructor::ToString(nsAString &aResult)
+ {
+diff --git a/dom/base/nsDOMClassInfo.h b/dom/base/nsDOMClassInfo.h
+--- a/dom/base/nsDOMClassInfo.h
++++ b/dom/base/nsDOMClassInfo.h
+@@ -19,16 +19,17 @@
+ #endif
+ 
+ class nsContentList;
+ class nsDocument;
+ struct nsGlobalNameStruct;
+ class nsGlobalWindow;
+ class nsIScriptSecurityManager;
+ class nsIDOMDOMConstructor;
++class nsScriptNameSpaceManager;
+ 
+ struct nsDOMClassInfoData;
+ 
+ typedef nsIClassInfo* (*nsDOMClassInfoConstructorFnc)
+   (nsDOMClassInfoData* aData);
+ 
+ typedef nsresult (*nsDOMConstructorFunc)(nsISupports** aNewObject);
+ 
+@@ -134,16 +135,20 @@ public:
+                                    JS::MutableHandle<JSPropertyDescriptor> aCtorDesc);
+ 
+   static nsresult CreateConstructor(const char16_t* aName,
+                                     const nsDOMClassInfoData* aData,
+                                     const nsGlobalNameStruct* aNameStruct,
+                                     nsPIDOMWindow* aOwner,
+                                     nsIDOMDOMConstructor** aResult);
+ 
++  static nsresult DefineInterfaceConstants(JSContext* aCx,
++                                           JS::Handle<JSObject*> aObject,
++                                           const nsIID* aIID);
++
+ protected:
+   friend nsIClassInfo* NS_GetDOMClassInfoInstance(nsDOMClassInfoID aID);
+ 
+   const nsDOMClassInfoData* mData;
+ 
+   virtual void PreserveWrapper(nsISupports *aNative) override
+   {
+   }
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -216,16 +216,17 @@
+ #include "mozilla/dom/PopStateEvent.h"
+ #include "mozilla/dom/PopupBlockedEvent.h"
+ #include "mozilla/dom/WindowBinding.h"
+ #include "nsITabChild.h"
+ #include "mozilla/dom/MediaQueryList.h"
+ #include "mozilla/dom/ScriptSettings.h"
+ #include "mozilla/dom/NavigatorBinding.h"
+ #include "nsIDOMConstructor.h"
++#include "nsIDOMGlobalPropertyInitializer.h"
+ 
+ #ifdef HAVE_SIDEBAR
+ #include "mozilla/dom/ExternalBinding.h"
+ #endif
+ 
+ #ifdef MOZ_WEBSPEECH
+ #include "mozilla/dom/SpeechSynthesis.h"
+ #endif
+@@ -4643,17 +4644,18 @@ nsGlobalWindow::GlobalResolve(JSContext*
+ 
+     JS::Rooted<JSObject*> class_obj(cx, &v.toObject());
+ 
+     // ... and define the constants from the DOM interface on that
+     // constructor object.
+ 
+     {
+       JSAutoCompartment ac(cx, class_obj);
+-      rv = DefineInterfaceConstants(cx, class_obj, &name_struct->mIID);
++      rv = nsDOMClassInfo::DefineInterfaceConstants(cx, class_obj,
++                                                    &name_struct->mIID);
+       NS_ENSURE_SUCCESS(rv, rv);
+     }
+ 
+     if (!JS_WrapValue(cx, &v)) {
+       return NS_ERROR_UNEXPECTED;
+     }
+ 
+     FillPropertyDescriptor(desc, obj, 0, v);
+@@ -4665,34 +4667,34 @@ nsGlobalWindow::GlobalResolve(JSContext*
+     if (!OldBindingConstructorEnabled(name_struct, cx)) {
+       return NS_OK;
+     }
+ 
+     // Create the XPConnect prototype for our classinfo, PostCreateProto will
+     // set up the prototype chain.  This will go ahead and define things on the
+     // actual window's global.
+     JS::Rooted<JSObject*> dot_prototype(cx);
+-    rv = GetXPCProto(nsDOMClassInfo::sXPConnect, cx, name_struct,
++    rv = GetXPCProto(nsDOMClassInfo::XPConnect(), cx, name_struct,
+                      &dot_prototype);
+     NS_ENSURE_SUCCESS(rv, rv);
+     MOZ_ASSERT(dot_prototype);
+ 
+     bool isXray = xpc::WrapperFactory::IsXrayWrapper(obj);
+     MOZ_ASSERT_IF(obj != GetGlobalJSObject(), isXray);
+     if (!isXray) {
+       // GetXPCProto already defined the property for us
+       FillPropertyDescriptor(desc, obj, JS::UndefinedValue(), false);
+       return NS_OK;
+     }
+ 
+     // This is the Xray case.  Look up the constructor object for this
+     // prototype.
+     const nsDOMClassInfoData *ci_data;
+     if (name_struct->mType == nsGlobalNameStruct::eTypeClassConstructor) {
+-      ci_data = &sClassInfoData[name_struct->mDOMClassInfoID];
++      ci_data = nullptr;//XXX&sClassInfoData[name_struct->mDOMClassInfoID];
+     } else {
+       ci_data = name_struct->mData;
+     }
+ 
+     return nsDOMClassInfo::ResolvePrototype(this, cx, obj, class_name,
+                                             ci_data, name_struct,
+                                             nameSpaceManager, dot_prototype,
+                                             desc);
+@@ -4710,24 +4712,24 @@ nsGlobalWindow::GlobalResolve(JSContext*
+     const nsGlobalNameStruct *alias_struct =
+       nameSpaceManager->GetConstructorProto(name_struct);
+     NS_ENSURE_TRUE(alias_struct, NS_ERROR_UNEXPECTED);
+ 
+     // We need to use the XPConnect prototype for the DOM class that this
+     // constructor is an alias for (for example for Image we need the prototype
+     // for HTMLImageElement).
+     JS::Rooted<JSObject*> dot_prototype(cx);
+-    rv = GetXPCProto(nsDOMClassInfo::sXPConnect, cx, alias_struct,
++    rv = GetXPCProto(nsDOMClassInfo::XPConnect(), cx, alias_struct,
+                      &dot_prototype);
+     NS_ENSURE_SUCCESS(rv, rv);
+     MOZ_ASSERT(dot_prototype);
+ 
+     const nsDOMClassInfoData *ci_data;
+     if (alias_struct->mType == nsGlobalNameStruct::eTypeClassConstructor) {
+-      ci_data = &sClassInfoData[alias_struct->mDOMClassInfoID];
++      ci_data = nullptr;//XXX&sClassInfoData[alias_struct->mDOMClassInfoID];
+     } else if (alias_struct->mType == nsGlobalNameStruct::eTypeExternalClassInfo) {
+       ci_data = alias_struct->mData;
+     } else {
+       return NS_ERROR_UNEXPECTED;
+     }
+ 
+     return nsDOMClassInfo::ResolvePrototype(this, cx, obj, class_name,
+                                             ci_data, name_struct,
+diff --git a/dom/base/nsGlobalWindow.h b/dom/base/nsGlobalWindow.h
+--- a/dom/base/nsGlobalWindow.h
++++ b/dom/base/nsGlobalWindow.h
+@@ -501,25 +501,25 @@ private:
+   nsresult LookupComponentsShim(JSContext* aCx, JS::Handle<JSObject*> aGlobal,
+                                 JS::MutableHandle<JSPropertyDescriptor> aDesc);
+   nsresult GetXPCProto(nsIXPConnect* aXPConnect, JSContext* aCx,
+                        const nsGlobalNameStruct* aNameStruct,
+                        JS::MutableHandle<JSObject*> aProto);
+   nsresult GlobalResolve(JSContext* aCx, JS::Handle<JSObject*> aObj,
+                          JS::Handle<jsid> aId,
+                          JS::MutableHandle<JSPropertyDescriptor> aDesc);
+-  bool NameStructEnabled(JSContext* aCx, const nsAString& aName,
+-                         const nsGlobalNameStruct& aNameStruct);
+   bool OldBindingConstructorEnabled(const nsGlobalNameStruct* aStruct,
+                                     JSContext* aCx);
+ 
+ public:
+   bool DoResolve(JSContext* aCx, JS::Handle<JSObject*> aObj,
+                  JS::Handle<jsid> aId,
+                  JS::MutableHandle<JSPropertyDescriptor> aDesc);
++  bool NameStructEnabled(JSContext* aCx, const nsAString& aName,
++                         const nsGlobalNameStruct& aNameStruct);
+ 
+   void GetOwnPropertyNames(JSContext* aCx, nsTArray<nsString>& aNames,
+                            mozilla::ErrorResult& aRv);
+ 
+   // Object Management
+   static already_AddRefed<nsGlobalWindow> Create(nsGlobalWindow *aOuterWindow);
+ 
+   static nsGlobalWindow *FromSupports(nsISupports *supports)
