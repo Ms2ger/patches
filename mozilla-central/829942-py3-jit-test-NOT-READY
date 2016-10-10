@@ -1,0 +1,66 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 829942 - Make jit_test.py Py3k-readier; r=terrence+jhammel f=decoder
+
+diff --git a/js/src/tests/lib/jittests.py b/js/src/tests/lib/jittests.py
+--- a/js/src/tests/lib/jittests.py
++++ b/js/src/tests/lib/jittests.py
+@@ -1,17 +1,18 @@
+ #!/usr/bin/env python
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ 
+ # jit_test.py -- Python harness for JavaScript trace tests.
+ 
+-from __future__ import print_function
++from __future__ import print_function, unicode_literals
++
+ import os, sys, tempfile, traceback, time
+ import subprocess
+ from subprocess import Popen, PIPE
+ from threading import Thread
+ import signal
+ 
+ try:
+     from multiprocessing import Process, Manager, cpu_count
+@@ -151,18 +152,18 @@ class Test:
+             test.valgrind = True
+ 
+         return test
+ 
+     def command(self, prefix):
+         scriptdir_var = os.path.dirname(self.path);
+         if not scriptdir_var.endswith('/'):
+             scriptdir_var += '/'
+-        expr = ("const platform=%r; const libdir=%r; const scriptdir=%r"
+-                % (sys.platform, LIB_DIR, scriptdir_var))
++        consts = (('platform', sys.platform), ('libdir', libdir_var), ('scriptdir', scriptdir_var))
++        expr = '; '.join('const %s="%s"' % const for const in consts)
+         # We may have specified '-a' or '-d' twice: once via --jitflags, once
+         # via the "|jit-test|" line.  Remove dups because they are toggles.
+         cmd = prefix + list(set(self.jitflags)) + ['-e', expr, '-f', self.path]
+         if self.valgrind:
+             cmd = self.VALGRIND_CMD + cmd
+         return cmd
+ 
+ def find_tests(substring=None):
+@@ -277,16 +278,18 @@ def run_test(test, prefix, options):
+     else:
+         run = run_cmd
+ 
+     env = os.environ.copy()
+     if test.tz_pacific:
+         env['TZ'] = 'PST8PDT'
+ 
+     out, err, code, timed_out = run(cmd, env, options.timeout)
++    out = out.decode('utf-8')
++    err = err.decode('utf-8')
+     return TestOutput(test, cmd, out, err, code, None, timed_out)
+ 
+ def check_output(out, err, rc, test):
+     if test.expect_error:
+         # The shell exits with code 3 on uncaught exceptions.
+         return test.expect_error in err and rc == 3
+ 
+     for line in out.split('\n'):

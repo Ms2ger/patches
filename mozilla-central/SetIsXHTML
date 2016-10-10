@@ -1,0 +1,113 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/public/nsIDocument.h b/content/base/public/nsIDocument.h
+--- a/content/base/public/nsIDocument.h
++++ b/content/base/public/nsIDocument.h
+@@ -851,16 +851,20 @@ public:
+   virtual void GetXMLDeclaration(nsAString& aVersion,
+                                  nsAString& aEncoding,
+                                  nsAString& Standalone) = 0;
+ 
+   bool IsHTML() const
+   {
+     return mIsRegularHTML;
+   }
++  void SetIsXHTML(bool aXHTML)
++  {
++    mIsRegularHTML = !aXHTML;
++  }
+   bool IsXUL() const
+   {
+     return mIsXUL;
+   }
+ 
+   virtual bool IsScriptEnabled() = 0;
+ 
+   virtual nsresult AddXMLEventsContent(nsIContent * aXMLEventsElement) = 0;
+diff --git a/content/base/src/nsDocument.cpp b/content/base/src/nsDocument.cpp
+--- a/content/base/src/nsDocument.cpp
++++ b/content/base/src/nsDocument.cpp
+@@ -7618,19 +7618,19 @@ nsDocument::CloneDocHelper(nsDocument* c
+   // State from nsIDocument
+   clone->mCharacterSet = mCharacterSet;
+   clone->mCharacterSetSource = mCharacterSetSource;
+   clone->mCompatMode = mCompatMode;
+   clone->mBidiOptions = mBidiOptions;
+   clone->mContentLanguage = mContentLanguage;
+   clone->SetContentTypeInternal(GetContentTypeInternal());
+   clone->mSecurityInfo = mSecurityInfo;
++  clone->mIsRegularHTML = mIsRegularHTML;
+ 
+   // State from nsDocument
+-  clone->mIsRegularHTML = mIsRegularHTML;
+   clone->mXMLDeclarationBits = mXMLDeclarationBits;
+   clone->mBaseTarget = mBaseTarget;
+   return NS_OK;
+ }
+ 
+ void
+ nsDocument::SetReadyStateInternal(ReadyState rs)
+ {
+diff --git a/content/html/document/src/nsHTMLDocument.h b/content/html/document/src/nsHTMLDocument.h
+--- a/content/html/document/src/nsHTMLDocument.h
++++ b/content/html/document/src/nsHTMLDocument.h
+@@ -174,17 +174,16 @@ public:
+ 
+   virtual void ScriptLoading(nsIScriptElement *aScript);
+   virtual void ScriptExecuted(nsIScriptElement *aScript);
+ 
+   virtual void AddedForm();
+   virtual void RemovedForm();
+   virtual int32_t GetNumFormsSynchronous();
+   virtual void TearingDownEditor(nsIEditor *aEditor);
+-  virtual void SetIsXHTML(bool aXHTML) { mIsRegularHTML = !aXHTML; }
+   virtual void SetDocWriteDisabled(bool aDisabled)
+   {
+     mDisableDocWrite = aDisabled;
+   }
+ 
+   nsresult ChangeContentEditableCount(nsIContent *aElement, int32_t aChange);
+   void DeferredContentEditableCountChange(nsIContent *aElement);
+ 
+diff --git a/content/html/document/src/nsIHTMLDocument.h b/content/html/document/src/nsIHTMLDocument.h
+--- a/content/html/document/src/nsIHTMLDocument.h
++++ b/content/html/document/src/nsIHTMLDocument.h
+@@ -178,16 +178,14 @@ public:
+    */
+   virtual nsIContent* GetBodyContentExternal() = 0;
+ 
+   /**
+    * Called when this nsIHTMLDocument's editor is destroyed.
+    */
+   virtual void TearingDownEditor(nsIEditor *aEditor) = 0;
+ 
+-  virtual void SetIsXHTML(bool aXHTML) = 0;
+-
+   virtual void SetDocWriteDisabled(bool aDisabled) = 0;
+ };
+ 
+ NS_DEFINE_STATIC_IID_ACCESSOR(nsIHTMLDocument, NS_IHTMLDOCUMENT_IID)
+ 
+ #endif /* nsIHTMLDocument_h */
+diff --git a/content/xml/document/src/nsXMLDocument.cpp b/content/xml/document/src/nsXMLDocument.cpp
+--- a/content/xml/document/src/nsXMLDocument.cpp
++++ b/content/xml/document/src/nsXMLDocument.cpp
+@@ -156,17 +156,17 @@ NS_NewDOMDocument(nsIDOMDocument** aInst
+   if (NS_FAILED(rv)) {
+     return rv;
+   }
+ 
+   if (isHTML) {
+     nsCOMPtr<nsIHTMLDocument> htmlDoc = do_QueryInterface(d);
+     NS_ASSERTION(htmlDoc, "HTML Document doesn't implement nsIHTMLDocument?");
+     htmlDoc->SetCompatibilityMode(eCompatibility_FullStandards);
+-    htmlDoc->SetIsXHTML(isXHTML);
++    d->SetIsXHTML(isXHTML);
+   }
+   nsDocument* doc = static_cast<nsDocument*>(d.get());
+   doc->SetLoadedAsData(aLoadedAsData);
+   doc->nsDocument::SetDocumentURI(aDocumentURI);
+   // Must set the principal first, since SetBaseURI checks it.
+   doc->SetPrincipal(aPrincipal);
+   doc->SetBaseURI(aBaseURI);
+ 

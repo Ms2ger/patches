@@ -1,0 +1,107 @@
+diff --git a/js/src/editline/Makefile.in b/js/src/editline/Makefile.in
+--- a/js/src/editline/Makefile.in
++++ b/js/src/editline/Makefile.in
+@@ -10,12 +10,12 @@ srcdir		= @srcdir@
+ VPATH           = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ FORCE_STATIC_LIB = 1
+ 
+ CSRCS = editline.c sysunix.c
+ 
+-DEFINES += -DANSI_ARROWS -DHAVE_TCGETATTR -DHIDE -DUSE_DIRENT -DSYS_UNIX \
++DEFINES += -DANSI_ARROWS -DHAVE_TCGETATTR -DUSE_DIRENT -DSYS_UNIX \
+ 	-DHAVE_STDLIB -DUNIQUE_HISTORY
+ 
+ include $(topsrcdir)/config/rules.mk
+diff --git a/js/src/jsapi-tests/testContexts.cpp b/js/src/jsapi-tests/testContexts.cpp
+--- a/js/src/jsapi-tests/testContexts.cpp
++++ b/js/src/jsapi-tests/testContexts.cpp
+@@ -31,17 +31,17 @@ BEGIN_TEST(testContexts_IsRunning)
+     }
+ END_TEST(testContexts_IsRunning)
+ 
+ BEGIN_TEST(testContexts_bug563735)
+ {
+     JSContext *cx2 = JS_NewContext(rt, 8192);
+     CHECK(cx2);
+ 
+-    JSBool ok;
++    JSBool ok = false;
+     {
+         JSAutoRequest req(cx2);
+         JSAutoCompartment ac(cx2, global);
+         jsval v = JSVAL_NULL;
+         ok = JS_SetProperty(cx2, global, "x", &v);
+     }
+     CHECK(ok);
+ 
+diff --git a/js/src/vm/Debugger.cpp b/js/src/vm/Debugger.cpp
+--- a/js/src/vm/Debugger.cpp
++++ b/js/src/vm/Debugger.cpp
+@@ -5359,17 +5359,17 @@ DebuggerEnv_setVariable(JSContext *cx, u
+         ac.construct(cx, env);
+         if (!cx->compartment()->wrapId(cx, id.address()) || !cx->compartment()->wrap(cx, &v))
+             return false;
+ 
+         /* This can trigger setters. */
+         ErrorCopier ec(ac, dbg->toJSObject());
+ 
+         /* Make sure the environment actually has the specified binding. */
+-        bool has;
++        bool has = false;
+         if (!JSObject::hasProperty(cx, env, id, &has))
+             return false;
+         if (!has) {
+             JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_DEBUG_VARIABLE_NOT_FOUND);
+             return false;
+         }
+ 
+         /* Just set the property. */
+diff --git a/js/xpconnect/shell/xpcshell.cpp b/js/xpconnect/shell/xpcshell.cpp
+--- a/js/xpconnect/shell/xpcshell.cpp
++++ b/js/xpconnect/shell/xpcshell.cpp
+@@ -1531,17 +1531,17 @@ static JSSecurityCallbacks shellSecurity
+ int
+ main(int argc, char **argv, char **envp)
+ {
+ #ifdef XP_MACOSX
+     InitAutoreleasePool();
+ #endif
+     JSRuntime *rt;
+     JSContext *cx;
+-    int result;
++    int result = 0;
+     nsresult rv;
+ 
+ #ifdef HAVE_SETBUF
+     // unbuffer stdout so that output is in the correct order; note that stderr
+     // is unbuffered by default
+     setbuf(stdout, 0);
+ #endif
+ 
+diff --git a/js/xpconnect/src/XPCWrappedNativeJSOps.cpp b/js/xpconnect/src/XPCWrappedNativeJSOps.cpp
+--- a/js/xpconnect/src/XPCWrappedNativeJSOps.cpp
++++ b/js/xpconnect/src/XPCWrappedNativeJSOps.cpp
+@@ -925,18 +925,18 @@ XPC_WN_Helper_NewResolve(JSContext *cx, 
+     XPCCallContext ccx(JS_CALLER, cx, obj);
+     XPCWrappedNative* wrapper = ccx.GetWrapper();
+     THROW_AND_RETURN_IF_BAD_WRAPPER(cx, wrapper);
+ 
+     RootedId old(cx, ccx.SetResolveName(id));
+ 
+     XPCNativeScriptableInfo* si = wrapper->GetScriptableInfo();
+     if (si && si->GetFlags().WantNewResolve()) {
+-        XPCWrappedNative* oldResolvingWrapper;
+-        JSBool allowPropMods = si->GetFlags().AllowPropModsDuringResolve();
++        XPCWrappedNative *oldResolvingWrapper = nullptr;
++        const bool allowPropMods = si->GetFlags().AllowPropModsDuringResolve();
+ 
+         if (allowPropMods)
+             oldResolvingWrapper = ccx.SetResolvingWrapper(wrapper);
+ 
+         rv = si->GetCallback()->NewResolve(wrapper, cx, obj, id, flags,
+                                            obj2FromScriptable.address(), &retval);
+ 
+         if (allowPropMods)

@@ -1,0 +1,139 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/public/nsIScriptElement.h b/content/base/public/nsIScriptElement.h
+--- a/content/base/public/nsIScriptElement.h
++++ b/content/base/public/nsIScriptElement.h
+@@ -38,17 +38,17 @@
+ 
+ #ifndef nsIScriptElement_h___
+ #define nsIScriptElement_h___
+ 
+ #include "nsISupports.h"
+ #include "nsIURI.h"
+ #include "nsCOMPtr.h"
+ #include "nsIScriptLoaderObserver.h"
+-#include "nsWeakPtr.h"
++#include "nsIWeakReferenceUtils.h"
+ #include "nsIParser.h"
+ #include "nsContentCreatorFunctions.h"
+ #include "nsIDOMHTMLScriptElement.h"
+ 
+ #define NS_ISCRIPTELEMENT_IID \
+ { 0x5bb3b905, 0x5988, 0x476f, \
+   { 0x95, 0x4f, 0x99, 0x02, 0x59, 0x82, 0x24, 0x67 } }
+ 
+@@ -178,17 +178,17 @@ public:
+     if (htmlScript) {
+       htmlScript->GetAsync(&async);
+     }
+     mForceAsync = !async;
+   }
+ 
+   void SetCreatorParser(nsIParser* aParser)
+   {
+-    mCreatorParser = getter_AddRefs(NS_GetWeakReference(aParser));
++    mCreatorParser = do_GetWeakReference(aParser);
+   }
+ 
+   /**
+    * Informs the creator parser that the evaluation of this script is starting
+    */
+   void BeginEvaluating()
+   {
+     nsCOMPtr<nsIParser> parser = do_QueryReferent(mCreatorParser);
+diff --git a/xpcom/ds/nsArray.cpp b/xpcom/ds/nsArray.cpp
+--- a/xpcom/ds/nsArray.cpp
++++ b/xpcom/ds/nsArray.cpp
+@@ -34,16 +34,17 @@
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsArray.h"
+ #include "nsArrayEnumerator.h"
+ #include "nsWeakReference.h"
++#include "nsIWeakReferenceUtils.h"
+ #include "nsThreadUtils.h"
+ 
+ // used by IndexOf()
+ struct findIndexOfClosure
+ {
+     nsISupports *targetElement;
+     uint32_t startIndex;
+     uint32_t resultIndex;
+@@ -134,19 +135,17 @@ nsArray::Enumerate(nsISimpleEnumerator *
+ 
+ // nsIMutableArray implementation
+ 
+ NS_IMETHODIMP
+ nsArray::AppendElement(nsISupports* aElement, bool aWeak)
+ {
+     bool result = false;
+     if (aWeak) {
+-        nsCOMPtr<nsISupports> elementRef =
+-            getter_AddRefs(static_cast<nsISupports*>
+-                                      (NS_GetWeakReference(aElement)));
++        nsCOMPtr<nsISupports> elementRef = do_GetWeakReference(aElement);
+         NS_ASSERTION(elementRef, "AppendElement: Trying to use weak references on an object that doesn't support it");
+         if (!elementRef)
+             return NS_ERROR_FAILURE;
+         result = mArray.AppendObject(elementRef);
+     }
+ 
+     else {
+         // add the object directly
+@@ -162,37 +161,33 @@ nsArray::RemoveElementAt(uint32_t aIndex
+     return result ? NS_OK : NS_ERROR_FAILURE;
+ }
+ 
+ NS_IMETHODIMP
+ nsArray::InsertElementAt(nsISupports* aElement, uint32_t aIndex, bool aWeak)
+ {
+     nsCOMPtr<nsISupports> elementRef;
+     if (aWeak) {
+-        elementRef =
+-            getter_AddRefs(static_cast<nsISupports*>
+-                                      (NS_GetWeakReference(aElement)));
++        elementRef = do_GetWeakReference(aElement);
+         NS_ASSERTION(elementRef, "InsertElementAt: Trying to use weak references on an object that doesn't support it");
+         if (!elementRef)
+             return NS_ERROR_FAILURE;
+     } else {
+         elementRef = aElement;
+     }
+     bool result = mArray.InsertObjectAt(elementRef, aIndex);
+     return result ? NS_OK : NS_ERROR_FAILURE;
+ }
+ 
+ NS_IMETHODIMP
+ nsArray::ReplaceElementAt(nsISupports* aElement, uint32_t aIndex, bool aWeak)
+ {
+     nsCOMPtr<nsISupports> elementRef;
+     if (aWeak) {
+-        elementRef =
+-            getter_AddRefs(static_cast<nsISupports*>
+-                                      (NS_GetWeakReference(aElement)));
++        elementRef = do_GetWeakReference(aElement);
+         NS_ASSERTION(elementRef, "ReplaceElementAt: Trying to use weak references on an object that doesn't support it");
+         if (!elementRef)
+             return NS_ERROR_FAILURE;
+     } else {
+         elementRef = aElement;
+     }
+     bool result = mArray.ReplaceObjectAt(elementRef, aIndex);
+     return result ? NS_OK : NS_ERROR_FAILURE;
+@@ -229,13 +224,11 @@ FindElementCallback(void *aElement, void
+ 
+ nsresult
+ nsArrayConstructor(nsISupports *aOuter, const nsIID& aIID, void **aResult)
+ {
+     if (aOuter)
+         return NS_ERROR_NO_AGGREGATION;
+ 
+     nsCOMPtr<nsIArray> inst = NS_IsMainThread() ? new nsArrayCC : new nsArray;
+-    if (!inst)
+-        return NS_ERROR_OUT_OF_MEMORY;
+ 
+     return inst->QueryInterface(aIID, aResult); 
+ }

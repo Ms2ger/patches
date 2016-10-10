@@ -1,0 +1,92 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/svg/content/src/nsSVGElement.cpp b/content/svg/content/src/nsSVGElement.cpp
+--- a/content/svg/content/src/nsSVGElement.cpp
++++ b/content/svg/content/src/nsSVGElement.cpp
+@@ -1103,33 +1103,32 @@ NS_IMETHODIMP nsSVGElement::SetId(const 
+ {
+   return SetAttr(kNameSpaceID_None, nsGkAtoms::id, aId, true);
+ }
+ 
+ /* readonly attribute nsIDOMSVGSVGElement ownerSVGElement; */
+ NS_IMETHODIMP
+ nsSVGElement::GetOwnerSVGElement(nsIDOMSVGElement * *aOwnerSVGElement)
+ {
+-  ErrorResult rv;
+-  NS_IF_ADDREF(*aOwnerSVGElement = GetOwnerSVGElement(rv));
+-  return rv.ErrorCode();
++  NS_IF_ADDREF(*aOwnerSVGElement = GetOwnerSVGElement());
++  return NS_OK;
+ }
+ 
+ SVGSVGElement*
+-nsSVGElement::GetOwnerSVGElement(ErrorResult& rv)
++nsSVGElement::GetOwnerSVGElement() const
+ {
+-  SVGSVGElement* ownerSVGElement = GetCtx();
+-
+-  // If we didn't find anything and we're not the outermost SVG element,
+-  // we've got an invalid structure
+-  if (!ownerSVGElement && Tag() != nsGkAtoms::svg) {
+-    rv.Throw(NS_ERROR_FAILURE);
++  for (nsIContent* ancestor = nsINode::GetParent();
++       ancestor;
++       ancestor = ancestor->GetParent()) {
++    if (ancestor->IsSVG(nsGkAtoms::svg)) {
++      return static_cast<SVGSVGElement*>(ancestor);
++    }
+   }
+ 
+-  return ownerSVGElement;
++  return nullptr;
+ }
+ 
+ /* readonly attribute nsIDOMSVGElement viewportElement; */
+ NS_IMETHODIMP
+ nsSVGElement::GetViewportElement(nsIDOMSVGElement * *aViewportElement)
+ {
+   nsSVGElement* elem = GetViewportElement();
+   NS_ADDREF(*aViewportElement = elem);
+diff --git a/content/svg/content/src/nsSVGElement.h b/content/svg/content/src/nsSVGElement.h
+--- a/content/svg/content/src/nsSVGElement.h
++++ b/content/svg/content/src/nsSVGElement.h
+@@ -299,17 +299,17 @@ public:
+   virtual nsIAtom* GetTransformListAttrName() const {
+     return nullptr;
+   }
+ 
+   virtual nsIDOMNode* AsDOMNode() MOZ_FINAL MOZ_OVERRIDE { return this; }
+   virtual bool IsTransformable() { return false; }
+ 
+   // WebIDL
+-  mozilla::dom::SVGSVGElement* GetOwnerSVGElement(mozilla::ErrorResult& rv);
++  mozilla::dom::SVGSVGElement* GetOwnerSVGElement() const;
+   nsSVGElement* GetViewportElement();
+   already_AddRefed<mozilla::dom::SVGAnimatedString> ClassName();
+   already_AddRefed<mozilla::dom::CSSValue> GetPresentationAttribute(const nsAString& aName, mozilla::ErrorResult& rv);
+ protected:
+   virtual JSObject* WrapNode(JSContext *cx,
+                              JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+ 
+ #ifdef DEBUG
+diff --git a/dom/webidl/SVGElement.webidl b/dom/webidl/SVGElement.webidl
+--- a/dom/webidl/SVGElement.webidl
++++ b/dom/webidl/SVGElement.webidl
+@@ -23,17 +23,16 @@ interface SVGElement : Element {
+   // http://lists.w3.org/Archives/Public/www-style/2003Oct/0347.html
+   // CSSValue? getPresentationAttribute(DOMString name);
+ 
+   /*[SetterThrows]
+   attribute DOMString xmllang;
+   [SetterThrows]
+   attribute DOMString xmlspace;*/
+ 
+-  [Throws]
+   readonly attribute SVGSVGElement? ownerSVGElement;
+   readonly attribute SVGElement? viewportElement;
+ 
+   [SetterThrows]
+            attribute EventHandler oncopy;
+   [SetterThrows]
+            attribute EventHandler oncut;
+   [SetterThrows]

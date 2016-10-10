@@ -1,0 +1,189 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/public/nsIDocument.h b/content/base/public/nsIDocument.h
+--- a/content/base/public/nsIDocument.h
++++ b/content/base/public/nsIDocument.h
+@@ -66,16 +66,18 @@
+ #endif // MOZ_SMIL
+ #include "nsIScriptGlobalObject.h"
+ #include "nsIDocumentEncoder.h"
+ #include "nsIAnimationFrameListener.h"
+ #include "nsEventStates.h"
+ #include "nsIStructuredCloneContainer.h"
+ #include "nsIBFCacheEntry.h"
+ #include "nsDOMMemoryReporter.h"
++#include "nsHTMLStyleSheet.h"
++#include "nsHTMLCSSStyleSheet.h"
+ 
+ class nsIContent;
+ class nsPresContext;
+ class nsIPresShell;
+ class nsIDocShell;
+ class nsStyleSet;
+ class nsIStyleSheet;
+ class nsIStyleRule;
+@@ -92,18 +94,16 @@ class nsILineBreaker;
+ class nsIWordBreaker;
+ class nsISelection;
+ class nsIChannel;
+ class nsIPrincipal;
+ class nsIDOMDocument;
+ class nsIDOMDocumentType;
+ class nsScriptLoader;
+ class nsIContentSink;
+-class nsHTMLStyleSheet;
+-class nsHTMLCSSStyleSheet;
+ class nsILayoutHistoryState;
+ class nsIVariant;
+ class nsIDOMUserDataHandler;
+ template<class E> class nsCOMArray;
+ class nsIDocumentObserver;
+ class nsBindingManager;
+ class nsIDOMNodeList;
+ class mozAutoSubtreeModified;
+@@ -643,23 +643,27 @@ public:
+    * StartDocumentLoad or Reset were never called)
+    */
+   virtual nsIChannel* GetChannel() const = 0;
+ 
+   /**
+    * Get this document's attribute stylesheet.  May return null if
+    * there isn't one.
+    */
+-  virtual nsHTMLStyleSheet* GetAttributeStyleSheet() const = 0;
++  nsHTMLStyleSheet* GetAttributeStyleSheet() const {
++    return mAttrStyleSheet;
++  }
+ 
+   /**
+    * Get this document's inline style sheet.  May return null if there
+    * isn't one
+    */
+-  virtual nsHTMLCSSStyleSheet* GetInlineStyleSheet() const = 0;
++  nsHTMLCSSStyleSheet* GetInlineStyleSheet() const {
++    return mStyleAttrStyleSheet;
++  }
+ 
+   /**
+    * Get/set the object from which a document can get a script context
+    * and scope. This is the context within which all scripts (during
+    * document creation and during event handling) will run. Note that
+    * this is the *inner* window object.
+    */
+   virtual nsIScriptGlobalObject* GetScriptGlobalObject() const = 0;
+@@ -1800,16 +1804,19 @@ protected:
+   // pointer is non-null iff we're currently in the bfcache.
+   nsIBFCacheEntry *mBFCacheEntry;
+ 
+   // Our base target.
+   nsString mBaseTarget;
+ 
+   nsCOMPtr<nsIStructuredCloneContainer> mStateObjectContainer;
+   nsCOMPtr<nsIVariant> mStateObjectCached;
++
++  nsRefPtr<nsHTMLStyleSheet> mAttrStyleSheet;
++  nsRefPtr<nsHTMLCSSStyleSheet> mStyleAttrStyleSheet;
+ };
+ 
+ NS_DEFINE_STATIC_IID_ACCESSOR(nsIDocument, NS_IDOCUMENT_IID)
+ 
+ /**
+  * mozAutoSubtreeModified batches DOM mutations so that a DOMSubtreeModified
+  * event is dispatched, if necessary, when the outermost mozAutoSubtreeModified
+  * object is deleted.
+diff --git a/content/base/src/nsDocument.h b/content/base/src/nsDocument.h
+--- a/content/base/src/nsDocument.h
++++ b/content/base/src/nsDocument.h
+@@ -116,18 +116,16 @@ class nsDocument;
+ class nsIDTD;
+ class nsIRadioVisitor;
+ class nsIFormControl;
+ struct nsRadioGroupStruct;
+ class nsOnloadBlocker;
+ class nsUnblockOnloadEvent;
+ class nsChildContentList;
+ class nsXMLEventsManager;
+-class nsHTMLStyleSheet;
+-class nsHTMLCSSStyleSheet;
+ class nsDOMNavigationTiming;
+ 
+ /**
+  * Right now our identifier map entries contain information for 'name'
+  * and 'id' mappings of a given string. This is so that
+  * nsHTMLDocument::ResolveName only has to do one hash lookup instead
+  * of two. It's not clear whether this still matters for performance.
+  * 
+@@ -616,32 +614,16 @@ public:
+   virtual int32_t GetNumberOfCatalogStyleSheets() const;
+   virtual nsIStyleSheet* GetCatalogStyleSheetAt(int32_t aIndex) const;
+   virtual void AddCatalogStyleSheet(nsIStyleSheet* aSheet);
+   virtual void EnsureCatalogStyleSheet(const char *aStyleSheetURI);
+ 
+   virtual nsIChannel* GetChannel() const {
+     return mChannel;
+   }
+-
+-  /**
+-   * Get this document's attribute stylesheet.  May return null if
+-   * there isn't one.
+-   */
+-  virtual nsHTMLStyleSheet* GetAttributeStyleSheet() const {
+-    return mAttrStyleSheet;
+-  }
+-
+-  /**
+-   * Get this document's inline style sheet.  May return null if there
+-   * isn't one
+-   */
+-  virtual nsHTMLCSSStyleSheet* GetInlineStyleSheet() const {
+-    return mStyleAttrStyleSheet;
+-  }
+   
+   /**
+    * Set the object from which a document can get a script context.
+    * This is the context within which all scripts (during document
+    * creation and during event handling) will run.
+    */
+   virtual nsIScriptGlobalObject* GetScriptGlobalObject() const;
+   virtual void SetScriptGlobalObject(nsIScriptGlobalObject* aGlobalObject);
+@@ -1130,18 +1112,16 @@ protected:
+   uint8_t mXMLDeclarationBits;
+ 
+   uint8_t mDefaultElementType;
+ 
+   nsInterfaceHashtable<nsVoidPtrHashKey, nsPIBoxObject> *mBoxObjectTable;
+ 
+   // The channel that got passed to StartDocumentLoad(), if any
+   nsCOMPtr<nsIChannel> mChannel;
+-  nsRefPtr<nsHTMLStyleSheet> mAttrStyleSheet;
+-  nsRefPtr<nsHTMLCSSStyleSheet> mStyleAttrStyleSheet;
+   nsRefPtr<nsXMLEventsManager> mXMLEventsManager;
+ 
+   // Our update nesting level
+   uint32_t mUpdateNestLevel;
+ 
+   // The application cache that this document is associated with, if
+   // any.  This can change during the lifetime of the document.
+   nsCOMPtr<nsIApplicationCache> mApplicationCache;
+diff --git a/layout/style/Makefile.in b/layout/style/Makefile.in
+--- a/layout/style/Makefile.in
++++ b/layout/style/Makefile.in
+@@ -68,16 +68,18 @@ EXPORTS		= \
+ 		nsCSSPseudoElementList.h \
+ 		nsCSSPseudoElements.h \
+ 		nsCSSRuleProcessor.h \
+ 		nsCSSStyleSheet.h \
+ 		nsCSSValue.h \
+ 		nsDOMCSSAttrDeclaration.h \
+ 		nsDOMCSSDeclaration.h \
+ 		nsDOMMediaQueryList.h \
++		nsHTMLCSSStyleSheet.h \
++		nsHTMLStyleSheet.h \
+ 		nsICSSDeclaration.h \
+ 		nsICSSLoaderObserver.h \
+ 		nsICSSPseudoComparator.h \
+ 		nsICSSRuleList.h \
+ 		nsICSSStyleRuleDOMWrapper.h \
+ 		nsIStyleRule.h \
+ 		nsIStyleRuleProcessor.h \
+ 		nsIStyleSheet.h \

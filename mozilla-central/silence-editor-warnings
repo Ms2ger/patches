@@ -1,0 +1,190 @@
+diff --git a/editor/composer/src/nsEditingSession.cpp b/editor/composer/src/nsEditingSession.cpp
+--- a/editor/composer/src/nsEditingSession.cpp
++++ b/editor/composer/src/nsEditingSession.cpp
+@@ -1398,7 +1398,9 @@
+ nsresult
+ nsEditingSession::DetachFromWindow(nsIDOMWindow* aWindow)
+ {
+-  NS_ENSURE_TRUE(mDoneSetup, NS_OK);
++  if (!mDoneSetup) {
++    return NS_OK;
++  }
+ 
+   NS_ASSERTION(mStateMaintainer, "mStateMaintainer should exist.");
+ 
+diff --git a/editor/libeditor/base/nsEditor.cpp b/editor/libeditor/base/nsEditor.cpp
+--- a/editor/libeditor/base/nsEditor.cpp
++++ b/editor/libeditor/base/nsEditor.cpp
+@@ -2477,7 +2477,9 @@
+ nsEditor::NotifyDocumentListeners(TDocumentListenerNotification aNotificationType)
+ {
+   int32_t numListeners = mDocStateListeners.Count();
+-  NS_ENSURE_TRUE(numListeners, NS_OK);    // maybe there just aren't any.
++  // maybe there just aren't any.
++  if (!numListeners)
++    return NS_OK;
+  
+   nsCOMArray<nsIDocumentStateListener> listeners(mDocStateListeners);
+   nsresult rv = NS_OK;
+diff --git a/editor/libeditor/base/nsSelectionState.cpp b/editor/libeditor/base/nsSelectionState.cpp
+--- a/editor/libeditor/base/nsSelectionState.cpp
++++ b/editor/libeditor/base/nsSelectionState.cpp
+@@ -246,10 +246,12 @@
+ nsresult
+ nsRangeUpdater::SelAdjCreateNode(nsIDOMNode *aParent, int32_t aPosition)
+ {
+-  if (mLock) return NS_OK;  // lock set by Will/DidReplaceParent, etc...
++  if (mLock)
++    return NS_OK;  // lock set by Will/DidReplaceParent, etc...
+   NS_ENSURE_TRUE(aParent, NS_ERROR_NULL_POINTER);
+   uint32_t i, count = mArray.Length();
+-  NS_ENSURE_TRUE(count, NS_OK);
++  if (!count)
++    return NS_OK;
+ 
+   nsRangeStore *item;
+   
+@@ -276,10 +278,12 @@
+ nsresult
+ nsRangeUpdater::SelAdjDeleteNode(nsIDOMNode *aNode)
+ {
+-  if (mLock) return NS_OK;  // lock set by Will/DidReplaceParent, etc...
++  if (mLock)
++    return NS_OK;  // lock set by Will/DidReplaceParent, etc...
+   NS_ENSURE_TRUE(aNode, NS_ERROR_NULL_POINTER);
+   uint32_t i, count = mArray.Length();
+-  NS_ENSURE_TRUE(count, NS_OK);
++  if (!count)
++    return NS_OK;
+ 
+   nsCOMPtr<nsIDOMNode> parent;
+   int32_t offset = 0;
+@@ -337,7 +341,8 @@
+   if (mLock) return NS_OK;  // lock set by Will/DidReplaceParent, etc...
+   NS_ENSURE_TRUE(aOldRightNode && aNewLeftNode, NS_ERROR_NULL_POINTER);
+   uint32_t i, count = mArray.Length();
+-  NS_ENSURE_TRUE(count, NS_OK);
++  if (!count)
++    return NS_OK;
+ 
+   nsCOMPtr<nsIDOMNode> parent;
+   int32_t offset;
+@@ -393,7 +398,8 @@
+   if (mLock) return NS_OK;  // lock set by Will/DidReplaceParent, etc...
+   NS_ENSURE_TRUE(aLeftNode && aRightNode && aParent, NS_ERROR_NULL_POINTER);
+   uint32_t i, count = mArray.Length();
+-  NS_ENSURE_TRUE(count, NS_OK);
++  if (!count)
++    return NS_OK;
+ 
+   nsRangeStore *item;
+ 
+@@ -463,7 +469,8 @@
+   if (mLock) return NS_OK;  // lock set by Will/DidReplaceParent, etc...
+ 
+   uint32_t count = mArray.Length();
+-  NS_ENSURE_TRUE(count, NS_OK);
++  if (!count)
++    return NS_OK;
+   nsCOMPtr<nsIDOMNode> node(do_QueryInterface(aTextNode));
+   NS_ENSURE_TRUE(node, NS_ERROR_NULL_POINTER);
+   
+@@ -489,7 +496,8 @@
+   if (mLock) return NS_OK;  // lock set by Will/DidReplaceParent, etc...
+ 
+   uint32_t i, count = mArray.Length();
+-  NS_ENSURE_TRUE(count, NS_OK);
++  if (!count)
++    return NS_OK;
+   nsRangeStore *item;
+   nsCOMPtr<nsIDOMNode> node(do_QueryInterface(aTextNode));
+   NS_ENSURE_TRUE(node, NS_ERROR_NULL_POINTER);
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -161,16 +161,16 @@
+ , mInfoYIncrement(20)
+ , mGridSize(0)
+ {
+-} 
++}
+ 
+ nsHTMLEditor::~nsHTMLEditor()
+ {
+-  // remove the rules as an action listener.  Else we get a bad
+-  // ownership loop later on.  it's ok if the rules aren't a listener;
+-  // we ignore the error.
+-  nsCOMPtr<nsIEditActionListener> mListener = do_QueryInterface(mRules);
+-  RemoveEditActionListener(mListener);
+-  
++  // Remove the rules as an action listener.  Else we get a bad ownership loop
++  // later on.
++  nsCOMPtr<nsIEditActionListener> listener = do_QueryInterface(mRules);
++  if (listener)
++    RemoveEditActionListener(listener);
++
+   // Clean up after our anonymous content -- we don't want these nodes to
+   // stay around (which they would, since the frames have an owning reference).
+ 
+diff --git a/editor/libeditor/text/nsPlaintextEditor.cpp b/editor/libeditor/text/nsPlaintextEditor.cpp
+--- a/editor/libeditor/text/nsPlaintextEditor.cpp
++++ b/editor/libeditor/text/nsPlaintextEditor.cpp
+@@ -105,15 +105,16 @@
+ , mCaretStyle(0)
+ #endif
+ {
+-} 
++}
+ 
+ nsPlaintextEditor::~nsPlaintextEditor()
+ {
+-  // remove the rules as an action listener.  Else we get a bad ownership loop later on.
+-  // it's ok if the rules aren't a listener; we ignore the error.
+-  nsCOMPtr<nsIEditActionListener> mListener = do_QueryInterface(mRules);
+-  RemoveEditActionListener(mListener);
+-  
++  // Remove the rules as an action listener.  Else we get a bad ownership loop
++  // later on.
++  nsCOMPtr<nsIEditActionListener> listener = do_QueryInterface(mRules);
++  if (listener)
++    RemoveEditActionListener(listener);
++
+   // Remove event listeners. Note that if we had an HTML editor,
+   //  it installed its own instead of these
+   RemoveEventListeners();
+diff --git a/editor/libeditor/text/nsTextEditRules.cpp b/editor/libeditor/text/nsTextEditRules.cpp
+--- a/editor/libeditor/text/nsTextEditRules.cpp
++++ b/editor/libeditor/text/nsTextEditRules.cpp
+@@ -1001,12 +1001,14 @@
+     res = mEditor->GetStartNodeAndOffset(aSelection, getter_AddRefs(startNode), &startOffset);
+     NS_ENSURE_SUCCESS(res, res);
+     NS_ENSURE_TRUE(startNode, NS_ERROR_FAILURE);
+-    
+-    bool bCollapsed;
+-    res = aSelection->GetIsCollapsed(&bCollapsed);
++
++    bool isCollapsed;
++    res = aSelection->GetIsCollapsed(&isCollapsed);
+     NS_ENSURE_SUCCESS(res, res);
+-  
+-    NS_ENSURE_TRUE(bCollapsed, NS_OK);
++
++    if (!isCollapsed) {
++      return NS_OK;
++    }
+ 
+     // Test for distance between caret and text that will be deleted
+     res = CheckBidiLevelForDeletion(aSelection, startNode, startOffset, aCollapsedAction, aCancel);
+diff --git a/uriloader/exthandler/unix/nsGNOMERegistry.cpp b/uriloader/exthandler/unix/nsGNOMERegistry.cpp
+--- a/uriloader/exthandler/unix/nsGNOMERegistry.cpp
++++ b/uriloader/exthandler/unix/nsGNOMERegistry.cpp
+@@ -127,6 +127,9 @@
+ nsGNOMERegistry::GetFromExtension(const nsACString& aFileExt)
+ {
+   NS_ASSERTION(aFileExt[0] != '.', "aFileExt shouldn't start with a dot");
++  if (aFileExt[0] == '.') {
++    printf("aFileExt: %s\n", PromiseFlatCString(aFileExt).get());
++  }
+   nsAutoCString mimeType;
+   nsCOMPtr<nsIGnomeVFSService> gnomevfs = do_GetService(NS_GNOMEVFSSERVICE_CONTRACTID);
+   nsCOMPtr<nsIGIOService> giovfs = do_GetService(NS_GIOSERVICE_CONTRACTID);

@@ -1,0 +1,3030 @@
+diff --git a/content/html/content/src/HTMLAttributeParsingUtils.cpp b/content/html/content/src/HTMLAttributeParsingUtils.cpp
+new file mode 100644
+--- /dev/null
++++ b/content/html/content/src/HTMLAttributeParsingUtils.cpp
+@@ -0,0 +1,584 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim:set tw=80 expandtab softtabstop=2 ts=2 sw=2: */
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is Mozilla Communicator client code.
++ *
++ * The Initial Developer of the Original Code is
++ * Netscape Communications Corporation.
++ * Portions created by the Initial Developer are Copyright (C) 1998
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#include "HTMLAttributeParsingUtils.h"
++#include "nsGenericHTMLElement.h"
++#include "nsMappedAttributeElement.h"
++#include "nsStyleConsts.h"
++#include "nsMappedAttributes.h"
++#include "nsAttrValue.h"
++#include "nsIAtom.h"
++#include "nsRuleData.h"
++#include "nsPresContext.h"
++
++namespace mozilla {
++namespace dom {
++
++static const nsAttrValue::EnumTable kAlignTable[] = {
++  { "left",      NS_STYLE_TEXT_ALIGN_LEFT },
++  { "right",     NS_STYLE_TEXT_ALIGN_RIGHT },
++
++  { "top",       NS_STYLE_VERTICAL_ALIGN_TOP },
++  { "middle",    NS_STYLE_VERTICAL_ALIGN_MIDDLE_WITH_BASELINE },
++  { "bottom",    NS_STYLE_VERTICAL_ALIGN_BASELINE },
++
++  { "center",    NS_STYLE_VERTICAL_ALIGN_MIDDLE_WITH_BASELINE },
++  { "baseline",  NS_STYLE_VERTICAL_ALIGN_BASELINE },
++
++  { "texttop",   NS_STYLE_VERTICAL_ALIGN_TEXT_TOP },
++  { "absmiddle", NS_STYLE_VERTICAL_ALIGN_MIDDLE },
++  { "abscenter", NS_STYLE_VERTICAL_ALIGN_MIDDLE },
++  { "absbottom", NS_STYLE_VERTICAL_ALIGN_BOTTOM },
++  { 0 }
++};
++
++static const nsAttrValue::EnumTable kDivAlignTable[] = {
++  { "left", NS_STYLE_TEXT_ALIGN_MOZ_LEFT },
++  { "right", NS_STYLE_TEXT_ALIGN_MOZ_RIGHT },
++  { "center", NS_STYLE_TEXT_ALIGN_MOZ_CENTER },
++  { "middle", NS_STYLE_TEXT_ALIGN_MOZ_CENTER },
++  { "justify", NS_STYLE_TEXT_ALIGN_JUSTIFY },
++  { 0 }
++};
++
++static const nsAttrValue::EnumTable kFrameborderTable[] = {
++  { "yes", NS_STYLE_FRAME_YES },
++  { "no", NS_STYLE_FRAME_NO },
++  { "1", NS_STYLE_FRAME_1 },
++  { "0", NS_STYLE_FRAME_0 },
++  { 0 }
++};
++
++static const nsAttrValue::EnumTable kScrollingTable[] = {
++  { "yes", NS_STYLE_FRAME_YES },
++  { "no", NS_STYLE_FRAME_NO },
++  { "on", NS_STYLE_FRAME_ON },
++  { "off", NS_STYLE_FRAME_OFF },
++  { "scroll", NS_STYLE_FRAME_SCROLL },
++  { "noscroll", NS_STYLE_FRAME_NOSCROLL },
++  { "auto", NS_STYLE_FRAME_AUTO },
++  { 0 }
++};
++
++static const nsAttrValue::EnumTable kTableVAlignTable[] = {
++  { "top",     NS_STYLE_VERTICAL_ALIGN_TOP },
++  { "middle",  NS_STYLE_VERTICAL_ALIGN_MIDDLE },
++  { "bottom",  NS_STYLE_VERTICAL_ALIGN_BOTTOM },
++  { "baseline",NS_STYLE_VERTICAL_ALIGN_BASELINE },
++  { 0 }
++};
++
++bool
++HTMLAttributeParsingUtils::ParseAlignValue(const nsAString& aString,
++                                      nsAttrValue& aResult)
++{
++  return aResult.ParseEnumValue(aString, kAlignTable);
++}
++
++//----------------------------------------
++
++static const nsAttrValue::EnumTable kTableHAlignTable[] = {
++  { "left",   NS_STYLE_TEXT_ALIGN_LEFT },
++  { "right",  NS_STYLE_TEXT_ALIGN_RIGHT },
++  { "center", NS_STYLE_TEXT_ALIGN_CENTER },
++  { "char",   NS_STYLE_TEXT_ALIGN_CHAR },
++  { "justify",NS_STYLE_TEXT_ALIGN_JUSTIFY },
++  { 0 }
++};
++
++// static
++bool
++HTMLAttributeParsingUtils::ParseTableHAlignValue(const nsAString& aString,
++                                            nsAttrValue& aResult)
++{
++  return aResult.ParseEnumValue(aString, kTableHAlignTable);
++}
++
++//----------------------------------------
++
++// This table are used for TD,TH,TR, etc (but not TABLE)
++static const nsAttrValue::EnumTable kTableCellHAlignTable[] = {
++  { "left",   NS_STYLE_TEXT_ALIGN_MOZ_LEFT },
++  { "right",  NS_STYLE_TEXT_ALIGN_MOZ_RIGHT },
++  { "center", NS_STYLE_TEXT_ALIGN_MOZ_CENTER },
++  { "char",   NS_STYLE_TEXT_ALIGN_CHAR },
++  { "justify",NS_STYLE_TEXT_ALIGN_JUSTIFY },
++  { "middle", NS_STYLE_TEXT_ALIGN_MOZ_CENTER },
++  { 0 }
++};
++
++// static
++bool
++HTMLAttributeParsingUtils::ParseTableCellHAlignValue(const nsAString& aString,
++                                                nsAttrValue& aResult)
++{
++  return aResult.ParseEnumValue(aString, kTableCellHAlignTable);
++}
++
++//----------------------------------------
++
++bool
++HTMLAttributeParsingUtils::ParseTableVAlignValue(const nsAString& aString,
++                                            nsAttrValue& aResult)
++{
++  return aResult.ParseEnumValue(aString, kTableVAlignTable);
++}
++
++// static
++bool
++HTMLAttributeParsingUtils::ParseDivAlignValue(const nsAString& aString,
++                                         nsAttrValue& aResult)
++{
++  return aResult.ParseEnumValue(aString, kDivAlignTable);
++}
++
++bool
++HTMLAttributeParsingUtils::ParseImageAttribute(nsIAtom* aAttribute,
++                                          const nsAString& aString,
++                                          nsAttrValue& aResult)
++{
++  if ((aAttribute == nsGkAtoms::width) ||
++      (aAttribute == nsGkAtoms::height)) {
++    return aResult.ParseSpecialIntValue(aString, true);
++  }
++  else if ((aAttribute == nsGkAtoms::hspace) ||
++           (aAttribute == nsGkAtoms::vspace) ||
++           (aAttribute == nsGkAtoms::border)) {
++    return aResult.ParseIntWithBounds(aString, 0);
++  }
++  return false;
++}
++
++bool
++HTMLAttributeParsingUtils::ParseFrameborderValue(const nsAString& aString,
++                                            nsAttrValue& aResult)
++{
++  return aResult.ParseEnumValue(aString, kFrameborderTable);
++}
++
++bool
++HTMLAttributeParsingUtils::ParseScrollingValue(const nsAString& aString,
++                                          nsAttrValue& aResult)
++{
++  return aResult.ParseEnumValue(aString, kScrollingTable);
++}
++
++/**
++ * Handle attributes common to all html elements
++ */
++void
++HTMLAttributeParsingUtils::MapCommonAttributesInto(const nsMappedAttributes* aAttributes,
++                                              nsRuleData* aData)
++{
++  if (aData->mSIDs & NS_STYLE_INHERIT_BIT(UserInterface)) {
++    nsRuleDataUserInterface *ui = aData->mUserInterfaceData;
++    if (ui->mUserModify.GetUnit() == eCSSUnit_Null) {
++      const nsAttrValue* value =
++        aAttributes->GetAttr(nsGkAtoms::contenteditable);
++      if (value) {
++        if (value->Equals(nsGkAtoms::_empty, eCaseMatters) ||
++            value->Equals(nsGkAtoms::_true, eIgnoreCase)) {
++          ui->mUserModify.SetIntValue(NS_STYLE_USER_MODIFY_READ_WRITE,
++                                      eCSSUnit_Enumerated);
++        }
++        else if (value->Equals(nsGkAtoms::_false, eIgnoreCase)) {
++            ui->mUserModify.SetIntValue(NS_STYLE_USER_MODIFY_READ_ONLY,
++                                        eCSSUnit_Enumerated);
++        }
++      }
++    }
++  }
++  if (aData->mSIDs & NS_STYLE_INHERIT_BIT(Visibility)) {
++    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::lang);
++    if (value && value->Type() == nsAttrValue::eString) {
++      aData->mDisplayData->mLang.SetStringValue(value->GetStringValue(),
++                                                eCSSUnit_Ident);
++    }
++  }
++}
++
++
++/* static */ const nsGenericElement::MappedAttributeEntry
++HTMLAttributeParsingUtils::sCommonAttributeMap[] = {
++  { &nsGkAtoms::contenteditable },
++  { &nsGkAtoms::lang },
++  { nullptr }
++};
++
++/* static */ const nsGenericElement::MappedAttributeEntry
++HTMLAttributeParsingUtils::sImageMarginSizeAttributeMap[] = {
++  { &nsGkAtoms::width },
++  { &nsGkAtoms::height },
++  { &nsGkAtoms::hspace },
++  { &nsGkAtoms::vspace },
++  { nullptr }
++};
++
++/* static */ const nsGenericElement::MappedAttributeEntry
++HTMLAttributeParsingUtils::sImageAlignAttributeMap[] = {
++  { &nsGkAtoms::align },
++  { nullptr }
++};
++
++/* static */ const nsGenericElement::MappedAttributeEntry
++HTMLAttributeParsingUtils::sDivAlignAttributeMap[] = {
++  { &nsGkAtoms::align },
++  { nullptr }
++};
++
++/* static */ const nsGenericElement::MappedAttributeEntry
++HTMLAttributeParsingUtils::sImageBorderAttributeMap[] = {
++  { &nsGkAtoms::border },
++  { nullptr }
++};
++
++/* static */ const nsGenericElement::MappedAttributeEntry
++HTMLAttributeParsingUtils::sBackgroundAttributeMap[] = {
++  { &nsGkAtoms::background },
++  { &nsGkAtoms::bgcolor },
++  { nullptr }
++};
++
++/* static */ const nsGenericElement::MappedAttributeEntry
++HTMLAttributeParsingUtils::sBackgroundColorAttributeMap[] = {
++  { &nsGkAtoms::bgcolor },
++  { nullptr }
++};
++
++/* static */ const nsGenericElement::MappedAttributeEntry
++HTMLAttributeParsingUtils::sScrollingAttributeMap[] = {
++  { &nsGkAtoms::scrolling },
++  { nullptr }
++};
++
++void
++HTMLAttributeParsingUtils::MapImageAlignAttributeInto(const nsMappedAttributes* aAttributes,
++                                                 nsRuleData* aRuleData)
++{
++  if (aRuleData->mSIDs & (NS_STYLE_INHERIT_BIT(Display) |
++                          NS_STYLE_INHERIT_BIT(TextReset))) {
++    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::align);
++    if (value && value->Type() == nsAttrValue::eEnum) {
++      int32_t align = value->GetEnumValue();
++      if ((aRuleData->mSIDs & NS_STYLE_INHERIT_BIT(Display)) &&
++          aRuleData->mDisplayData->mFloat.GetUnit() == eCSSUnit_Null) {
++        if (align == NS_STYLE_TEXT_ALIGN_LEFT)
++          aRuleData->mDisplayData->mFloat.SetIntValue(NS_STYLE_FLOAT_LEFT, eCSSUnit_Enumerated);
++        else if (align == NS_STYLE_TEXT_ALIGN_RIGHT)
++          aRuleData->mDisplayData->mFloat.SetIntValue(NS_STYLE_FLOAT_RIGHT, eCSSUnit_Enumerated);
++      }
++      if ((aRuleData->mSIDs & NS_STYLE_INHERIT_BIT(TextReset)) &&
++          aRuleData->mTextData->mVerticalAlign.GetUnit() == eCSSUnit_Null) {
++        switch (align) {
++        case NS_STYLE_TEXT_ALIGN_LEFT:
++        case NS_STYLE_TEXT_ALIGN_RIGHT:
++          break;
++        default:
++          aRuleData->mTextData->mVerticalAlign.SetIntValue(align, eCSSUnit_Enumerated);
++          break;
++        }
++      }
++    }
++  }
++}
++
++void
++HTMLAttributeParsingUtils::MapDivAlignAttributeInto(const nsMappedAttributes* aAttributes,
++                                               nsRuleData* aRuleData)
++{
++  if (aRuleData->mSIDs & NS_STYLE_INHERIT_BIT(Text)) {
++    if (aRuleData->mTextData->mTextAlign.GetUnit() == eCSSUnit_Null) {
++      // align: enum
++      const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::align);
++      if (value && value->Type() == nsAttrValue::eEnum)
++        aRuleData->mTextData->mTextAlign.SetIntValue(value->GetEnumValue(), eCSSUnit_Enumerated);
++    }
++  }
++}
++
++
++void
++HTMLAttributeParsingUtils::MapImageMarginAttributeInto(const nsMappedAttributes* aAttributes,
++                                                  nsRuleData* aData)
++{
++  if (!(aData->mSIDs & NS_STYLE_INHERIT_BIT(Margin)))
++    return;
++
++  const nsAttrValue* value;
++
++  // hspace: value
++  value = aAttributes->GetAttr(nsGkAtoms::hspace);
++  if (value) {
++    nsCSSValue hval;
++    if (value->Type() == nsAttrValue::eInteger)
++      hval.SetFloatValue((float)value->GetIntegerValue(), eCSSUnit_Pixel);
++    else if (value->Type() == nsAttrValue::ePercent)
++      hval.SetPercentValue(value->GetPercentValue());
++
++    if (hval.GetUnit() != eCSSUnit_Null) {
++      nsCSSRect& margin = aData->mMarginData->mMargin;
++      if (margin.mLeft.GetUnit() == eCSSUnit_Null)
++        margin.mLeft = hval;
++      if (margin.mRight.GetUnit() == eCSSUnit_Null)
++        margin.mRight = hval;
++    }
++  }
++
++  // vspace: value
++  value = aAttributes->GetAttr(nsGkAtoms::vspace);
++  if (value) {
++    nsCSSValue vval;
++    if (value->Type() == nsAttrValue::eInteger)
++      vval.SetFloatValue((float)value->GetIntegerValue(), eCSSUnit_Pixel);
++    else if (value->Type() == nsAttrValue::ePercent)
++      vval.SetPercentValue(value->GetPercentValue());
++  
++    if (vval.GetUnit() != eCSSUnit_Null) {
++      nsCSSRect& margin = aData->mMarginData->mMargin;
++      if (margin.mTop.GetUnit() == eCSSUnit_Null)
++        margin.mTop = vval;
++      if (margin.mBottom.GetUnit() == eCSSUnit_Null)
++        margin.mBottom = vval;
++    }
++  }
++}
++
++void
++HTMLAttributeParsingUtils::MapImageSizeAttributesInto(const nsMappedAttributes* aAttributes,
++                                                 nsRuleData* aData)
++{
++  if (!(aData->mSIDs & NS_STYLE_INHERIT_BIT(Position)))
++    return;
++
++  // width: value
++  if (aData->mPositionData->mWidth.GetUnit() == eCSSUnit_Null) {
++    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::width);
++    if (value && value->Type() == nsAttrValue::eInteger)
++      aData->mPositionData->mWidth.SetFloatValue((float)value->GetIntegerValue(), eCSSUnit_Pixel);
++    else if (value && value->Type() == nsAttrValue::ePercent)
++      aData->mPositionData->mWidth.SetPercentValue(value->GetPercentValue());
++  }
++
++  // height: value
++  if (aData->mPositionData->mHeight.GetUnit() == eCSSUnit_Null) {
++    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::height);
++    if (value && value->Type() == nsAttrValue::eInteger)
++      aData->mPositionData->mHeight.SetFloatValue((float)value->GetIntegerValue(), eCSSUnit_Pixel); 
++    else if (value && value->Type() == nsAttrValue::ePercent)
++      aData->mPositionData->mHeight.SetPercentValue(value->GetPercentValue());    
++  }
++}
++
++void
++HTMLAttributeParsingUtils::MapImageBorderAttributeInto(const nsMappedAttributes* aAttributes,
++                                                  nsRuleData* aData)
++{
++  if (!(aData->mSIDs & NS_STYLE_INHERIT_BIT(Border)))
++    return;
++
++  // border: pixels
++  const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::border);
++  if (!value)
++    return;
++  
++  nscoord val = 0;
++  if (value->Type() == nsAttrValue::eInteger)
++    val = value->GetIntegerValue();
++
++  nsCSSRect& borderWidth = aData->mMarginData->mBorderWidth;
++  if (borderWidth.mLeft.GetUnit() == eCSSUnit_Null)
++    borderWidth.mLeft.SetFloatValue((float)val, eCSSUnit_Pixel);
++  if (borderWidth.mTop.GetUnit() == eCSSUnit_Null)
++    borderWidth.mTop.SetFloatValue((float)val, eCSSUnit_Pixel);
++  if (borderWidth.mRight.GetUnit() == eCSSUnit_Null)
++    borderWidth.mRight.SetFloatValue((float)val, eCSSUnit_Pixel);
++  if (borderWidth.mBottom.GetUnit() == eCSSUnit_Null)
++    borderWidth.mBottom.SetFloatValue((float)val, eCSSUnit_Pixel);
++
++  nsCSSRect& borderStyle = aData->mMarginData->mBorderStyle;
++  if (borderStyle.mLeft.GetUnit() == eCSSUnit_Null)
++    borderStyle.mLeft.SetIntValue(NS_STYLE_BORDER_STYLE_SOLID, eCSSUnit_Enumerated);
++  if (borderStyle.mTop.GetUnit() == eCSSUnit_Null)
++    borderStyle.mTop.SetIntValue(NS_STYLE_BORDER_STYLE_SOLID, eCSSUnit_Enumerated);
++  if (borderStyle.mRight.GetUnit() == eCSSUnit_Null)
++    borderStyle.mRight.SetIntValue(NS_STYLE_BORDER_STYLE_SOLID, eCSSUnit_Enumerated);
++  if (borderStyle.mBottom.GetUnit() == eCSSUnit_Null)
++    borderStyle.mBottom.SetIntValue(NS_STYLE_BORDER_STYLE_SOLID, eCSSUnit_Enumerated);
++
++  nsCSSRect& borderColor = aData->mMarginData->mBorderColor;
++  if (borderColor.mLeft.GetUnit() == eCSSUnit_Null)
++    borderColor.mLeft.SetIntValue(NS_STYLE_COLOR_MOZ_USE_TEXT_COLOR, eCSSUnit_Enumerated);
++  if (borderColor.mTop.GetUnit() == eCSSUnit_Null)
++    borderColor.mTop.SetIntValue(NS_STYLE_COLOR_MOZ_USE_TEXT_COLOR, eCSSUnit_Enumerated);
++  if (borderColor.mRight.GetUnit() == eCSSUnit_Null)
++    borderColor.mRight.SetIntValue(NS_STYLE_COLOR_MOZ_USE_TEXT_COLOR, eCSSUnit_Enumerated);
++  if (borderColor.mBottom.GetUnit() == eCSSUnit_Null)
++    borderColor.mBottom.SetIntValue(NS_STYLE_COLOR_MOZ_USE_TEXT_COLOR, eCSSUnit_Enumerated);
++}
++
++void
++HTMLAttributeParsingUtils::MapBackgroundInto(const nsMappedAttributes* aAttributes,
++                                        nsRuleData* aData)
++{
++  if (!(aData->mSIDs & NS_STYLE_INHERIT_BIT(Background)))
++    return;
++
++  nsPresContext* presContext = aData->mPresContext;
++  if (!aData->mColorData->mBackImage && presContext->UseDocumentColors()) {
++    // background
++    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::background);
++    if (value && value->Type() == nsAttrValue::eString) {
++      const nsString& spec = value->GetStringValue();
++      if (!spec.IsEmpty()) {
++        // Resolve url to an absolute url
++        // XXX this breaks if the HTML element has an xml:base
++        // attribute (the xml:base will not be taken into account)
++        // as well as elements with _baseHref set. We need to be able
++        // to get to the element somehow, or store the base URI in the
++        // attributes.
++        nsIDocument* doc = presContext->Document();
++        nsCOMPtr<nsIURI> uri;
++        nsresult rv = nsContentUtils::NewURIWithDocumentCharset(
++            getter_AddRefs(uri), spec, doc, doc->GetBaseURI());
++        if (NS_SUCCEEDED(rv)) {
++          // Note that this should generally succeed here, due to the way
++          // |spec| is created.  Maybe we should just add an nsStringBuffer
++          // accessor on nsAttrValue?
++          nsStringBuffer* buffer = nsCSSValue::BufferFromString(spec);
++          if (NS_LIKELY(buffer != 0)) {
++            // XXXbz it would be nice to assert that doc->NodePrincipal() is
++            // the same as the principal of the node (which we'd need to store
++            // in the mapped attrs or something?)
++            nsCSSValue::Image *img =
++              new nsCSSValue::Image(uri, buffer, doc->GetDocumentURI(),
++                                    doc->NodePrincipal(), doc);
++            buffer->Release();
++            if (NS_LIKELY(img != 0)) {
++              // Use nsRuleDataColor's temporary mTempBackImage to
++              // make a value list.
++              aData->mColorData->mTempBackImage.mValue.SetImageValue(img);
++              aData->mColorData->mBackImage =
++                &aData->mColorData->mTempBackImage;
++            }
++          }
++        }
++      }
++      else if (presContext->CompatibilityMode() == eCompatibility_NavQuirks) {
++        // in NavQuirks mode, allow the empty string to set the
++        // background to empty
++        // Use nsRuleDataColor's temporary mTempBackImage to make a value list.
++        aData->mColorData->mBackImage = nullptr;
++        aData->mColorData->mTempBackImage.mValue.SetNoneValue();
++        aData->mColorData->mBackImage = &aData->mColorData->mTempBackImage;
++      }
++    }
++  }
++}
++
++void
++HTMLAttributeParsingUtils::MapBGColorInto(const nsMappedAttributes* aAttributes,
++                                     nsRuleData* aData)
++{
++  if (!(aData->mSIDs & NS_STYLE_INHERIT_BIT(Background)))
++    return;
++
++  if (aData->mColorData->mBackColor.GetUnit() == eCSSUnit_Null &&
++      aData->mPresContext->UseDocumentColors()) {
++    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::bgcolor);
++    nscolor color;
++    if (value && value->GetColorValue(color)) {
++      aData->mColorData->mBackColor.SetColorValue(color);
++    }
++  }
++}
++
++void
++HTMLAttributeParsingUtils::MapBackgroundAttributesInto(const nsMappedAttributes* aAttributes,
++                                                  nsRuleData* aData)
++{
++  MapBackgroundInto(aAttributes, aData);
++  MapBGColorInto(aAttributes, aData);
++}
++
++void
++HTMLAttributeParsingUtils::MapScrollingAttributeInto(const nsMappedAttributes* aAttributes,
++                                                nsRuleData* aData)
++{
++  if (!(aData->mSIDs & NS_STYLE_INHERIT_BIT(Display)))
++    return;
++
++  // scrolling
++  nsCSSValue* overflowValues[2] = {
++    &aData->mDisplayData->mOverflowX,
++    &aData->mDisplayData->mOverflowY,
++  };
++  for (uint32_t i = 0; i < NS_ARRAY_LENGTH(overflowValues); ++i) {
++    if (overflowValues[i]->GetUnit() == eCSSUnit_Null) {
++      const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::scrolling);
++      if (value && value->Type() == nsAttrValue::eEnum) {
++        int32_t mappedValue;
++        switch (value->GetEnumValue()) {
++          case NS_STYLE_FRAME_ON:
++          case NS_STYLE_FRAME_SCROLL:
++          case NS_STYLE_FRAME_YES:
++            mappedValue = NS_STYLE_OVERFLOW_SCROLL;
++            break;
++
++          case NS_STYLE_FRAME_OFF:
++          case NS_STYLE_FRAME_NOSCROLL:
++          case NS_STYLE_FRAME_NO:
++            mappedValue = NS_STYLE_OVERFLOW_HIDDEN;
++            break;
++        
++          case NS_STYLE_FRAME_AUTO:
++            mappedValue = NS_STYLE_OVERFLOW_AUTO;
++            break;
++
++          default:
++            NS_NOTREACHED("unexpected value");
++            mappedValue = NS_STYLE_OVERFLOW_AUTO;
++            break;
++        }
++        overflowValues[i]->SetIntValue(mappedValue, eCSSUnit_Enumerated);
++      }
++    }
++  }
++}
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/content/html/content/src/HTMLAttributeParsingUtils.h b/content/html/content/src/HTMLAttributeParsingUtils.h
+new file mode 100644
+--- /dev/null
++++ b/content/html/content/src/HTMLAttributeParsingUtils.h
+@@ -0,0 +1,258 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim:set tw=80 expandtab softtabstop=2 ts=2 sw=2: */
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is Mozilla Communicator client code.
++ *
++ * The Initial Developer of the Original Code is
++ * Netscape Communications Corporation.
++ * Portions created by the Initial Developer are Copyright (C) 1998
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#ifndef mozilla_dom_HTMLAttributeParsingUtils_h__
++#define mozilla_dom_HTMLAttributeParsingUtils_h__
++
++#include "nsAString.h"
++#include "nsGenericElement.h"
++
++class nsMappedAttributes;
++class nsAttrValue;
++class nsIAtom;
++class nsRuleData;
++struct MappedAttributeEntry;
++
++namespace mozilla {
++namespace dom {
++
++class HTMLAttributeParsingUtils {
++  // This class is not to be constructed, use the static member functions only
++  HTMLAttributeParsingUtils();
++  ~HTMLAttributeParsingUtils();
++
++public:
++  /**
++   * Parse an alignment attribute (top/middle/bottom/baseline)
++   *
++   * @param aString the string to parse
++   * @param aResult the resulting HTMLValue
++   * @return whether the value was parsed
++   */
++  static bool ParseAlignValue(const nsAString& aString,
++                                nsAttrValue& aResult);
++
++  /**
++   * Parse a div align string to value (left/right/center/middle/justify)
++   *
++   * @param aString the string to parse
++   * @param aResult the resulting HTMLValue
++   * @return whether the value was parsed
++   */
++  static bool ParseDivAlignValue(const nsAString& aString,
++                                   nsAttrValue& aResult);
++
++  /**
++   * Convert a table halign string to value (left/right/center/char/justify)
++   *
++   * @param aString the string to parse
++   * @param aResult the resulting HTMLValue
++   * @return whether the value was parsed
++   */
++  static bool ParseTableHAlignValue(const nsAString& aString,
++                                      nsAttrValue& aResult);
++
++  /**
++   * Convert a table cell halign string to value
++   *
++   * @param aString the string to parse
++   * @param aResult the resulting HTMLValue
++   * @return whether the value was parsed
++   */
++  static bool ParseTableCellHAlignValue(const nsAString& aString,
++                                          nsAttrValue& aResult);
++
++  /**
++   * Convert a table valign string to value (left/right/center/char/justify/
++   * abscenter/absmiddle/middle)
++   *
++   * @param aString the string to parse
++   * @param aResult the resulting HTMLValue
++   * @return whether the value was parsed
++   */
++  static bool ParseTableVAlignValue(const nsAString& aString,
++                                      nsAttrValue& aResult);
++
++  /**
++   * Convert an image attribute to value (width, height, hspace, vspace, border)
++   *
++   * @param aAttribute the attribute to parse
++   * @param aString the string to parse
++   * @param aResult the resulting HTMLValue
++   * @return whether the value was parsed
++   */
++  static bool ParseImageAttribute(nsIAtom* aAttribute,
++                                    const nsAString& aString,
++                                    nsAttrValue& aResult);
++  /**
++   * Convert a frameborder string to value (yes/no/1/0)
++   *
++   * @param aString the string to parse
++   * @param aResult the resulting HTMLValue
++   * @return whether the value was parsed
++   */
++  static bool ParseFrameborderValue(const nsAString& aString,
++                                      nsAttrValue& aResult);
++
++  /**
++   * Convert a scrolling string to value (yes/no/on/off/scroll/noscroll/auto)
++   *
++   * @param aString the string to parse
++   * @param aResult the resulting HTMLValue
++   * @return whether the value was parsed
++   */
++  static bool ParseScrollingValue(const nsAString& aString,
++                                    nsAttrValue& aResult);
++
++  /*
++   * Attribute Mapping Helpers
++   */
++
++  /**
++   * A style attribute mapping function for the most common attributes, to be
++   * called by subclasses' attribute mapping functions.  Currently handles
++   * dir and lang, could handle others.
++   *
++   * @param aAttributes the list of attributes to map
++   * @param aData the returned rule data [INOUT]
++   * @see GetAttributeMappingFunction
++   */
++  static void MapCommonAttributesInto(const nsMappedAttributes* aAttributes,
++                                      nsRuleData* aRuleData);
++  static const nsGenericElement::MappedAttributeEntry sCommonAttributeMap[];
++  static const nsGenericElement::MappedAttributeEntry sImageMarginSizeAttributeMap[];
++  static const nsGenericElement::MappedAttributeEntry sImageBorderAttributeMap[];
++  static const nsGenericElement::MappedAttributeEntry sImageAlignAttributeMap[];
++  static const nsGenericElement::MappedAttributeEntry sDivAlignAttributeMap[];
++  static const nsGenericElement::MappedAttributeEntry sBackgroundAttributeMap[];
++  static const nsGenericElement::MappedAttributeEntry sBackgroundColorAttributeMap[];
++  static const nsGenericElement::MappedAttributeEntry sScrollingAttributeMap[];
++
++  /**
++   * Helper to map the align attribute into a style struct.
++   *
++   * @param aAttributes the list of attributes to map
++   * @param aData the returned rule data [INOUT]
++   * @see GetAttributeMappingFunction
++   */
++  static void MapImageAlignAttributeInto(const nsMappedAttributes* aAttributes,
++                                         nsRuleData* aData);
++
++  /**
++   * Helper to map the align attribute into a style struct for things
++   * like <div>, <h1>, etc.
++   *
++   * @param aAttributes the list of attributes to map
++   * @param aData the returned rule data [INOUT]
++   * @see GetAttributeMappingFunction
++   */
++  static void MapDivAlignAttributeInto(const nsMappedAttributes* aAttributes,
++                                       nsRuleData* aData);
++
++  /**
++   * Helper to map the image border attribute into a style struct.
++   *
++   * @param aAttributes the list of attributes to map
++   * @param aData the returned rule data [INOUT]
++   * @see GetAttributeMappingFunction
++   */
++  static void MapImageBorderAttributeInto(const nsMappedAttributes* aAttributes,
++                                          nsRuleData* aData);
++  /**
++   * Helper to map the image margin attribute into a style struct.
++   *
++   * @param aAttributes the list of attributes to map
++   * @param aData the returned rule data [INOUT]
++   * @see GetAttributeMappingFunction
++   */
++  static void MapImageMarginAttributeInto(const nsMappedAttributes* aAttributes,
++                                          nsRuleData* aData);
++  /**
++   * Helper to map the image position attribute into a style struct.
++   *
++   * @param aAttributes the list of attributes to map
++   * @param aData the returned rule data [INOUT]
++   * @see GetAttributeMappingFunction
++   */
++  static void MapImageSizeAttributesInto(const nsMappedAttributes* aAttributes,
++                                         nsRuleData* aData);
++  /**
++   * Helper to map the background attribute
++   * into a style struct.
++   *
++   * @param aAttributes the list of attributes to map
++   * @param aData the returned rule data [INOUT]
++   * @see GetAttributeMappingFunction
++   */
++  static void MapBackgroundInto(const nsMappedAttributes* aAttributes,
++                                nsRuleData* aData);
++  /**
++   * Helper to map the bgcolor attribute
++   * into a style struct.
++   *
++   * @param aAttributes the list of attributes to map
++   * @param aData the returned rule data [INOUT]
++   * @see GetAttributeMappingFunction
++   */
++  static void MapBGColorInto(const nsMappedAttributes* aAttributes,
++                             nsRuleData* aData);
++  /**
++   * Helper to map the background attributes (currently background and bgcolor)
++   * into a style struct.
++   *
++   * @param aAttributes the list of attributes to map
++   * @param aData the returned rule data [INOUT]
++   * @see GetAttributeMappingFunction
++   */
++  static void MapBackgroundAttributesInto(const nsMappedAttributes* aAttributes,
++                                          nsRuleData* aData);
++  /**
++   * Helper to map the scrolling attribute on FRAME and IFRAME
++   * into a style struct.
++   *
++   * @param aAttributes the list of attributes to map
++   * @param aData the returned rule data [INOUT]
++   * @see GetAttributeMappingFunction
++   */
++  static void MapScrollingAttributeInto(const nsMappedAttributes* aAttributes,
++                                        nsRuleData* aData);
++};
++
++} // namespace dom
++} // namespace mozilla
++#endif // mozilla_dom_HTMLAttributeParsingUtils_h__
+diff --git a/content/html/content/src/Makefile.in b/content/html/content/src/Makefile.in
+--- a/content/html/content/src/Makefile.in
++++ b/content/html/content/src/Makefile.in
+@@ -53,6 +53,7 @@
+ 		$(NULL)
+ 
+ CPPSRCS		= \
++		HTMLAttributeParsingUtils.cpp \
+ 		nsClientRect.cpp \
+ 		nsHTMLDNSPrefetch.cpp \
+ 		nsGenericHTMLElement.cpp \
+diff --git a/content/html/content/src/nsGenericHTMLElement.cpp b/content/html/content/src/nsGenericHTMLElement.cpp
+--- a/content/html/content/src/nsGenericHTMLElement.cpp
++++ b/content/html/content/src/nsGenericHTMLElement.cpp
+@@ -109,6 +109,8 @@
+ #include "nsLayoutUtils.h"
+ #include "nsContentCreatorFunctions.h"
+ #include "mozAutoDocUpdate.h"
++
++#include "HTMLAttributeParsingUtils.h"
+ 
+ class nsINodeInfo;
+ class nsIDOMNodeList;
+@@ -1232,7 +1234,7 @@
+ nsGenericHTMLElement::IsAttributeMapped(const nsIAtom* aAttribute) const
+ {
+   static const MappedAttributeEntry* const map[] = {
+-    sCommonAttributeMap
++    mozilla::dom::HTMLAttributeParsingUtils::sCommonAttributeMap
+   };
+   
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+@@ -1241,7 +1243,7 @@
+ nsMapRuleToAttributesFunc
+ nsGenericHTMLElement::GetAttributeMappingFunction() const
+ {
+-  return &MapCommonAttributesInto;
++  return &mozilla::dom::HTMLAttributeParsingUtils::MapCommonAttributesInto;
+ }
+ 
+ nsIFormControlFrame*
+@@ -1393,536 +1395,6 @@
+   }
+ 
+   return nullptr;
+-}
+-
+-static const nsAttrValue::EnumTable kAlignTable[] = {
+-  { "left",      NS_STYLE_TEXT_ALIGN_LEFT },
+-  { "right",     NS_STYLE_TEXT_ALIGN_RIGHT },
+-
+-  { "top",       NS_STYLE_VERTICAL_ALIGN_TOP },
+-  { "middle",    NS_STYLE_VERTICAL_ALIGN_MIDDLE_WITH_BASELINE },
+-  { "bottom",    NS_STYLE_VERTICAL_ALIGN_BASELINE },
+-
+-  { "center",    NS_STYLE_VERTICAL_ALIGN_MIDDLE_WITH_BASELINE },
+-  { "baseline",  NS_STYLE_VERTICAL_ALIGN_BASELINE },
+-
+-  { "texttop",   NS_STYLE_VERTICAL_ALIGN_TEXT_TOP },
+-  { "absmiddle", NS_STYLE_VERTICAL_ALIGN_MIDDLE },
+-  { "abscenter", NS_STYLE_VERTICAL_ALIGN_MIDDLE },
+-  { "absbottom", NS_STYLE_VERTICAL_ALIGN_BOTTOM },
+-  { 0 }
+-};
+-
+-static const nsAttrValue::EnumTable kDivAlignTable[] = {
+-  { "left", NS_STYLE_TEXT_ALIGN_MOZ_LEFT },
+-  { "right", NS_STYLE_TEXT_ALIGN_MOZ_RIGHT },
+-  { "center", NS_STYLE_TEXT_ALIGN_MOZ_CENTER },
+-  { "middle", NS_STYLE_TEXT_ALIGN_MOZ_CENTER },
+-  { "justify", NS_STYLE_TEXT_ALIGN_JUSTIFY },
+-  { 0 }
+-};
+-
+-static const nsAttrValue::EnumTable kFrameborderTable[] = {
+-  { "yes", NS_STYLE_FRAME_YES },
+-  { "no", NS_STYLE_FRAME_NO },
+-  { "1", NS_STYLE_FRAME_1 },
+-  { "0", NS_STYLE_FRAME_0 },
+-  { 0 }
+-};
+-
+-static const nsAttrValue::EnumTable kScrollingTable[] = {
+-  { "yes", NS_STYLE_FRAME_YES },
+-  { "no", NS_STYLE_FRAME_NO },
+-  { "on", NS_STYLE_FRAME_ON },
+-  { "off", NS_STYLE_FRAME_OFF },
+-  { "scroll", NS_STYLE_FRAME_SCROLL },
+-  { "noscroll", NS_STYLE_FRAME_NOSCROLL },
+-  { "auto", NS_STYLE_FRAME_AUTO },
+-  { 0 }
+-};
+-
+-static const nsAttrValue::EnumTable kTableVAlignTable[] = {
+-  { "top",     NS_STYLE_VERTICAL_ALIGN_TOP },
+-  { "middle",  NS_STYLE_VERTICAL_ALIGN_MIDDLE },
+-  { "bottom",  NS_STYLE_VERTICAL_ALIGN_BOTTOM },
+-  { "baseline",NS_STYLE_VERTICAL_ALIGN_BASELINE },
+-  { 0 }
+-};
+-
+-bool
+-nsGenericHTMLElement::ParseAlignValue(const nsAString& aString,
+-                                      nsAttrValue& aResult)
+-{
+-  return aResult.ParseEnumValue(aString, kAlignTable);
+-}
+-
+-//----------------------------------------
+-
+-static const nsAttrValue::EnumTable kTableHAlignTable[] = {
+-  { "left",   NS_STYLE_TEXT_ALIGN_LEFT },
+-  { "right",  NS_STYLE_TEXT_ALIGN_RIGHT },
+-  { "center", NS_STYLE_TEXT_ALIGN_CENTER },
+-  { "char",   NS_STYLE_TEXT_ALIGN_CHAR },
+-  { "justify",NS_STYLE_TEXT_ALIGN_JUSTIFY },
+-  { 0 }
+-};
+-
+-
+-bool
+-nsGenericHTMLElement::ParseTableHAlignValue(const nsAString& aString,
+-                                            nsAttrValue& aResult)
+-{
+-  return aResult.ParseEnumValue(aString, kTableHAlignTable);
+-}
+-
+-//----------------------------------------
+-
+-// This table are used for TD,TH,TR, etc (but not TABLE)
+-static const nsAttrValue::EnumTable kTableCellHAlignTable[] = {
+-  { "left",   NS_STYLE_TEXT_ALIGN_MOZ_LEFT },
+-  { "right",  NS_STYLE_TEXT_ALIGN_MOZ_RIGHT },
+-  { "center", NS_STYLE_TEXT_ALIGN_MOZ_CENTER },
+-  { "char",   NS_STYLE_TEXT_ALIGN_CHAR },
+-  { "justify",NS_STYLE_TEXT_ALIGN_JUSTIFY },
+-  { "middle", NS_STYLE_TEXT_ALIGN_MOZ_CENTER },
+-  { 0 }
+-};
+-
+-// static
+-bool
+-nsGenericHTMLElement::ParseTableCellHAlignValue(const nsAString& aString,
+-                                                nsAttrValue& aResult)
+-{
+-  return aResult.ParseEnumValue(aString, kTableCellHAlignTable);
+-}
+-
+-//----------------------------------------
+-
+-bool
+-nsGenericHTMLElement::ParseTableVAlignValue(const nsAString& aString,
+-                                            nsAttrValue& aResult)
+-{
+-  return aResult.ParseEnumValue(aString, kTableVAlignTable);
+-}
+-
+-bool
+-nsGenericHTMLElement::ParseDivAlignValue(const nsAString& aString,
+-                                         nsAttrValue& aResult)
+-{
+-  return aResult.ParseEnumValue(aString, kDivAlignTable);
+-}
+-
+-bool
+-nsGenericHTMLElement::ParseImageAttribute(nsIAtom* aAttribute,
+-                                          const nsAString& aString,
+-                                          nsAttrValue& aResult)
+-{
+-  if ((aAttribute == nsGkAtoms::width) ||
+-      (aAttribute == nsGkAtoms::height)) {
+-    return aResult.ParseSpecialIntValue(aString, true);
+-  }
+-  else if ((aAttribute == nsGkAtoms::hspace) ||
+-           (aAttribute == nsGkAtoms::vspace) ||
+-           (aAttribute == nsGkAtoms::border)) {
+-    return aResult.ParseIntWithBounds(aString, 0);
+-  }
+-  return false;
+-}
+-
+-bool
+-nsGenericHTMLElement::ParseFrameborderValue(const nsAString& aString,
+-                                            nsAttrValue& aResult)
+-{
+-  return aResult.ParseEnumValue(aString, kFrameborderTable);
+-}
+-
+-bool
+-nsGenericHTMLElement::ParseScrollingValue(const nsAString& aString,
+-                                          nsAttrValue& aResult)
+-{
+-  return aResult.ParseEnumValue(aString, kScrollingTable);
+-}
+-
+-/**
+- * Handle attributes common to all html elements
+- */
+-void
+-nsGenericHTMLElement::MapCommonAttributesInto(const nsMappedAttributes* aAttributes,
+-                                              nsRuleData* aData)
+-{
+-  if (aData->mSIDs & NS_STYLE_INHERIT_BIT(UserInterface)) {
+-    nsRuleDataUserInterface *ui = aData->mUserInterfaceData;
+-    if (ui->mUserModify.GetUnit() == eCSSUnit_Null) {
+-      const nsAttrValue* value =
+-        aAttributes->GetAttr(nsGkAtoms::contenteditable);
+-      if (value) {
+-        if (value->Equals(nsGkAtoms::_empty, eCaseMatters) ||
+-            value->Equals(nsGkAtoms::_true, eIgnoreCase)) {
+-          ui->mUserModify.SetIntValue(NS_STYLE_USER_MODIFY_READ_WRITE,
+-                                      eCSSUnit_Enumerated);
+-        }
+-        else if (value->Equals(nsGkAtoms::_false, eIgnoreCase)) {
+-            ui->mUserModify.SetIntValue(NS_STYLE_USER_MODIFY_READ_ONLY,
+-                                        eCSSUnit_Enumerated);
+-        }
+-      }
+-    }
+-  }
+-  if (aData->mSIDs & NS_STYLE_INHERIT_BIT(Visibility)) {
+-    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::lang);
+-    if (value && value->Type() == nsAttrValue::eString) {
+-      aData->mDisplayData->mLang.SetStringValue(value->GetStringValue(),
+-                                                eCSSUnit_Ident);
+-    }
+-  }
+-}
+-
+-
+-/* static */ const nsGenericHTMLElement::MappedAttributeEntry
+-nsGenericHTMLElement::sCommonAttributeMap[] = {
+-  { &nsGkAtoms::contenteditable },
+-  { &nsGkAtoms::lang },
+-  { nullptr }
+-};
+-
+-/* static */ const nsGenericElement::MappedAttributeEntry
+-nsGenericHTMLElement::sImageMarginSizeAttributeMap[] = {
+-  { &nsGkAtoms::width },
+-  { &nsGkAtoms::height },
+-  { &nsGkAtoms::hspace },
+-  { &nsGkAtoms::vspace },
+-  { nullptr }
+-};
+-
+-/* static */ const nsGenericElement::MappedAttributeEntry
+-nsGenericHTMLElement::sImageAlignAttributeMap[] = {
+-  { &nsGkAtoms::align },
+-  { nullptr }
+-};
+-
+-/* static */ const nsGenericElement::MappedAttributeEntry
+-nsGenericHTMLElement::sDivAlignAttributeMap[] = {
+-  { &nsGkAtoms::align },
+-  { nullptr }
+-};
+-
+-/* static */ const nsGenericElement::MappedAttributeEntry
+-nsGenericHTMLElement::sImageBorderAttributeMap[] = {
+-  { &nsGkAtoms::border },
+-  { nullptr }
+-};
+-
+-/* static */ const nsGenericElement::MappedAttributeEntry
+-nsGenericHTMLElement::sBackgroundAttributeMap[] = {
+-  { &nsGkAtoms::background },
+-  { &nsGkAtoms::bgcolor },
+-  { nullptr }
+-};
+-
+-/* static */ const nsGenericElement::MappedAttributeEntry
+-nsGenericHTMLElement::sBackgroundColorAttributeMap[] = {
+-  { &nsGkAtoms::bgcolor },
+-  { nullptr }
+-};
+-
+-/* static */ const nsGenericElement::MappedAttributeEntry
+-nsGenericHTMLElement::sScrollingAttributeMap[] = {
+-  { &nsGkAtoms::scrolling },
+-  { nullptr }
+-};
+-
+-void
+-nsGenericHTMLElement::MapImageAlignAttributeInto(const nsMappedAttributes* aAttributes,
+-                                                 nsRuleData* aRuleData)
+-{
+-  if (aRuleData->mSIDs & (NS_STYLE_INHERIT_BIT(Display) |
+-                          NS_STYLE_INHERIT_BIT(TextReset))) {
+-    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::align);
+-    if (value && value->Type() == nsAttrValue::eEnum) {
+-      int32_t align = value->GetEnumValue();
+-      if ((aRuleData->mSIDs & NS_STYLE_INHERIT_BIT(Display)) &&
+-          aRuleData->mDisplayData->mFloat.GetUnit() == eCSSUnit_Null) {
+-        if (align == NS_STYLE_TEXT_ALIGN_LEFT)
+-          aRuleData->mDisplayData->mFloat.SetIntValue(NS_STYLE_FLOAT_LEFT, eCSSUnit_Enumerated);
+-        else if (align == NS_STYLE_TEXT_ALIGN_RIGHT)
+-          aRuleData->mDisplayData->mFloat.SetIntValue(NS_STYLE_FLOAT_RIGHT, eCSSUnit_Enumerated);
+-      }
+-      if ((aRuleData->mSIDs & NS_STYLE_INHERIT_BIT(TextReset)) &&
+-          aRuleData->mTextData->mVerticalAlign.GetUnit() == eCSSUnit_Null) {
+-        switch (align) {
+-        case NS_STYLE_TEXT_ALIGN_LEFT:
+-        case NS_STYLE_TEXT_ALIGN_RIGHT:
+-          break;
+-        default:
+-          aRuleData->mTextData->mVerticalAlign.SetIntValue(align, eCSSUnit_Enumerated);
+-          break;
+-        }
+-      }
+-    }
+-  }
+-}
+-
+-void
+-nsGenericHTMLElement::MapDivAlignAttributeInto(const nsMappedAttributes* aAttributes,
+-                                               nsRuleData* aRuleData)
+-{
+-  if (aRuleData->mSIDs & NS_STYLE_INHERIT_BIT(Text)) {
+-    if (aRuleData->mTextData->mTextAlign.GetUnit() == eCSSUnit_Null) {
+-      // align: enum
+-      const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::align);
+-      if (value && value->Type() == nsAttrValue::eEnum)
+-        aRuleData->mTextData->mTextAlign.SetIntValue(value->GetEnumValue(), eCSSUnit_Enumerated);
+-    }
+-  }
+-}
+-
+-
+-void
+-nsGenericHTMLElement::MapImageMarginAttributeInto(const nsMappedAttributes* aAttributes,
+-                                                  nsRuleData* aData)
+-{
+-  if (!(aData->mSIDs & NS_STYLE_INHERIT_BIT(Margin)))
+-    return;
+-
+-  const nsAttrValue* value;
+-
+-  // hspace: value
+-  value = aAttributes->GetAttr(nsGkAtoms::hspace);
+-  if (value) {
+-    nsCSSValue hval;
+-    if (value->Type() == nsAttrValue::eInteger)
+-      hval.SetFloatValue((float)value->GetIntegerValue(), eCSSUnit_Pixel);
+-    else if (value->Type() == nsAttrValue::ePercent)
+-      hval.SetPercentValue(value->GetPercentValue());
+-
+-    if (hval.GetUnit() != eCSSUnit_Null) {
+-      nsCSSRect& margin = aData->mMarginData->mMargin;
+-      if (margin.mLeft.GetUnit() == eCSSUnit_Null)
+-        margin.mLeft = hval;
+-      if (margin.mRight.GetUnit() == eCSSUnit_Null)
+-        margin.mRight = hval;
+-    }
+-  }
+-
+-  // vspace: value
+-  value = aAttributes->GetAttr(nsGkAtoms::vspace);
+-  if (value) {
+-    nsCSSValue vval;
+-    if (value->Type() == nsAttrValue::eInteger)
+-      vval.SetFloatValue((float)value->GetIntegerValue(), eCSSUnit_Pixel);
+-    else if (value->Type() == nsAttrValue::ePercent)
+-      vval.SetPercentValue(value->GetPercentValue());
+-  
+-    if (vval.GetUnit() != eCSSUnit_Null) {
+-      nsCSSRect& margin = aData->mMarginData->mMargin;
+-      if (margin.mTop.GetUnit() == eCSSUnit_Null)
+-        margin.mTop = vval;
+-      if (margin.mBottom.GetUnit() == eCSSUnit_Null)
+-        margin.mBottom = vval;
+-    }
+-  }
+-}
+-
+-void
+-nsGenericHTMLElement::MapImageSizeAttributesInto(const nsMappedAttributes* aAttributes,
+-                                                 nsRuleData* aData)
+-{
+-  if (!(aData->mSIDs & NS_STYLE_INHERIT_BIT(Position)))
+-    return;
+-
+-  // width: value
+-  if (aData->mPositionData->mWidth.GetUnit() == eCSSUnit_Null) {
+-    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::width);
+-    if (value && value->Type() == nsAttrValue::eInteger)
+-      aData->mPositionData->mWidth.SetFloatValue((float)value->GetIntegerValue(), eCSSUnit_Pixel);
+-    else if (value && value->Type() == nsAttrValue::ePercent)
+-      aData->mPositionData->mWidth.SetPercentValue(value->GetPercentValue());
+-  }
+-
+-  // height: value
+-  if (aData->mPositionData->mHeight.GetUnit() == eCSSUnit_Null) {
+-    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::height);
+-    if (value && value->Type() == nsAttrValue::eInteger)
+-      aData->mPositionData->mHeight.SetFloatValue((float)value->GetIntegerValue(), eCSSUnit_Pixel); 
+-    else if (value && value->Type() == nsAttrValue::ePercent)
+-      aData->mPositionData->mHeight.SetPercentValue(value->GetPercentValue());    
+-  }
+-}
+-
+-void
+-nsGenericHTMLElement::MapImageBorderAttributeInto(const nsMappedAttributes* aAttributes,
+-                                                  nsRuleData* aData)
+-{
+-  if (!(aData->mSIDs & NS_STYLE_INHERIT_BIT(Border)))
+-    return;
+-
+-  // border: pixels
+-  const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::border);
+-  if (!value)
+-    return;
+-  
+-  nscoord val = 0;
+-  if (value->Type() == nsAttrValue::eInteger)
+-    val = value->GetIntegerValue();
+-
+-  nsCSSRect& borderWidth = aData->mMarginData->mBorderWidth;
+-  if (borderWidth.mLeft.GetUnit() == eCSSUnit_Null)
+-    borderWidth.mLeft.SetFloatValue((float)val, eCSSUnit_Pixel);
+-  if (borderWidth.mTop.GetUnit() == eCSSUnit_Null)
+-    borderWidth.mTop.SetFloatValue((float)val, eCSSUnit_Pixel);
+-  if (borderWidth.mRight.GetUnit() == eCSSUnit_Null)
+-    borderWidth.mRight.SetFloatValue((float)val, eCSSUnit_Pixel);
+-  if (borderWidth.mBottom.GetUnit() == eCSSUnit_Null)
+-    borderWidth.mBottom.SetFloatValue((float)val, eCSSUnit_Pixel);
+-
+-  nsCSSRect& borderStyle = aData->mMarginData->mBorderStyle;
+-  if (borderStyle.mLeft.GetUnit() == eCSSUnit_Null)
+-    borderStyle.mLeft.SetIntValue(NS_STYLE_BORDER_STYLE_SOLID, eCSSUnit_Enumerated);
+-  if (borderStyle.mTop.GetUnit() == eCSSUnit_Null)
+-    borderStyle.mTop.SetIntValue(NS_STYLE_BORDER_STYLE_SOLID, eCSSUnit_Enumerated);
+-  if (borderStyle.mRight.GetUnit() == eCSSUnit_Null)
+-    borderStyle.mRight.SetIntValue(NS_STYLE_BORDER_STYLE_SOLID, eCSSUnit_Enumerated);
+-  if (borderStyle.mBottom.GetUnit() == eCSSUnit_Null)
+-    borderStyle.mBottom.SetIntValue(NS_STYLE_BORDER_STYLE_SOLID, eCSSUnit_Enumerated);
+-
+-  nsCSSRect& borderColor = aData->mMarginData->mBorderColor;
+-  if (borderColor.mLeft.GetUnit() == eCSSUnit_Null)
+-    borderColor.mLeft.SetIntValue(NS_STYLE_COLOR_MOZ_USE_TEXT_COLOR, eCSSUnit_Enumerated);
+-  if (borderColor.mTop.GetUnit() == eCSSUnit_Null)
+-    borderColor.mTop.SetIntValue(NS_STYLE_COLOR_MOZ_USE_TEXT_COLOR, eCSSUnit_Enumerated);
+-  if (borderColor.mRight.GetUnit() == eCSSUnit_Null)
+-    borderColor.mRight.SetIntValue(NS_STYLE_COLOR_MOZ_USE_TEXT_COLOR, eCSSUnit_Enumerated);
+-  if (borderColor.mBottom.GetUnit() == eCSSUnit_Null)
+-    borderColor.mBottom.SetIntValue(NS_STYLE_COLOR_MOZ_USE_TEXT_COLOR, eCSSUnit_Enumerated);
+-}
+-
+-void
+-nsGenericHTMLElement::MapBackgroundInto(const nsMappedAttributes* aAttributes,
+-                                        nsRuleData* aData)
+-{
+-  if (!(aData->mSIDs & NS_STYLE_INHERIT_BIT(Background)))
+-    return;
+-
+-  nsPresContext* presContext = aData->mPresContext;
+-  if (!aData->mColorData->mBackImage && presContext->UseDocumentColors()) {
+-    // background
+-    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::background);
+-    if (value && value->Type() == nsAttrValue::eString) {
+-      const nsString& spec = value->GetStringValue();
+-      if (!spec.IsEmpty()) {
+-        // Resolve url to an absolute url
+-        // XXX this breaks if the HTML element has an xml:base
+-        // attribute (the xml:base will not be taken into account)
+-        // as well as elements with _baseHref set. We need to be able
+-        // to get to the element somehow, or store the base URI in the
+-        // attributes.
+-        nsIDocument* doc = presContext->Document();
+-        nsCOMPtr<nsIURI> uri;
+-        nsresult rv = nsContentUtils::NewURIWithDocumentCharset(
+-            getter_AddRefs(uri), spec, doc, doc->GetBaseURI());
+-        if (NS_SUCCEEDED(rv)) {
+-          // Note that this should generally succeed here, due to the way
+-          // |spec| is created.  Maybe we should just add an nsStringBuffer
+-          // accessor on nsAttrValue?
+-          nsStringBuffer* buffer = nsCSSValue::BufferFromString(spec);
+-          if (NS_LIKELY(buffer != 0)) {
+-            // XXXbz it would be nice to assert that doc->NodePrincipal() is
+-            // the same as the principal of the node (which we'd need to store
+-            // in the mapped attrs or something?)
+-            nsCSSValue::Image *img =
+-              new nsCSSValue::Image(uri, buffer, doc->GetDocumentURI(),
+-                                    doc->NodePrincipal(), doc);
+-            buffer->Release();
+-            if (NS_LIKELY(img != 0)) {
+-              // Use nsRuleDataColor's temporary mTempBackImage to
+-              // make a value list.
+-              aData->mColorData->mTempBackImage.mValue.SetImageValue(img);
+-              aData->mColorData->mBackImage =
+-                &aData->mColorData->mTempBackImage;
+-            }
+-          }
+-        }
+-      }
+-      else if (presContext->CompatibilityMode() == eCompatibility_NavQuirks) {
+-        // in NavQuirks mode, allow the empty string to set the
+-        // background to empty
+-        // Use nsRuleDataColor's temporary mTempBackImage to make a value list.
+-        aData->mColorData->mBackImage = nullptr;
+-        aData->mColorData->mTempBackImage.mValue.SetNoneValue();
+-        aData->mColorData->mBackImage = &aData->mColorData->mTempBackImage;
+-      }
+-    }
+-  }
+-}
+-
+-void
+-nsGenericHTMLElement::MapBGColorInto(const nsMappedAttributes* aAttributes,
+-                                     nsRuleData* aData)
+-{
+-  if (!(aData->mSIDs & NS_STYLE_INHERIT_BIT(Background)))
+-    return;
+-
+-  if (aData->mColorData->mBackColor.GetUnit() == eCSSUnit_Null &&
+-      aData->mPresContext->UseDocumentColors()) {
+-    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::bgcolor);
+-    nscolor color;
+-    if (value && value->GetColorValue(color)) {
+-      aData->mColorData->mBackColor.SetColorValue(color);
+-    }
+-  }
+-}
+-
+-void
+-nsGenericHTMLElement::MapBackgroundAttributesInto(const nsMappedAttributes* aAttributes,
+-                                                  nsRuleData* aData)
+-{
+-  MapBackgroundInto(aAttributes, aData);
+-  MapBGColorInto(aAttributes, aData);
+-}
+-
+-void
+-nsGenericHTMLElement::MapScrollingAttributeInto(const nsMappedAttributes* aAttributes,
+-                                                nsRuleData* aData)
+-{
+-  if (!(aData->mSIDs & NS_STYLE_INHERIT_BIT(Display)))
+-    return;
+-
+-  // scrolling
+-  nsCSSValue* overflowValues[2] = {
+-    &aData->mDisplayData->mOverflowX,
+-    &aData->mDisplayData->mOverflowY,
+-  };
+-  for (uint32_t i = 0; i < NS_ARRAY_LENGTH(overflowValues); ++i) {
+-    if (overflowValues[i]->GetUnit() == eCSSUnit_Null) {
+-      const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::scrolling);
+-      if (value && value->Type() == nsAttrValue::eEnum) {
+-        int32_t mappedValue;
+-        switch (value->GetEnumValue()) {
+-          case NS_STYLE_FRAME_ON:
+-          case NS_STYLE_FRAME_SCROLL:
+-          case NS_STYLE_FRAME_YES:
+-            mappedValue = NS_STYLE_OVERFLOW_SCROLL;
+-            break;
+-
+-          case NS_STYLE_FRAME_OFF:
+-          case NS_STYLE_FRAME_NOSCROLL:
+-          case NS_STYLE_FRAME_NO:
+-            mappedValue = NS_STYLE_OVERFLOW_HIDDEN;
+-            break;
+-        
+-          case NS_STYLE_FRAME_AUTO:
+-            mappedValue = NS_STYLE_OVERFLOW_AUTO;
+-            break;
+-
+-          default:
+-            NS_NOTREACHED("unexpected value");
+-            mappedValue = NS_STYLE_OVERFLOW_AUTO;
+-            break;
+-        }
+-        overflowValues[i]->SetIntValue(mappedValue, eCSSUnit_Enumerated);
+-      }
+-    }
+-  }
+ }
+ 
+ //----------------------------------------------------------------------
+diff --git a/content/html/content/src/nsGenericHTMLElement.h b/content/html/content/src/nsGenericHTMLElement.h
+--- a/content/html/content/src/nsGenericHTMLElement.h
++++ b/content/html/content/src/nsGenericHTMLElement.h
+@@ -242,200 +242,6 @@
+ 
+   //----------------------------------------
+ 
+-  /**
+-   * Parse an alignment attribute (top/middle/bottom/baseline)
+-   *
+-   * @param aString the string to parse
+-   * @param aResult the resulting HTMLValue
+-   * @return whether the value was parsed
+-   */
+-  static bool ParseAlignValue(const nsAString& aString,
+-                                nsAttrValue& aResult);
+-
+-  /**
+-   * Parse a div align string to value (left/right/center/middle/justify)
+-   *
+-   * @param aString the string to parse
+-   * @param aResult the resulting HTMLValue
+-   * @return whether the value was parsed
+-   */
+-  static bool ParseDivAlignValue(const nsAString& aString,
+-                                   nsAttrValue& aResult);
+-
+-  /**
+-   * Convert a table halign string to value (left/right/center/char/justify)
+-   *
+-   * @param aString the string to parse
+-   * @param aResult the resulting HTMLValue
+-   * @return whether the value was parsed
+-   */
+-  static bool ParseTableHAlignValue(const nsAString& aString,
+-                                      nsAttrValue& aResult);
+-
+-  /**
+-   * Convert a table cell halign string to value
+-   *
+-   * @param aString the string to parse
+-   * @param aResult the resulting HTMLValue
+-   * @return whether the value was parsed
+-   */
+-  static bool ParseTableCellHAlignValue(const nsAString& aString,
+-                                          nsAttrValue& aResult);
+-
+-  /**
+-   * Convert a table valign string to value (left/right/center/char/justify/
+-   * abscenter/absmiddle/middle)
+-   *
+-   * @param aString the string to parse
+-   * @param aResult the resulting HTMLValue
+-   * @return whether the value was parsed
+-   */
+-  static bool ParseTableVAlignValue(const nsAString& aString,
+-                                      nsAttrValue& aResult);
+-
+-  /**
+-   * Convert an image attribute to value (width, height, hspace, vspace, border)
+-   *
+-   * @param aAttribute the attribute to parse
+-   * @param aString the string to parse
+-   * @param aResult the resulting HTMLValue
+-   * @return whether the value was parsed
+-   */
+-  static bool ParseImageAttribute(nsIAtom* aAttribute,
+-                                    const nsAString& aString,
+-                                    nsAttrValue& aResult);
+-  /**
+-   * Convert a frameborder string to value (yes/no/1/0)
+-   *
+-   * @param aString the string to parse
+-   * @param aResult the resulting HTMLValue
+-   * @return whether the value was parsed
+-   */
+-  static bool ParseFrameborderValue(const nsAString& aString,
+-                                      nsAttrValue& aResult);
+-
+-  /**
+-   * Convert a scrolling string to value (yes/no/on/off/scroll/noscroll/auto)
+-   *
+-   * @param aString the string to parse
+-   * @param aResult the resulting HTMLValue
+-   * @return whether the value was parsed
+-   */
+-  static bool ParseScrollingValue(const nsAString& aString,
+-                                    nsAttrValue& aResult);
+-
+-  /*
+-   * Attribute Mapping Helpers
+-   */
+-
+-  /**
+-   * A style attribute mapping function for the most common attributes, to be
+-   * called by subclasses' attribute mapping functions.  Currently handles
+-   * dir and lang, could handle others.
+-   *
+-   * @param aAttributes the list of attributes to map
+-   * @param aData the returned rule data [INOUT]
+-   * @see GetAttributeMappingFunction
+-   */
+-  static void MapCommonAttributesInto(const nsMappedAttributes* aAttributes, 
+-                                      nsRuleData* aRuleData);
+-  static const MappedAttributeEntry sCommonAttributeMap[];
+-  static const MappedAttributeEntry sImageMarginSizeAttributeMap[];
+-  static const MappedAttributeEntry sImageBorderAttributeMap[];
+-  static const MappedAttributeEntry sImageAlignAttributeMap[];
+-  static const MappedAttributeEntry sDivAlignAttributeMap[];
+-  static const MappedAttributeEntry sBackgroundAttributeMap[];
+-  static const MappedAttributeEntry sBackgroundColorAttributeMap[];
+-  static const MappedAttributeEntry sScrollingAttributeMap[];
+-  
+-  /**
+-   * Helper to map the align attribute into a style struct.
+-   *
+-   * @param aAttributes the list of attributes to map
+-   * @param aData the returned rule data [INOUT]
+-   * @see GetAttributeMappingFunction
+-   */
+-  static void MapImageAlignAttributeInto(const nsMappedAttributes* aAttributes,
+-                                         nsRuleData* aData);
+-
+-  /**
+-   * Helper to map the align attribute into a style struct for things
+-   * like <div>, <h1>, etc.
+-   *
+-   * @param aAttributes the list of attributes to map
+-   * @param aData the returned rule data [INOUT]
+-   * @see GetAttributeMappingFunction
+-   */
+-  static void MapDivAlignAttributeInto(const nsMappedAttributes* aAttributes,
+-                                       nsRuleData* aData);
+-
+-  /**
+-   * Helper to map the image border attribute into a style struct.
+-   *
+-   * @param aAttributes the list of attributes to map
+-   * @param aData the returned rule data [INOUT]
+-   * @see GetAttributeMappingFunction
+-   */
+-  static void MapImageBorderAttributeInto(const nsMappedAttributes* aAttributes,
+-                                          nsRuleData* aData);
+-  /**
+-   * Helper to map the image margin attribute into a style struct.
+-   *
+-   * @param aAttributes the list of attributes to map
+-   * @param aData the returned rule data [INOUT]
+-   * @see GetAttributeMappingFunction
+-   */
+-  static void MapImageMarginAttributeInto(const nsMappedAttributes* aAttributes,
+-                                          nsRuleData* aData);
+-  /**
+-   * Helper to map the image position attribute into a style struct.
+-   *
+-   * @param aAttributes the list of attributes to map
+-   * @param aData the returned rule data [INOUT]
+-   * @see GetAttributeMappingFunction
+-   */
+-  static void MapImageSizeAttributesInto(const nsMappedAttributes* aAttributes,
+-                                         nsRuleData* aData);
+-  /**
+-   * Helper to map the background attribute
+-   * into a style struct.
+-   *
+-   * @param aAttributes the list of attributes to map
+-   * @param aData the returned rule data [INOUT]
+-   * @see GetAttributeMappingFunction
+-   */
+-  static void MapBackgroundInto(const nsMappedAttributes* aAttributes,
+-                                nsRuleData* aData);
+-  /**
+-   * Helper to map the bgcolor attribute
+-   * into a style struct.
+-   *
+-   * @param aAttributes the list of attributes to map
+-   * @param aData the returned rule data [INOUT]
+-   * @see GetAttributeMappingFunction
+-   */
+-  static void MapBGColorInto(const nsMappedAttributes* aAttributes,
+-                             nsRuleData* aData);
+-  /**
+-   * Helper to map the background attributes (currently background and bgcolor)
+-   * into a style struct.
+-   *
+-   * @param aAttributes the list of attributes to map
+-   * @param aData the returned rule data [INOUT]
+-   * @see GetAttributeMappingFunction
+-   */
+-  static void MapBackgroundAttributesInto(const nsMappedAttributes* aAttributes,
+-                                          nsRuleData* aData);
+-  /**
+-   * Helper to map the scrolling attribute on FRAME and IFRAME
+-   * into a style struct.
+-   *
+-   * @param aAttributes the list of attributes to map
+-   * @param aData the returned rule data [INOUT]
+-   * @see GetAttributeMappingFunction
+-   */
+-  static void MapScrollingAttributeInto(const nsMappedAttributes* aAttributes,
+-                                        nsRuleData* aData);
+   /**
+    * Get the presentation state for a piece of content, or create it if it does
+    * not exist.  Generally used by SaveState().
+diff --git a/content/html/content/src/nsHTMLBRElement.cpp b/content/html/content/src/nsHTMLBRElement.cpp
+--- a/content/html/content/src/nsHTMLBRElement.cpp
++++ b/content/html/content/src/nsHTMLBRElement.cpp
+@@ -34,6 +34,7 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
++
+ #include "nsIDOMHTMLBRElement.h"
+ #include "nsIDOMEventTarget.h"
+ #include "nsGenericHTMLElement.h"
+@@ -41,6 +42,9 @@
+ #include "nsStyleConsts.h"
+ #include "nsMappedAttributes.h"
+ #include "nsRuleData.h"
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ class nsHTMLBRElement : public nsGenericHTMLElement,
+                         public nsIDOMHTMLBRElement
+@@ -139,7 +143,7 @@
+     }
+   }
+ 
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ NS_IMETHODIMP_(bool)
+@@ -152,7 +156,7 @@
+ 
+   static const MappedAttributeEntry* const map[] = {
+     attributes,
+-    sCommonAttributeMap,
++    HTMLAttributeParsingUtils::sCommonAttributeMap,
+   };
+ 
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLBodyElement.cpp b/content/html/content/src/nsHTMLBodyElement.cpp
+--- a/content/html/content/src/nsHTMLBodyElement.cpp
++++ b/content/html/content/src/nsHTMLBodyElement.cpp
+@@ -35,6 +35,7 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
++
+ #include "nscore.h"
+ #include "nsCOMPtr.h"
+ #include "nsIDOMHTMLBodyElement.h"
+@@ -56,6 +57,8 @@
+ #include "nsIEditorDocShell.h"
+ #include "nsCOMPtr.h"
+ #include "nsRuleWalker.h"
++
++#include "HTMLAttributeParsingUtils.h"
+ 
+ //----------------------------------------------------------------------
+ 
+@@ -400,8 +403,8 @@
+     }
+   }
+ 
+-  nsGenericHTMLElement::MapBackgroundAttributesInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++  mozilla::dom::HTMLAttributeParsingUtils::MapBackgroundAttributesInto(aAttributes, aData);
++  mozilla::dom::HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ nsMapRuleToAttributesFunc
+@@ -446,8 +449,8 @@
+ 
+   static const MappedAttributeEntry* const map[] = {
+     attributes,
+-    sCommonAttributeMap,
+-    sBackgroundAttributeMap,
++    mozilla::dom::HTMLAttributeParsingUtils::sCommonAttributeMap,
++    mozilla::dom::HTMLAttributeParsingUtils::sBackgroundAttributeMap,
+   };
+ 
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLDivElement.cpp b/content/html/content/src/nsHTMLDivElement.cpp
+--- a/content/html/content/src/nsHTMLDivElement.cpp
++++ b/content/html/content/src/nsHTMLDivElement.cpp
+@@ -41,6 +41,8 @@
+ #include "nsStyleConsts.h"
+ #include "nsMappedAttributes.h"
+ 
++#include "HTMLAttributeParsingUtils.h"
++
+ class nsHTMLDivElement : public nsGenericHTMLElement,
+                          public nsIDOMHTMLDivElement
+ {
+@@ -129,7 +131,7 @@
+ 
+     if (mNodeInfo->Equals(nsGkAtoms::div) &&
+         aAttribute == nsGkAtoms::align) {
+-      return ParseDivAlignValue(aValue, aResult);
++      return mozilla::dom::HTMLAttributeParsingUtils::ParseDivAlignValue(aValue, aResult);
+     }
+   }
+ 
+@@ -140,17 +142,17 @@
+ static void
+ MapAttributesIntoRule(const nsMappedAttributes* aAttributes, nsRuleData* aData)
+ {
+-  nsGenericHTMLElement::MapDivAlignAttributeInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++  mozilla::dom::HTMLAttributeParsingUtils::MapDivAlignAttributeInto(aAttributes, aData);
++  mozilla::dom::HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ static void
+ MapMarqueeAttributesIntoRule(const nsMappedAttributes* aAttributes, nsRuleData* aData)
+ {
+-  nsGenericHTMLElement::MapImageMarginAttributeInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapImageSizeAttributesInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapBGColorInto(aAttributes, aData);
++  mozilla::dom::HTMLAttributeParsingUtils::MapImageMarginAttributeInto(aAttributes, aData);
++  mozilla::dom::HTMLAttributeParsingUtils::MapImageSizeAttributesInto(aAttributes, aData);
++  mozilla::dom::HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
++  mozilla::dom::HTMLAttributeParsingUtils::MapBGColorInto(aAttributes, aData);
+ }
+ 
+ NS_IMETHODIMP_(bool)
+@@ -158,16 +160,16 @@
+ {
+   if (mNodeInfo->Equals(nsGkAtoms::div)) {
+     static const MappedAttributeEntry* const map[] = {
+-      sDivAlignAttributeMap,
+-      sCommonAttributeMap
++      mozilla::dom::HTMLAttributeParsingUtils::sDivAlignAttributeMap,
++      mozilla::dom::HTMLAttributeParsingUtils::sCommonAttributeMap
+     };
+     return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+   }
+   if (mNodeInfo->Equals(nsGkAtoms::marquee)) {  
+     static const MappedAttributeEntry* const map[] = {
+-      sImageMarginSizeAttributeMap,
+-      sBackgroundColorAttributeMap,
+-      sCommonAttributeMap
++      mozilla::dom::HTMLAttributeParsingUtils::sImageMarginSizeAttributeMap,
++      mozilla::dom::HTMLAttributeParsingUtils::sBackgroundColorAttributeMap,
++      mozilla::dom::HTMLAttributeParsingUtils::sCommonAttributeMap
+     };
+     return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+   }
+diff --git a/content/html/content/src/nsHTMLFontElement.cpp b/content/html/content/src/nsHTMLFontElement.cpp
+--- a/content/html/content/src/nsHTMLFontElement.cpp
++++ b/content/html/content/src/nsHTMLFontElement.cpp
+@@ -34,6 +34,7 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
++
+ #include "nsCOMPtr.h"
+ #include "nsIDOMHTMLFontElement.h"
+ #include "nsIDOMEventTarget.h"
+@@ -46,6 +47,9 @@
+ #include "nsCSSStruct.h"
+ #include "nsRuleData.h"
+ #include "nsIDocument.h"
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ class nsHTMLFontElement : public nsGenericHTMLElement,
+                           public nsIDOMHTMLFontElement
+@@ -245,7 +249,7 @@
+     }
+   }
+ 
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ NS_IMETHODIMP_(bool)
+@@ -262,7 +266,7 @@
+ 
+   static const MappedAttributeEntry* const map[] = {
+     attributes,
+-    sCommonAttributeMap,
++    HTMLAttributeParsingUtils::sCommonAttributeMap,
+   };
+ 
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLFrameElement.cpp b/content/html/content/src/nsHTMLFrameElement.cpp
+--- a/content/html/content/src/nsHTMLFrameElement.cpp
++++ b/content/html/content/src/nsHTMLFrameElement.cpp
+@@ -34,6 +34,7 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
++
+ #include "nsIDOMHTMLFrameElement.h"
+ #include "nsGenericHTMLFrameElement.h"
+ #include "nsGkAtoms.h"
+@@ -41,6 +42,8 @@
+ #include "nsIDOMDocument.h"
+ #include "nsDOMError.h"
+ 
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ class nsHTMLFrameElement : public nsGenericHTMLFrameElement,
+                            public nsIDOMHTMLFrameElement
+@@ -132,7 +135,7 @@
+       return aResult.ParseColor(aValue, GetOwnerDoc());
+     }
+     if (aAttribute == nsGkAtoms::frameborder) {
+-      return ParseFrameborderValue(aValue, aResult);
++      return HTMLAttributeParsingUtils::ParseFrameborderValue(aValue, aResult);
+     }
+     if (aAttribute == nsGkAtoms::marginwidth) {
+       return aResult.ParseSpecialIntValue(aValue, true);
+@@ -141,7 +144,7 @@
+       return aResult.ParseSpecialIntValue(aValue, true);
+     }
+     if (aAttribute == nsGkAtoms::scrolling) {
+-      return ParseScrollingValue(aValue, aResult);
++      return HTMLAttributeParsingUtils::ParseScrollingValue(aValue, aResult);
+     }
+   }
+ 
+@@ -153,16 +156,16 @@
+ MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                       nsRuleData* aData)
+ {
+-  nsGenericHTMLElement::MapScrollingAttributeInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapScrollingAttributeInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ NS_IMETHODIMP_(bool)
+ nsHTMLFrameElement::IsAttributeMapped(const nsIAtom* aAttribute) const
+ {
+   static const MappedAttributeEntry* const map[] = {
+-    sScrollingAttributeMap,
+-    sCommonAttributeMap,
++    HTMLAttributeParsingUtils::sScrollingAttributeMap,
++    HTMLAttributeParsingUtils::sCommonAttributeMap,
+   };
+   
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLFrameSetElement.cpp b/content/html/content/src/nsHTMLFrameSetElement.cpp
+--- a/content/html/content/src/nsHTMLFrameSetElement.cpp
++++ b/content/html/content/src/nsHTMLFrameSetElement.cpp
+@@ -34,6 +34,7 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
++
+ #include "nsIDOMHTMLFrameSetElement.h"
+ #include "nsIDOMEventTarget.h"
+ #include "nsGenericHTMLElement.h"
+@@ -42,6 +43,9 @@
+ #include "nsIFrameSetElement.h"
+ #include "nsIHTMLDocument.h"
+ #include "nsIDocument.h"
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ class nsHTMLFrameSetElement : public nsGenericHTMLElement,
+                               public nsIDOMHTMLFrameSetElement,
+@@ -274,7 +278,7 @@
+       return aResult.ParseColor(aValue, GetOwnerDoc());
+     }
+     if (aAttribute == nsGkAtoms::frameborder) {
+-      return nsGenericHTMLElement::ParseFrameborderValue(aValue, aResult);
++      return HTMLAttributeParsingUtils::ParseFrameborderValue(aValue, aResult);
+     }
+     if (aAttribute == nsGkAtoms::border) {
+       return aResult.ParseIntWithBounds(aValue, 0, 100);
+diff --git a/content/html/content/src/nsHTMLHRElement.cpp b/content/html/content/src/nsHTMLHRElement.cpp
+--- a/content/html/content/src/nsHTMLHRElement.cpp
++++ b/content/html/content/src/nsHTMLHRElement.cpp
+@@ -34,6 +34,7 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
++
+ #include "nsIDOMHTMLHRElement.h"
+ #include "nsIDOMNSHTMLHRElement.h"
+ #include "nsIDOMEventTarget.h"
+@@ -43,6 +44,9 @@
+ #include "nsPresContext.h"
+ #include "nsMappedAttributes.h"
+ #include "nsRuleData.h"
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ class nsHTMLHRElement : public nsGenericHTMLElement,
+                         public nsIDOMHTMLHRElement,
+@@ -300,7 +304,7 @@
+     }
+   }
+ 
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ NS_IMETHODIMP_(bool)
+@@ -317,7 +321,7 @@
+   
+   static const MappedAttributeEntry* const map[] = {
+     attributes,
+-    sCommonAttributeMap,
++    HTMLAttributeParsingUtils::sCommonAttributeMap,
+   };
+ 
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLHeadingElement.cpp b/content/html/content/src/nsHTMLHeadingElement.cpp
+--- a/content/html/content/src/nsHTMLHeadingElement.cpp
++++ b/content/html/content/src/nsHTMLHeadingElement.cpp
+@@ -34,6 +34,7 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
++
+ #include "nsIDOMHTMLHeadingElement.h"
+ #include "nsIDOMEventTarget.h"
+ #include "nsGenericHTMLElement.h"
+@@ -42,6 +43,9 @@
+ #include "nsMappedAttributes.h"
+ #include "nsRuleData.h"
+ #include "mozAutoDocUpdate.h"
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ class nsHTMLHeadingElement : public nsGenericHTMLElement,
+                              public nsIDOMHTMLHeadingElement
+@@ -116,7 +120,7 @@
+                                      nsAttrValue& aResult)
+ {
+   if (aAttribute == nsGkAtoms::align && aNamespaceID == kNameSpaceID_None) {
+-    return ParseDivAlignValue(aValue, aResult);
++    return HTMLAttributeParsingUtils::ParseDivAlignValue(aValue, aResult);
+   }
+ 
+   return nsGenericHTMLElement::ParseAttribute(aNamespaceID, aAttribute, aValue,
+@@ -126,16 +130,16 @@
+ static void
+ MapAttributesIntoRule(const nsMappedAttributes* aAttributes, nsRuleData* aData)
+ {
+-  nsGenericHTMLElement::MapDivAlignAttributeInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapDivAlignAttributeInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ NS_IMETHODIMP_(bool)
+ nsHTMLHeadingElement::IsAttributeMapped(const nsIAtom* aAttribute) const
+ {
+   static const MappedAttributeEntry* const map[] = {
+-    sDivAlignAttributeMap,
+-    sCommonAttributeMap
++    HTMLAttributeParsingUtils::sDivAlignAttributeMap,
++    HTMLAttributeParsingUtils::sCommonAttributeMap
+   };
+ 
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLIFrameElement.cpp b/content/html/content/src/nsHTMLIFrameElement.cpp
+--- a/content/html/content/src/nsHTMLIFrameElement.cpp
++++ b/content/html/content/src/nsHTMLIFrameElement.cpp
+@@ -34,6 +34,7 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
++
+ #include "nsIDOMHTMLIFrameElement.h"
+ #include "nsGenericHTMLFrameElement.h"
+ #include "nsIDOMDocument.h"
+@@ -47,6 +48,9 @@
+ #include "nsDOMError.h"
+ #include "nsRuleData.h"
+ #include "nsStyleConsts.h"
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ class nsHTMLIFrameElement : public nsGenericHTMLFrameElement,
+                             public nsIDOMHTMLIFrameElement
+@@ -169,13 +173,13 @@
+       return aResult.ParseSpecialIntValue(aValue, true);
+     }
+     if (aAttribute == nsGkAtoms::frameborder) {
+-      return ParseFrameborderValue(aValue, aResult);
++      return HTMLAttributeParsingUtils::ParseFrameborderValue(aValue, aResult);
+     }
+     if (aAttribute == nsGkAtoms::scrolling) {
+-      return ParseScrollingValue(aValue, aResult);
++      return HTMLAttributeParsingUtils::ParseScrollingValue(aValue, aResult);
+     }
+     if (aAttribute == nsGkAtoms::align) {
+-      return ParseAlignValue(aValue, aResult);
++      return HTMLAttributeParsingUtils::ParseAlignValue(aValue, aResult);
+     }
+   }
+ 
+@@ -228,9 +232,9 @@
+     }
+   }
+ 
+-  nsGenericHTMLElement::MapScrollingAttributeInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapImageAlignAttributeInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapScrollingAttributeInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapImageAlignAttributeInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ NS_IMETHODIMP_(bool)
+@@ -245,9 +249,9 @@
+ 
+   static const MappedAttributeEntry* const map[] = {
+     attributes,
+-    sScrollingAttributeMap,
+-    sImageAlignAttributeMap,
+-    sCommonAttributeMap,
++    HTMLAttributeParsingUtils::sScrollingAttributeMap,
++    HTMLAttributeParsingUtils::sImageAlignAttributeMap,
++    HTMLAttributeParsingUtils::sCommonAttributeMap,
+   };
+   
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLImageElement.cpp b/content/html/content/src/nsHTMLImageElement.cpp
+--- a/content/html/content/src/nsHTMLImageElement.cpp
++++ b/content/html/content/src/nsHTMLImageElement.cpp
+@@ -34,6 +34,7 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
++
+ #include "nsIDOMHTMLImageElement.h"
+ #include "nsIDOMNSHTMLImageElement.h"
+ #include "nsIDOMEventTarget.h"
+@@ -75,6 +76,9 @@
+ #include "nsEventDispatcher.h"
+ 
+ #include "nsLayoutUtils.h"
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ // XXX nav attrs: suppress
+ 
+@@ -368,14 +372,14 @@
+ {
+   if (aNamespaceID == kNameSpaceID_None) {
+     if (aAttribute == nsGkAtoms::align) {
+-      return ParseAlignValue(aValue, aResult);
++      return HTMLAttributeParsingUtils::ParseAlignValue(aValue, aResult);
+     }
+     if (aAttribute == nsGkAtoms::src) {
+       static const char* kWhitespace = " \n\r\t\b";
+       aResult.SetTo(nsContentUtils::TrimCharsInSet(kWhitespace, aValue));
+       return true;
+     }
+-    if (ParseImageAttribute(aAttribute, aValue, aResult)) {
++    if (HTMLAttributeParsingUtils::ParseImageAttribute(aAttribute, aValue, aResult)) {
+       return true;
+     }
+   }
+@@ -388,11 +392,11 @@
+ MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                       nsRuleData* aData)
+ {
+-  nsGenericHTMLElement::MapImageAlignAttributeInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapImageBorderAttributeInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapImageMarginAttributeInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapImageSizeAttributesInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapImageAlignAttributeInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapImageBorderAttributeInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapImageMarginAttributeInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapImageSizeAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ nsChangeHint
+@@ -412,10 +416,10 @@
+ nsHTMLImageElement::IsAttributeMapped(const nsIAtom* aAttribute) const
+ {
+   static const MappedAttributeEntry* const map[] = {
+-    sCommonAttributeMap,
+-    sImageMarginSizeAttributeMap,
+-    sImageBorderAttributeMap,
+-    sImageAlignAttributeMap
++    HTMLAttributeParsingUtils::sCommonAttributeMap,
++    HTMLAttributeParsingUtils::sImageMarginSizeAttributeMap,
++    HTMLAttributeParsingUtils::sImageBorderAttributeMap,
++    HTMLAttributeParsingUtils::sImageAlignAttributeMap
+   };
+ 
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLInputElement.cpp b/content/html/content/src/nsHTMLInputElement.cpp
+--- a/content/html/content/src/nsHTMLInputElement.cpp
++++ b/content/html/content/src/nsHTMLInputElement.cpp
+@@ -109,6 +109,9 @@
+ 
+ #include "mozAutoDocUpdate.h"
+ #include "nsHTMLFormElement.h"
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ #include "nsTextEditRules.h"
+ 
+@@ -2277,9 +2280,9 @@
+       return aResult.ParseIntWithBounds(aValue, 0);
+     }
+     if (aAttribute == nsGkAtoms::align) {
+-      return ParseAlignValue(aValue, aResult);
++      return HTMLAttributeParsingUtils::ParseAlignValue(aValue, aResult);
+     }
+-    if (ParseImageAttribute(aAttribute, aValue, aResult)) {
++    if (HTMLAttributeParsingUtils::ParseImageAttribute(aAttribute, aValue, aResult)) {
+       // We have to call |ParseImageAttribute| unconditionally since we
+       // don't know if we're going to have a type="image" attribute yet,
+       // (or could have it set dynamically in the future).  See bug
+@@ -2327,14 +2330,14 @@
+   const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::type);
+   if (value && value->Type() == nsAttrValue::eEnum &&
+       value->GetEnumValue() == NS_FORM_INPUT_IMAGE) {
+-    nsGenericHTMLFormElement::MapImageBorderAttributeInto(aAttributes, aData);
+-    nsGenericHTMLFormElement::MapImageMarginAttributeInto(aAttributes, aData);
+-    nsGenericHTMLFormElement::MapImageSizeAttributesInto(aAttributes, aData);
++    HTMLAttributeParsingUtils::MapImageBorderAttributeInto(aAttributes, aData);
++    HTMLAttributeParsingUtils::MapImageMarginAttributeInto(aAttributes, aData);
++    HTMLAttributeParsingUtils::MapImageSizeAttributesInto(aAttributes, aData);
+     // Images treat align as "float"
+-    nsGenericHTMLFormElement::MapImageAlignAttributeInto(aAttributes, aData);
++    HTMLAttributeParsingUtils::MapImageAlignAttributeInto(aAttributes, aData);
+   } 
+ 
+-  nsGenericHTMLFormElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ nsChangeHint
+@@ -2372,9 +2375,9 @@
+ 
+   static const MappedAttributeEntry* const map[] = {
+     attributes,
+-    sCommonAttributeMap,
+-    sImageMarginSizeAttributeMap,
+-    sImageBorderAttributeMap,
++    HTMLAttributeParsingUtils::sCommonAttributeMap,
++    HTMLAttributeParsingUtils::sImageMarginSizeAttributeMap,
++    HTMLAttributeParsingUtils::sImageBorderAttributeMap,
+   };
+ 
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLLIElement.cpp b/content/html/content/src/nsHTMLLIElement.cpp
+--- a/content/html/content/src/nsHTMLLIElement.cpp
++++ b/content/html/content/src/nsHTMLLIElement.cpp
+@@ -34,6 +34,7 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
++
+ #include "nsIDOMHTMLLIElement.h"
+ #include "nsIDOMEventTarget.h"
+ #include "nsGenericHTMLElement.h"
+@@ -41,6 +42,9 @@
+ #include "nsStyleConsts.h"
+ #include "nsMappedAttributes.h"
+ #include "nsRuleData.h"
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ class nsHTMLLIElement : public nsGenericHTMLElement,
+                         public nsIDOMHTMLLIElement
+@@ -159,7 +163,7 @@
+     }
+   }
+ 
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ NS_IMETHODIMP_(bool)
+@@ -172,7 +176,7 @@
+ 
+   static const MappedAttributeEntry* const map[] = {
+     attributes,
+-    sCommonAttributeMap,
++    HTMLAttributeParsingUtils::sCommonAttributeMap,
+   };
+ 
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLMediaElement.cpp b/content/html/content/src/nsHTMLMediaElement.cpp
+--- a/content/html/content/src/nsHTMLMediaElement.cpp
++++ b/content/html/content/src/nsHTMLMediaElement.cpp
+@@ -92,6 +92,9 @@
+ #ifdef MOZ_WAVE
+ #include "nsWaveDecoder.h"
+ #endif
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ #ifdef PR_LOGGING
+ static PRLogModuleInfo* gMediaElementLog;
+@@ -1050,7 +1053,7 @@
+             || aAttribute == nsGkAtoms::end) {
+       return aResult.ParseFloatValue(aValue);
+     }
+-    else if (ParseImageAttribute(aAttribute, aValue, aResult)) {
++    else if (HTMLAttributeParsingUtils::ParseImageAttribute(aAttribute, aValue, aResult)) {
+       return true;
+     }
+   }
+diff --git a/content/html/content/src/nsHTMLOListElement.cpp b/content/html/content/src/nsHTMLOListElement.cpp
+--- a/content/html/content/src/nsHTMLOListElement.cpp
++++ b/content/html/content/src/nsHTMLOListElement.cpp
+@@ -34,6 +34,7 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
++
+ #include "nsIDOMHTMLOListElement.h"
+ #include "nsIDOMHTMLDListElement.h"
+ #include "nsIDOMHTMLUListElement.h"
+@@ -43,6 +44,9 @@
+ #include "nsStyleConsts.h"
+ #include "nsMappedAttributes.h"
+ #include "nsRuleData.h"
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ class nsHTMLSharedListElement : public nsGenericHTMLElement,
+                                 public nsIDOMHTMLOListElement,
+@@ -193,7 +197,7 @@
+     }
+   }
+ 
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ NS_IMETHODIMP_(bool)
+@@ -208,7 +212,7 @@
+ 
+     static const MappedAttributeEntry* const map[] = {
+       attributes,
+-      sCommonAttributeMap,
++      HTMLAttributeParsingUtils::sCommonAttributeMap,
+     };
+ 
+     return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLObjectElement.cpp b/content/html/content/src/nsHTMLObjectElement.cpp
+--- a/content/html/content/src/nsHTMLObjectElement.cpp
++++ b/content/html/content/src/nsHTMLObjectElement.cpp
+@@ -50,6 +50,9 @@
+ #include "nsFormSubmission.h"
+ #include "nsIObjectFrame.h"
+ #include "nsIPluginInstance.h"
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ class nsHTMLObjectElement : public nsGenericHTMLFormElement,
+                             public nsObjectLoadingContent,
+@@ -403,9 +406,9 @@
+ {
+   if (aNamespaceID == kNameSpaceID_None) {
+     if (aAttribute == nsGkAtoms::align) {
+-      return ParseAlignValue(aValue, aResult);
++      return HTMLAttributeParsingUtils::ParseAlignValue(aValue, aResult);
+     }
+-    if (ParseImageAttribute(aAttribute, aValue, aResult)) {
++    if (HTMLAttributeParsingUtils::ParseImageAttribute(aAttribute, aValue, aResult)) {
+       return true;
+     }
+   }
+@@ -418,21 +421,21 @@
+ MapAttributesIntoRule(const nsMappedAttributes *aAttributes,
+                       nsRuleData *aData)
+ {
+-  nsGenericHTMLFormElement::MapImageAlignAttributeInto(aAttributes, aData);
+-  nsGenericHTMLFormElement::MapImageBorderAttributeInto(aAttributes, aData);
+-  nsGenericHTMLFormElement::MapImageMarginAttributeInto(aAttributes, aData);
+-  nsGenericHTMLFormElement::MapImageSizeAttributesInto(aAttributes, aData);
+-  nsGenericHTMLFormElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapImageAlignAttributeInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapImageBorderAttributeInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapImageMarginAttributeInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapImageSizeAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ NS_IMETHODIMP_(bool)
+ nsHTMLObjectElement::IsAttributeMapped(const nsIAtom *aAttribute) const
+ {
+   static const MappedAttributeEntry* const map[] = {
+-    sCommonAttributeMap,
+-    sImageMarginSizeAttributeMap,
+-    sImageBorderAttributeMap,
+-    sImageAlignAttributeMap,
++    HTMLAttributeParsingUtils::sCommonAttributeMap,
++    HTMLAttributeParsingUtils::sImageMarginSizeAttributeMap,
++    HTMLAttributeParsingUtils::sImageBorderAttributeMap,
++    HTMLAttributeParsingUtils::sImageAlignAttributeMap,
+   };
+ 
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLParagraphElement.cpp b/content/html/content/src/nsHTMLParagraphElement.cpp
+--- a/content/html/content/src/nsHTMLParagraphElement.cpp
++++ b/content/html/content/src/nsHTMLParagraphElement.cpp
+@@ -34,6 +34,7 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
++
+ #include "nsIDOMHTMLParagraphElement.h"
+ #include "nsIDOMEventTarget.h"
+ #include "nsGenericHTMLElement.h"
+@@ -41,6 +42,9 @@
+ #include "nsStyleConsts.h"
+ #include "nsMappedAttributes.h"
+ #include "nsRuleData.h"
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ // XXX missing nav attributes
+ 
+@@ -118,7 +122,7 @@
+                                        nsAttrValue& aResult)
+ {
+   if (aAttribute == nsGkAtoms::align && aNamespaceID == kNameSpaceID_None) {
+-    return ParseDivAlignValue(aValue, aResult);
++    return HTMLAttributeParsingUtils::ParseDivAlignValue(aValue, aResult);
+   }
+ 
+   return nsGenericHTMLElement::ParseAttribute(aNamespaceID, aAttribute, aValue,
+@@ -128,16 +132,16 @@
+ static void
+ MapAttributesIntoRule(const nsMappedAttributes* aAttributes, nsRuleData* aData)
+ {
+-  nsGenericHTMLElement::MapDivAlignAttributeInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapDivAlignAttributeInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ NS_IMETHODIMP_(bool)
+ nsHTMLParagraphElement::IsAttributeMapped(const nsIAtom* aAttribute) const
+ {
+   static const MappedAttributeEntry* const map[] = {
+-    sDivAlignAttributeMap,
+-    sCommonAttributeMap,
++    HTMLAttributeParsingUtils::sDivAlignAttributeMap,
++    HTMLAttributeParsingUtils::sCommonAttributeMap,
+   };
+ 
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLPreElement.cpp b/content/html/content/src/nsHTMLPreElement.cpp
+--- a/content/html/content/src/nsHTMLPreElement.cpp
++++ b/content/html/content/src/nsHTMLPreElement.cpp
+@@ -34,6 +34,7 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
++
+ #include "nsIDOMHTMLPreElement.h"
+ #include "nsIDOMEventTarget.h"
+ #include "nsGenericHTMLElement.h"
+@@ -42,6 +43,9 @@
+ #include "nsMappedAttributes.h"
+ #include "nsRuleData.h"
+ #include "nsCSSStruct.h"
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ // XXX wrap, variable, cols, tabstop
+ 
+@@ -176,7 +180,7 @@
+     }
+   }
+ 
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ NS_IMETHODIMP_(bool)
+@@ -192,7 +196,7 @@
+   
+   static const MappedAttributeEntry* const map[] = {
+     attributes,
+-    sCommonAttributeMap,
++    HTMLAttributeParsingUtils::sCommonAttributeMap,
+   };
+ 
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLSelectElement.cpp b/content/html/content/src/nsHTMLSelectElement.cpp
+--- a/content/html/content/src/nsHTMLSelectElement.cpp
++++ b/content/html/content/src/nsHTMLSelectElement.cpp
+@@ -68,6 +68,9 @@
+ #include "nsServiceManagerUtils.h"
+ #include "nsRuleData.h"
+ #include "nsEventDispatcher.h"
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ NS_IMPL_ISUPPORTS1(nsSelectState, nsSelectState)
+ NS_DEFINE_STATIC_IID_ACCESSOR(nsSelectState, NS_SELECT_STATE_IID)
+@@ -1377,8 +1380,8 @@
+ MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                       nsRuleData* aData)
+ {
+-  nsGenericHTMLFormElement::MapImageAlignAttributeInto(aAttributes, aData);
+-  nsGenericHTMLFormElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapImageAlignAttributeInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ nsChangeHint
+@@ -1398,8 +1401,8 @@
+ nsHTMLSelectElement::IsAttributeMapped(const nsIAtom* aAttribute) const
+ {
+   static const MappedAttributeEntry* const map[] = {
+-    sCommonAttributeMap,
+-    sImageAlignAttributeMap
++    HTMLAttributeParsingUtils::sCommonAttributeMap,
++    HTMLAttributeParsingUtils::sImageAlignAttributeMap
+   };
+ 
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLSharedElement.cpp b/content/html/content/src/nsHTMLSharedElement.cpp
+--- a/content/html/content/src/nsHTMLSharedElement.cpp
++++ b/content/html/content/src/nsHTMLSharedElement.cpp
+@@ -48,6 +48,9 @@
+ #include "nsMappedAttributes.h"
+ #include "nsNetUtil.h"
+ #include "nsHTMLFormElement.h"
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ // XXX nav4 has type= start= (same as OL/UL)
+ extern nsAttrValue::EnumTable kListTypeTable[];
+@@ -234,7 +237,7 @@
+         return aResult.ParseIntWithBounds(aValue, 0);
+       }
+       if (aAttribute == nsGkAtoms::align) {
+-        return ParseAlignValue(aValue, aResult);
++        return HTMLAttributeParsingUtils::ParseAlignValue(aValue, aResult);
+       }
+       if (aAttribute == nsGkAtoms::width ||
+           aAttribute == nsGkAtoms::height) {
+@@ -267,8 +270,8 @@
+ SpacerMapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                             nsRuleData* aData)
+ {
+-  nsGenericHTMLElement::MapImageMarginAttributeInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapImageSizeAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapImageMarginAttributeInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapImageSizeAttributesInto(aAttributes, aData);
+ 
+   if (aData->mSIDs & (NS_STYLE_INHERIT_BIT(Position) |
+                       NS_STYLE_INHERIT_BIT(Display))) {
+@@ -350,7 +353,7 @@
+     // the code that calculates it.
+   }
+ 
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ static void
+@@ -371,7 +374,7 @@
+     }
+   }
+ 
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ NS_IMETHODIMP_(bool)
+@@ -388,9 +391,9 @@
+ 
+     static const MappedAttributeEntry* const map[] = {
+       attributes,
+-      sCommonAttributeMap,
+-      sImageMarginSizeAttributeMap,
+-      sImageBorderAttributeMap,
++      HTMLAttributeParsingUtils::sCommonAttributeMap,
++      HTMLAttributeParsingUtils::sImageMarginSizeAttributeMap,
++      HTMLAttributeParsingUtils::sImageBorderAttributeMap,
+     };
+ 
+     return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+@@ -405,7 +408,7 @@
+   
+     static const MappedAttributeEntry* const map[] = {
+       attributes,
+-      sCommonAttributeMap,
++      HTMLAttributeParsingUtils::sCommonAttributeMap,
+     };
+ 
+     return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLSharedObjectElement.cpp b/content/html/content/src/nsHTMLSharedObjectElement.cpp
+--- a/content/html/content/src/nsHTMLSharedObjectElement.cpp
++++ b/content/html/content/src/nsHTMLSharedObjectElement.cpp
+@@ -49,6 +49,9 @@
+ #include "nsIDOMGetSVGDocument.h"
+ #include "nsIDOMSVGDocument.h"
+ #endif
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ // XXX this is to get around conflicts with windows.h defines
+ // introduced through jni.h
+@@ -378,9 +381,9 @@
+ {
+   if (aNamespaceID == kNameSpaceID_None) {
+     if (aAttribute == nsGkAtoms::align) {
+-      return ParseAlignValue(aValue, aResult);
++      return HTMLAttributeParsingUtils::ParseAlignValue(aValue, aResult);
+     }
+-    if (ParseImageAttribute(aAttribute, aValue, aResult)) {
++    if (HTMLAttributeParsingUtils::ParseImageAttribute(aAttribute, aValue, aResult)) {
+       return true;
+     }
+   }
+@@ -393,21 +396,21 @@
+ MapAttributesIntoRule(const nsMappedAttributes *aAttributes,
+                       nsRuleData *aData)
+ {
+-  nsGenericHTMLElement::MapImageBorderAttributeInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapImageMarginAttributeInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapImageSizeAttributesInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapImageAlignAttributeInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapImageBorderAttributeInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapImageMarginAttributeInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapImageSizeAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapImageAlignAttributeInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ NS_IMETHODIMP_(bool)
+ nsHTMLSharedObjectElement::IsAttributeMapped(const nsIAtom *aAttribute) const
+ {
+   static const MappedAttributeEntry* const map[] = {
+-    sCommonAttributeMap,
+-    sImageMarginSizeAttributeMap,
+-    sImageBorderAttributeMap,
+-    sImageAlignAttributeMap,
++    HTMLAttributeParsingUtils::sCommonAttributeMap,
++    HTMLAttributeParsingUtils::sImageMarginSizeAttributeMap,
++    HTMLAttributeParsingUtils::sImageBorderAttributeMap,
++    HTMLAttributeParsingUtils::sImageAlignAttributeMap,
+   };
+ 
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLTableCaptionElement.cpp b/content/html/content/src/nsHTMLTableCaptionElement.cpp
+--- a/content/html/content/src/nsHTMLTableCaptionElement.cpp
++++ b/content/html/content/src/nsHTMLTableCaptionElement.cpp
+@@ -34,6 +34,7 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
++
+ #include "nsIDOMHTMLTableCaptionElem.h"
+ #include "nsIDOMEventTarget.h"
+ #include "nsGenericHTMLElement.h"
+@@ -41,6 +42,9 @@
+ #include "nsStyleConsts.h"
+ #include "nsMappedAttributes.h"
+ #include "nsRuleData.h"
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ class nsHTMLTableCaptionElement :  public nsGenericHTMLElement,
+                                    public nsIDOMHTMLTableCaptionElement
+@@ -142,7 +146,7 @@
+     }
+   }
+ 
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ NS_IMETHODIMP_(bool)
+@@ -155,7 +159,7 @@
+ 
+   static const MappedAttributeEntry* const map[] = {
+     attributes,
+-    sCommonAttributeMap,
++    HTMLAttributeParsingUtils::sCommonAttributeMap,
+   };
+ 
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLTableCellElement.cpp b/content/html/content/src/nsHTMLTableCellElement.cpp
+--- a/content/html/content/src/nsHTMLTableCellElement.cpp
++++ b/content/html/content/src/nsHTMLTableCellElement.cpp
+@@ -34,6 +34,7 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
++
+ #include "nsIDOMHTMLTableCellElement.h"
+ #include "nsIDOMHTMLTableRowElement.h"
+ #include "nsIDOMHTMLCollection.h"
+@@ -46,6 +47,9 @@
+ #include "nsRuleData.h"
+ #include "nsIDocument.h"
+ #include "celldata.h"
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ class nsHTMLTableCellElement : public nsGenericHTMLElement,
+                                public nsIDOMHTMLTableCellElement
+@@ -310,7 +314,7 @@
+       return aResult.ParseSpecialIntValue(aValue, true);
+     }
+     if (aAttribute == nsGkAtoms::align) {
+-      return ParseTableCellHAlignValue(aValue, aResult);
++      return HTMLAttributeParsingUtils::ParseTableCellHAlignValue(aValue, aResult);
+     }
+     if (aAttribute == nsGkAtoms::bgcolor) {
+       return aResult.ParseColor(aValue, GetOwnerDoc());
+@@ -319,7 +323,7 @@
+       return aResult.ParseEnumValue(aValue, kCellScopeTable);
+     }
+     if (aAttribute == nsGkAtoms::valign) {
+-      return ParseTableVAlignValue(aValue, aResult);
++      return HTMLAttributeParsingUtils::ParseTableVAlignValue(aValue, aResult);
+     }
+   }
+ 
+@@ -394,8 +398,8 @@
+     }
+   }
+   
+-  nsGenericHTMLElement::MapBackgroundAttributesInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapBackgroundAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ NS_IMETHODIMP_(bool)
+@@ -420,8 +424,8 @@
+ 
+   static const MappedAttributeEntry* const map[] = {
+     attributes,
+-    sCommonAttributeMap,
+-    sBackgroundAttributeMap,
++    HTMLAttributeParsingUtils::sCommonAttributeMap,
++    HTMLAttributeParsingUtils::sBackgroundAttributeMap,
+   };
+ 
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLTableColElement.cpp b/content/html/content/src/nsHTMLTableColElement.cpp
+--- a/content/html/content/src/nsHTMLTableColElement.cpp
++++ b/content/html/content/src/nsHTMLTableColElement.cpp
+@@ -34,6 +34,7 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
++
+ #include "nsIDOMHTMLTableColElement.h"
+ #include "nsIDOMEventTarget.h"
+ #include "nsMappedAttributes.h"
+@@ -41,6 +42,9 @@
+ #include "nsGkAtoms.h"
+ #include "nsStyleConsts.h"
+ #include "nsRuleData.h"
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ // use the same protection as ancient code did 
+ // http://lxr.mozilla.org/classic/source/lib/layout/laytable.c#46
+@@ -136,10 +140,10 @@
+       return aResult.ParseSpecialIntValue(aValue, true);
+     }
+     if (aAttribute == nsGkAtoms::align) {
+-      return ParseTableCellHAlignValue(aValue, aResult);
++      return HTMLAttributeParsingUtils::ParseTableCellHAlignValue(aValue, aResult);
+     }
+     if (aAttribute == nsGkAtoms::valign) {
+-      return ParseTableVAlignValue(aValue, aResult);
++      return HTMLAttributeParsingUtils::ParseTableVAlignValue(aValue, aResult);
+     }
+   }
+ 
+@@ -201,7 +205,7 @@
+     }
+   }
+ 
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ NS_IMETHODIMP_(bool)
+@@ -217,7 +221,7 @@
+ 
+   static const MappedAttributeEntry* const map[] = {
+     attributes,
+-    sCommonAttributeMap,
++    HTMLAttributeParsingUtils::sCommonAttributeMap,
+   };
+ 
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLTableElement.cpp b/content/html/content/src/nsHTMLTableElement.cpp
+--- a/content/html/content/src/nsHTMLTableElement.cpp
++++ b/content/html/content/src/nsHTMLTableElement.cpp
+@@ -34,6 +34,7 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
++
+ #include "nsIDOMHTMLTableElement.h"
+ #include "nsIDOMHTMLTableCaptionElem.h"
+ #include "nsIDOMHTMLTableSectionElem.h"
+@@ -56,6 +57,9 @@
+ #include "nsGenericHTMLElement.h"
+ #include "nsIHTMLCollection.h"
+ /* end for collections */
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ class TableRowsCollection;
+ 
+@@ -1006,7 +1010,7 @@
+     }
+     
+     if (aAttribute == nsGkAtoms::align) {
+-      return ParseTableHAlignValue(aValue, aResult);
++      return HTMLAttributeParsingUtils::ParseTableHAlignValue(aValue, aResult);
+     }
+     if (aAttribute == nsGkAtoms::bgcolor ||
+         aAttribute == nsGkAtoms::bordercolor) {
+@@ -1198,7 +1202,7 @@
+     const nsStyleDisplay* readDisplay = aData->mStyleContext->GetStyleDisplay();
+   
+     if (readDisplay->mDisplay != NS_STYLE_DISPLAY_TABLE_CELL)
+-      nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++      HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+   }
+   if (aData->mSIDs & NS_STYLE_INHERIT_BIT(Border)) {
+     const nsStyleDisplay* readDisplay = aData->mStyleContext->GetStyleDisplay();
+@@ -1243,7 +1247,7 @@
+     const nsStyleDisplay* readDisplay = aData->mStyleContext->GetStyleDisplay();
+   
+     if (readDisplay->mDisplay != NS_STYLE_DISPLAY_TABLE_CELL)
+-      nsGenericHTMLElement::MapBackgroundAttributesInto(aAttributes, aData);
++      HTMLAttributeParsingUtils::MapBackgroundAttributesInto(aAttributes, aData);
+   }
+ }
+ 
+@@ -1269,8 +1273,8 @@
+ 
+   static const MappedAttributeEntry* const map[] = {
+     attributes,
+-    sCommonAttributeMap,
+-    sBackgroundAttributeMap,
++    HTMLAttributeParsingUtils::sCommonAttributeMap,
++    HTMLAttributeParsingUtils::sBackgroundAttributeMap,
+   };
+ 
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLTableRowElement.cpp b/content/html/content/src/nsHTMLTableRowElement.cpp
+--- a/content/html/content/src/nsHTMLTableRowElement.cpp
++++ b/content/html/content/src/nsHTMLTableRowElement.cpp
+@@ -34,6 +34,7 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
++
+ #include "nsIDOMHTMLTableRowElement.h"
+ #include "nsIDOMHTMLTableElement.h"
+ #include "nsIDOMHTMLTableSectionElem.h"
+@@ -47,6 +48,9 @@
+ #include "nsStyleConsts.h"
+ #include "nsHTMLParts.h"
+ #include "nsRuleData.h"
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ class nsHTMLTableRowElement : public nsGenericHTMLElement,
+                               public nsIDOMHTMLTableRowElement
+@@ -387,13 +391,13 @@
+       return aResult.ParseSpecialIntValue(aValue, true);
+     }
+     if (aAttribute == nsGkAtoms::align) {
+-      return ParseTableCellHAlignValue(aValue, aResult);
++      return HTMLAttributeParsingUtils::ParseTableCellHAlignValue(aValue, aResult);
+     }
+     if (aAttribute == nsGkAtoms::bgcolor) {
+       return aResult.ParseColor(aValue, GetOwnerDoc());
+     }
+     if (aAttribute == nsGkAtoms::valign) {
+-      return ParseTableVAlignValue(aValue, aResult);
++      return HTMLAttributeParsingUtils::ParseTableVAlignValue(aValue, aResult);
+     }
+   }
+ 
+@@ -431,8 +435,8 @@
+     }
+   }
+ 
+-  nsGenericHTMLElement::MapBackgroundAttributesInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapBackgroundAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ NS_IMETHODIMP_(bool)
+@@ -447,8 +451,8 @@
+ 
+   static const MappedAttributeEntry* const map[] = {
+     attributes,
+-    sCommonAttributeMap,
+-    sBackgroundAttributeMap,
++    HTMLAttributeParsingUtils::sCommonAttributeMap,
++    HTMLAttributeParsingUtils::sBackgroundAttributeMap,
+   };
+ 
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLTableSectionElement.cpp b/content/html/content/src/nsHTMLTableSectionElement.cpp
+--- a/content/html/content/src/nsHTMLTableSectionElement.cpp
++++ b/content/html/content/src/nsHTMLTableSectionElement.cpp
+@@ -34,6 +34,7 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
++
+ #include "nsIDOMHTMLTableSectionElem.h"
+ #include "nsIDOMEventTarget.h"
+ #include "nsMappedAttributes.h"
+@@ -45,6 +46,9 @@
+ #include "nsRuleData.h"
+ #include "nsDOMError.h"
+ #include "nsIDocument.h"
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ // you will see the phrases "rowgroup" and "section" used interchangably
+ 
+@@ -253,13 +257,13 @@
+       return aResult.ParseSpecialIntValue(aValue, true);
+     }
+     if (aAttribute == nsGkAtoms::align) {
+-      return ParseTableCellHAlignValue(aValue, aResult);
++      return HTMLAttributeParsingUtils::ParseTableCellHAlignValue(aValue, aResult);
+     }
+     if (aAttribute == nsGkAtoms::bgcolor) {
+       return aResult.ParseColor(aValue, GetOwnerDoc());
+     }
+     if (aAttribute == nsGkAtoms::valign) {
+-      return ParseTableVAlignValue(aValue, aResult);
++      return HTMLAttributeParsingUtils::ParseTableVAlignValue(aValue, aResult);
+     }
+   }
+ 
+@@ -295,8 +299,8 @@
+     }
+   }
+ 
+-  nsGenericHTMLElement::MapBackgroundAttributesInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapBackgroundAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ NS_IMETHODIMP_(bool)
+@@ -311,8 +315,8 @@
+ 
+   static const MappedAttributeEntry* const map[] = {
+     attributes,
+-    sCommonAttributeMap,
+-    sBackgroundAttributeMap,
++    HTMLAttributeParsingUtils::sCommonAttributeMap,
++    HTMLAttributeParsingUtils::sBackgroundAttributeMap,
+   };
+ 
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLTextAreaElement.cpp b/content/html/content/src/nsHTMLTextAreaElement.cpp
+--- a/content/html/content/src/nsHTMLTextAreaElement.cpp
++++ b/content/html/content/src/nsHTMLTextAreaElement.cpp
+@@ -36,6 +36,7 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
++
+ #include "nsGenericHTMLFormElement.h"
+ #include "nsIDOMHTMLTextAreaElement.h"
+ #include "nsIDOMNSHTMLTextAreaElement.h"
+@@ -76,6 +77,9 @@
+ #include "nsDOMError.h"
+ #include "mozAutoDocUpdate.h"
+ #include "nsISupportsPrimitives.h"
++
++#include "HTMLAttributeParsingUtils.h"
++using namespace mozilla::dom;
+ 
+ static NS_DEFINE_CID(kXULControllersCID,  NS_XULCONTROLLERS_CID);
+ 
+@@ -547,8 +551,8 @@
+ MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                       nsRuleData* aData)
+ {
+-  nsGenericHTMLFormElement::MapDivAlignAttributeInto(aAttributes, aData);
+-  nsGenericHTMLFormElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapDivAlignAttributeInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ nsChangeHint
+@@ -570,8 +574,8 @@
+ nsHTMLTextAreaElement::IsAttributeMapped(const nsIAtom* aAttribute) const
+ {
+   static const MappedAttributeEntry* const map[] = {
+-    sDivAlignAttributeMap,
+-    sCommonAttributeMap,
++    HTMLAttributeParsingUtils::sDivAlignAttributeMap,
++    HTMLAttributeParsingUtils::sCommonAttributeMap,
+   };
+ 
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));
+diff --git a/content/html/content/src/nsHTMLVideoElement.cpp b/content/html/content/src/nsHTMLVideoElement.cpp
+--- a/content/html/content/src/nsHTMLVideoElement.cpp
++++ b/content/html/content/src/nsHTMLVideoElement.cpp
+@@ -39,17 +39,19 @@
+ #include "nsIDOMHTMLSourceElement.h"
+ #include "nsHTMLVideoElement.h"
+ #include "nsGenericHTMLElement.h"
++#include "nsIDocument.h"
++#include "nsIDOMDocument.h"
++#include "nsDOMError.h"
++
++#include "HTMLAttributeParsingUtils.h"
++
+ #include "nsGkAtoms.h"
+ #include "nsSize.h"
+ #include "nsIFrame.h"
+-#include "nsIDocument.h"
+-#include "nsIDOMDocument.h"
+-#include "nsDOMError.h"
+ #include "nsNodeInfoManager.h"
+ #include "plbase64.h"
+ #include "nsNetUtil.h"
+ #include "prmem.h"
+-#include "nsNetUtil.h"
+ #include "nsXPCOMStrings.h"
+ #include "prlock.h"
+ #include "nsThreadUtils.h"
+@@ -65,6 +67,8 @@
+ #include "nsIDOMDocumentEvent.h"
+ #include "nsIDOMProgressEvent.h"
+ #include "nsHTMLMediaError.h"
++
++using namespace mozilla::dom;
+ 
+ NS_IMPL_NS_NEW_HTML_ELEMENT_CHECK_PARSER(Video)
+ 
+@@ -132,8 +136,8 @@
+ MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                       nsRuleData* aData)
+ {
+-  nsGenericHTMLElement::MapImageSizeAttributesInto(aAttributes, aData);
+-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapImageSizeAttributesInto(aAttributes, aData);
++  HTMLAttributeParsingUtils::MapCommonAttributesInto(aAttributes, aData);
+ }
+ 
+ NS_IMETHODIMP_(bool)
+@@ -147,7 +151,7 @@
+ 
+   static const MappedAttributeEntry* const map[] = {
+     attributes,
+-    sCommonAttributeMap
++    HTMLAttributeParsingUtils::sCommonAttributeMap
+   };
+ 
+   return FindAttributeDependence(aAttribute, map, NS_ARRAY_LENGTH(map));

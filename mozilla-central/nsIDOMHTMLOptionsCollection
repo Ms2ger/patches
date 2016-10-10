@@ -1,0 +1,377 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/content/src/HTMLOptionsCollection.cpp b/content/html/content/src/HTMLOptionsCollection.cpp
+--- a/content/html/content/src/HTMLOptionsCollection.cpp
++++ b/content/html/content/src/HTMLOptionsCollection.cpp
+@@ -96,45 +96,45 @@ HTMLOptionsCollection::GetOptionIndex(El
+ 
+ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(HTMLOptionsCollection, mElements)
+ 
+ // nsISupports
+ 
+ // QueryInterface implementation for HTMLOptionsCollection
+ NS_INTERFACE_TABLE_HEAD(HTMLOptionsCollection)
+   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
+-  NS_INTERFACE_TABLE3(HTMLOptionsCollection,
++  NS_INTERFACE_TABLE2(HTMLOptionsCollection,
+                       nsIHTMLCollection,
+-                      nsIDOMHTMLOptionsCollection,
+                       nsIDOMHTMLCollection)
+   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(HTMLOptionsCollection)
+ NS_INTERFACE_MAP_END
+ 
+ 
+ NS_IMPL_CYCLE_COLLECTING_ADDREF(HTMLOptionsCollection)
+ NS_IMPL_CYCLE_COLLECTING_RELEASE(HTMLOptionsCollection)
+ 
+ 
+ JSObject*
+ HTMLOptionsCollection::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+ {
+   return HTMLOptionsCollectionBinding::Wrap(aCx, aScope, this);
+ }
+ 
+-NS_IMETHODIMP
+-HTMLOptionsCollection::SetLength(uint32_t aLength)
++void
++HTMLOptionsCollection::SetLength(uint32_t aLength, ErrorResult& aError)
+ {
+   if (!mSelect) {
+-    return NS_ERROR_UNEXPECTED;
++    aError.Throw(NS_ERROR_UNEXPECTED);
++    return;
+   }
+ 
+-  return mSelect->SetLength(aLength);
++  aError = mSelect->SetLength(aLength);
+ }
+ 
+-NS_IMETHODIMP
++nsresult
+ HTMLOptionsCollection::SetOption(uint32_t aIndex,
+                                  nsIDOMHTMLOptionElement* aOption)
+ {
+   if (!mSelect) {
+     return NS_OK;
+   }
+ 
+   // if the new option is null, just remove this option.  Note that it's safe
+@@ -149,17 +149,17 @@ HTMLOptionsCollection::SetOption(uint32_
+   nsresult rv = NS_OK;
+ 
+   uint32_t index = uint32_t(aIndex);
+ 
+   // Now we're going to be setting an option in our collection
+   if (index > mElements.Length()) {
+     // Fill our array with blank options up to (but not including, since we're
+     // about to change it) aIndex, for compat with other browsers.
+-    rv = SetLength(index);
++    rv = mSelect->SetLength(index);
+     NS_ENSURE_SUCCESS(rv, rv);
+   }
+ 
+   NS_ASSERTION(index <= mElements.Length(), "SetLength lied");
+   
+   nsCOMPtr<nsIDOMNode> ret;
+   if (index == mElements.Length()) {
+     rv = mSelect->AppendChild(aOption, getter_AddRefs(ret));
+@@ -187,45 +187,29 @@ HTMLOptionsCollection::GetSelectedIndex(
+     return 0;
+   }
+ 
+   int32_t selectedIndex;
+   aError = mSelect->GetSelectedIndex(&selectedIndex);
+   return selectedIndex;
+ }
+ 
+-NS_IMETHODIMP
+-HTMLOptionsCollection::GetSelectedIndex(int32_t* aSelectedIndex)
+-{
+-  ErrorResult rv;
+-  *aSelectedIndex = GetSelectedIndex(rv);
+-  return rv.ErrorCode();
+-}
+-
+ void
+ HTMLOptionsCollection::SetSelectedIndex(int32_t aSelectedIndex,
+                                         ErrorResult& aError)
+ {
+   if (!mSelect) {
+     aError.Throw(NS_ERROR_UNEXPECTED);
+     return;
+   }
+ 
+   aError = mSelect->SetSelectedIndex(aSelectedIndex);
+ }
+ 
+ NS_IMETHODIMP
+-HTMLOptionsCollection::SetSelectedIndex(int32_t aSelectedIndex)
+-{
+-  ErrorResult rv;
+-  SetSelectedIndex(aSelectedIndex, rv);
+-  return rv.ErrorCode();
+-}
+-
+-NS_IMETHODIMP
+ HTMLOptionsCollection::Item(uint32_t aIndex, nsIDOMNode** aReturn)
+ {
+   nsISupports* item = GetElementAt(aIndex);
+   if (!item) {
+     *aReturn = nullptr;
+ 
+     return NS_OK;
+   }
+@@ -316,38 +300,16 @@ HTMLOptionsCollection::GetSupportedNames
+   }
+ 
+   aNames.SetCapacity(atoms.Length());
+   for (uint32_t i = 0; i < atoms.Length(); ++i) {
+     aNames.AppendElement(nsDependentAtomString(atoms[i]));
+   }
+ }
+ 
+-NS_IMETHODIMP
+-HTMLOptionsCollection::GetSelect(nsIDOMHTMLSelectElement** aReturn)
+-{
+-  NS_IF_ADDREF(*aReturn = mSelect);
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+-HTMLOptionsCollection::Add(nsIDOMHTMLOptionElement* aOption,
+-                           nsIVariant* aBefore)
+-{
+-  if (!aOption) {
+-    return NS_ERROR_INVALID_ARG;
+-  }
+-
+-  if (!mSelect) {
+-    return NS_ERROR_NOT_INITIALIZED;
+-  }
+-
+-  return mSelect->Add(aOption, aBefore);
+-}
+-
+ void
+ HTMLOptionsCollection::Add(const HTMLOptionOrOptGroupElement& aElement,
+                            const Nullable<HTMLElementOrLong>& aBefore,
+                            ErrorResult& aError)
+ {
+   mSelect->Add(aElement, aBefore, aError);
+ }
+ 
+@@ -361,18 +323,10 @@ HTMLOptionsCollection::Remove(int32_t aI
+ 
+   uint32_t len = Length();
+   if (aIndex < 0 || (uint32_t)aIndex >= len)
+     aIndex = 0;
+ 
+   aError = mSelect->Remove(aIndex);
+ }
+ 
+-NS_IMETHODIMP
+-HTMLOptionsCollection::Remove(int32_t aIndex)
+-{
+-  ErrorResult rv;
+-  Remove(aIndex, rv);
+-  return rv.ErrorCode();
+-}
+-
+ } // namespace dom
+ } // namespace mozilla
+diff --git a/content/html/content/src/HTMLOptionsCollection.h b/content/html/content/src/HTMLOptionsCollection.h
+--- a/content/html/content/src/HTMLOptionsCollection.h
++++ b/content/html/content/src/HTMLOptionsCollection.h
+@@ -2,17 +2,16 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ #ifndef mozilla_dom_HTMLOptionsCollection_h
+ #define mozilla_dom_HTMLOptionsCollection_h
+ 
+ #include "mozilla/Attributes.h"
+ #include "nsIHTMLCollection.h"
+-#include "nsIDOMHTMLOptionsCollection.h"
+ #include "nsWrapperCache.h"
+ 
+ #include "mozilla/dom/HTMLOptionElement.h"
+ #include "mozilla/dom/UnionTypes.h"
+ #include "mozilla/ErrorResult.h"
+ #include "nsCOMPtr.h"
+ #include "nsError.h"
+ #include "nsGenericHTMLElement.h"
+@@ -25,17 +24,16 @@ namespace dom {
+ 
+ class HTMLSelectElement;
+ 
+ /**
+  * The collection of options in the select (what you get back when you do
+  * select.options in DOM)
+  */
+ class HTMLOptionsCollection : public nsIHTMLCollection
+-                            , public nsIDOMHTMLOptionsCollection
+                             , public nsWrapperCache
+ {
+   typedef HTMLOptionElementOrHTMLOptGroupElement HTMLOptionOrOptGroupElement;
+ public:
+   HTMLOptionsCollection(HTMLSelectElement* aSelect);
+   virtual ~HTMLOptionsCollection();
+ 
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+@@ -54,24 +52,17 @@ public:
+   virtual Element* GetElementAt(uint32_t aIndex) MOZ_OVERRIDE;
+   virtual JSObject* NamedItem(JSContext* aCx, const nsAString& aName,
+                               ErrorResult& aError) MOZ_OVERRIDE;
+   virtual void GetSupportedNames(nsTArray<nsString>& aNames) MOZ_OVERRIDE;
+ 
+   // nsIDOMHTMLCollection interface
+   NS_IMPL_NSIDOMHTMLCOLLECTION
+ 
+-  // nsIDOMHTMLOptionsCollection interface
+-  NS_IMETHOD SetLength(uint32_t aLength) MOZ_OVERRIDE;
+-  NS_IMETHOD GetSelectedIndex(int32_t* aSelectedIndex) MOZ_OVERRIDE;
+-  NS_IMETHOD SetSelectedIndex(int32_t aSelectedIndex) MOZ_OVERRIDE;
+-  NS_IMETHOD SetOption(uint32_t index, nsIDOMHTMLOptionElement* option) MOZ_OVERRIDE;
+-  NS_IMETHOD GetSelect(nsIDOMHTMLSelectElement** aSelect) MOZ_OVERRIDE;
+-  NS_IMETHOD Add(nsIDOMHTMLOptionElement* option, nsIVariant* before) MOZ_OVERRIDE;
+-  NS_IMETHOD Remove(int32_t index) MOZ_OVERRIDE;
++  nsresult SetOption(uint32_t index, nsIDOMHTMLOptionElement* option);
+ 
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(HTMLOptionsCollection,
+                                                          nsIHTMLCollection)
+ 
+   // Helpers for HTMLSelectElement
+   /**
+    * Insert an option
+    * @param aOption the option to insert
+@@ -132,16 +123,17 @@ public:
+    * @param aForward TRUE to look forward, FALSE to look backward
+    * @return the option index
+    */
+   nsresult GetOptionIndex(Element* aOption,
+                           int32_t aStartIndex, bool aForward,
+                           int32_t* aIndex);
+ 
+   HTMLOptionElement* GetNamedItem(const nsAString& aName) const;
++  void SetLength(uint32_t aLength, ErrorResult& aError);
+   void Add(const HTMLOptionOrOptGroupElement& aElement,
+            const Nullable<HTMLElementOrLong>& aBefore,
+            ErrorResult& aError);
+   void Remove(int32_t aIndex, ErrorResult& aError);
+   int32_t GetSelectedIndex(ErrorResult& aError);
+   void SetSelectedIndex(int32_t aSelectedIndex, ErrorResult& aError);
+   void IndexedSetter(uint32_t aIndex, nsIDOMHTMLOptionElement* aOption,
+                      ErrorResult& aError)
+diff --git a/content/html/content/src/HTMLSelectElement.cpp b/content/html/content/src/HTMLSelectElement.cpp
+--- a/content/html/content/src/HTMLSelectElement.cpp
++++ b/content/html/content/src/HTMLSelectElement.cpp
+@@ -702,17 +702,17 @@ HTMLSelectElement::Remove(int32_t aIndex
+       parent->RemoveChild(option, getter_AddRefs(ret));
+     }
+   }
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+-HTMLSelectElement::GetOptions(nsIDOMHTMLOptionsCollection** aValue)
++HTMLSelectElement::GetOptions(nsIDOMHTMLCollection** aValue)
+ {
+   NS_IF_ADDREF(*aValue = GetOptions());
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ HTMLSelectElement::GetType(nsAString& aType)
+diff --git a/dom/interfaces/html/moz.build b/dom/interfaces/html/moz.build
+--- a/dom/interfaces/html/moz.build
++++ b/dom/interfaces/html/moz.build
+@@ -45,17 +45,16 @@ XPIDL_SOURCES += [
+     'nsIDOMHTMLMenuItemElement.idl',
+     'nsIDOMHTMLMetaElement.idl',
+     'nsIDOMHTMLMeterElement.idl',
+     'nsIDOMHTMLModElement.idl',
+     'nsIDOMHTMLOListElement.idl',
+     'nsIDOMHTMLObjectElement.idl',
+     'nsIDOMHTMLOptGroupElement.idl',
+     'nsIDOMHTMLOptionElement.idl',
+-    'nsIDOMHTMLOptionsCollection.idl',
+     'nsIDOMHTMLOutputElement.idl',
+     'nsIDOMHTMLParagraphElement.idl',
+     'nsIDOMHTMLParamElement.idl',
+     'nsIDOMHTMLPreElement.idl',
+     'nsIDOMHTMLProgressElement.idl',
+     'nsIDOMHTMLQuoteElement.idl',
+     'nsIDOMHTMLScriptElement.idl',
+     'nsIDOMHTMLSelectElement.idl',
+diff --git a/dom/interfaces/html/nsIDOMHTMLSelectElement.idl b/dom/interfaces/html/nsIDOMHTMLSelectElement.idl
+--- a/dom/interfaces/html/nsIDOMHTMLSelectElement.idl
++++ b/dom/interfaces/html/nsIDOMHTMLSelectElement.idl
+@@ -1,42 +1,42 @@
+ /* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "nsIDOMHTMLElement.idl"
+-#include "nsIDOMHTMLOptionsCollection.idl"
++#include "nsIDOMHTMLCollection.idl"
+ 
+ /**
+  * The nsIDOMHTMLSelectElement interface is the interface to a [X]HTML
+  * select element.
+  *
+  * This interface is trying to follow the DOM Level 2 HTML specification:
+  * http://www.w3.org/TR/DOM-Level-2-HTML/
+  *
+  * with changes from the work-in-progress WHATWG HTML specification:
+  * http://www.whatwg.org/specs/web-apps/current-work/
+  */
+ 
+ interface nsIDOMValidityState;
+ 
+-[scriptable, uuid(8af2123f-c83a-430a-a739-d103a8eaba52)]
++[scriptable, builtinclass, uuid(8af2123f-c83a-430a-a739-d103a8eaba52)]
+ interface nsIDOMHTMLSelectElement : nsIDOMHTMLElement
+ {
+            attribute boolean                     autofocus;
+            attribute boolean                     disabled;
+   readonly attribute nsIDOMHTMLFormElement       form;
+            attribute boolean                     multiple;
+            attribute DOMString                   name;
+            attribute unsigned long               size;
+ 
+   readonly attribute DOMString                   type;
+ 
+-  readonly attribute nsIDOMHTMLOptionsCollection options;
++  readonly attribute nsIDOMHTMLCollection        options;
+            attribute unsigned long               length;
+   nsIDOMNode                item(in unsigned long index);
+   nsIDOMNode                namedItem(in DOMString name);
+   // This add method implementation means the following
+   // since IDL doesn't support overfload.
+   //   void add(in nsIDOMHTMLElement, [optional] in nsIDOMHTMLElement)
+   //   void add(in nsIDOMHTMLElement, in long)
+   void                      add(in nsIDOMHTMLElement element, 
+diff --git a/dom/webidl/HTMLOptionsCollection.webidl b/dom/webidl/HTMLOptionsCollection.webidl
+--- a/dom/webidl/HTMLOptionsCollection.webidl
++++ b/dom/webidl/HTMLOptionsCollection.webidl
+@@ -6,16 +6,17 @@
+  * The origin of this IDL file is
+  * http://www.w3.org/TR/2012/WD-html5-20120329/
+  *
+  * Copyright © 2012 W3C® (MIT, ERCIM, Keio), All Rights Reserved. W3C
+  * liability, trademark and document use rules apply.
+  */
+ 
+ interface HTMLOptionsCollection : HTMLCollection {
++  [SetterThrows]
+            attribute unsigned long length;
+   [Throws]
+   getter object? namedItem(DOMString name);
+   [Throws]
+   setter creator void (unsigned long index, HTMLOptionElement? option);
+   [Throws]
+   void add((HTMLOptionElement or HTMLOptGroupElement) element, optional (HTMLElement or long)? before = null);
+   [Throws]

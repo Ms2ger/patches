@@ -1,0 +1,407 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+Bug 665345 - Move WebIDL tests out of test_canvas.html
+
+These tests can easily break other tests in hard-to-understand
+ways if the order of tests were to change, and 2d.type.replace
+already needed special-casing to avoid trouble.
+
+diff --git a/content/canvas/test/Makefile.in b/content/canvas/test/Makefile.in
+--- a/content/canvas/test/Makefile.in
++++ b/content/canvas/test/Makefile.in
+@@ -137,16 +137,24 @@ MOCHITEST_FILES += \
+ 
+ # Tests that use setTimeout.
+ MOCHITEST_FILES += \
+   test_2d.drawImage.animated.apng.html \
+   test_2d.drawImage.animated.gif.html \
+   test_2d.pattern.animated.gif.html \
+   $(NULL)
+ 
++# WebIDL tests that don't play well with other tests.
++MOCHITEST_FILES += \
++  test_2d.type.prototype.html \
++  test_2d.type.replace.html \
++  test_type.prototype.html \
++  test_type.replace.html \
++  $(NULL)
++
+ ifneq (1_Linux,$(MOZ_SUITE)_$(OS_ARCH))
+ # This test fails in Suite on Linux for some reason, disable it there
+ MOCHITEST_FILES += test_2d.composite.uncovered.image.destination-atop.html
+ endif
+ 
+ # xor and lighter aren't well handled by cairo; they mostly work, but we don't want
+ # to test that
+ #	test_2d.composite.solid.xor.html \
+diff --git a/content/canvas/test/standalone.dat b/content/canvas/test/standalone.dat
+--- a/content/canvas/test/standalone.dat
++++ b/content/canvas/test/standalone.dat
+@@ -11,8 +11,13 @@ test_2d.path.stroke.prune.curve.html
+ test_2d.path.stroke.prune.line.html
+ test_2d.path.stroke.prune.rect.html
+ test_2d.transformation.setTransform.skewed.html
+ test_2d.transformation.transform.skewed.html
+ # setTimeout
+ test_2d.drawImage.animated.apng.html
+ test_2d.drawImage.animated.gif.html
+ test_2d.pattern.animated.gif.html
++# Clashes
++test_2d.type.prototype.html
++test_2d.type.replace.html
++test_type.prototype.html
++test_type.replace.html
+diff --git a/content/canvas/test/test_2d.type.prototype.html b/content/canvas/test/test_2d.type.prototype.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_2d.type.prototype.html
+@@ -0,0 +1,32 @@
++<!DOCTYPE HTML>
++<title>Canvas test: 2d.type.prototype</title>
++<!-- Testing: window.CanvasRenderingContext2D.prototype are not [[Writable]] and not [[Configurable]], and its methods are [[Configurable]]. -->
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++ok(window.CanvasRenderingContext2D.prototype, "window.CanvasRenderingContext2D.prototype");
++ok(window.CanvasRenderingContext2D.prototype.fill, "window.CanvasRenderingContext2D.prototype.fill");
++window.CanvasRenderingContext2D.prototype = null;
++ok(window.CanvasRenderingContext2D.prototype, "window.CanvasRenderingContext2D.prototype");
++delete window.CanvasRenderingContext2D.prototype;
++ok(window.CanvasRenderingContext2D.prototype, "window.CanvasRenderingContext2D.prototype");
++window.CanvasRenderingContext2D.prototype.fill = 1;
++ok(window.CanvasRenderingContext2D.prototype.fill === 1, "window.CanvasRenderingContext2D.prototype.fill === 1");
++delete window.CanvasRenderingContext2D.prototype.fill;
++ok(window.CanvasRenderingContext2D.prototype.fill === undefined, "window.CanvasRenderingContext2D.prototype.fill === undefined");
++
++SimpleTest.finish();
++
++});
++</script>
++
+diff --git a/content/canvas/test/test_2d.type.replace.html b/content/canvas/test/test_2d.type.replace.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_2d.type.replace.html
+@@ -0,0 +1,31 @@
++<!DOCTYPE HTML>
++<title>Canvas test: 2d.type.replace</title>
++<!-- Testing: Interface methods can be overridden -->
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++var fillRect = window.CanvasRenderingContext2D.prototype.fillRect;
++window.CanvasRenderingContext2D.prototype.fillRect = function (x, y, w, h)
++{
++    this.fillStyle = '#0f0';
++    fillRect.call(this, x, y, w, h);
++};
++ctx.fillStyle = '#f00';
++ctx.fillRect(0, 0, 100, 50);
++isPixel(ctx, 50,25, 0,255,0,255, "50,25", "0,255,0,255", 0);
++
++SimpleTest.finish();
++
++});
++</script>
++
+diff --git a/content/canvas/test/test_canvas.html b/content/canvas/test/test_canvas.html
+--- a/content/canvas/test/test_canvas.html
++++ b/content/canvas/test/test_canvas.html
+@@ -18007,72 +18007,16 @@ window.CanvasRenderingContext2D.prototyp
+ ctx.fillStyle = '#f00';
+ ctx.fillRectGreen(0, 0, 100, 50);
+ isPixel(ctx, 50,25, 0,255,0,255, 0);
+ 
+ 
+ }
+ </script>
+ 
+-<!-- [[[ test_2d.type.prototype.html ]]] -->
+-
+-<p>Canvas test: 2d.type.prototype</p>
+-<!-- Testing: window.CanvasRenderingContext2D.prototype is { DontDelete, ReadOnly }, and its methods are not -->
+-<canvas height="50" id="c611" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-function test_2d_type_prototype() {
+-
+-var canvas = document.getElementById('c611');
+-var ctx = canvas.getContext('2d');
+-
+-var fill = window.CanvasRenderingContext2D.prototype.fill;
+-ok(window.CanvasRenderingContext2D.prototype, "window.CanvasRenderingContext2D.prototype");
+-ok(window.CanvasRenderingContext2D.prototype.fill, "window.CanvasRenderingContext2D.prototype.fill");
+-window.CanvasRenderingContext2D.prototype = null;
+-ok(window.CanvasRenderingContext2D.prototype, "window.CanvasRenderingContext2D.prototype");
+-delete window.CanvasRenderingContext2D.prototype;
+-ok(window.CanvasRenderingContext2D.prototype, "window.CanvasRenderingContext2D.prototype");
+-window.CanvasRenderingContext2D.prototype.fill = 1;
+-ok(window.CanvasRenderingContext2D.prototype.fill === 1, "window.CanvasRenderingContext2D.prototype.fill === 1");
+-delete window.CanvasRenderingContext2D.prototype.fill;
+-ok(window.CanvasRenderingContext2D.prototype.fill === undefined, "window.CanvasRenderingContext2D.prototype.fill === undefined");
+-
+-//restore the original method to ensure that other tests can run successfully
+-window.CanvasRenderingContext2D.prototype.fill = fill;
+-}
+-</script>
+-
+-<!-- [[[ test_2d.type.replace.html ]]] -->
+-
+-<p>Canvas test: 2d.type.replace</p>
+-<!-- Testing: Interface methods can be overridden -->
+-<canvas height="50" id="c612" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-function test_2d_type_replace() {
+-
+-var canvas = document.getElementById('c612');
+-var ctx = canvas.getContext('2d');
+-
+-var fillRect = window.CanvasRenderingContext2D.prototype.fillRect;
+-window.CanvasRenderingContext2D.prototype.fillRect = function (x, y, w, h)
+-{
+-    this.fillStyle = '#0f0';
+-    fillRect.call(this, x, y, w, h);
+-};
+-ctx.fillStyle = '#f00';
+-ctx.fillRect(0, 0, 100, 50);
+-isPixel(ctx, 50,25, 0,255,0,255, 0);
+-
+-//restore the original method to ensure that other tests can run successfully
+-window.CanvasRenderingContext2D.prototype.fillRect = fillRect;
+-}
+-</script>
+-
+ <!-- [[[ test_2d.voidreturn.html ]]] -->
+ 
+ <p>Canvas test: 2d.voidreturn</p>
+ <!-- Testing: void methods return undefined -->
+ <canvas height="50" id="c613" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+ <script>
+ 
+ function test_2d_voidreturn() {
+@@ -19633,66 +19577,16 @@ var canvas = document.getElementById('c6
+ var ctx = canvas.getContext('2d');
+ 
+ ok(Object.prototype.toString.call(canvas) === '[object HTMLCanvasElement]', "Object.prototype.toString.call(canvas) === '[object HTMLCanvasElement]'");
+ 
+ 
+ }
+ </script>
+ 
+-<!-- [[[ test_type.prototype.html ]]] -->
+-
+-<p>Canvas test: type.prototype</p>
+-<!-- Testing: window.HTMLCanvasElement has prototype, which is { ReadOnly, DontDelete }. prototype has getContext, which is not -->
+-<canvas height="50" id="c679" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-function test_type_prototype() {
+-
+-var canvas = document.getElementById('c679');
+-var ctx = canvas.getContext('2d');
+-
+-ok(window.HTMLCanvasElement.prototype, "window.HTMLCanvasElement.prototype");
+-ok(window.HTMLCanvasElement.prototype.getContext, "window.HTMLCanvasElement.prototype.getContext");
+-window.HTMLCanvasElement.prototype = null;
+-ok(window.HTMLCanvasElement.prototype, "window.HTMLCanvasElement.prototype");
+-delete window.HTMLCanvasElement.prototype;
+-ok(window.HTMLCanvasElement.prototype, "window.HTMLCanvasElement.prototype");
+-var getContext = window.HTMLCanvasElement.prototype.getContext;
+-window.HTMLCanvasElement.prototype.getContext = 1;
+-ok(window.HTMLCanvasElement.prototype.getContext === 1, "window.HTMLCanvasElement.prototype.getContext === 1");
+-delete window.HTMLCanvasElement.prototype.getContext;
+-ok(window.HTMLCanvasElement.prototype.getContext === undefined, "window.HTMLCanvasElement.prototype.getContext === undefined");
+-window.HTMLCanvasElement.prototype.getContext = getContext;
+-
+-
+-}
+-</script>
+-
+-<!-- [[[ test_type.replace.html ]]] -->
+-
+-<p>Canvas test: type.replace</p>
+-<!-- Testing: HTMLCanvasElement methods can be replaced, and the replacement methods used by canvases -->
+-<canvas height="50" id="c680" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-function test_type_replace() {
+-
+-var canvas = document.getElementById('c680');
+-var ctx = canvas.getContext('2d');
+-
+-var getContext = window.HTMLCanvasElement.prototype.getContext;
+-window.HTMLCanvasElement.prototype.getContext = function (name) { return 0; };
+-ok(canvas.getContext('2d') === 0, "canvas.getContext('2d') === 0");
+-window.HTMLCanvasElement.prototype.getContext = getContext;
+-
+-
+-}
+-</script>
+-
+ <!-- [[[ test_2d.imagedata_coercion.html ]]] -->
+ 
+ <p>Canvas test: 2d.imagedata_coercion</p>
+ <!-- Testing: imagedata coerced correctly on set -->
+ <canvas height="1" id="c681" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+ <script>
+ 
+ /* NOTE: Due to round-tripping through premultiplied values and the rounding
+@@ -22734,26 +22628,16 @@ function runTests() {
+   ok(false, "unexpected exception thrown in: test_2d_type_exists");
+  }
+  try {
+   test_2d_type_extend();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_type_extend");
+  }
+  try {
+-  test_2d_type_prototype();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_2d_type_prototype");
+- }
+- try {
+-  test_2d_type_replace();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_2d_type_replace");
+- }
+- try {
+   test_2d_voidreturn();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_voidreturn");
+  }
+  try {
+   test_bug397524();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_bug397524");
+@@ -23074,21 +22958,16 @@ function runTests() {
+   ok(false, "unexpected exception thrown in: test_type_extend");
+  }
+  try {
+   test_type_name();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_type_name");
+  }
+  try {
+-  test_type_prototype();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_type_prototype");
+- }
+- try {
+   test_2d_imagedata_coercion();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_imagedata_coercion");
+  }
+  try {
+   test_2d_imageSmoothing();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_imageSmoothing");
+@@ -23104,22 +22983,16 @@ function runTests() {
+   ok(false, "unexpected exception thrown in: test_zero_dimensions_imagedata");
+  }
+  try {
+   test_getImageData_after_zero_canvas();
+  } catch(e) {
+   throw e;
+   ok(false, "unexpected exception thrown in: test_getImageData_after_zero_canvas");
+  }
+- try {
+-  // run this test last since it replaces the getContext method
+-  test_type_replace();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_type_replace");
+- }
+ 
+ 
+  SimpleTest.finish();
+ }
+ 
+ addLoadEvent(runTests);
+ 
+ </script>
+diff --git a/content/canvas/test/test_type.prototype.html b/content/canvas/test/test_type.prototype.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_type.prototype.html
+@@ -0,0 +1,32 @@
++<!DOCTYPE HTML>
++<title>Canvas test: type.prototype</title>
++<!-- Testing: window.HTMLCanvasElement has prototype, which is { ReadOnly, DontDelete }. prototype has getContext, which is not -->
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++ok(window.HTMLCanvasElement.prototype, "window.HTMLCanvasElement.prototype");
++ok(window.HTMLCanvasElement.prototype.getContext, "window.HTMLCanvasElement.prototype.getContext");
++window.HTMLCanvasElement.prototype = null;
++ok(window.HTMLCanvasElement.prototype, "window.HTMLCanvasElement.prototype");
++delete window.HTMLCanvasElement.prototype;
++ok(window.HTMLCanvasElement.prototype, "window.HTMLCanvasElement.prototype");
++window.HTMLCanvasElement.prototype.getContext = 1;
++ok(window.HTMLCanvasElement.prototype.getContext === 1, "window.HTMLCanvasElement.prototype.getContext === 1");
++delete window.HTMLCanvasElement.prototype.getContext;
++ok(window.HTMLCanvasElement.prototype.getContext === undefined, "window.HTMLCanvasElement.prototype.getContext === undefined");
++
++SimpleTest.finish();
++
++});
++</script>
++
+diff --git a/content/canvas/test/test_type.replace.html b/content/canvas/test/test_type.replace.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_type.replace.html
+@@ -0,0 +1,24 @@
++<!DOCTYPE HTML>
++<title>Canvas test: type.replace</title>
++<!-- Testing: HTMLCanvasElement methods can be replaced, and the replacement methods used by canvases -->
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++window.HTMLCanvasElement.prototype.getContext = function (name) { return 0; };
++ok(canvas.getContext('2d') === 0, "canvas.getContext('2d') === 0");
++
++SimpleTest.finish();
++
++});
++</script>
++

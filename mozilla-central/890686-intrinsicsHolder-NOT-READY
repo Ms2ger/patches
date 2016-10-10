@@ -1,0 +1,576 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 890686 - Move intrinsicsHolder to the compartment; r=till
+
+diff --git a/js/src/builtin/Intl.cpp b/js/src/builtin/Intl.cpp
+--- a/js/src/builtin/Intl.cpp
++++ b/js/src/builtin/Intl.cpp
+@@ -392,17 +392,17 @@ udat_close(UDateFormat *format)
+ 
+ /******************** Common to Intl constructors ********************/
+ 
+ static bool
+ IntlInitialize(JSContext *cx, HandleObject obj, Handle<PropertyName*> initializer,
+                HandleValue locales, HandleValue options)
+ {
+     RootedValue initializerValue(cx);
+-    if (!cx->global()->getIntrinsicValue(cx, initializer, &initializerValue))
++    if (!cx->compartment()->getIntrinsicValue(cx, initializer, &initializerValue))
+         return false;
+     JS_ASSERT(initializerValue.isObject());
+     JS_ASSERT(initializerValue.toObject().is<JSFunction>());
+ 
+     InvokeArgs args(cx);
+     if (!args.init(3))
+         return false;
+ 
+@@ -458,17 +458,17 @@ intl_availableLocales(JSContext *cx, Cou
+ 
+ /**
+  * Returns the object holding the internal properties for obj.
+  */
+ static bool
+ GetInternals(JSContext *cx, HandleObject obj, MutableHandleObject internals)
+ {
+     RootedValue getInternalsValue(cx);
+-    if (!cx->global()->getIntrinsicValue(cx, cx->names().getInternals, &getInternalsValue))
++    if (!cx->compartment()->getIntrinsicValue(cx, cx->names().getInternals, &getInternalsValue))
+         return false;
+     JS_ASSERT(getInternalsValue.isObject());
+     JS_ASSERT(getInternalsValue.toObject().is<JSFunction>());
+ 
+     InvokeArgs args(cx);
+     if (!args.init(1))
+         return false;
+ 
+@@ -683,17 +683,17 @@ InitCollatorClass(JSContext *cx, HandleO
+         return NULL;
+ 
+     /*
+      * Install the getter for Collator.prototype.compare, which returns a bound
+      * comparison function for the specified Collator object (suitable for
+      * passing to methods like Array.prototype.sort).
+      */
+     RootedValue getter(cx);
+-    if (!cx->global()->getIntrinsicValue(cx, cx->names().CollatorCompareGet, &getter))
++    if (!cx->compartment()->getIntrinsicValue(cx, cx->names().CollatorCompareGet, &getter))
+         return NULL;
+     RootedValue undefinedValue(cx, UndefinedValue());
+     if (!JSObject::defineProperty(cx, proto, cx->names().compare, undefinedValue,
+                                   JS_DATA_TO_FUNC_PTR(JSPropertyOp, &getter.toObject()),
+                                   NULL, JSPROP_GETTER))
+     {
+         return NULL;
+     }
+@@ -1165,17 +1165,17 @@ InitNumberFormatClass(JSContext *cx, Han
+         return NULL;
+ 
+     /*
+      * Install the getter for NumberFormat.prototype.format, which returns a
+      * bound formatting function for the specified NumberFormat object (suitable
+      * for passing to methods like Array.prototype.map).
+      */
+     RootedValue getter(cx);
+-    if (!cx->global()->getIntrinsicValue(cx, cx->names().NumberFormatFormatGet, &getter))
++    if (!cx->compartment()->getIntrinsicValue(cx, cx->names().NumberFormatFormatGet, &getter))
+         return NULL;
+     RootedValue undefinedValue(cx, UndefinedValue());
+     if (!JSObject::defineProperty(cx, proto, cx->names().format, undefinedValue,
+                                   JS_DATA_TO_FUNC_PTR(JSPropertyOp, &getter.toObject()),
+                                   NULL, JSPROP_GETTER))
+     {
+         return NULL;
+     }
+@@ -1617,17 +1617,17 @@ InitDateTimeFormatClass(JSContext *cx, H
+         return NULL;
+ 
+     /*
+      * Install the getter for DateTimeFormat.prototype.format, which returns a
+      * bound formatting function for the specified DateTimeFormat object
+      * (suitable for passing to methods like Array.prototype.map).
+      */
+     RootedValue getter(cx);
+-    if (!cx->global()->getIntrinsicValue(cx, cx->names().DateTimeFormatFormatGet, &getter))
++    if (!cx->compartment()->getIntrinsicValue(cx, cx->names().DateTimeFormatFormatGet, &getter))
+         return NULL;
+     RootedValue undefinedValue(cx, UndefinedValue());
+     if (!JSObject::defineProperty(cx, proto, cx->names().format, undefinedValue,
+                                   JS_DATA_TO_FUNC_PTR(JSPropertyOp, &getter.toObject()),
+                                   NULL, JSPROP_GETTER))
+     {
+         return NULL;
+     }
+diff --git a/js/src/builtin/ParallelArray.cpp b/js/src/builtin/ParallelArray.cpp
+--- a/js/src/builtin/ParallelArray.cpp
++++ b/js/src/builtin/ParallelArray.cpp
+@@ -98,17 +98,17 @@ ParallelArrayObject::construct(JSContext
+ }
+ 
+ 
+ /* static */ JSFunction *
+ ParallelArrayObject::getConstructor(JSContext *cx, unsigned argc)
+ {
+     RootedPropertyName ctorName(cx, ctorNames[js::Min(argc, NumCtors - 1)]);
+     RootedValue ctorValue(cx);
+-    if (!cx->global()->getIntrinsicValue(cx, ctorName, &ctorValue))
++    if (!cx->compartment()->getIntrinsicValue(cx, ctorName, &ctorValue))
+         return NULL;
+     JS_ASSERT(ctorValue.isObject() && ctorValue.toObject().is<JSFunction>());
+     return &ctorValue.toObject().as<JSFunction>();
+ }
+ 
+ /*static*/ JSObject *
+ ParallelArrayObject::newInstance(JSContext *cx, NewObjectKind newKind /* = GenericObject */)
+ {
+@@ -219,17 +219,17 @@ ParallelArrayObject::initClass(JSContext
+     // Define the length getter.
+     {
+         const char lengthStr[] = "ParallelArrayLength";
+         JSAtom *atom = Atomize(cx, lengthStr, strlen(lengthStr));
+         if (!atom)
+             return NULL;
+         Rooted<PropertyName *> lengthProp(cx, atom->asPropertyName());
+         RootedValue lengthValue(cx);
+-        if (!cx->global()->getIntrinsicValue(cx, lengthProp, &lengthValue))
++        if (!cx->compartment()->getIntrinsicValue(cx, lengthProp, &lengthValue))
+             return NULL;
+         RootedObject lengthGetter(cx, &lengthValue.toObject());
+         if (!lengthGetter)
+             return NULL;
+ 
+         RootedId lengthId(cx, AtomToId(cx->names().length));
+         unsigned flags = JSPROP_PERMANENT | JSPROP_SHARED | JSPROP_GETTER;
+         RootedValue value(cx, UndefinedValue());
+diff --git a/js/src/ion/IonBuilder.cpp b/js/src/ion/IonBuilder.cpp
+--- a/js/src/ion/IonBuilder.cpp
++++ b/js/src/ion/IonBuilder.cpp
+@@ -6207,17 +6207,17 @@ IonBuilder::jsop_intrinsic(HandlePropert
+         if (!resumeAfter(ins))
+             return false;
+ 
+         return pushTypeBarrier(ins, types, true);
+     }
+ 
+     // Bake in the intrinsic. Make sure that TI agrees with us on the type.
+     RootedValue vp(cx, UndefinedValue());
+-    if (!cx->global()->getIntrinsicValue(cx, name, &vp))
++    if (!cx->compartment()->getIntrinsicValue(cx, name, &vp))
+         return false;
+ 
+     JS_ASSERT(types->hasType(types::GetValueType(cx, vp)));
+ 
+     MConstant *ins = MConstant::New(vp);
+     current->add(ins);
+     current->push(ins);
+ 
+@@ -7070,18 +7070,18 @@ IonBuilder::jsop_arguments_getelem()
+         if (id < (int32_t)inlineCallInfo_->argc() && id >= 0)
+             current->push(inlineCallInfo_->getArg(id));
+         else
+             pushConstant(UndefinedValue());
+ 
+         return true;
+     }
+ 
+-    // inlined not constant not supported, yet.
+-    return abort("NYI inlined not constant get argument element");
++    // inlined not constant not supported, yet.
++    return abort("NYI inlined not constant get argument element");
+ }
+ 
+ bool
+ IonBuilder::jsop_arguments_setelem(MDefinition *object, MDefinition *index, MDefinition *value)
+ {
+     return abort("NYI arguments[]=");
+ }
+ 
+diff --git a/js/src/ion/VMFunctions.cpp b/js/src/ion/VMFunctions.cpp
+--- a/js/src/ion/VMFunctions.cpp
++++ b/js/src/ion/VMFunctions.cpp
+@@ -503,17 +503,17 @@ OperatorInI(JSContext *cx, uint32_t inde
+ {
+     RootedValue key(cx, Int32Value(index));
+     return OperatorIn(cx, key, obj, out);
+ }
+ 
+ bool
+ GetIntrinsicValue(JSContext *cx, HandlePropertyName name, MutableHandleValue rval)
+ {
+-    if (!cx->global()->getIntrinsicValue(cx, name, rval))
++    if (!cx->compartment()->getIntrinsicValue(cx, name, rval))
+         return false;
+ 
+     // This function is called when we try to compile a cold getintrinsic
+     // op. MCallGetIntrinsicValue has an AliasSet of None for optimization
+     // purposes, as its side effect is not observable from JS. We are
+     // guaranteed to bail out after this function, but because of its AliasSet,
+     // type info will not be reflowed. Manually monitor here.
+     types::TypeScript::Monitor(cx, rval);
+diff --git a/js/src/jsapi.cpp b/js/src/jsapi.cpp
+--- a/js/src/jsapi.cpp
++++ b/js/src/jsapi.cpp
+@@ -4964,17 +4964,17 @@ JS_DefineFunctions(JSContext *cx, JSObje
+                 JSFunction *fun = DefineFunction(cx, obj, id, /* native = */ NULL, fs->nargs, 0,
+                                                  JSFunction::ExtendedFinalizeKind, SingletonObject);
+                 if (!fun)
+                     return JS_FALSE;
+                 fun->setIsSelfHostedBuiltin();
+                 fun->setExtendedSlot(0, PrivateValue(const_cast<JSFunctionSpec*>(fs)));
+                 funVal.setObject(*fun);
+             }
+-            RootedObject holder(cx, cx->global()->intrinsicsHolder());
++            RootedObject holder(cx, cx->compartment()->intrinsicsHolder());
+             if (!JSObject::defineProperty(cx, holder, shName, funVal))
+                 return JS_FALSE;
+         } else {
+             JSFunction *fun = DefineFunction(cx, obj, id, fs->call.op, fs->nargs, flags);
+             if (!fun)
+                 return JS_FALSE;
+             if (fs->call.info)
+                 fun->setJitInfo(fs->call.info);
+diff --git a/js/src/jsapi.h b/js/src/jsapi.h
+--- a/js/src/jsapi.h
++++ b/js/src/jsapi.h
+@@ -2876,17 +2876,17 @@ struct JSClass {
+  * member initial value.  The "original ... value" verbiage is there because
+  * in ECMA-262, global properties naming class objects are read/write and
+  * deleteable, for the most part.
+  *
+  * Implementing this efficiently requires that global objects have classes
+  * with the following flags. Failure to use JSCLASS_GLOBAL_FLAGS was
+  * prevously allowed, but is now an ES5 violation and thus unsupported.
+  */
+-#define JSCLASS_GLOBAL_SLOT_COUNT      (JSProto_LIMIT * 3 + 25)
++#define JSCLASS_GLOBAL_SLOT_COUNT      (JSProto_LIMIT * 3 + 24)
+ #define JSCLASS_GLOBAL_FLAGS_WITH_SLOTS(n)                                    \
+     (JSCLASS_IS_GLOBAL | JSCLASS_HAS_RESERVED_SLOTS(JSCLASS_GLOBAL_SLOT_COUNT + (n)))
+ #define JSCLASS_GLOBAL_FLAGS                                                  \
+     JSCLASS_GLOBAL_FLAGS_WITH_SLOTS(0)
+ #define JSCLASS_HAS_GLOBAL_FLAG_AND_SLOTS(clasp)                              \
+   (((clasp)->flags & JSCLASS_IS_GLOBAL)                                       \
+    && JSCLASS_RESERVED_SLOTS(clasp) >= JSCLASS_GLOBAL_SLOT_COUNT)
+ 
+diff --git a/js/src/jscompartment.cpp b/js/src/jscompartment.cpp
+--- a/js/src/jscompartment.cpp
++++ b/js/src/jscompartment.cpp
+@@ -50,16 +50,17 @@ JSCompartment::JSCompartment(Zone *zone,
+     lastAnimationTime(0),
+     regExps(rt),
+     propertyTree(thisForCtor()),
+     gcIncomingGrayPointers(NULL),
+     gcLiveArrayBuffers(NULL),
+     gcWeakMapList(NULL),
+     debugModeBits(rt->debugMode ? DebugFromC : 0),
+     rngState(0),
++    intrinsicsHolder_(NULL),
+     watchpointMap(NULL),
+     scriptCountsMap(NULL),
+     debugScriptMap(NULL),
+     debugScopes(NULL),
+     enumerators(NULL),
+     compartmentStats(NULL)
+ #ifdef JS_ION
+     , ionCompartment_(NULL)
+@@ -499,16 +500,19 @@ JSCompartment::mark(JSTracer *trc)
+ #endif
+ 
+     /*
+      * If a compartment is on-stack, we mark its global so that
+      * JSContext::global() remains valid.
+      */
+     if (enterCompartmentDepth && global_)
+         MarkObjectRoot(trc, global_.unsafeGet(), "on-stack compartment global");
++
++    if (intrinsicsHolder_)
++        MarkObjectRoot(trc, &intrinsicsHolder_, "intrinsicsHolder_");
+ }
+ 
+ void
+ JSCompartment::sweep(FreeOp *fop, bool releaseTypes)
+ {
+     JS_ASSERT(!activeAnalysis);
+ 
+     /* This function includes itself in PHASE_SWEEP_TABLES. */
+@@ -853,8 +857,29 @@ JSCompartment::sizeOfIncludingThis(mozil
+ #endif
+ }
+ 
+ void
+ JSCompartment::adoptWorkerAllocator(Allocator *workerAllocator)
+ {
+     zone()->allocator.arenas.adoptArenas(rt, &workerAllocator->arenas);
+ }
++
++bool
++JSCompartment::initializeIntrinsicsHolder(JSContext *cx, js::Handle<js::GlobalObject*> global)
++{
++    MOZ_ASSERT(!intrinsicsHolder_);
++    RootedObject holder(cx);
++    if (cx->runtime()->isSelfHostingGlobal(global)) {
++        holder = global;
++    } else {
++        holder = NewObjectWithClassProto(cx, &ObjectClass, NULL, global, TenuredObject);
++        if (!holder)
++            return false;
++    }
++    intrinsicsHolder_ = holder;
++
++    /* Define a property 'global' with the current global as its value. */
++    RootedValue globalValue(cx, ObjectValue(*global));
++    return JSObject::defineProperty(cx, holder, cx->names().global, globalValue,
++                                    JS_PropertyStub, JS_StrictPropertyStub,
++                                    JSPROP_PERMANENT | JSPROP_READONLY);
++}
+diff --git a/js/src/jscompartment.h b/js/src/jscompartment.h
+--- a/js/src/jscompartment.h
++++ b/js/src/jscompartment.h
+@@ -343,17 +343,46 @@ struct JSCompartment
+     void removeDebuggee(js::FreeOp *fop, js::GlobalObject *global,
+                         js::AutoDebugModeGC &dmgc,
+                         js::GlobalObjectSet::Enum *debuggeesEnum = NULL);
+     bool setDebugModeFromC(JSContext *cx, bool b, js::AutoDebugModeGC &dmgc);
+ 
+     void clearBreakpointsIn(js::FreeOp *fop, js::Debugger *dbg, JSObject *handler);
+     void clearTraps(js::FreeOp *fop);
+ 
++  public:
++    bool initializeIntrinsicsHolder(JSContext *cx, js::Handle<js::GlobalObject*> global);
++
++    JSObject *intrinsicsHolder() const {
++        return intrinsicsHolder_;
++    }
++
++    bool getIntrinsicValue(JSContext *cx, js::HandlePropertyName name,
++                           js::MutableHandleValue value) const {
++        js::RootedObject holder(cx, intrinsicsHolder());
++        js::RootedId id(cx, NameToId(name));
++        if (HasDataProperty(cx, holder, id, value.address()))
++            return true;
++        if (!cx->runtime()->cloneSelfHostedValue(cx, name, value))
++            return false;
++        mozilla::DebugOnly<bool> ok = JS_DefinePropertyById(cx, holder, id, value, NULL, NULL, 0);
++        MOZ_ASSERT(ok);
++        return true;
++    }
++
++    bool setIntrinsicValue(JSContext *cx, js::PropertyName *name, js::HandleValue value) {
++        MOZ_ASSERT(cx->runtime()->isSelfHostingGlobal(global()));
++        js::RootedObject holder(cx, intrinsicsHolder());
++        js::RootedValue valCopy(cx, value);
++        return JSObject::setProperty(cx, holder, holder, name, &valCopy, false);
++    }
++
+   private:
++    JSObject *intrinsicsHolder_;
++
+     void sweepBreakpoints(js::FreeOp *fop);
+ 
+   public:
+     js::WatchpointMap *watchpointMap;
+ 
+     js::ScriptCountsMap *scriptCountsMap;
+ 
+     js::DebugScriptMap *debugScriptMap;
+diff --git a/js/src/vm/GlobalObject-inl.h b/js/src/vm/GlobalObject-inl.h
+--- a/js/src/vm/GlobalObject-inl.h
++++ b/js/src/vm/GlobalObject-inl.h
+@@ -193,30 +193,11 @@ GlobalObject::createArrayFromBuffer<uint
+ 
+ void
+ GlobalObject::setProtoGetter(JSFunction *protoGetter)
+ {
+     JS_ASSERT(getSlotRef(PROTO_GETTER).isUndefined());
+     setSlot(PROTO_GETTER, ObjectValue(*protoGetter));
+ }
+ 
+-bool
+-GlobalObject::setIntrinsicValue(JSContext *cx, PropertyName *name, HandleValue value)
+-{
+-#ifdef DEBUG
+-    RootedObject self(cx, this);
+-    JS_ASSERT(cx->runtime()->isSelfHostingGlobal(self));
+-#endif
+-    RootedObject holder(cx, intrinsicsHolder());
+-    RootedValue valCopy(cx, value);
+-    return JSObject::setProperty(cx, holder, holder, name, &valCopy, false);
+-}
+-
+-void
+-GlobalObject::setIntrinsicsHolder(JSObject *obj)
+-{
+-    JS_ASSERT(getSlotRef(INTRINSICS).isUndefined());
+-    setSlot(INTRINSICS, ObjectValue(*obj));
+-}
+-
+ } // namespace js
+ 
+ #endif /* vm_GlobalObject_inl_h */
+diff --git a/js/src/vm/GlobalObject.cpp b/js/src/vm/GlobalObject.cpp
+--- a/js/src/vm/GlobalObject.cpp
++++ b/js/src/vm/GlobalObject.cpp
+@@ -375,33 +375,18 @@ GlobalObject::initFunctionAndObjectClass
+     RootedFunction throwTypeError(cx, NewFunction(cx, NullPtr(), ThrowTypeError, 0,
+                                                   JSFunction::NATIVE_FUN, self, NullPtr()));
+     if (!throwTypeError)
+         return NULL;
+     if (!JSObject::preventExtensions(cx, throwTypeError))
+         return NULL;
+     self->setThrowTypeError(throwTypeError);
+ 
+-    RootedObject intrinsicsHolder(cx);
+-    if (cx->runtime()->isSelfHostingGlobal(self)) {
+-        intrinsicsHolder = self;
+-    } else {
+-        intrinsicsHolder = NewObjectWithClassProto(cx, &ObjectClass, NULL, self, TenuredObject);
+-        if (!intrinsicsHolder)
+-            return NULL;
+-    }
+-    self->setIntrinsicsHolder(intrinsicsHolder);
+-    /* Define a property 'global' with the current global as its value. */
+-    RootedValue global(cx, ObjectValue(*self));
+-    if (!JSObject::defineProperty(cx, intrinsicsHolder, cx->names().global,
+-                                  global, JS_PropertyStub, JS_StrictPropertyStub,
+-                                  JSPROP_PERMANENT | JSPROP_READONLY))
+-    {
++    if (!compartment()->initializeIntrinsicsHolder(cx, self))
+         return NULL;
+-    }
+ 
+     /*
+      * The global object should have |Object.prototype| as its [[Prototype]].
+      * Eventually we'd like to have standard classes be there from the start,
+      * and thus we would know we were always setting what had previously been a
+      * null [[Prototype]], but right now some code assumes it can set the
+      * [[Prototype]] before standard classes have been initialized.  For now,
+      * only set the [[Prototype]] if it hasn't already been set.
+diff --git a/js/src/vm/GlobalObject.h b/js/src/vm/GlobalObject.h
+--- a/js/src/vm/GlobalObject.h
++++ b/js/src/vm/GlobalObject.h
+@@ -92,20 +92,19 @@ class GlobalObject : public JSObject
+     static const unsigned SET_ITERATOR_PROTO      = MAP_ITERATOR_PROTO + 1;
+     static const unsigned COLLATOR_PROTO          = SET_ITERATOR_PROTO + 1;
+     static const unsigned NUMBER_FORMAT_PROTO     = COLLATOR_PROTO + 1;
+     static const unsigned DATE_TIME_FORMAT_PROTO  = NUMBER_FORMAT_PROTO + 1;
+     static const unsigned REGEXP_STATICS          = DATE_TIME_FORMAT_PROTO + 1;
+     static const unsigned FUNCTION_NS             = REGEXP_STATICS + 1;
+     static const unsigned RUNTIME_CODEGEN_ENABLED = FUNCTION_NS + 1;
+     static const unsigned DEBUGGERS               = RUNTIME_CODEGEN_ENABLED + 1;
+-    static const unsigned INTRINSICS              = DEBUGGERS + 1;
+ 
+     /* Total reserved-slot count for global objects. */
+-    static const unsigned RESERVED_SLOTS = INTRINSICS + 1;
++    static const unsigned RESERVED_SLOTS = DEBUGGERS + 1;
+ 
+     void staticAsserts() {
+         /*
+          * The slot count must be in the public API for JSCLASS_GLOBAL_FLAGS,
+          * and we aren't going to expose GlobalObject, so just assert that the
+          * two values are synchronized.
+          */
+         JS_STATIC_ASSERT(JSCLASS_GLOBAL_SLOT_COUNT == RESERVED_SLOTS);
+@@ -123,18 +122,16 @@ class GlobalObject : public JSObject
+     inline void setDetailsForKey(JSProtoKey key, JSObject *ctor, JSObject *proto);
+     inline void setObjectClassDetails(JSFunction *ctor, JSObject *proto);
+     inline void setFunctionClassDetails(JSFunction *ctor, JSObject *proto);
+ 
+     inline void setThrowTypeError(JSFunction *fun);
+     inline void setOriginalEval(JSObject *evalobj);
+     inline void setProtoGetter(JSFunction *protoGetter);
+ 
+-    inline void setIntrinsicsHolder(JSObject *obj);
+-
+     Value getConstructor(JSProtoKey key) const {
+         JS_ASSERT(key <= JSProto_LIMIT);
+         return getSlot(key);
+     }
+ 
+     Value getPrototype(JSProtoKey key) const {
+         JS_ASSERT(key <= JSProto_LIMIT);
+         return getSlot(JSProto_LIMIT + key);
+@@ -365,35 +362,16 @@ class GlobalObject : public JSObject
+         if (dataViewClassInitialized())
+             return &getPrototype(JSProto_DataView).toObject();
+         Rooted<GlobalObject*> self(cx, this);
+         if (!js_InitTypedArrayClasses(cx, self))
+             return NULL;
+         return &self->getPrototype(JSProto_DataView).toObject();
+     }
+ 
+-    JSObject *intrinsicsHolder() {
+-        JS_ASSERT(!getSlotRef(INTRINSICS).isUndefined());
+-        return &getSlotRef(INTRINSICS).toObject();
+-    }
+-
+-    bool getIntrinsicValue(JSContext *cx, HandlePropertyName name, MutableHandleValue value) {
+-        RootedObject holder(cx, intrinsicsHolder());
+-        RootedId id(cx, NameToId(name));
+-        if (HasDataProperty(cx, holder, id, value.address()))
+-            return true;
+-        if (!cx->runtime()->cloneSelfHostedValue(cx, name, value))
+-            return false;
+-        mozilla::DebugOnly<bool> ok = JS_DefinePropertyById(cx, holder, id, value, NULL, NULL, 0);
+-        JS_ASSERT(ok);
+-        return true;
+-    }
+-
+-    inline bool setIntrinsicValue(JSContext *cx, PropertyName *name, HandleValue value);
+-
+     inline RegExpStatics *getRegExpStatics() const;
+ 
+     JSObject *getThrowTypeError() const {
+         JS_ASSERT(functionObjectClassesInitialized());
+         return &getSlot(THROWTYPEERROR).toObject();
+     }
+ 
+     Value createDataViewForThis() const {
+diff --git a/js/src/vm/Interpreter-inl.h b/js/src/vm/Interpreter-inl.h
+--- a/js/src/vm/Interpreter-inl.h
++++ b/js/src/vm/Interpreter-inl.h
+@@ -263,24 +263,24 @@ FetchNameNoGC(JSObject *pobj, Shape *sha
+     vp.set(pobj->nativeGetSlot(shape->slot()));
+     return true;
+ }
+ 
+ inline bool
+ GetIntrinsicOperation(JSContext *cx, jsbytecode *pc, MutableHandleValue vp)
+ {
+     RootedPropertyName name(cx, cx->currentScript()->getName(pc));
+-    return cx->global()->getIntrinsicValue(cx, name, vp);
++    return cx->compartment()->getIntrinsicValue(cx, name, vp);
+ }
+ 
+ inline bool
+ SetIntrinsicOperation(JSContext *cx, JSScript *script, jsbytecode *pc, HandleValue val)
+ {
+     RootedPropertyName name(cx, script->getName(pc));
+-    return cx->global()->setIntrinsicValue(cx, name, val);
++    return cx->compartment()->setIntrinsicValue(cx, name, val);
+ }
+ 
+ inline bool
+ SetNameOperation(JSContext *cx, JSScript *script, jsbytecode *pc, HandleObject scope,
+                  HandleValue val)
+ {
+     JS_ASSERT(*pc == JSOP_SETNAME || *pc == JSOP_SETGNAME);
+     JS_ASSERT_IF(*pc == JSOP_SETGNAME, scope == cx->global());
+diff --git a/js/src/vm/Interpreter.cpp b/js/src/vm/Interpreter.cpp
+--- a/js/src/vm/Interpreter.cpp
++++ b/js/src/vm/Interpreter.cpp
+@@ -1746,17 +1746,17 @@ BEGIN_CASE(JSOP_ENUMCONSTELEM)
+ END_CASE(JSOP_ENUMCONSTELEM)
+ #endif
+ 
+ BEGIN_CASE(JSOP_BINDGNAME)
+     PUSH_OBJECT(regs.fp()->global());
+ END_CASE(JSOP_BINDGNAME)
+ 
+ BEGIN_CASE(JSOP_BINDINTRINSIC)
+-    PUSH_OBJECT(*cx->global()->intrinsicsHolder());
++    PUSH_OBJECT(*cx->compartment()->intrinsicsHolder());
+ END_CASE(JSOP_BINDGNAME)
+ 
+ BEGIN_CASE(JSOP_BINDNAME)
+ {
+     RootedObject &scopeChain = rootObject0;
+     scopeChain = regs.fp()->scopeChain();
+ 
+     RootedPropertyName &name = rootName0;

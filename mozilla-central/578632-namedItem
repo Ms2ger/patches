@@ -1,0 +1,240 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 578632 - Cleanup nsIDOMHTMLCollection::NamedItem implementations; r=bz
+
+diff --git a/content/base/src/nsContentList.cpp b/content/base/src/nsContentList.cpp
+--- a/content/base/src/nsContentList.cpp
++++ b/content/base/src/nsContentList.cpp
+@@ -614,26 +614,20 @@ nsContentList::Item(uint32_t aIndex, nsI
+   }
+ 
+   *aReturn = nullptr;
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+-nsContentList::NamedItem(const nsAString& aName, nsIDOMNode** aReturn)
++nsContentList::NamedItem(const nsAString& aName, nsISupports** aReturn)
+ {
+-  nsIContent *content = NamedItem(aName, true);
+-
+-  if (content) {
+-    return CallQueryInterface(content, aReturn);
+-  }
+-
+-  *aReturn = nullptr;
+-
++  nsCOMPtr<nsIContent> content = NamedItem(aName, true);
++  content.forget(aReturn);
+   return NS_OK;
+ }
+ 
+ nsIContent*
+ nsContentList::GetNodeAt(uint32_t aIndex)
+ {
+   return Item(aIndex, true);
+ }
+diff --git a/content/html/content/src/nsHTMLFormElement.cpp b/content/html/content/src/nsHTMLFormElement.cpp
+--- a/content/html/content/src/nsHTMLFormElement.cpp
++++ b/content/html/content/src/nsHTMLFormElement.cpp
+@@ -2258,49 +2258,21 @@ nsFormControlList::Item(uint32_t aIndex,
+     return NS_OK;
+   }
+ 
+   return CallQueryInterface(item, aReturn);
+ }
+ 
+ NS_IMETHODIMP 
+ nsFormControlList::NamedItem(const nsAString& aName,
+-                             nsIDOMNode** aReturn)
++                             nsISupports** aReturn)
+ {
+-  FlushPendingNotifications();
+-
+-  *aReturn = nullptr;
+-
+-  nsCOMPtr<nsISupports> supports;
+-  
+-  if (!mNameLookupTable.Get(aName, getter_AddRefs(supports))) {
+-    // key not found
+-    return NS_OK;
+-  }
+-
+-  if (!supports) {
+-    return NS_OK;
+-  }
+-
+-  // We found something, check if it's a node
+-  CallQueryInterface(supports, aReturn);
+-  if (*aReturn) {
+-    return NS_OK;
+-  }
+-
+-  // If not, we check if it's a node list.
+-  nsCOMPtr<nsIDOMNodeList> nodeList = do_QueryInterface(supports);
+-  NS_ASSERTION(nodeList, "Huh, what's going one here?");
+-  if (!nodeList) {
+-    return NS_OK;
+-  }
+-
+-  // And since we're only asking for one node here, we return the first
+-  // one from the list.
+-  return nodeList->Item(0, aReturn);
++  nsCOMPtr<nsISupports> supports = NamedItemInternal(aName, true);
++  supports.forget(aReturn);
++  return NS_OK;
+ }
+ 
+ nsISupports*
+ nsFormControlList::NamedItemInternal(const nsAString& aName,
+                                      bool aFlushContent)
+ {
+   if (aFlushContent) {
+     FlushPendingNotifications();
+diff --git a/content/html/content/src/nsHTMLSelectElement.cpp b/content/html/content/src/nsHTMLSelectElement.cpp
+--- a/content/html/content/src/nsHTMLSelectElement.cpp
++++ b/content/html/content/src/nsHTMLSelectElement.cpp
+@@ -1284,17 +1284,17 @@ nsHTMLSelectElement::IsHTMLFocusable(boo
+ NS_IMETHODIMP
+ nsHTMLSelectElement::Item(uint32_t aIndex, nsIDOMNode** aReturn)
+ {
+   return mOptions->Item(aIndex, aReturn);
+ }
+ 
+ NS_IMETHODIMP
+ nsHTMLSelectElement::NamedItem(const nsAString& aName,
+-                               nsIDOMNode** aReturn)
++                               nsISupports** aReturn)
+ {
+   return mOptions->NamedItem(aName, aReturn);
+ }
+ 
+ bool
+ nsHTMLSelectElement::CheckSelectSomething(bool aNotify)
+ {
+   if (mIsDoneAddingChildren) {
+@@ -2199,20 +2199,20 @@ nsHTMLOptionCollection::GetNamedItem(con
+ nsINode*
+ nsHTMLOptionCollection::GetParentObject()
+ {
+     return mSelect;
+ }
+ 
+ NS_IMETHODIMP
+ nsHTMLOptionCollection::NamedItem(const nsAString& aName,
+-                                  nsIDOMNode** aReturn)
++                                  nsISupports** aReturn)
+ {
+-  NS_IF_ADDREF(*aReturn = GetNamedItemHelper(mElements, aName));
+-
++  nsCOMPtr<nsIDOMNode> node = GetNamedItemHelper(mElements, aName);
++  node.forget(aReturn);
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsHTMLOptionCollection::GetSelect(nsIDOMHTMLSelectElement **aReturn)
+ {
+   NS_IF_ADDREF(*aReturn = mSelect);
+   return NS_OK;
+diff --git a/content/html/content/src/nsHTMLTableElement.cpp b/content/html/content/src/nsHTMLTableElement.cpp
+--- a/content/html/content/src/nsHTMLTableElement.cpp
++++ b/content/html/content/src/nsHTMLTableElement.cpp
+@@ -295,27 +295,22 @@ TableRowsCollection::GetNamedItem(const 
+     }
+   );
+   *aCache = nullptr;
+   return nullptr;
+ }
+ 
+ NS_IMETHODIMP 
+ TableRowsCollection::NamedItem(const nsAString& aName,
+-                               nsIDOMNode** aReturn)
++                               nsISupports** aReturn)
+ {
+   nsWrapperCache *cache;
+-  nsISupports* item = GetNamedItem(aName, &cache);
+-  if (!item) {
+-    *aReturn = nullptr;
+-
+-    return NS_OK;
+-  }
+-
+-  return CallQueryInterface(item, aReturn);
++  nsCOMPtr<nsISupports> item = GetNamedItem(aName, &cache);
++  item.forget(aReturn);
++  return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ TableRowsCollection::ParentDestroyed()
+ {
+   // see comment in destructor, do NOT release mParent!
+   mParent = nullptr;
+ 
+diff --git a/dom/interfaces/html/nsIDOMHTMLCollection.idl b/dom/interfaces/html/nsIDOMHTMLCollection.idl
+--- a/dom/interfaces/html/nsIDOMHTMLCollection.idl
++++ b/dom/interfaces/html/nsIDOMHTMLCollection.idl
+@@ -53,17 +53,17 @@ interface nsIContent;
+  */
+ 
+ [scriptable, uuid(b7ccd7b3-86aa-4322-a50c-b972643bb662)]
+ interface nsIDOMHTMLCollection : nsISupports
+ {
+   readonly attribute unsigned long    length;
+ 
+   [getter,forward(getNodeAt)] nsIDOMNode    item(in unsigned long index);
+-  [getter,forward(getNamedItem)] nsIDOMNode namedItem(in DOMString name);
++  [getter,forward(getNamedItem)] nsISupports namedItem(in DOMString name);
+ 
+   /**
+    * Get the node at the index.  Returns null if the index is out of bounds.
+    */
+   [noscript,notxpcom,nostdcall] nsIContent  getNodeAt(in unsigned long index);
+ 
+   /**
+    * Get the node for the name.  Returns null if no node exists for the name.
+diff --git a/dom/interfaces/html/nsIDOMHTMLOptionsCollection.idl b/dom/interfaces/html/nsIDOMHTMLOptionsCollection.idl
+--- a/dom/interfaces/html/nsIDOMHTMLOptionsCollection.idl
++++ b/dom/interfaces/html/nsIDOMHTMLOptionsCollection.idl
+@@ -60,17 +60,17 @@ interface nsIDOMHTMLOptionsCollection : 
+            attribute unsigned long   length;
+                                         // raises(DOMException) on setting
+ 
+   // FIXME item should just be inherited from nsIDOMHTMLCollection
+   nsIDOMNode         item(in unsigned long index);
+ 
+   // FIXME namedItem (and getNamedItem) should return a NodeList if there are
+   //       multiple matching items
+-  [getter,forward(getNamedItem)] nsIDOMNode namedItem(in DOMString name);
++  [getter,forward(getNamedItem)] nsISupports namedItem(in DOMString name);
+ 
+   /**
+    * Get the node for the name.  Returns null if no node exists for the name.
+    */
+   [noscript,notxpcom,nostdcall] nsISupports getNamedItem(in DOMString name,
+                                                          out nsWrapperCachePtr cache);
+ 
+            attribute long             selectedIndex;
+diff --git a/dom/interfaces/html/nsIDOMHTMLSelectElement.idl b/dom/interfaces/html/nsIDOMHTMLSelectElement.idl
+--- a/dom/interfaces/html/nsIDOMHTMLSelectElement.idl
++++ b/dom/interfaces/html/nsIDOMHTMLSelectElement.idl
+@@ -63,17 +63,17 @@ interface nsIDOMHTMLSelectElement : nsID
+            attribute DOMString                   name;
+            attribute long                        size;
+ 
+   readonly attribute DOMString                   type;
+ 
+   readonly attribute nsIDOMHTMLOptionsCollection options;
+            attribute unsigned long               length;
+   nsIDOMNode                item(in unsigned long index);
+-  nsIDOMNode                namedItem(in DOMString name);
++  nsISupports               namedItem(in DOMString name);
+   // This add method implementation means the following
+   // since IDL doesn't support overfload.
+   //   void add(in nsIDOMHTMLElement, [optional] in nsIDOMHTMLElement)
+   //   void add(in nsIDOMHTMLElement, in long)
+   void                      add(in nsIDOMHTMLElement element, 
+                                 [optional] in nsIVariant before)
+                                                      raises(DOMException);   
+   void                      remove(in long index);

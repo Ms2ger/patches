@@ -1,0 +1,421 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 890695 - Use MOZ_THIS_IN_INITIALIZER_LIST in content/; r=mounir
+
+diff --git a/content/html/content/src/HTMLAnchorElement.cpp b/content/html/content/src/HTMLAnchorElement.cpp
+--- a/content/html/content/src/HTMLAnchorElement.cpp
++++ b/content/html/content/src/HTMLAnchorElement.cpp
+@@ -1,26 +1,25 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* vim:set tw=80 expandtab softtabstop=2 ts=2 sw=2: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "mozilla/dom/HTMLAnchorElement.h"
+ 
++#include "mozilla/dom/HTMLAnchorElementBinding.h"
+ #include "mozilla/MemoryReporting.h"
+-#include "mozilla/dom/HTMLAnchorElementBinding.h"
+-
+ #include "nsCOMPtr.h"
+ #include "nsContentUtils.h"
+ #include "nsGkAtoms.h"
++#include "nsHTMLDNSPrefetch.h"
++#include "nsIDocument.h"
+ #include "nsIPresShell.h"
+-#include "nsIDocument.h"
+ #include "nsPresContext.h"
+-#include "nsHTMLDNSPrefetch.h"
+ 
+ NS_IMPL_NS_NEW_HTML_ELEMENT(Anchor)
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ #define ANCHOR_ELEMENT_FLAG_BIT(n_) NODE_FLAG_BIT(ELEMENT_TYPE_SPECIFIC_BITS_OFFSET + (n_))
+ 
+diff --git a/content/html/content/src/HTMLAnchorElement.h b/content/html/content/src/HTMLAnchorElement.h
+--- a/content/html/content/src/HTMLAnchorElement.h
++++ b/content/html/content/src/HTMLAnchorElement.h
+@@ -3,37 +3,36 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_HTMLAnchorElement_h
+ #define mozilla_dom_HTMLAnchorElement_h
+ 
+ #include "mozilla/Attributes.h"
++#include "mozilla/dom/Link.h"
+ #include "nsGenericHTMLElement.h"
+ #include "nsIDOMHTMLAnchorElement.h"
+ #include "nsILink.h"
+-#include "Link.h"
+-#include "base/compiler_specific.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ class HTMLAnchorElement : public nsGenericHTMLElement,
+                           public nsIDOMHTMLAnchorElement,
+                           public nsILink,
+                           public Link
+ {
+ public:
+   using Element::GetText;
+   using Element::SetText;
+ 
+   HTMLAnchorElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+     : nsGenericHTMLElement(aNodeInfo)
+-    , ALLOW_THIS_IN_INITIALIZER_LIST(Link(this))
++    , Link(MOZ_THIS_IN_INITIALIZER_LIST())
+   {
+     SetIsDOMBinding();
+   }
+   virtual ~HTMLAnchorElement();
+ 
+   // nsISupports
+   NS_DECL_ISUPPORTS_INHERITED
+ 
+diff --git a/content/html/content/src/HTMLAreaElement.cpp b/content/html/content/src/HTMLAreaElement.cpp
+--- a/content/html/content/src/HTMLAreaElement.cpp
++++ b/content/html/content/src/HTMLAreaElement.cpp
+@@ -1,28 +1,28 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* vim:set tw=80 expandtab softtabstop=2 ts=2 sw=2: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "mozilla/dom/HTMLAreaElement.h"
+ 
++#include "mozilla/Attributes.h"
++#include "mozilla/dom/HTMLAreaElementBinding.h"
+ #include "mozilla/MemoryReporting.h"
+-#include "mozilla/dom/HTMLAreaElementBinding.h"
+-#include "base/compiler_specific.h"
+ 
+ NS_IMPL_NS_NEW_HTML_ELEMENT(Area)
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ HTMLAreaElement::HTMLAreaElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+-  : nsGenericHTMLElement(aNodeInfo),
+-    ALLOW_THIS_IN_INITIALIZER_LIST(Link(this))
++  : nsGenericHTMLElement(aNodeInfo)
++  , Link(MOZ_THIS_IN_INITIALIZER_LIST())
+ {
+   SetIsDOMBinding();
+ }
+ 
+ HTMLAreaElement::~HTMLAreaElement()
+ {
+ }
+ 
+diff --git a/content/html/content/src/HTMLAreaElement.h b/content/html/content/src/HTMLAreaElement.h
+--- a/content/html/content/src/HTMLAreaElement.h
++++ b/content/html/content/src/HTMLAreaElement.h
+@@ -3,22 +3,22 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_HTMLAreaElement_h
+ #define mozilla_dom_HTMLAreaElement_h
+ 
+ #include "mozilla/Attributes.h"
++#include "mozilla/dom/Link.h"
++#include "nsGenericHTMLElement.h"
++#include "nsGkAtoms.h"
+ #include "nsIDOMHTMLAreaElement.h"
+-#include "nsGenericHTMLElement.h"
+ #include "nsILink.h"
+-#include "nsGkAtoms.h"
+ #include "nsIURL.h"
+-#include "Link.h"
+ 
+ class nsIDocument;
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ class HTMLAreaElement : public nsGenericHTMLElement,
+                         public nsIDOMHTMLAreaElement,
+diff --git a/content/html/content/src/HTMLLinkElement.cpp b/content/html/content/src/HTMLLinkElement.cpp
+--- a/content/html/content/src/HTMLLinkElement.cpp
++++ b/content/html/content/src/HTMLLinkElement.cpp
+@@ -1,43 +1,43 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "mozilla/dom/HTMLLinkElement.h"
+ 
++#include "mozilla/Attributes.h"
++#include "mozilla/dom/HTMLLinkElementBinding.h"
+ #include "mozilla/MemoryReporting.h"
+-#include "mozilla/dom/HTMLLinkElementBinding.h"
+-#include "base/compiler_specific.h"
++#include "nsAsyncDOMEvent.h"
++#include "nsContentUtils.h"
+ #include "nsGenericHTMLElement.h"
++#include "nsGkAtoms.h"
++#include "nsIDocument.h"
++#include "nsIDOMEvent.h"
++#include "nsIDOMStyleSheet.h"
+ #include "nsILink.h"
+-#include "nsGkAtoms.h"
+-#include "nsStyleConsts.h"
+-#include "nsIDOMStyleSheet.h"
+ #include "nsIStyleSheet.h"
+ #include "nsIStyleSheetLinkingElement.h"
+-#include "nsReadableUtils.h"
+-#include "nsUnicharUtils.h"
+ #include "nsIURL.h"
+ #include "nsNetUtil.h"
+-#include "nsIDocument.h"
+-#include "nsIDOMEvent.h"
+-#include "nsContentUtils.h"
+ #include "nsPIDOMWindow.h"
+-#include "nsAsyncDOMEvent.h"
++#include "nsReadableUtils.h"
++#include "nsStyleConsts.h"
++#include "nsUnicharUtils.h"
+ 
+ NS_IMPL_NS_NEW_HTML_ELEMENT(Link)
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ HTMLLinkElement::HTMLLinkElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+-  : nsGenericHTMLElement(aNodeInfo),
+-    ALLOW_THIS_IN_INITIALIZER_LIST(Link(this))
++  : nsGenericHTMLElement(aNodeInfo)
++  , Link(MOZ_THIS_IN_INITIALIZER_LIST())
+ {
+   SetIsDOMBinding();
+ }
+ 
+ HTMLLinkElement::~HTMLLinkElement()
+ {
+ }
+ 
+diff --git a/content/html/content/src/HTMLLinkElement.h b/content/html/content/src/HTMLLinkElement.h
+--- a/content/html/content/src/HTMLLinkElement.h
++++ b/content/html/content/src/HTMLLinkElement.h
+@@ -2,21 +2,21 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_HTMLLinkElement_h
+ #define mozilla_dom_HTMLLinkElement_h
+ 
+ #include "mozilla/Attributes.h"
++#include "mozilla/dom/Link.h"
+ #include "nsGenericHTMLElement.h"
+ #include "nsIDOMHTMLLinkElement.h"
+ #include "nsILink.h"
+ #include "nsStyleLinkElement.h"
+-#include "mozilla/dom/Link.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ class HTMLLinkElement : public nsGenericHTMLElement,
+                         public nsIDOMHTMLLinkElement,
+                         public nsILink,
+                         public nsStyleLinkElement,
+diff --git a/content/html/content/src/HTMLSelectElement.cpp b/content/html/content/src/HTMLSelectElement.cpp
+--- a/content/html/content/src/HTMLSelectElement.cpp
++++ b/content/html/content/src/HTMLSelectElement.cpp
+@@ -1,22 +1,22 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "mozilla/dom/HTMLSelectElement.h"
+ 
+ #include "mozAutoDocUpdate.h"
++#include "mozilla/Attributes.h"
+ #include "mozilla/dom/Element.h"
+ #include "mozilla/dom/HTMLOptGroupElement.h"
+ #include "mozilla/dom/HTMLOptionElement.h"
+ #include "mozilla/dom/HTMLSelectElementBinding.h"
+ #include "mozilla/Util.h"
+-#include "base/compiler_specific.h"
+ #include "nsContentCreatorFunctions.h"
+ #include "nsError.h"
+ #include "nsEventDispatcher.h"
+ #include "nsEventStates.h"
+ #include "nsFormSubmission.h"
+ #include "nsGkAtoms.h"
+ #include "nsGUIEvent.h"
+ #include "nsIComboboxControlFrame.h"
+@@ -99,17 +99,17 @@ SafeOptionListMutation::~SafeOptionListM
+ //
+ 
+ // construction, destruction
+ 
+ 
+ HTMLSelectElement::HTMLSelectElement(already_AddRefed<nsINodeInfo> aNodeInfo,
+                                      FromParser aFromParser)
+   : nsGenericHTMLFormElement(aNodeInfo),
+-    ALLOW_THIS_IN_INITIALIZER_LIST(mOptions(new HTMLOptionsCollection(this))),
++    mOptions(new HTMLOptionsCollection(MOZ_THIS_IN_INITIALIZER_LIST())),
+     mIsDoneAddingChildren(!aFromParser),
+     mDisabledChanged(false),
+     mMutating(false),
+     mInhibitStateRestoration(!!(aFromParser & FROM_PARSER_FRAGMENT)),
+     mSelectionHasChanged(false),
+     mDefaultSelectionSet(false),
+     mCanShowInvalidUI(true),
+     mCanShowValidUI(true),
+diff --git a/content/html/content/src/HTMLTextAreaElement.cpp b/content/html/content/src/HTMLTextAreaElement.cpp
+--- a/content/html/content/src/HTMLTextAreaElement.cpp
++++ b/content/html/content/src/HTMLTextAreaElement.cpp
+@@ -1,48 +1,47 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* vim: set sw=2 ts=2 et tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "mozilla/dom/HTMLTextAreaElement.h"
++
++#include "mozAutoDocUpdate.h"
++#include "mozilla/Attributes.h"
+ #include "mozilla/dom/HTMLTextAreaElementBinding.h"
+ #include "mozilla/Util.h"
+-#include "base/compiler_specific.h"
+-
++#include "nsAttrValueInlines.h"
++#include "nsContentCID.h"
++#include "nsContentCreatorFunctions.h"
++#include "nsError.h"
++#include "nsEventDispatcher.h"
++#include "nsFocusManager.h"
++#include "nsFormSubmission.h"
++#include "nsGUIEvent.h"
++#include "nsIComponentManager.h"
++#include "nsIConstraintValidation.h"
+ #include "nsIControllers.h"
+-#include "nsFocusManager.h"
+-#include "nsPIDOMWindow.h"
+-#include "nsContentCID.h"
+-#include "nsIComponentManager.h"
++#include "nsIDocument.h"
+ #include "nsIDOMHTMLFormElement.h"
++#include "nsIFormControlFrame.h"
+ #include "nsIFormControl.h"
+ #include "nsIForm.h"
+-#include "nsFormSubmission.h"
+-#include "nsAttrValueInlines.h"
+-#include "nsStyleConsts.h"
++#include "nsIFrame.h"
++#include "nsISupportsPrimitives.h"
++#include "nsITextControlFrame.h"
++#include "nsLayoutUtils.h"
++#include "nsLinebreakConverter.h"
++#include "nsMappedAttributes.h"
++#include "nsPIDOMWindow.h"
+ #include "nsPresContext.h"
+-#include "nsMappedAttributes.h"
+-#include "nsIFormControlFrame.h"
+-#include "nsITextControlFrame.h"
+-#include "nsLinebreakConverter.h"
+-#include "nsIDocument.h"
+-#include "nsIFrame.h"
+-#include "nsGUIEvent.h"
+ #include "nsPresState.h"
+ #include "nsReadableUtils.h"
+-#include "nsEventDispatcher.h"
+-#include "nsLayoutUtils.h"
+-#include "nsError.h"
+-#include "mozAutoDocUpdate.h"
+-#include "nsISupportsPrimitives.h"
+-#include "nsContentCreatorFunctions.h"
+-#include "nsIConstraintValidation.h"
+-
++#include "nsStyleConsts.h"
+ #include "nsTextEditorState.h"
+ 
+ static NS_DEFINE_CID(kXULControllersCID,  NS_XULCONTROLLERS_CID);
+ 
+ #define NS_NO_CONTENT_DISPATCH (1 << 0)
+ 
+ NS_IMPL_NS_NEW_HTML_ELEMENT_CHECK_PARSER(TextArea)
+ 
+@@ -54,17 +53,17 @@ HTMLTextAreaElement::HTMLTextAreaElement
+   : nsGenericHTMLFormElement(aNodeInfo),
+     mValueChanged(false),
+     mHandlingSelect(false),
+     mDoneAddingChildren(!aFromParser),
+     mInhibitStateRestoration(!!(aFromParser & FROM_PARSER_FRAGMENT)),
+     mDisabledChanged(false),
+     mCanShowInvalidUI(true),
+     mCanShowValidUI(true),
+-    ALLOW_THIS_IN_INITIALIZER_LIST(mState(this))
++    mState(MOZ_THIS_IN_INITIALIZER_LIST())
+ {
+   AddMutationObserver(this);
+ 
+   // Set up our default state.  By default we're enabled (since we're
+   // a control type that can be disabled but not actually disabled
+   // right now), optional, and valid.  We are NOT readwrite by default
+   // until someone calls UpdateEditableState on us, apparently!  Also
+   // by default we don't have to show validity UI and so forth.
+diff --git a/content/svg/content/src/SVGAElement.cpp b/content/svg/content/src/SVGAElement.cpp
+--- a/content/svg/content/src/SVGAElement.cpp
++++ b/content/svg/content/src/SVGAElement.cpp
+@@ -1,21 +1,22 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "mozilla/dom/SVGAElement.h"
+-#include "base/compiler_specific.h"
++
++#include "mozilla/Attributes.h"
+ #include "mozilla/dom/SVGAElementBinding.h"
++#include "nsCOMPtr.h"
++#include "nsContentUtils.h"
++#include "nsGkAtoms.h"
+ #include "nsILink.h"
+ #include "nsSVGString.h"
+-#include "nsCOMPtr.h"
+-#include "nsGkAtoms.h"
+-#include "nsContentUtils.h"
+ 
+ NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(A)
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ JSObject*
+ SVGAElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+@@ -40,18 +41,18 @@ NS_IMPL_ISUPPORTS_INHERITED5(SVGAElement
+                              nsILink,
+                              Link)
+ 
+ 
+ //----------------------------------------------------------------------
+ // Implementation
+ 
+ SVGAElement::SVGAElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+-  : SVGAElementBase(aNodeInfo),
+-    ALLOW_THIS_IN_INITIALIZER_LIST(Link(this))
++  : SVGAElementBase(aNodeInfo)
++  , Link(MOZ_THIS_IN_INITIALIZER_LIST())
+ {
+ }
+ 
+ already_AddRefed<SVGAnimatedString>
+ SVGAElement::Href()
+ {
+   return mStringAttributes[HREF].ToDOMAnimatedString(this);
+ }

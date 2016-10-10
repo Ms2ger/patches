@@ -1,0 +1,56 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/base/nsEditor.cpp b/editor/libeditor/base/nsEditor.cpp
+--- a/editor/libeditor/base/nsEditor.cpp
++++ b/editor/libeditor/base/nsEditor.cpp
+@@ -3082,16 +3082,28 @@ nsEditor::GetChildOffset(nsIDOMNode *aCh
+   nsCOMPtr<nsIContent> cChild = do_QueryInterface(aChild);
+   NS_ENSURE_TRUE(cChild && content, NS_ERROR_NULL_POINTER);
+ 
+   aOffset = content->IndexOf(cChild);
+ 
+   return NS_OK;
+ }
+ 
++void
++nsEditor::GetNodeLocation(nsINode* inChild, nsINode** outParent, int32_t* outOffset)
++{
++  NS_ABORT_IF_FALSE(inChild && outParent && outOffset, "bad args");
++
++  nsCOMPtr<nsINode> parent = inChild->GetParentNode();
++  if (parent) {
++    *outOffset = parent->IndexOf(parent);
++  }
++  parent.forget(outParent);
++}
++
+ nsresult 
+ nsEditor::GetNodeLocation(nsIDOMNode *inChild, nsCOMPtr<nsIDOMNode> *outParent, int32_t *outOffset)
+ {
+   NS_ASSERTION((inChild && outParent && outOffset), "bad args");
+   nsresult result = NS_ERROR_NULL_POINTER;
+   if (inChild && outParent && outOffset)
+   {
+     result = inChild->GetParentNode(getter_AddRefs(*outParent));
+diff --git a/editor/libeditor/base/nsEditor.h b/editor/libeditor/base/nsEditor.h
+--- a/editor/libeditor/base/nsEditor.h
++++ b/editor/libeditor/base/nsEditor.h
+@@ -465,16 +465,18 @@ public:
+ 
+   /**
+    *  Set aParent to the parent of aChild.
+    *  Set aOffset to the offset of aChild in aParent.  
+    */
+   static nsresult GetNodeLocation(nsIDOMNode *aChild, 
+                                  nsCOMPtr<nsIDOMNode> *aParent, 
+                                  int32_t    *aOffset);
++  static void GetNodeLocation(nsINode* inChild, nsINode** outParent,
++                              int32_t* outOffset);
+ 
+   /** returns the number of things inside aNode in the out-param aCount.  
+     * @param  aNode is the node to get the length of.  
+     *         If aNode is text, returns number of characters. 
+     *         If not, returns number of children nodes.
+     * @param  aCount [OUT] the result of the above calculation.
+     */
+   static nsresult GetLengthOfDOMNode(nsIDOMNode *aNode, uint32_t &aCount);

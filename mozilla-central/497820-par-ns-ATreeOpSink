@@ -1,0 +1,159 @@
+diff --git a/parser/html/nsAHtml5TreeOpSink.h b/parser/html/ATreeOpSink.h
+rename from parser/html/nsAHtml5TreeOpSink.h
+rename to parser/html/ATreeOpSink.h
+--- a/parser/html/nsAHtml5TreeOpSink.h
++++ b/parser/html/ATreeOpSink.h
+@@ -35,15 +35,18 @@
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+-#ifndef nsAHtml5TreeOpSink_h___
+-#define nsAHtml5TreeOpSink_h___
++#ifndef mozilla_htmlparser_ATreeOpSink_h
++#define mozilla_htmlparser_ATreeOpSink_h
++
++namespace mozilla {
++namespace htmlparser {
+ 
+ /**
+  * The purpose of this interface is to connect a tree op executor 
+  * (main-thread case), a tree op stage (non-speculative off-the-main-thread
+  * case) or a speculation (speculative case).
+  */
+-class nsAHtml5TreeOpSink {
++class ATreeOpSink {
+   public:
+   
+     /**
+@@ -54,4 +57,7 @@
+     
+ };
+ 
+-#endif /* nsAHtml5TreeOpSink_h___ */
++} // namespace htmlparser
++} // namespace mozilla
++
++#endif // mozilla_htmlparser_ATreeOpSink_h
+diff --git a/parser/html/Speculation.cpp b/parser/html/Speculation.cpp
+--- a/parser/html/Speculation.cpp
++++ b/parser/html/Speculation.cpp
+@@ -68,7 +68,7 @@
+ }
+ 
+ void
+-Speculation::FlushToSink(nsAHtml5TreeOpSink* aSink)
++Speculation::FlushToSink(ATreeOpSink* aSink)
+ {
+   aSink->MoveOpsFrom(mOpQueue);
+ }
+diff --git a/parser/html/Speculation.h b/parser/html/Speculation.h
+--- a/parser/html/Speculation.h
++++ b/parser/html/Speculation.h
+@@ -41,14 +41,14 @@
+ #include "nsHtml5UTF16Buffer.h"
+ #include "nsAHtml5TreeBuilderState.h"
+ #include "nsHtml5TreeOperation.h"
+-#include "nsAHtml5TreeOpSink.h"
++#include "ATreeOpSink.h"
+ #include "nsTArray.h"
+ #include "nsAutoPtr.h"
+ 
+ namespace mozilla {
+ namespace htmlparser {
+ 
+-class Speculation : public nsAHtml5TreeOpSink
++class Speculation : public ATreeOpSink
+ {
+   public:
+     Speculation(nsHtml5UTF16Buffer* aBuffer,
+@@ -80,7 +80,7 @@
+      */
+     virtual void MoveOpsFrom(nsTArray<nsHtml5TreeOperation>& aOpQueue);
+ 
+-    void FlushToSink(nsAHtml5TreeOpSink* aSink);
++    void FlushToSink(ATreeOpSink* aSink);
+ 
+   private:
+     /**
+diff --git a/parser/html/TreeOpStage.h b/parser/html/TreeOpStage.h
+--- a/parser/html/TreeOpStage.h
++++ b/parser/html/TreeOpStage.h
+@@ -41,13 +41,13 @@
+ #include "mozilla/Mutex.h"
+ #include "nsHtml5TreeOperation.h"
+ #include "nsTArray.h"
+-#include "nsAHtml5TreeOpSink.h"
++#include "ATreeOpSink.h"
+ #include "SpeculativeLoad.h"
+ 
+ namespace mozilla {
+ namespace htmlparser {
+ 
+-class TreeOpStage : public nsAHtml5TreeOpSink {
++class TreeOpStage : public ATreeOpSink {
+   public:
+ 
+     TreeOpStage();
+diff --git a/parser/html/nsHtml5TreeBuilderCppSupplement.h b/parser/html/nsHtml5TreeBuilderCppSupplement.h
+--- a/parser/html/nsHtml5TreeBuilderCppSupplement.h
++++ b/parser/html/nsHtml5TreeBuilderCppSupplement.h
+@@ -50,7 +50,7 @@
+ 
+ class nsPresContext;
+ 
+-nsHtml5TreeBuilder::nsHtml5TreeBuilder(nsAHtml5TreeOpSink* aOpSink,
++nsHtml5TreeBuilder::nsHtml5TreeBuilder(mozilla::htmlparser::ATreeOpSink* aOpSink,
+                                        mozilla::htmlparser::TreeOpStage* aStage)
+   : scriptingEnabled(false)
+   , fragment(false)
+diff --git a/parser/html/nsHtml5TreeBuilderHSupplement.h b/parser/html/nsHtml5TreeBuilderHSupplement.h
+--- a/parser/html/nsHtml5TreeBuilderHSupplement.h
++++ b/parser/html/nsHtml5TreeBuilderHSupplement.h
+@@ -42,7 +42,7 @@
+     nsTArray<nsHtml5TreeOperation>         mOpQueue;
+     nsTArray<mozilla::htmlparser::SpeculativeLoad>
+                                            mSpeculativeLoadQueue;
+-    nsAHtml5TreeOpSink*                    mOpSink;
++    mozilla::htmlparser::ATreeOpSink*      mOpSink;
+     nsAutoArrayPtr<nsIContent*>            mHandles;
+     int32_t                                mHandlesUsed;
+     nsTArray<nsAutoArrayPtr<nsIContent*> > mOldHandles;
+@@ -63,7 +63,7 @@
+     
+   public:
+ 
+-    nsHtml5TreeBuilder(nsAHtml5TreeOpSink* aOpSink,
++    nsHtml5TreeBuilder(mozilla::htmlparser::ATreeOpSink* aOpSink,
+                        mozilla::htmlparser::TreeOpStage* aStage);
+ 
+     ~nsHtml5TreeBuilder();
+@@ -72,7 +72,7 @@
+ 
+     bool HasScript();
+     
+-    void SetOpSink(nsAHtml5TreeOpSink* aOpSink) {
++    void SetOpSink(mozilla::htmlparser::ATreeOpSink* aOpSink) {
+       mOpSink = aOpSink;
+     }
+ 
+diff --git a/parser/html/nsHtml5TreeOpExecutor.h b/parser/html/nsHtml5TreeOpExecutor.h
+--- a/parser/html/nsHtml5TreeOpExecutor.h
++++ b/parser/html/nsHtml5TreeOpExecutor.h
+@@ -54,7 +54,7 @@
+ #include "nsIScriptElement.h"
+ #include "nsIParser.h"
+ #include "nsCOMArray.h"
+-#include "nsAHtml5TreeOpSink.h"
++#include "ATreeOpSink.h"
+ #include "TreeOpStage.h"
+ #include "nsHashSets.h"
+ #include "nsIURI.h"
+@@ -74,7 +74,7 @@
+ 
+ class nsHtml5TreeOpExecutor : public nsContentSink,
+                               public nsIContentSink,
+-                              public nsAHtml5TreeOpSink
++                              public mozilla::htmlparser::ATreeOpSink
+ {
+   friend class nsHtml5FlushLoopGuard;
+ 

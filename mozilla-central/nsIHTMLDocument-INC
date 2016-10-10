@@ -1,0 +1,102 @@
+diff --git a/content/html/content/src/nsImageMapUtils.cpp b/content/html/content/src/nsImageMapUtils.cpp
+--- a/content/html/content/src/nsImageMapUtils.cpp
++++ b/content/html/content/src/nsImageMapUtils.cpp
+@@ -34,21 +34,23 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsString.h"
+ #include "nsReadableUtils.h"
+ #include "nsCOMPtr.h"
+ #include "nsIDocument.h"
+-#include "nsIContent.h"
++#include "mozilla/dom/Element.h"
+ #include "nsIHTMLDocument.h"
+ #include "nsIDOMHTMLMapElement.h"
+ #include "nsImageMapUtils.h"
+ 
++using namespace mozilla::dom;
++
+ /*static*/
+ already_AddRefed<nsIDOMHTMLMapElement>
+ nsImageMapUtils::FindImageMap(nsIDocument *aDocument, 
+                               const nsAString &aUsemap)
+ {
+   if (!aDocument)
+     return nullptr;
+ 
+@@ -84,17 +86,17 @@ nsImageMapUtils::FindImageMap(nsIDocumen
+     return map;
+   } else {
+     // For XHTML elements embedded in non-XHTML documents we get the
+     // map by id since XHTML requires that where a "name" attribute
+     // was used in HTML 4.01, the "id" attribute must be used in
+     // XHTML. The attribute "name" is officially deprecated.  This
+     // simplifies our life becase we can simply get the map with
+     // getElementById().
+-    nsIContent *element = aDocument->GetElementById(usemap);
++    Element *element = aDocument->GetElementById(usemap);
+ 
+     if (element) {
+       nsIDOMHTMLMapElement* map;
+       CallQueryInterface(element, &map);
+       return map;
+     }
+   }
+   
+diff --git a/content/html/document/src/nsIHTMLDocument.h b/content/html/document/src/nsIHTMLDocument.h
+--- a/content/html/document/src/nsIHTMLDocument.h
++++ b/content/html/document/src/nsIHTMLDocument.h
+@@ -29,34 +29,30 @@
+  * under the terms of either the GPL or the LGPL, and not to allow others to
+  * use your version of this file under the terms of the MPL, indicate your
+  * decision by deleting the provisions above and replace them with the notice
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+-#ifndef nsIHTMLDocument_h___
+-#define nsIHTMLDocument_h___
++
++#ifndef nsIHTMLDocument_h
++#define nsIHTMLDocument_h
+ 
+ #include "nsISupports.h"
+ #include "nsCompatibility.h"
+-#include "nsContentList.h"
+ 
+-class nsIImageMap;
+-class nsString;
+-class nsIDOMNodeList;
+-class nsIDOMHTMLCollection;
++class nsIDOMHTMLFormElement;
+ class nsIDOMHTMLMapElement;
+-class nsHTMLStyleSheet;
+-class nsIStyleSheet;
+ class nsIContent;
+-class nsIDOMHTMLBodyElement;
+ class nsIScriptElement;
+ class nsIEditor;
++class nsContentList;
++class nsWrapperCache;
+ 
+ #define NS_IHTMLDOCUMENT_IID \
+ { 0x840cacc9, 0x1956, 0x4987, \
+   { 0x80, 0x6e, 0xc6, 0xab, 0x19, 0x1b, 0x92, 0xd2 } }
+ 
+ 
+ /**
+  * HTML document extensions to nsIDocument.
+@@ -184,9 +180,9 @@ public:
+ 
+   virtual void SetIsXHTML(bool aXHTML) = 0;
+ 
+   virtual void SetDocWriteDisabled(bool aDisabled) = 0;
+ };
+ 
+ NS_DEFINE_STATIC_IID_ACCESSOR(nsIHTMLDocument, NS_IHTMLDOCUMENT_IID)
+ 
+-#endif /* nsIHTMLDocument_h___ */
++#endif /* nsIHTMLDocument_h */

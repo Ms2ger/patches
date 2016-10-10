@@ -1,0 +1,275 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 896275 - Use MOZ_THIS_IN_INITIALIZER_LIST in dom/; r=mounir
+
+diff --git a/dom/indexedDB/ipc/IndexedDBParent.cpp b/dom/indexedDB/ipc/IndexedDBParent.cpp
+--- a/dom/indexedDB/ipc/IndexedDBParent.cpp
++++ b/dom/indexedDB/ipc/IndexedDBParent.cpp
+@@ -1,41 +1,38 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+-#include "base/basictypes.h"
+-
+ #include "IndexedDBParent.h"
+ 
++#include "AsyncConnectionHelper.h"
++#include "mozilla/AppProcessChecker.h"
++#include "mozilla/Assertions.h"
++#include "mozilla/Attributes.h"
++#include "mozilla/dom/ContentParent.h"
++#include "mozilla/dom/indexedDB/DatabaseInfo.h"
++#include "mozilla/dom/indexedDB/IDBDatabase.h"
++#include "mozilla/dom/indexedDB/IDBEvents.h"
++#include "mozilla/dom/indexedDB/IDBFactory.h"
++#include "mozilla/dom/indexedDB/IDBIndex.h"
++#include "mozilla/dom/indexedDB/IDBKeyRange.h"
++#include "mozilla/dom/indexedDB/IDBObjectStore.h"
++#include "mozilla/dom/indexedDB/IDBTransaction.h"
++#include "mozilla/dom/ipc/Blob.h"
++#include "mozilla/dom/TabParent.h"
++#include "mozilla/unused.h"
++#include "mozilla/Util.h"
++#include "nsContentUtils.h"
++#include "nsCxPusher.h"
++#include "nsIDOMEvent.h"
+ #include "nsIDOMFile.h"
+-#include "nsIDOMEvent.h"
+ #include "nsIIDBVersionChangeEvent.h"
+ #include "nsIXPConnect.h"
+ 
+-#include "mozilla/AppProcessChecker.h"
+-#include "mozilla/Assertions.h"
+-#include "mozilla/unused.h"
+-#include "mozilla/Util.h"
+-#include "mozilla/dom/ContentParent.h"
+-#include "mozilla/dom/TabParent.h"
+-#include "mozilla/dom/ipc/Blob.h"
+-#include "nsContentUtils.h"
+-#include "nsCxPusher.h"
+-
+-#include "AsyncConnectionHelper.h"
+-#include "DatabaseInfo.h"
+-#include "IDBDatabase.h"
+-#include "IDBEvents.h"
+-#include "IDBFactory.h"
+-#include "IDBIndex.h"
+-#include "IDBKeyRange.h"
+-#include "IDBObjectStore.h"
+-#include "IDBTransaction.h"
+-
+ #define CHROME_ORIGIN "chrome"
+ #define PERMISSION_PREFIX "indexedDB-chrome-"
+ #define PERMISSION_SUFFIX_READ "-read"
+ #define PERMISSION_SUFFIX_WRITE "-write"
+ 
+ USING_INDEXEDDB_NAMESPACE
+ 
+ using namespace mozilla;
+@@ -235,17 +232,17 @@ IndexedDBParent::DeallocPIndexedDBDelete
+   return true;
+ }
+ 
+ /*******************************************************************************
+  * IndexedDBDatabaseParent
+  ******************************************************************************/
+ 
+ IndexedDBDatabaseParent::IndexedDBDatabaseParent()
+-: mEventListener(ALLOW_THIS_IN_INITIALIZER_LIST(this))
++: mEventListener(MOZ_THIS_IN_INITIALIZER_LIST())
+ {
+   MOZ_COUNT_CTOR(IndexedDBDatabaseParent);
+ }
+ 
+ IndexedDBDatabaseParent::~IndexedDBDatabaseParent()
+ {
+   MOZ_COUNT_DTOR(IndexedDBDatabaseParent);
+ }
+@@ -643,17 +640,17 @@ IndexedDBDatabaseParent::DeallocPIndexed
+   return true;
+ }
+ 
+ /*******************************************************************************
+  * IndexedDBTransactionParent
+  ******************************************************************************/
+ 
+ IndexedDBTransactionParent::IndexedDBTransactionParent()
+-: mEventListener(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
++: mEventListener(MOZ_THIS_IN_INITIALIZER_LIST()),
+   mArtificialRequestCount(false)
+ {
+   MOZ_COUNT_CTOR(IndexedDBTransactionParent);
+ }
+ 
+ IndexedDBTransactionParent::~IndexedDBTransactionParent()
+ {
+   MOZ_COUNT_DTOR(IndexedDBTransactionParent);
+@@ -2081,17 +2078,17 @@ IndexedDBCursorRequestParent::Continue(c
+ }
+ 
+ /*******************************************************************************
+  * IndexedDBDeleteDatabaseRequestParent
+  ******************************************************************************/
+ 
+ IndexedDBDeleteDatabaseRequestParent::IndexedDBDeleteDatabaseRequestParent(
+                                                            IDBFactory* aFactory)
+-: mEventListener(ALLOW_THIS_IN_INITIALIZER_LIST(this)), mFactory(aFactory)
++: mEventListener(MOZ_THIS_IN_INITIALIZER_LIST()), mFactory(aFactory)
+ {
+   MOZ_COUNT_CTOR(IndexedDBDeleteDatabaseRequestParent);
+   MOZ_ASSERT(aFactory);
+ }
+ 
+ IndexedDBDeleteDatabaseRequestParent::~IndexedDBDeleteDatabaseRequestParent()
+ {
+   MOZ_COUNT_DTOR(IndexedDBDeleteDatabaseRequestParent);
+diff --git a/dom/plugins/ipc/BrowserStreamChild.cpp b/dom/plugins/ipc/BrowserStreamChild.cpp
+--- a/dom/plugins/ipc/BrowserStreamChild.cpp
++++ b/dom/plugins/ipc/BrowserStreamChild.cpp
+@@ -1,16 +1,18 @@
+ /* -*- Mode: C++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 8 -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+-#include "BrowserStreamChild.h"
+-#include "PluginInstanceChild.h"
+-#include "StreamNotifyChild.h"
++#include "mozilla/plugins/BrowserStreamChild.h"
++
++#include "mozilla/Attributes.h"
++#include "mozilla/plugins/PluginInstanceChild.h"
++#include "mozilla/plugins/StreamNotifyChild.h"
+ 
+ namespace mozilla {
+ namespace plugins {
+ 
+ BrowserStreamChild::BrowserStreamChild(PluginInstanceChild* instance,
+                                        const nsCString& url,
+                                        const uint32_t& length,
+                                        const uint32_t& lastmodified,
+@@ -25,17 +27,17 @@ BrowserStreamChild::BrowserStreamChild(P
+   , mDestroyPending(NOT_DESTROYED)
+   , mNotifyPending(false)
+   , mStreamAsFilePending(false)
+   , mInstanceDying(false)
+   , mState(CONSTRUCTING)
+   , mURL(url)
+   , mHeaders(headers)
+   , mStreamNotify(notifyData)
+-  , ALLOW_THIS_IN_INITIALIZER_LIST(mDeliveryTracker(this))
++  , mDeliveryTracker(MOZ_THIS_IN_INITIALIZER_LIST())
+ {
+   PLUGIN_LOG_DEBUG(("%s (%s, %i, %i, %p, %s, %s)", FULLFUNCTION,
+                     url.get(), length, lastmodified, (void*) notifyData,
+                     headers.get(), mimeType.get()));
+ 
+   AssertPluginThread();
+ 
+   memset(&mStream, 0, sizeof(mStream));
+diff --git a/dom/plugins/ipc/PluginModuleParent.cpp b/dom/plugins/ipc/PluginModuleParent.cpp
+--- a/dom/plugins/ipc/PluginModuleParent.cpp
++++ b/dom/plugins/ipc/PluginModuleParent.cpp
+@@ -1,54 +1,55 @@
+ /* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+  * vim: sw=4 ts=4 et :
+  * This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
++#include "mozilla/plugins/PluginModuleParent.h"
++
++#include "base/process_util.h"
++#include "mozilla/Attributes.h"
++#include "mozilla/dom/PCrashReporterParent.h"
++#include "mozilla/ipc/SyncChannel.h"
++#include "mozilla/plugins/BrowserStreamParent.h"
++#include "mozilla/Preferences.h"
++#include "mozilla/Services.h"
++#include "mozilla/unused.h"
++#include "nsAutoPtr.h"
++#include "nsCRT.h"
++#include "nsIFile.h"
++#include "nsIObserverService.h"
++#include "nsNPAPIPlugin.h"
++#include "nsPrintfCString.h"
++#include "PluginIdentifierParent.h"
++#include "prsystem.h"
++
++#ifdef XP_WIN
++#include "PluginHangUIParent.h"
++#include "mozilla/widget/AudioSession.h"
++#endif
++
++#ifdef MOZ_ENABLE_PROFILER_SPS
++#include "nsIProfileSaveEvent.h"
++#endif
++
+ #ifdef MOZ_WIDGET_GTK
+ #include <glib.h>
+ #elif XP_MACOSX
+ #include "PluginInterposeOSX.h"
+ #include "PluginUtilsOSX.h"
+ #endif
++
+ #ifdef MOZ_WIDGET_QT
+ #include <QtCore/QCoreApplication>
+ #include <QtCore/QEventLoop>
+ #include "NestedLoopTimer.h"
+ #endif
+ 
+-#include "base/process_util.h"
+-
+-#include "mozilla/Preferences.h"
+-#include "mozilla/unused.h"
+-#include "mozilla/ipc/SyncChannel.h"
+-#include "mozilla/plugins/PluginModuleParent.h"
+-#include "mozilla/plugins/BrowserStreamParent.h"
+-#include "mozilla/dom/PCrashReporterParent.h"
+-#include "PluginIdentifierParent.h"
+-
+-#include "nsAutoPtr.h"
+-#include "nsCRT.h"
+-#include "nsNPAPIPlugin.h"
+-#include "nsIFile.h"
+-#include "nsPrintfCString.h"
+-
+-#include "prsystem.h"
+-
+-#ifdef XP_WIN
+-#include "PluginHangUIParent.h"
+-#include "mozilla/widget/AudioSession.h"
+-#endif
+-#ifdef MOZ_ENABLE_PROFILER_SPS
+-#include "nsIProfileSaveEvent.h"
+-#endif
+-#include "mozilla/Services.h"
+-#include "nsIObserverService.h"
+-
+ using base::KillProcess;
+ 
+ using mozilla::PluginLibrary;
+ using mozilla::ipc::SyncChannel;
+ using mozilla::dom::PCrashReporterParent;
+ using mozilla::dom::CrashReporterParent;
+ 
+ using namespace mozilla;
+@@ -115,17 +116,17 @@ PluginModuleParent::LoadModule(const cha
+ 
+ PluginModuleParent::PluginModuleParent(const char* aFilePath)
+     : mSubprocess(new PluginProcessParent(aFilePath))
+     , mShutdown(false)
+     , mClearSiteDataSupported(false)
+     , mGetSitesWithDataSupported(false)
+     , mNPNIface(NULL)
+     , mPlugin(NULL)
+-    , ALLOW_THIS_IN_INITIALIZER_LIST(mTaskFactory(this))
++    , mTaskFactory(MOZ_THIS_IN_INITIALIZER_LIST())
+ #ifdef XP_WIN
+     , mPluginCpuUsageOnHang()
+     , mHangUIParent(nullptr)
+     , mHangUIEnabled(true)
+     , mIsTimerReset(true)
+ #endif
+ #ifdef MOZ_CRASHREPORTER_INJECTOR
+     , mFlashProcess1(0)

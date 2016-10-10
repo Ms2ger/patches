@@ -1,0 +1,75 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 817277 - Add a nsGlobalWindow::GetLocation() without outparams
+
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -8127,33 +8127,34 @@ nsGlobalWindow::GetPrivateRoot()
+     }
+   }
+ 
+   return static_cast<nsGlobalWindow *>
+                     (static_cast<nsIDOMWindow *>(top));
+ }
+ 
+ 
+-NS_IMETHODIMP
+-nsGlobalWindow::GetLocation(nsIDOMLocation ** aLocation)
+-{
+-  FORWARD_TO_INNER(GetLocation, (aLocation), NS_ERROR_NOT_INITIALIZED);
+-
+-  *aLocation = nullptr;
++nsLocation*
++nsGlobalWindow::GetLocation()
++{
++  FORWARD_TO_INNER(GetLocation, (), nullptr);
+ 
+   nsIDocShell *docShell = GetDocShell();
+   if (!mLocation && docShell) {
+     mLocation = new nsLocation(docShell);
+-    if (!mLocation) {
+-      return NS_ERROR_OUT_OF_MEMORY;
+-    }
+-  }
+-
+-  NS_IF_ADDREF(*aLocation = mLocation);
+-
++  }
++
++  return mLocation;
++}
++
++NS_IMETHODIMP
++nsGlobalWindow::GetLocation(nsIDOMLocation** aLocation)
++{
++  nsRefPtr<nsLocation> location = GetLocation();
++  location.forget(aLocation);
+   return NS_OK;
+ }
+ 
+ void
+ nsGlobalWindow::ActivateOrDeactivate(bool aActivate)
+ {
+   // Set / unset mIsActive on the top level window, which is used for the
+   // :-moz-window-inactive pseudoclass.
+diff --git a/dom/base/nsGlobalWindow.h b/dom/base/nsGlobalWindow.h
+--- a/dom/base/nsGlobalWindow.h
++++ b/dom/base/nsGlobalWindow.h
+@@ -464,16 +464,17 @@ public:
+   NS_DECL_NSIDOMSTORAGEINDEXEDDB
+ 
+   // nsIInterfaceRequestor
+   NS_DECL_NSIINTERFACEREQUESTOR
+ 
+   // WebIDL interface.
+   uint32_t GetLength();
+   already_AddRefed<nsIDOMWindow> IndexedGetter(uint32_t aIndex, bool& aFound);
++  nsLocation* GetLocation();
+ 
+   // Object Management
+   nsGlobalWindow(nsGlobalWindow *aOuterWindow);
+ 
+   static nsGlobalWindow *FromSupports(nsISupports *supports)
+   {
+     // Make sure this matches the casts we do in QueryInterface().
+     return (nsGlobalWindow *)(mozilla::dom::EventTarget *)supports;

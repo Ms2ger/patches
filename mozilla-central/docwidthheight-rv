@@ -1,0 +1,116 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/document/src/nsHTMLDocument.cpp b/content/html/document/src/nsHTMLDocument.cpp
+--- a/content/html/document/src/nsHTMLDocument.cpp
++++ b/content/html/document/src/nsHTMLDocument.cpp
+@@ -2248,16 +2248,62 @@ nsHTMLDocument::RemovedForm()
+ }
+ 
+ int32_t
+ nsHTMLDocument::GetNumFormsSynchronous()
+ {
+   return mNumForms;
+ }
+ 
++nsresult
++nsHTMLDocument::GetBodySize(int32_t* aWidth,
++                            int32_t* aHeight)
++{
++  *aWidth = *aHeight = 0;
++
++  FlushPendingNotifications(Flush_Layout);
++
++  // Find the <body> element: this is what we'll want to use for the
++  // document's width and height values.
++  Element* body = GetBodyElement();
++  if (!body) {
++    return NS_OK;
++  }
++
++  // Now grab its frame
++  nsIFrame* frame = body->GetPrimaryFrame();
++  if (!frame)
++    return NS_OK;
++  
++  nsSize size = frame->GetSize();
++
++  *aWidth = nsPresContext::AppUnitsToIntCSSPixels(size.width);
++  *aHeight = nsPresContext::AppUnitsToIntCSSPixels(size.height);
++
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++nsHTMLDocument::GetWidth(int32_t* aWidth)
++{
++  NS_ENSURE_ARG_POINTER(aWidth);
++
++  int32_t height;
++  return GetBodySize(aWidth, &height);
++}
++
++NS_IMETHODIMP
++nsHTMLDocument::GetHeight(int32_t* aHeight)
++{
++  NS_ENSURE_ARG_POINTER(aHeight);
++
++  int32_t width;
++  return GetBodySize(&width, aHeight);
++}
++
+ NS_IMETHODIMP
+ nsHTMLDocument::GetAlinkColor(nsAString& aAlinkColor)
+ {
+   aAlinkColor.Truncate();
+ 
+   nsCOMPtr<nsIDOMHTMLBodyElement> body = do_QueryInterface(GetBodyElement());
+   if (body) {
+     body->GetALink(aAlinkColor);
+diff --git a/dom/interfaces/html/nsIDOMNSHTMLDocument.idl b/dom/interfaces/html/nsIDOMNSHTMLDocument.idl
+--- a/dom/interfaces/html/nsIDOMNSHTMLDocument.idl
++++ b/dom/interfaces/html/nsIDOMNSHTMLDocument.idl
+@@ -34,19 +34,21 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "domstubs.idl"
+ 
+-[scriptable, uuid(386e9eee-1f06-40a6-a1a7-ed986646b793)]
++[scriptable, uuid(95cd5ad4-ae8a-4f0e-b168-35e03d5e0b9a)]
+ interface nsIDOMNSHTMLDocument : nsISupports
+ {
++  readonly attribute long                 width;
++  readonly attribute long                 height;
+            attribute DOMString            alinkColor;
+            attribute DOMString            linkColor;
+            attribute DOMString            vlinkColor;
+            attribute DOMString            bgColor;
+            attribute DOMString            fgColor;
+            attribute DOMString            domain;
+ 
+   readonly attribute nsIDOMHTMLCollection embeds;
+diff --git a/js/src/xpconnect/src/dom_quickstubs.qsconf b/js/src/xpconnect/src/dom_quickstubs.qsconf
+--- a/js/src/xpconnect/src/dom_quickstubs.qsconf
++++ b/js/src/xpconnect/src/dom_quickstubs.qsconf
+@@ -325,16 +325,18 @@ members = [
+     'nsIDOMHTMLTextAreaElement.value',
+     'nsIDOMHTMLTextAreaElement.type',
+     'nsIDOMHTMLTextAreaElement.select',
+     'nsIDOMHTMLTitleElement.text',
+     'nsIDOMHTMLCanvasElement.width',
+     'nsIDOMHTMLCanvasElement.height',
+     'nsIDOMHTMLCanvasElement.getContext',
+     'nsIDOMHTMLCanvasElement.toDataURL',
++    'nsIDOMNSHTMLDocument.width',
++    'nsIDOMNSHTMLDocument.height',
+     'nsIDOMNSHTMLDocument.domain',
+     'nsIDOMNSHTMLDocument.getSelection',
+     'nsIDOMNSHTMLDocument.designMode',
+     'nsIDOMNSHTMLElement.contentEditable',
+     'nsIDOMNSHTMLElement.isContentEditable',
+     'nsIDOMNSHTMLElement.offsetParent',
+     'nsIDOMNSHTMLElement.innerHTML',
+     'nsIDOMNSHTMLElement.offsetLeft',

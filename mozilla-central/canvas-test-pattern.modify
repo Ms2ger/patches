@@ -1,0 +1,291 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 665345 - Move tests that use image.onload out of test_canvas.html
+
+These tests are asynchronous and can interfere with other tests.
+
+diff --git a/content/canvas/test/Makefile.in b/content/canvas/test/Makefile.in
+--- a/content/canvas/test/Makefile.in
++++ b/content/canvas/test/Makefile.in
+@@ -138,16 +138,22 @@ MOCHITEST_FILES += \
+ 
+ # Tests that use setTimeout.
+ MOCHITEST_FILES += \
+   test_2d.drawImage.animated.apng.html \
+   test_2d.drawImage.animated.gif.html \
+   test_2d.pattern.animated.gif.html \
+   $(NULL)
+ 
++# Tests that use events.
++MOCHITEST_FILES += \
++  test_2d.pattern.modify.image1.html \
++  test_2d.pattern.modify.image2.html \
++  $(NULL)
++
+ # WebIDL tests that don't play well with other tests.
+ MOCHITEST_FILES += \
+   test_2d.type.prototype.html \
+   test_2d.type.replace.html \
+   test_type.prototype.html \
+   test_type.replace.html \
+   $(NULL)
+ 
+diff --git a/content/canvas/test/standalone.dat b/content/canvas/test/standalone.dat
+--- a/content/canvas/test/standalone.dat
++++ b/content/canvas/test/standalone.dat
+@@ -68,13 +68,16 @@ test_2d.path.stroke.prune.curve.html
+ test_2d.path.stroke.prune.line.html
+ test_2d.path.stroke.prune.rect.html
+ test_2d.transformation.setTransform.skewed.html
+ test_2d.transformation.transform.skewed.html
+ # setTimeout
+ test_2d.drawImage.animated.apng.html
+ test_2d.drawImage.animated.gif.html
+ test_2d.pattern.animated.gif.html
++# Events
++test_2d.pattern.modify.image1.html
++test_2d.pattern.modify.image2.html
+ # Clashes
+ test_2d.type.prototype.html
+ test_2d.type.replace.html
+ test_type.prototype.html
+ test_type.replace.html
+diff --git a/content/canvas/test/test_2d.pattern.modify.image1.html b/content/canvas/test/test_2d.pattern.modify.image1.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_2d.pattern.modify.image1.html
+@@ -0,0 +1,56 @@
++<!DOCTYPE HTML>
++<title>Canvas test: 2d.pattern.modify.image1</title>
++<script src="/MochiKit/MochiKit.js"></script>
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++function isPixel(ctx, x,y, r,g,b,a, pos, colour, d) {
++    var pixel = ctx.getImageData(x, y, 1, 1);
++    var pr = pixel.data[0],
++        pg = pixel.data[1],
++        pb = pixel.data[2],
++        pa = pixel.data[3];
++    ok(r-d <= pr && pr <= r+d &&
++       g-d <= pg && pg <= g+d &&
++       b-d <= pb && pb <= b+d &&
++       a-d <= pa && pa <= a+d,
++       "pixel "+pos+" is "+pr+","+pg+","+pb+","+pa+"; expected "+colour+" +/- "+d);
++}
++function deferTest() {
++    _deferred = true;
++}
++function wrapFunction(f) {
++    return function () {
++        f.apply(null, arguments);
++        SimpleTest.finish();
++    }
++}
++
++SimpleTest.waitForExplicitFinish();
++MochiKit.DOM.addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++var img = document.getElementById('green.png');
++var pattern = ctx.createPattern(img, 'no-repeat');
++deferTest();
++img.onload = wrapFunction(function ()
++{
++    ctx.fillStyle = pattern;
++    ctx.fillRect(0, 0, 100, 50);
++
++    isPixel(ctx, 1,1, 0,255,0,255, "1,1", "0,255,0,255", 0);
++    isPixel(ctx, 98,1, 0,255,0,255, "98,1", "0,255,0,255", 0);
++    isPixel(ctx, 1,48, 0,255,0,255, "1,48", "0,255,0,255", 0);
++    isPixel(ctx, 98,48, 0,255,0,255, "98,48", "0,255,0,255", 0);
++});
++img.src = 'image_red.png';
++
++
++});
++</script>
++<img src="image_green.png" id="green.png" class="resource">
++
+diff --git a/content/canvas/test/test_2d.pattern.modify.image2.html b/content/canvas/test/test_2d.pattern.modify.image2.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_2d.pattern.modify.image2.html
+@@ -0,0 +1,60 @@
++<!DOCTYPE HTML>
++<title>Canvas test: 2d.pattern.modify.image2</title>
++<script src="/MochiKit/MochiKit.js"></script>
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++function isPixel(ctx, x,y, r,g,b,a, pos, colour, d) {
++    var pixel = ctx.getImageData(x, y, 1, 1);
++    var pr = pixel.data[0],
++        pg = pixel.data[1],
++        pb = pixel.data[2],
++        pa = pixel.data[3];
++    ok(r-d <= pr && pr <= r+d &&
++       g-d <= pg && pg <= g+d &&
++       b-d <= pb && pb <= b+d &&
++       a-d <= pa && pa <= a+d,
++       "pixel "+pos+" is "+pr+","+pg+","+pb+","+pa+"; expected "+colour+" +/- "+d);
++}
++function deferTest() {
++    _deferred = true;
++}
++function wrapFunction(f) {
++    return function () {
++        f.apply(null, arguments);
++        SimpleTest.finish();
++    }
++}
++
++SimpleTest.waitForExplicitFinish();
++MochiKit.DOM.addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++var img = document.getElementById('green.png');
++var pattern = ctx.createPattern(img, 'no-repeat');
++ctx.fillStyle = pattern;
++ctx.fillRect(0, 0, 100, 50);
++ctx.fillStyle = '#00f';
++ctx.fillRect(0, 0, 100, 50);
++deferTest();
++img.onload = wrapFunction(function ()
++{
++    ctx.fillStyle = pattern;
++    ctx.fillRect(0, 0, 100, 50);
++
++    isPixel(ctx, 1,1, 0,255,0,255, "1,1", "0,255,0,255", 0);
++    isPixel(ctx, 98,1, 0,255,0,255, "98,1", "0,255,0,255", 0);
++    isPixel(ctx, 1,48, 0,255,0,255, "1,48", "0,255,0,255", 0);
++    isPixel(ctx, 98,48, 0,255,0,255, "98,48", "0,255,0,255", 0);
++});
++img.src = 'image_red.png';
++
++
++});
++</script>
++<img src="image_green.png" id="green.png" class="resource">
++
+diff --git a/content/canvas/test/test_canvas.html b/content/canvas/test/test_canvas.html
+--- a/content/canvas/test/test_canvas.html
++++ b/content/canvas/test/test_canvas.html
+@@ -12635,83 +12635,16 @@ isPixel(ctx, 1,1, 0,255,0,255, 0);
+ isPixel(ctx, 98,1, 0,255,0,255, 0);
+ isPixel(ctx, 1,48, 0,255,0,255, 0);
+ isPixel(ctx, 98,48, 0,255,0,255, 0);
+ 
+ 
+ }
+ </script>
+ 
+-<!-- [[[ test_2d.pattern.modify.image1.html ]]] -->
+-
+-<p>Canvas test: 2d.pattern.modify.image1</p>
+-<canvas height="50" id="c472" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-var canvas472 = document.getElementById('c472');
+-var ctx472 = canvas472.getContext('2d');
+-
+-function test_2d_pattern_modify_image1() {
+-
+-var img = document.getElementById('green_11.png');
+-var pattern = ctx472.createPattern(img, 'no-repeat');
+-deferTest();
+-img.onload = wrapFunction(function ()
+-{
+-    ctx472.fillStyle = pattern;
+-    ctx472.fillRect(0, 0, 100, 50);
+-
+-    isPixel(ctx472, 1,1, 0,255,0,255, 0);
+-    isPixel(ctx472, 98,1, 0,255,0,255, 0);
+-    isPixel(ctx472, 1,48, 0,255,0,255, 0);
+-    isPixel(ctx472, 98,48, 0,255,0,255, 0);
+-});
+-img.src = 'image_red.png';
+-
+-
+-}
+-</script>
+-<img class="resource" id="green_11.png" src="image_green.png">
+-
+-<!-- [[[ test_2d.pattern.modify.image2.html ]]] -->
+-
+-<p>Canvas test: 2d.pattern.modify.image2</p>
+-<canvas height="50" id="c473" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-
+-var canvas473 = document.getElementById('c473');
+-var ctx473 = canvas473.getContext('2d');
+-
+-function test_2d_pattern_modify_image2() {
+-
+-var img = document.getElementById('green_12.png');
+-var pattern = ctx473.createPattern(img, 'no-repeat');
+-ctx473.fillStyle = pattern;
+-ctx473.fillRect(0, 0, 100, 50);
+-ctx473.fillStyle = '#00f';
+-ctx473.fillRect(0, 0, 100, 50);
+-deferTest();
+-img.onload = wrapFunction(function ()
+-{
+-    ctx473.fillStyle = pattern;
+-    ctx473.fillRect(0, 0, 100, 50);
+-
+-    isPixel(ctx473, 1,1, 0,255,0,255, 0);
+-    isPixel(ctx473, 98,1, 0,255,0,255, 0);
+-    isPixel(ctx473, 1,48, 0,255,0,255, 0);
+-    isPixel(ctx473, 98,48, 0,255,0,255, 0);
+-});
+-img.src = 'image_red.png';
+-
+-
+-}
+-</script>
+-<img class="resource" id="green_12.png" src="image_green.png">
+-
+ <!-- [[[ test_2d.pattern.paint.norepeat.basic.html ]]] -->
+ 
+ <p>Canvas test: 2d.pattern.paint.norepeat.basic</p>
+ <canvas height="50" id="c474" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+ <script>
+ 
+ function test_2d_pattern_paint_norepeat_basic() {
+ 
+@@ -19930,26 +19863,16 @@ function runTests() {
+   ok(false, "unexpected exception thrown in: test_2d_pattern_modify_canvas1");
+  }
+  try {
+   test_2d_pattern_modify_canvas2();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_pattern_modify_canvas2");
+  }
+  try {
+-  test_2d_pattern_modify_image1();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_2d_pattern_modify_image1");
+- }
+- try {
+-  test_2d_pattern_modify_image2();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_2d_pattern_modify_image2");
+- }
+- try {
+   test_2d_pattern_paint_norepeat_basic();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_pattern_paint_norepeat_basic");
+  }
+  try {
+   test_2d_pattern_paint_norepeat_coord1();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_pattern_paint_norepeat_coord1");

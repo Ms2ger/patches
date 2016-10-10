@@ -1,0 +1,129 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/webidl/CSSFontFeatureValuesRule.webidl b/dom/webidl/CSSFontFeatureValuesRule.webidl
+new file mode 100644
+--- /dev/null
++++ b/dom/webidl/CSSFontFeatureValuesRule.webidl
+@@ -0,0 +1,22 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++// http://dev.w3.org/csswg/css-fonts/#om-fontfeaturevalues
++interface CSSFontFeatureValuesRule : CSSRule {
++  [SetterThrows]
++  attribute DOMString fontFamily;
++
++  // readonly attribute CSSFontFeatureValuesMap annotation;
++  // readonly attribute CSSFontFeatureValuesMap ornaments;
++  // readonly attribute CSSFontFeatureValuesMap stylistic;
++  // readonly attribute CSSFontFeatureValuesMap swash;
++  // readonly attribute CSSFontFeatureValuesMap characterVariant;
++  // readonly attribute CSSFontFeatureValuesMap styleset;
++};
++
++// Mozilla extensions.
++partial interface CSSFontFeatureValuesRule {
++  [SetterThrows]
++  attribute DOMString valueText;
++};
+diff --git a/dom/webidl/CSSRule.webidl b/dom/webidl/CSSRule.webidl
+new file mode 100644
+--- /dev/null
++++ b/dom/webidl/CSSRule.webidl
+@@ -0,0 +1,43 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++// http://dev.w3.org/csswg/cssom/#the-cssrule-interface
++interface CSSRule {
++  const unsigned short STYLE_RULE = 1;
++  const unsigned short CHARSET_RULE = 2;
++  const unsigned short IMPORT_RULE = 3;
++  const unsigned short MEDIA_RULE = 4;
++  const unsigned short FONT_FACE_RULE = 5;
++  const unsigned short PAGE_RULE = 6;
++  const unsigned short NAMESPACE_RULE = 10;
++  readonly attribute unsigned short type;
++  attribute DOMString cssText;
++  readonly attribute CSSRule? parentRule;
++  readonly attribute CSSStyleSheet? parentStyleSheet;
++};
++
++// http://dev.w3.org/csswg/css-animations/#CSSRule-interface has
++partial interface CSSRule {
++  const unsigned short KEYFRAMES_RULE = 7;
++  const unsigned short KEYFRAME_RULE = 8;
++};
++
++// http://dev.w3.org/csswg/css-conditional/#extentions-to-cssrule-interface
++partial interface CSSRule {
++  const unsigned short SUPPORTS_RULE = 12;
++}
++
++// http://dev.w3.org/csswg/css-fonts/#om-fontfeaturevalues
++partial interface CSSRule {
++  const unsigned short FONT_FEATURE_VALUES_RULE = 14;
++}
++
++// Mozilla extensions
++partial interface CSSRule {
++  const unsigned short      UNKNOWN_RULE                   = 0;
++  [Pref="layout.css.prefixes.animations"]
++  const unsigned short      MOZ_KEYFRAMES_RULE             = 7;
++  [Pref="layout.css.prefixes.animations"]
++  const unsigned short      MOZ_KEYFRAME_RULE              = 8;
++};
+diff --git a/dom/webidl/WebIDL.mk b/dom/webidl/WebIDL.mk
+--- a/dom/webidl/WebIDL.mk
++++ b/dom/webidl/WebIDL.mk
+@@ -40,17 +40,19 @@ webidl_files = \
+   ClientRectList.webidl \
+   ClipboardEvent.webidl \
+   CommandEvent.webidl \
+   Comment.webidl \
+   CompositionEvent.webidl \
+   ConvolverNode.webidl \
+   Coordinates.webidl \
+   CSS.webidl \
++  CSSFontFeatureValuesRule.webidl \
+   CSSPrimitiveValue.webidl \
++  CSSRule.webidl \
+   CSSStyleDeclaration.webidl \
+   CSSStyleSheet.webidl \
+   CSSValue.webidl \
+   CSSValueList.webidl \
+   DataContainerEvent.webidl \
+   DelayNode.webidl \
+   DesktopNotification.webidl \
+   DeviceMotionEvent.webidl \
+diff --git a/layout/style/nsCSSRules.cpp b/layout/style/nsCSSRules.cpp
+--- a/layout/style/nsCSSRules.cpp
++++ b/layout/style/nsCSSRules.cpp
+@@ -1921,25 +1921,22 @@ nsCSSFontFeatureValuesRule::Clone() cons
+ {
+   nsRefPtr<css::Rule> clone = new nsCSSFontFeatureValuesRule(*this);
+   return clone.forget();
+ }
+ 
+ NS_IMPL_ADDREF(nsCSSFontFeatureValuesRule)
+ NS_IMPL_RELEASE(nsCSSFontFeatureValuesRule)
+ 
+-DOMCI_DATA(CSSFontFeatureValuesRule, nsCSSFontFeatureValuesRule)
+-
+ // QueryInterface implementation for nsCSSFontFeatureValuesRule
+ NS_INTERFACE_MAP_BEGIN(nsCSSFontFeatureValuesRule)
+   NS_INTERFACE_MAP_ENTRY(nsIStyleRule)
+   NS_INTERFACE_MAP_ENTRY(nsIDOMCSSFontFeatureValuesRule)
+   NS_INTERFACE_MAP_ENTRY(nsIDOMCSSRule)
+   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIStyleRule)
+-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(CSSFontFeatureValuesRule)
+ NS_INTERFACE_MAP_END
+ 
+ IMPL_STYLE_RULE_INHERIT(nsCSSFontFeatureValuesRule, Rule)
+ 
+ static void
+ FamilyListToString(const nsTArray<nsString>& aFamilyList, nsAString& aOutStr)
+ {
+   uint32_t i, n = aFamilyList.Length();

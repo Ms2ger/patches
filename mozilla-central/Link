@@ -1,0 +1,206 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/Link.cpp b/content/base/src/Link.cpp
+--- a/content/base/src/Link.cpp
++++ b/content/base/src/Link.cpp
+@@ -42,28 +42,29 @@
+ #include "nsIEventStateManager.h"
+ #include "nsIURL.h"
+ 
+ #include "nsContentUtils.h"
+ #include "nsEscape.h"
+ #include "nsGkAtoms.h"
+ #include "nsString.h"
+ #include "mozAutoDocUpdate.h"
+-
++#include "nsGenericElement.h"
+ #include "mozilla/Services.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+-Link::Link()
++Link::Link(nsGenericElement* aElement)
+   : mLinkState(defaultState)
+   , mRegistered(false)
+-  , mContent(NULL)
++  , mContent(aElement)
+   , mHistory(services::GetHistoryService())
+ {
++  NS_ABORT_IF_FALSE(mContent, "No element provided!");
+ }
+ 
+ Link::~Link()
+ {
+   UnregisterFromHistory();
+ }
+ 
+ nsLinkState
+@@ -533,22 +534,17 @@ Link::SetHrefAttribute(nsIURI *aURI)
+   NS_ASSERTION(aURI, "Null URI is illegal!");
+ 
+   nsAutoCString href;
+   (void)aURI->GetSpec(href);
+   (void)Content()->SetAttr(kNameSpaceID_None, nsGkAtoms::href,
+                            NS_ConvertUTF8toUTF16(href), true);
+ }
+ 
+-nsIContent *
++nsGenericElement*
+ Link::Content()
+ {
+-  if (NS_LIKELY(mContent)) {
+-    return mContent;
+-  }
+-
+-  nsCOMPtr<nsIContent> content(do_QueryInterface(this));
+-  NS_ABORT_IF_FALSE(content, "This must be able to QI to nsIContent!");
+-  return mContent = content;
++  NS_ABORT_IF_FALSE(mContent, "No element provided!");
++  return mContent;
+ }
+ 
+ } // namespace dom
+ } // namespace mozilla
+diff --git a/content/base/src/Link.h b/content/base/src/Link.h
+--- a/content/base/src/Link.h
++++ b/content/base/src/Link.h
+@@ -42,30 +42,32 @@
+  */
+ 
+ #ifndef mozilla_dom_Link_h__
+ #define mozilla_dom_Link_h__
+ 
+ #include "nsIContent.h"
+ #include "mozilla/IHistory.h"
+ 
++class nsGenericElement;
++
+ namespace mozilla {
+ namespace dom {
+ 
+ #define MOZILLA_DOM_LINK_IMPLEMENTATION_IID \
+   { 0xa687a99c, 0x3893, 0x45c0, \
+     {0x8e, 0xab, 0xb8, 0xf7, 0xd7, 0x9e, 0x9e, 0x7b } }
+ 
+ class Link : public nsISupports
+ {
+ public:
+   NS_DECLARE_STATIC_IID_ACCESSOR(MOZILLA_DOM_LINK_IMPLEMENTATION_IID)
+ 
+   static const nsLinkState defaultState = eLinkState_Unknown;
+-  Link();
++  Link(nsGenericElement*);
+   nsLinkState GetLinkState() const;
+   virtual void SetLinkState(nsLinkState aState);
+ 
+   /**
+    * @return NS_EVENT_STATE_VISITED if this link is visited,
+    *         NS_EVENT_STATE_UNVISTED if this link is not visited, or 0 if this
+    *         link is not actually a link.
+    */
+@@ -126,18 +128,18 @@ private:
+   mutable nsCOMPtr<nsIURI> mCachedURI;
+ 
+   bool mRegistered;
+ 
+   /**
+    * Obtains a pointer to the nsIContent interface that classes inheriting from
+    * this should also inherit from.
+    */
+-  nsIContent *Content();
+-  nsIContent *mContent;
++  nsGenericElement* Content();
++  nsGenericElement* mContent;
+ 
+   // Strong reference to History.  The link has to unregister before History
+   // can disappear.
+   nsCOMPtr<IHistory> mHistory;
+ };
+ 
+ NS_DEFINE_STATIC_IID_ACCESSOR(Link, MOZILLA_DOM_LINK_IMPLEMENTATION_IID)
+ 
+diff --git a/content/html/content/src/nsHTMLAnchorElement.cpp b/content/html/content/src/nsHTMLAnchorElement.cpp
+--- a/content/html/content/src/nsHTMLAnchorElement.cpp
++++ b/content/html/content/src/nsHTMLAnchorElement.cpp
+@@ -125,16 +125,17 @@ public:
+   virtual nsXPCClassInfo* GetClassInfo();
+ };
+ 
+ 
+ NS_IMPL_NS_NEW_HTML_ELEMENT(Anchor)
+ 
+ nsHTMLAnchorElement::nsHTMLAnchorElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+   : nsGenericHTMLElement(aNodeInfo)
++  , Link(this)
+ {
+ }
+ 
+ nsHTMLAnchorElement::~nsHTMLAnchorElement()
+ {
+ }
+ 
+ 
+diff --git a/content/html/content/src/nsHTMLAreaElement.cpp b/content/html/content/src/nsHTMLAreaElement.cpp
+--- a/content/html/content/src/nsHTMLAreaElement.cpp
++++ b/content/html/content/src/nsHTMLAreaElement.cpp
+@@ -110,16 +110,17 @@ public:
+ };
+ 
+ 
+ NS_IMPL_NS_NEW_HTML_ELEMENT(Area)
+ 
+ 
+ nsHTMLAreaElement::nsHTMLAreaElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+   : nsGenericHTMLElement(aNodeInfo)
++  , Link(this)
+ {
+ }
+ 
+ nsHTMLAreaElement::~nsHTMLAreaElement()
+ {
+ }
+ 
+ NS_IMPL_ADDREF_INHERITED(nsHTMLAreaElement, nsGenericElement) 
+diff --git a/content/html/content/src/nsHTMLLinkElement.cpp b/content/html/content/src/nsHTMLLinkElement.cpp
+--- a/content/html/content/src/nsHTMLLinkElement.cpp
++++ b/content/html/content/src/nsHTMLLinkElement.cpp
+@@ -130,16 +130,17 @@ protected:
+ };
+ 
+ 
+ NS_IMPL_NS_NEW_HTML_ELEMENT(Link)
+ 
+ 
+ nsHTMLLinkElement::nsHTMLLinkElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+   : nsGenericHTMLElement(aNodeInfo)
++  , Link(this)
+ {
+ }
+ 
+ nsHTMLLinkElement::~nsHTMLLinkElement()
+ {
+ }
+ 
+ 
+diff --git a/content/svg/content/src/nsSVGAElement.cpp b/content/svg/content/src/nsSVGAElement.cpp
+--- a/content/svg/content/src/nsSVGAElement.cpp
++++ b/content/svg/content/src/nsSVGAElement.cpp
+@@ -75,16 +75,17 @@ NS_INTERFACE_TABLE_HEAD(nsSVGAElement)
+ NS_INTERFACE_MAP_END_INHERITING(nsSVGAElementBase)
+ 
+ 
+ //----------------------------------------------------------------------
+ // Implementation
+ 
+ nsSVGAElement::nsSVGAElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+   : nsSVGAElementBase(aNodeInfo)
++  , Link(this)
+ {
+ }
+ 
+ //----------------------------------------------------------------------
+ // nsIDOMSVGURIReference methods
+ 
+ /* readonly attribute nsIDOMSVGAnimatedString href; */
+ NS_IMETHODIMP

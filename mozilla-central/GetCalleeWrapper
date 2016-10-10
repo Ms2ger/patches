@@ -1,0 +1,201 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/caps/src/nsScriptSecurityManager.cpp b/caps/src/nsScriptSecurityManager.cpp
+--- a/caps/src/nsScriptSecurityManager.cpp
++++ b/caps/src/nsScriptSecurityManager.cpp
+@@ -693,20 +693,20 @@ nsScriptSecurityManager::CheckPropertyAc
+     //--See if the object advertises a non-default level of access
+     //  using nsISecurityCheckedComponent
+     nsCOMPtr<nsISecurityCheckedComponent> checkedComponent =
+         do_QueryInterface(aObj);
+ 
+     nsXPIDLCString objectSecurityLevel;
+     if (checkedComponent)
+     {
+-        nsCOMPtr<nsIXPConnectWrappedNative> wrapper;
+         nsCOMPtr<nsIInterfaceInfo> interfaceInfo;
+         const nsIID* objIID = nullptr;
+-        rv = aCallContext->GetCalleeWrapper(getter_AddRefs(wrapper));
++        nsCOMPtr<nsIXPConnectWrappedNative> wrapper =
++            aCallContext->GetCalleeWrapper();
+         if (NS_SUCCEEDED(rv) && wrapper)
+             rv = wrapper->FindInterfaceWithMember(property, getter_AddRefs(interfaceInfo));
+         if (NS_SUCCEEDED(rv) && interfaceInfo)
+             rv = interfaceInfo->GetIIDShared(&objIID);
+         if (NS_SUCCEEDED(rv) && objIID)
+         {
+             switch (aAction)
+             {
+diff --git a/js/xpconnect/loader/mozJSComponentLoader.cpp b/js/xpconnect/loader/mozJSComponentLoader.cpp
+--- a/js/xpconnect/loader/mozJSComponentLoader.cpp
++++ b/js/xpconnect/loader/mozJSComponentLoader.cpp
+@@ -640,21 +640,17 @@ mozJSComponentLoader::FindTargetObject(J
+         nsCOMPtr<nsIXPConnect> xpc =
+             do_GetService(kXPConnectServiceContractID, &rv);
+         NS_ENSURE_SUCCESS(rv, rv);
+ 
+         nsAXPCNativeCallContext *cc = nullptr;
+         rv = xpc->GetCurrentNativeCallContext(&cc);
+         NS_ENSURE_SUCCESS(rv, rv);
+ 
+-        nsCOMPtr<nsIXPConnectWrappedNative> wn;
+-        rv = cc->GetCalleeWrapper(getter_AddRefs(wn));
+-        NS_ENSURE_SUCCESS(rv, rv);
+-
+-        targetObject = wn->GetJSObject();
++        targetObject = cc->GetCalleeWrapperJS();
+         if (!targetObject) {
+             NS_ERROR("null calling object");
+             return NS_ERROR_FAILURE;
+         }
+ 
+         targetObject = JS_GetGlobalForObject(aCx, targetObject);
+     }
+ 
+diff --git a/js/xpconnect/public/nsAXPCNativeCallContext.h b/js/xpconnect/public/nsAXPCNativeCallContext.h
+--- a/js/xpconnect/public/nsAXPCNativeCallContext.h
++++ b/js/xpconnect/public/nsAXPCNativeCallContext.h
+@@ -2,27 +2,30 @@
+  *
+  * This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef nsAXPCNativeCallContext_h__
+ #define nsAXPCNativeCallContext_h__
+ 
++#include "jspubtd.h"
++
+ class nsIXPConnectWrappedNative;
+ 
+ /**
+ * A native call context is allocated on the stack when XPConnect calls a
+ * native method. Holding a pointer to this object beyond the currently
+ * executing stack frame is not permitted.
+ */
+ class nsAXPCNativeCallContext
+ {
+ public:
+-    NS_IMETHOD GetCalleeWrapper(nsIXPConnectWrappedNative **aResult) = 0;
++    virtual nsIXPConnectWrappedNative *GetCalleeWrapper() = 0;
++    virtual JSObject *GetCalleeWrapperJS() = 0;
+     NS_IMETHOD GetJSContext(JSContext **aResult) = 0;
+     virtual void GetArguments(uint32_t *aArgc, JS::Value **aArgv);
+ 
+     NS_IMETHOD GetPreviousCallContext(nsAXPCNativeCallContext **aResult) = 0;
+ 
+     enum { LANG_UNKNOWN = 0,
+            LANG_JS      = 1,
+            LANG_NATIVE  = 2 };
+diff --git a/js/xpconnect/src/XPCCallContext.cpp b/js/xpconnect/src/XPCCallContext.cpp
+--- a/js/xpconnect/src/XPCCallContext.cpp
++++ b/js/xpconnect/src/XPCCallContext.cpp
+@@ -1,12 +1,11 @@
+-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+- * vim: set ts=8 sts=4 et sw=4 tw=99:
+- *
+- * This Source Code Form is subject to the terms of the Mozilla Public
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
++/* vim: set ts=8 sts=4 et sw=4 tw=99: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ /* Call context. */
+ 
+ #include "mozilla/Util.h"
+ #include "AccessCheck.h"
+ 
+@@ -274,24 +273,27 @@ XPCCallContext::~XPCCallContext()
+             NS_ASSERTION(poppedCX == mJSContext, "bad pop");
+         }
+     }
+ 
+     if (shouldReleaseXPC && mXPC)
+         NS_RELEASE(mXPC);
+ }
+ 
+-/* readonly attribute nsIXPConnectWrappedNative CalleeWrapper; */
+-NS_IMETHODIMP
+-XPCCallContext::GetCalleeWrapper(nsIXPConnectWrappedNative * *aCalleeWrapper)
++nsIXPConnectWrappedNative*
++XPCCallContext::GetCalleeWrapper()
+ {
+-    nsIXPConnectWrappedNative* temp = mWrapper;
+-    NS_IF_ADDREF(temp);
+-    *aCalleeWrapper = temp;
+-    return NS_OK;
++    return mWrapper;
++}
++
++
++JSObject*
++XPCCallContext::GetCalleeWrapperJS()
++{
++    return mWrapper->GetFlatJSObject();
+ }
+ 
+ /* readonly attribute JSContextPtr JSContext; */
+ NS_IMETHODIMP
+ XPCCallContext::GetJSContext(JSContext * *aJSContext)
+ {
+     JS_AbortIfWrongThread(JS_GetRuntime(mJSContext));
+     *aJSContext = mJSContext;
+diff --git a/js/xpconnect/src/XPCJSID.cpp b/js/xpconnect/src/XPCJSID.cpp
+--- a/js/xpconnect/src/XPCJSID.cpp
++++ b/js/xpconnect/src/XPCJSID.cpp
+@@ -1,9 +1,9 @@
+-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
++/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+ /* vim: set ts=8 sts=4 et sw=4 tw=99: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ /* An xpcom implementation of the JavaScript nsIID and nsCID objects. */
+ 
+ #include "xpcprivate.h"
+@@ -700,19 +700,17 @@ GetWrapperObject(MutableHandleObject obj
+ {
+     obj.set(NULL);
+     nsXPConnect* xpc = nsXPConnect::XPConnect();
+     nsAXPCNativeCallContext *ccxp = NULL;
+     xpc->GetCurrentNativeCallContext(&ccxp);
+     if (!ccxp)
+         return;
+ 
+-    nsCOMPtr<nsIXPConnectWrappedNative> wrapper;
+-    ccxp->GetCalleeWrapper(getter_AddRefs(wrapper));
+-    obj.set(wrapper->GetJSObject());
++    obj.set(ccxp->GetCalleeWrapperJS());
+ }
+ 
+ /* nsISupports createInstance (); */
+ NS_IMETHODIMP
+ nsJSCID::CreateInstance(const JS::Value& iidval, JSContext* cx,
+                         uint8_t optionalArgc, JS::Value* retval)
+ {
+     if (!mDetails.IsValid())
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -1032,17 +1032,18 @@ class AutoJSContextDestroyer
+   public:
+     AutoJSContextDestroyer(JSContext *aCx) : mCx(aCx) {}
+     ~AutoJSContextDestroyer() { JS_DestroyContext(mCx); }
+ };
+ 
+ class MOZ_STACK_CLASS XPCCallContext : public nsAXPCNativeCallContext
+ {
+ public:
+-    NS_IMETHOD GetCalleeWrapper(nsIXPConnectWrappedNative **aResult);
++    virtual nsIXPConnectWrappedNative *GetCalleeWrapper();
++    virtual JSObject *GetCalleeWrapperJS();
+     NS_IMETHOD GetJSContext(JSContext **aResult);
+     virtual void GetArguments(uint32_t *aArgc, JS::Value **aArgv);
+     NS_IMETHOD GetPreviousCallContext(nsAXPCNativeCallContext **aResult);
+     NS_IMETHOD GetLanguage(uint16_t *aResult);
+ 
+     enum {NO_ARGS = (unsigned) -1};
+ 
+     static JSContext* GetDefaultJSContext();

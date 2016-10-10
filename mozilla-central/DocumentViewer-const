@@ -1,0 +1,147 @@
+diff --git a/layout/base/nsDocumentViewer.cpp b/layout/base/nsDocumentViewer.cpp
+--- a/layout/base/nsDocumentViewer.cpp
++++ b/layout/base/nsDocumentViewer.cpp
+@@ -362,10 +362,11 @@
+    * case, if mParentWidget is null then this document should not even
+    * be displayed.
+    */
+-  nsIView* FindContainerView();
++  nsIView* FindContainerView() const;
+ 
+   /**
+    * Create our device context
++   * @post mDeviceContext is not null
+    */
+   nsresult CreateDeviceContext(nsIView* aContainerView);
+ 
+@@ -390,15 +391,15 @@
+    */
+   nsresult InitPresentationStuff(bool aDoInitialReflow);
+ 
+-  nsresult GetPopupNode(nsIDOMNode** aNode);
+-  nsresult GetPopupLinkNode(nsIDOMNode** aNode);
+-  nsresult GetPopupImageNode(nsIImageLoadingContent** aNode);
++  nsresult GetPopupNode(nsIDOMNode** aNode) const;
++  nsresult GetPopupLinkNode(nsIDOMNode** aNode) const;
++  nsresult GetPopupImageNode(nsIImageLoadingContent** aNode) const;
+ 
+   void PrepareToStartLoad();
+ 
+   nsresult SyncParentSubDocMap();
+ 
+-  nsresult GetDocumentSelection(nsISelection **aSelection);
++  nsresult GetDocumentSelection(nsISelection **aSelection) const;
+ 
+   /**
+    * Destroys the PresShell.
+@@ -427,7 +428,7 @@
+   // of Printing or PP has changed
+   void SetIsPrintingInDocShellTree(nsIDocShellTreeNode* aParentNode,
+                                    bool                 aIsPrintingOrPP,
+-                                   bool                 aStartAtTop);
++                                   bool                 aStartAtTop) const;
+ #endif // NS_PRINTING
+ 
+   /**
+@@ -437,9 +438,9 @@
+ 
+ protected:
+   // These return the current shell/prescontext etc.
+-  nsIPresShell* GetPresShell();
+-  nsPresContext* GetPresContext();
+-  nsIViewManager* GetViewManager();
++  nsIPresShell* GetPresShell() const;
++  nsPresContext* GetPresContext() const;
++  nsIViewManager* GetViewManager() const;
+ 
+   // IMPORTANT: The ownership implicit in the following member
+   // variables has been explicitly checked and set using nsCOMPtr
+@@ -1757,19 +1758,19 @@
+ }
+ 
+ nsIPresShell*
+-DocumentViewerImpl::GetPresShell()
++DocumentViewerImpl::GetPresShell() const
+ {
+   return mPresShell;
+ }
+ 
+ nsPresContext*
+-DocumentViewerImpl::GetPresContext()
++DocumentViewerImpl::GetPresContext() const
+ {
+   return mPresContext;
+ }
+ 
+ nsIViewManager*
+-DocumentViewerImpl::GetViewManager()
++DocumentViewerImpl::GetViewManager() const
+ {
+   return mViewManager;
+ }
+@@ -2277,7 +2278,7 @@
+ }
+ 
+ nsIView*
+-DocumentViewerImpl::FindContainerView()
++DocumentViewerImpl::FindContainerView() const
+ {
+   nsIView* containerView = nullptr;
+ 
+@@ -2400,7 +2401,8 @@
+ 
+ // Return the selection for the document. Note that text fields have their
+ // own selection, which cannot be accessed with this method.
+-nsresult DocumentViewerImpl::GetDocumentSelection(nsISelection **aSelection)
++nsresult
++DocumentViewerImpl::GetDocumentSelection(nsISelection **aSelection) const
+ {
+   NS_ENSURE_ARG_POINTER(aSelection);
+   if (!mPresShell) {
+@@ -3240,16 +3242,13 @@
+  */
+ 
+ nsresult
+-DocumentViewerImpl::GetPopupNode(nsIDOMNode** aNode)
++DocumentViewerImpl::GetPopupNode(nsIDOMNode** aNode) const
+ {
+   NS_ENSURE_ARG_POINTER(aNode);
+ 
+-  // get the document
+-  nsIDocument* document = GetDocument();
+-  NS_ENSURE_TRUE(document, NS_ERROR_FAILURE);
+-
+   // get the private dom window
+-  nsCOMPtr<nsPIDOMWindow> window(document->GetWindow());
++  NS_ENSURE_TRUE(mDocument, NS_ERROR_FAILURE);
++  nsCOMPtr<nsPIDOMWindow> window(mDocument->GetWindow());
+   NS_ENSURE_TRUE(window, NS_ERROR_NOT_AVAILABLE);
+   if (window) {
+     nsCOMPtr<nsPIWindowRoot> root = window->GetTopWindowRoot();
+@@ -3264,7 +3263,7 @@
+ 
+ // GetPopupLinkNode: return popup link node or fail
+ nsresult
+-DocumentViewerImpl::GetPopupLinkNode(nsIDOMNode** aNode)
++DocumentViewerImpl::GetPopupLinkNode(nsIDOMNode** aNode) const
+ {
+   NS_ENSURE_ARG_POINTER(aNode);
+ 
+@@ -3320,7 +3319,7 @@
+ 
+ // GetPopupLinkNode: return popup image node or fail
+ nsresult
+-DocumentViewerImpl::GetPopupImageNode(nsIImageLoadingContent** aNode)
++DocumentViewerImpl::GetPopupImageNode(nsIImageLoadingContent** aNode) const
+ {
+   NS_ENSURE_ARG_POINTER(aNode);
+ 
+@@ -3977,7 +3976,7 @@
+ void
+ DocumentViewerImpl::SetIsPrintingInDocShellTree(nsIDocShellTreeNode* aParentNode,
+                                                 bool                 aIsPrintingOrPP,
+-                                                bool                 aStartAtTop)
++                                                bool                 aStartAtTop) const
+ {
+   NS_ASSERTION(aParentNode, "Parent can't be NULL!");
+ 

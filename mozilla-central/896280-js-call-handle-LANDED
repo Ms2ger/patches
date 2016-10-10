@@ -1,0 +1,161 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 896280 - Pass MutableHandleValue to JS::Call(); r=terrence
+
+diff --git a/content/base/src/nsObjectLoadingContent.cpp b/content/base/src/nsObjectLoadingContent.cpp
+--- a/content/base/src/nsObjectLoadingContent.cpp
++++ b/content/base/src/nsObjectLoadingContent.cpp
+@@ -3088,18 +3088,18 @@ nsObjectLoadingContent::LegacyCall(JSCon
+   }
+ 
+   if (!pi_obj) {
+     aRv.Throw(NS_ERROR_NOT_AVAILABLE);
+     return JS::UndefinedValue();
+   }
+ 
+   JS::Rooted<JS::Value> retval(aCx);
+-  bool ok = ::JS::Call(aCx, thisVal, pi_obj, args.Length(),
+-                       args.Elements(), retval.address());
++  bool ok = JS::Call(aCx, thisVal, pi_obj, args.Length(), args.Elements(),
++                     &retval);
+   if (!ok) {
+     aRv.Throw(NS_ERROR_FAILURE);
+     return JS::UndefinedValue();
+   }
+ 
+   Telemetry::Accumulate(Telemetry::PLUGIN_CALLED_DIRECTLY, true);
+   return retval;
+ }
+diff --git a/js/src/jsapi.cpp b/js/src/jsapi.cpp
+--- a/js/src/jsapi.cpp
++++ b/js/src/jsapi.cpp
+@@ -5719,28 +5719,25 @@ JS_CallFunctionValue(JSContext *cx, JSOb
+     RootedValue rv(cx);
+     if (!Invoke(cx, ObjectOrNullValue(obj), fval, argc, argv, &rv))
+         return false;
+     *rval = rv;
+     return true;
+ }
+ 
+ JS_PUBLIC_API(bool)
+-JS::Call(JSContext *cx, jsval thisv, jsval fval, unsigned argc, jsval *argv, jsval *rval)
++JS::Call(JSContext *cx, jsval thisv, jsval fval, unsigned argc, jsval *argv,
++         MutableHandleValue rval)
+ {
+     AssertHeapIsIdle(cx);
+     CHECK_REQUEST(cx);
+     assertSameCompartment(cx, thisv, fval, JSValueArray(argv, argc));
+     AutoLastFrameCheck lfc(cx);
+ 
+-    RootedValue rv(cx);
+-    if (!Invoke(cx, thisv, fval, argc, argv, &rv))
+-        return false;
+-    *rval = rv;
+-    return true;
++    return Invoke(cx, thisv, fval, argc, argv, rval);
+ }
+ 
+ JS_PUBLIC_API(JSObject *)
+ JS_New(JSContext *cx, JSObject *ctorArg, unsigned argc, jsval *argv)
+ {
+     RootedObject ctor(cx, ctorArg);
+     AssertHeapIsIdle(cx);
+     CHECK_REQUEST(cx);
+diff --git a/js/src/jsapi.h b/js/src/jsapi.h
+--- a/js/src/jsapi.h
++++ b/js/src/jsapi.h
+@@ -4126,35 +4126,43 @@ JS_CallFunctionName(JSContext *cx, JSObj
+ 
+ extern JS_PUBLIC_API(JSBool)
+ JS_CallFunctionValue(JSContext *cx, JSObject *obj, jsval fval, unsigned argc,
+                      jsval *argv, jsval *rval);
+ 
+ namespace JS {
+ 
+ static inline bool
+-Call(JSContext *cx, JSObject *thisObj, JSFunction *fun, unsigned argc, jsval *argv, jsval *rval) {
+-    return !!JS_CallFunction(cx, thisObj, fun, argc, argv, rval);
++Call(JSContext *cx, JSObject *thisObj, JSFunction *fun, unsigned argc, jsval *argv,
++     MutableHandle<Value> rval)
++{
++    return !!JS_CallFunction(cx, thisObj, fun, argc, argv, rval.address());
+ }
+ 
+ static inline bool
+-Call(JSContext *cx, JSObject *thisObj, const char *name, unsigned argc, jsval *argv, jsval *rval) {
+-    return !!JS_CallFunctionName(cx, thisObj, name, argc, argv, rval);
++Call(JSContext *cx, JSObject *thisObj, const char *name, unsigned argc, jsval *argv,
++     MutableHandle<Value> rval)
++{
++    return !!JS_CallFunctionName(cx, thisObj, name, argc, argv, rval.address());
+ }
+ 
+ static inline bool
+-Call(JSContext *cx, JSObject *thisObj, jsval fun, unsigned argc, jsval *argv, jsval *rval) {
+-    return !!JS_CallFunctionValue(cx, thisObj, fun, argc, argv, rval);
++Call(JSContext *cx, JSObject *thisObj, jsval fun, unsigned argc, jsval *argv,
++     MutableHandle<Value> rval)
++{
++    return !!JS_CallFunctionValue(cx, thisObj, fun, argc, argv, rval.address());
+ }
+ 
+ extern JS_PUBLIC_API(bool)
+-Call(JSContext *cx, jsval thisv, jsval fun, unsigned argc, jsval *argv, jsval *rval);
++Call(JSContext *cx, jsval thisv, jsval fun, unsigned argc, jsval *argv, MutableHandle<Value> rval);
+ 
+ static inline bool
+-Call(JSContext *cx, jsval thisv, JSObject *funObj, unsigned argc, jsval *argv, jsval *rval) {
++Call(JSContext *cx, jsval thisv, JSObject *funObj, unsigned argc, jsval *argv,
++     MutableHandle<Value> rval)
++{
+     return Call(cx, thisv, OBJECT_TO_JSVAL(funObj), argc, argv, rval);
+ }
+ 
+ } /* namespace JS */
+ 
+ /*
+  * These functions allow setting an operation callback that will be called
+  * from the JS thread some time after any thread triggered the callback using
+diff --git a/js/xpconnect/src/XPCComponents.cpp b/js/xpconnect/src/XPCComponents.cpp
+--- a/js/xpconnect/src/XPCComponents.cpp
++++ b/js/xpconnect/src/XPCComponents.cpp
+@@ -3067,17 +3067,17 @@ xpc::SandboxCallableProxyHandler::call(J
+     // remap |this|.
+     JS::Value thisVal =
+       WrapperFactory::IsXrayWrapper(sandboxProxy) ? args.computeThis(cx) : args.thisv();
+     if (thisVal == ObjectValue(*sandboxGlobal)) {
+         thisVal = ObjectValue(*js::GetProxyTargetObject(sandboxProxy));
+     }
+ 
+     return JS::Call(cx, thisVal, js::GetProxyPrivate(proxy), args.length(), args.array(),
+-                    args.rval().address());
++                    args.rval());
+ }
+ 
+ xpc::SandboxCallableProxyHandler xpc::sandboxCallableProxyHandler;
+ 
+ // Wrap a callable such that if we're called with oldThisObj as the
+ // "this" we will instead call it with newThisObj as the this.
+ static JSObject*
+ WrapCallable(JSContext *cx, JSObject *callable, JSObject *sandboxProtoProxy)
+diff --git a/startupcache/test/TestStartupCache.cpp b/startupcache/test/TestStartupCache.cpp
+--- a/startupcache/test/TestStartupCache.cpp
++++ b/startupcache/test/TestStartupCache.cpp
+@@ -414,17 +414,17 @@ GetHistogramCounts(const char *testmsg, 
+ 
+   Rooted<Value> snapshot_val(cx);
+   JSFunction *snapshot_fn = NULL;
+   Rooted<Value> ss(cx);
+   return (JS_GetProperty(cx, JSVAL_TO_OBJECT(h), "snapshot",
+                          snapshot_val.address())
+           && (snapshot_fn = JS_ValueToFunction(cx, snapshot_val))
+           && JS::Call(cx, JSVAL_TO_OBJECT(h),
+-                      snapshot_fn, 0, NULL, ss.address())
++                      snapshot_fn, 0, NULL, &ss)
+           && JS_GetProperty(cx, JSVAL_TO_OBJECT(ss), "counts", counts.address()));
+ }
+ 
+ nsresult
+ CompareCountArrays(JSContext *cx, JSObject *aBefore, JSObject *aAfter)
+ {
+   uint32_t before_size, after_size;
+   JS::RootedObject before(cx, aBefore);

@@ -1,0 +1,745 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsDocument.cpp b/content/base/src/nsDocument.cpp
+--- a/content/base/src/nsDocument.cpp
++++ b/content/base/src/nsDocument.cpp
+@@ -4575,63 +4575,16 @@ nsDocument::CreateProcessingInstruction(
+   if (NS_FAILED(rv)) {
+     return rv;
+   }
+ 
+   return CallQueryInterface(content, aReturn);
+ }
+ 
+ NS_IMETHODIMP
+-nsDocument::CreateAttribute(const nsAString& aName,
+-                            nsIDOMAttr** aReturn)
+-{
+-  *aReturn = nullptr;
+-  NS_ENSURE_TRUE(mNodeInfoManager, NS_ERROR_NOT_INITIALIZED);
+-
+-  nsresult rv = nsContentUtils::CheckQName(aName, false);
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  nsAutoString value;
+-  nsDOMAttribute* attribute;
+-
+-  nsCOMPtr<nsINodeInfo> nodeInfo;
+-  rv = mNodeInfoManager->GetNodeInfo(aName, nullptr, kNameSpaceID_None,
+-                                     getter_AddRefs(nodeInfo));
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  attribute = new nsDOMAttribute(nullptr, nodeInfo.forget(), value);
+-  NS_ENSURE_TRUE(attribute, NS_ERROR_OUT_OF_MEMORY);
+-
+-  return CallQueryInterface(attribute, aReturn);
+-}
+-
+-NS_IMETHODIMP
+-nsDocument::CreateAttributeNS(const nsAString & aNamespaceURI,
+-                              const nsAString & aQualifiedName,
+-                              nsIDOMAttr **aResult)
+-{
+-  NS_ENSURE_ARG_POINTER(aResult);
+-  *aResult = nullptr;
+-
+-  nsCOMPtr<nsINodeInfo> nodeInfo;
+-  nsresult rv = nsContentUtils::GetNodeInfoFromQName(aNamespaceURI,
+-                                                     aQualifiedName,
+-                                                     mNodeInfoManager,
+-                                                     getter_AddRefs(nodeInfo));
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  nsAutoString value;
+-  nsDOMAttribute* attribute =
+-    new nsDOMAttribute(nullptr, nodeInfo.forget(), value);
+-  NS_ENSURE_TRUE(attribute, NS_ERROR_OUT_OF_MEMORY);
+-
+-  return CallQueryInterface(attribute, aResult);
+-}
+-
+-NS_IMETHODIMP
+ nsDocument::CreateEntityReference(const nsAString& aName,
+                                   nsIDOMEntityReference** aReturn)
+ {
+   NS_ENSURE_ARG_POINTER(aReturn);
+ 
+   *aReturn = nullptr;
+   return NS_OK;
+ }
+@@ -6085,36 +6038,17 @@ nsDocument::AdoptNode(nsIDOMNode *aAdopt
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   nsCOMPtr<nsINode> adoptedNode;
+   uint16_t nodeType;
+   aAdoptedNode->GetNodeType(&nodeType);
+   switch (nodeType) {
+     case nsIDOMNode::ATTRIBUTE_NODE:
+     {
+-      // Remove from ownerElement.
+-      nsCOMPtr<nsIDOMAttr> adoptedAttr = do_QueryInterface(aAdoptedNode, &rv);
+-      NS_ENSURE_SUCCESS(rv, rv);
+-
+-      nsCOMPtr<nsIDOMElement> ownerElement;
+-      rv = adoptedAttr->GetOwnerElement(getter_AddRefs(ownerElement));
+-      NS_ENSURE_SUCCESS(rv, rv);
+-
+-      if (ownerElement) {
+-        nsCOMPtr<nsIDOMAttr> newAttr;
+-        rv = ownerElement->RemoveAttributeNode(adoptedAttr,
+-                                               getter_AddRefs(newAttr));
+-        NS_ENSURE_SUCCESS(rv, rv);
+-
+-        newAttr.swap(adoptedAttr);
+-      }
+-
+-      adoptedNode = do_QueryInterface(adoptedAttr, &rv);
+-      NS_ENSURE_SUCCESS(rv, rv);
+-      break;
++      return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
+     }
+     case nsIDOMNode::DOCUMENT_FRAGMENT_NODE:
+     case nsIDOMNode::ELEMENT_NODE:
+     case nsIDOMNode::PROCESSING_INSTRUCTION_NODE:
+     case nsIDOMNode::TEXT_NODE:
+     case nsIDOMNode::CDATA_SECTION_NODE:
+     case nsIDOMNode::COMMENT_NODE:
+     {
+diff --git a/content/base/src/nsDocumentFragment.cpp b/content/base/src/nsDocumentFragment.cpp
+--- a/content/base/src/nsDocumentFragment.cpp
++++ b/content/base/src/nsDocumentFragment.cpp
+@@ -43,17 +43,16 @@
+ #include "nsIContent.h"
+ #include "nsIDOMDocumentFragment.h"
+ #include "nsGenericElement.h"
+ #include "nsINameSpaceManager.h"
+ #include "nsINodeInfo.h"
+ #include "nsNodeInfoManager.h"
+ #include "nsIDocument.h"
+ #include "nsIDOMDocument.h"
+-#include "nsIDOMAttr.h"
+ #include "nsDOMError.h"
+ #include "nsIDOM3Node.h"
+ #include "nsGkAtoms.h"
+ #include "nsDOMString.h"
+ #include "nsIDOMUserDataHandler.h"
+ 
+ class nsDocumentFragment : public nsGenericElement,
+                            public nsIDOMDocumentFragment
+diff --git a/content/base/src/nsGenericElement.cpp b/content/base/src/nsGenericElement.cpp
+--- a/content/base/src/nsGenericElement.cpp
++++ b/content/base/src/nsGenericElement.cpp
+@@ -2383,89 +2383,16 @@ nsGenericElement::RemoveAttribute(const 
+   // away during UnsetAttr. If it did UnsetAttr would be left with a
+   // dangling pointer as argument without knowing it.
+   nsAttrName tmp(*name);
+ 
+   return UnsetAttr(name->NamespaceID(), name->LocalName(), true);
+ }
+ 
+ nsresult
+-nsGenericElement::GetAttributeNode(const nsAString& aName,
+-                                   nsIDOMAttr** aReturn)
+-{
+-  NS_ENSURE_ARG_POINTER(aReturn);
+-  *aReturn = nullptr;
+-
+-  nsCOMPtr<nsIDOMNamedNodeMap> map;
+-  nsresult rv = GetAttributes(getter_AddRefs(map));
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  nsCOMPtr<nsIDOMNode> node;
+-  rv = map->GetNamedItem(aName, getter_AddRefs(node));
+-
+-  if (NS_SUCCEEDED(rv) && node) {
+-    rv = CallQueryInterface(node, aReturn);
+-  }
+-
+-  return rv;
+-}
+-
+-nsresult
+-nsGenericElement::SetAttributeNode(nsIDOMAttr* aAttribute,
+-                                   nsIDOMAttr** aReturn)
+-{
+-  NS_ENSURE_ARG_POINTER(aReturn);
+-  NS_ENSURE_ARG_POINTER(aAttribute);
+-
+-  *aReturn = nullptr;
+-
+-  nsCOMPtr<nsIDOMNamedNodeMap> map;
+-  nsresult rv = GetAttributes(getter_AddRefs(map));
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  nsCOMPtr<nsIDOMNode> returnNode;
+-  rv = map->SetNamedItem(aAttribute, getter_AddRefs(returnNode));
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  if (returnNode) {
+-    rv = CallQueryInterface(returnNode, aReturn);
+-  }
+-
+-  return rv;
+-}
+-
+-nsresult
+-nsGenericElement::RemoveAttributeNode(nsIDOMAttr* aAttribute,
+-                                      nsIDOMAttr** aReturn)
+-{
+-  NS_ENSURE_ARG_POINTER(aReturn);
+-  NS_ENSURE_ARG_POINTER(aAttribute);
+-
+-  *aReturn = nullptr;
+-
+-  nsCOMPtr<nsIDOMNamedNodeMap> map;
+-  nsresult rv = GetAttributes(getter_AddRefs(map));
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  nsAutoString name;
+-
+-  rv = aAttribute->GetName(name);
+-  if (NS_SUCCEEDED(rv)) {
+-    nsCOMPtr<nsIDOMNode> node;
+-    rv = map->RemoveNamedItem(name, getter_AddRefs(node));
+-
+-    if (NS_SUCCEEDED(rv) && node) {
+-      rv = CallQueryInterface(node, aReturn);
+-    }
+-  }
+-
+-  return rv;
+-}
+-
+-nsresult
+ nsGenericElement::GetElementsByTagName(const nsAString& aTagname,
+                                        nsIDOMNodeList** aReturn)
+ {
+   nsAutoString lowercaseName;
+   nsContentUtils::ASCIIToLower(aTagname, lowercaseName);
+   nsCOMPtr<nsIAtom> XMLAtom = do_GetAtom(aTagname);
+   nsCOMPtr<nsIAtom> HTMLAtom = do_GetAtom(lowercaseName);
+ 
+@@ -2531,63 +2458,16 @@ nsGenericElement::RemoveAttributeNS(cons
+ 
+   nsAutoString tmp;
+   UnsetAttr(nsid, name, true);
+ 
+   return NS_OK;
+ }
+ 
+ nsresult
+-nsGenericElement::GetAttributeNodeNS(const nsAString& aNamespaceURI,
+-                                     const nsAString& aLocalName,
+-                                     nsIDOMAttr** aReturn)
+-{
+-  NS_ENSURE_ARG_POINTER(aReturn);
+-
+-  *aReturn = nullptr;
+-
+-  nsCOMPtr<nsIDOMNamedNodeMap> map;
+-  nsresult rv = GetAttributes(getter_AddRefs(map));
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  nsCOMPtr<nsIDOMNode> node;
+-  rv = map->GetNamedItemNS(aNamespaceURI, aLocalName, getter_AddRefs(node));
+-
+-  if (NS_SUCCEEDED(rv) && node) {
+-    rv = CallQueryInterface(node, aReturn);
+-  }
+-
+-  return rv;
+-}
+-
+-nsresult
+-nsGenericElement::SetAttributeNodeNS(nsIDOMAttr* aNewAttr,
+-                                     nsIDOMAttr** aReturn)
+-{
+-  NS_ENSURE_ARG_POINTER(aReturn);
+-  NS_ENSURE_ARG_POINTER(aNewAttr);
+-
+-  *aReturn = nullptr;
+-
+-  nsCOMPtr<nsIDOMNamedNodeMap> map;
+-  nsresult rv = GetAttributes(getter_AddRefs(map));
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  nsCOMPtr<nsIDOMNode> returnNode;
+-  rv = map->SetNamedItemNS(aNewAttr, getter_AddRefs(returnNode));
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  if (returnNode) {
+-    rv = CallQueryInterface(returnNode, aReturn);
+-  }
+-
+-  return rv;
+-}
+-
+-nsresult
+ nsGenericElement::GetElementsByTagNameNS(const nsAString& aNamespaceURI,
+                                          const nsAString& aLocalName,
+                                          nsIDOMNodeList** aReturn)
+ {
+   int32_t nameSpaceId = kNameSpaceID_Wildcard;
+ 
+   if (!aNamespaceURI.EqualsLiteral("*")) {
+     nsresult rv =
+@@ -4698,23 +4578,17 @@ nsGenericElement::SetAttrAndNotify(PRInt
+     rv = AfterSetAttr(aNamespaceID, aName, aValueForAfterSetAttr, aNotify);
+     NS_ENSURE_SUCCESS(rv, rv);
+   }
+ 
+   if (aFireMutation) {
+     mozAutoRemovableBlockerRemover blockerRemover(GetOwnerDoc());
+     
+     nsMutationEvent mutation(true, NS_MUTATION_ATTRMODIFIED);
+-
+-    nsCOMPtr<nsIDOMAttr> attrNode;
+-    nsAutoString ns;
+-    nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNamespaceID, ns);
+-    GetAttributeNodeNS(ns, nsDependentAtomString(aName),
+-                       getter_AddRefs(attrNode));
+-    mutation.mRelatedNode = attrNode;
++    mutation.mRelatedNode = NULL;
+ 
+     mutation.mAttrName = aName;
+     nsAutoString newValue;
+     GetAttr(aNamespaceID, aName, newValue);
+     if (!newValue.IsEmpty()) {
+       mutation.mNewAttrValue = do_GetAtom(newValue);
+     }
+     if (!aOldValue.IsEmpty()) {
+@@ -4884,30 +4758,16 @@ nsGenericElement::UnsetAttr(int32_t aNam
+ 
+   // When notifying, make sure to keep track of states whose value
+   // depends solely on the value of an attribute.
+   uint32_t stateMask = 0;
+   if (aNotify) {
+     stateMask = uint32_t(IntrinsicState());
+   }    
+ 
+-  bool hasMutationListeners = aNotify &&
+-    nsContentUtils::HasMutationListeners(this,
+-                                         NS_EVENT_BITS_MUTATION_ATTRMODIFIED,
+-                                         this);
+-
+-  // Grab the attr node if needed before we remove it from the attr map
+-  nsCOMPtr<nsIDOMAttr> attrNode;
+-  if (hasMutationListeners) {
+-    nsAutoString ns;
+-    nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNameSpaceID, ns);
+-    GetAttributeNodeNS(ns, nsDependentAtomString(aName),
+-                       getter_AddRefs(attrNode));
+-  }
+-
+   // Clear binding to nsIDOMNamedNodeMap
+   nsDOMSlots *slots = GetExistingDOMSlots();
+   if (slots && slots->mAttributeMap) {
+     slots->mAttributeMap->DropAttribute(aNameSpaceID, aName);
+   }
+ 
+   // The id-handling code, and in the future possibly other code, need to
+   // react to unexpected attribute changes.
+@@ -4936,24 +4796,27 @@ nsGenericElement::UnsetAttr(int32_t aNam
+     }
+     nsNodeUtils::AttributeChanged(this, aNameSpaceID, aName,
+                                   nsIDOMMutationEvent::REMOVAL);
+   }
+ 
+   rv = AfterSetAttr(aNameSpaceID, aName, nullptr, aNotify);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+-  if (hasMutationListeners) {
++  if (aNotify &&
++      nsContentUtils::HasMutationListeners(this,
++                                           NS_EVENT_BITS_MUTATION_ATTRMODIFIED,
++                                           this)) {
+     mozAutoRemovableBlockerRemover blockerRemover(GetOwnerDoc());
+ 
+     nsCOMPtr<nsIDOMEventTarget> node =
+       do_QueryInterface(static_cast<nsIContent *>(this));
+     nsMutationEvent mutation(true, NS_MUTATION_ATTRMODIFIED);
+ 
+-    mutation.mRelatedNode = attrNode;
++    mutation.mRelatedNode = NULL;
+     mutation.mAttrName = aName;
+ 
+     nsAutoString value;
+     oldValue.ToString(value);
+     if (!value.IsEmpty())
+       mutation.mPrevAttrValue = do_GetAtom(value);
+     mutation.mAttrChange = nsIDOMMutationEvent::REMOVAL;
+ 
+diff --git a/content/base/src/nsGenericElement.h b/content/base/src/nsGenericElement.h
+--- a/content/base/src/nsGenericElement.h
++++ b/content/base/src/nsGenericElement.h
+@@ -66,17 +66,16 @@
+ #include "nsIDOMNodeSelector.h"
+ #include "nsIDOMXPathNSResolver.h"
+ #include "nsPresContext.h"
+ 
+ #ifdef MOZ_SMIL
+ #include "nsISMILAttr.h"
+ #endif // MOZ_SMIL
+ 
+-class nsIDOMAttr;
+ class nsIDOMEventListener;
+ class nsIFrame;
+ class nsIDOMNamedNodeMap;
+ class nsICSSDeclaration;
+ class nsIDOMCSSStyleDeclaration;
+ class nsIURI;
+ class nsINodeInfo;
+ class nsIControllers;
+@@ -511,34 +510,26 @@ public:
+ 
+   // nsIDOMElement method implementation
+   NS_IMETHOD GetTagName(nsAString& aTagName);
+   NS_IMETHOD GetAttribute(const nsAString& aName,
+                           nsAString& aReturn);
+   NS_IMETHOD SetAttribute(const nsAString& aName,
+                           const nsAString& aValue);
+   NS_IMETHOD RemoveAttribute(const nsAString& aName);
+-  NS_IMETHOD GetAttributeNode(const nsAString& aName,
+-                              nsIDOMAttr** aReturn);
+-  NS_IMETHOD SetAttributeNode(nsIDOMAttr* aNewAttr, nsIDOMAttr** aReturn);
+-  NS_IMETHOD RemoveAttributeNode(nsIDOMAttr* aOldAttr, nsIDOMAttr** aReturn);
+   NS_IMETHOD GetElementsByTagName(const nsAString& aTagname,
+                                   nsIDOMNodeList** aReturn);
+   NS_IMETHOD GetAttributeNS(const nsAString& aNamespaceURI,
+                             const nsAString& aLocalName,
+                             nsAString& aReturn);
+   NS_IMETHOD SetAttributeNS(const nsAString& aNamespaceURI,
+                             const nsAString& aQualifiedName,
+                             const nsAString& aValue);
+   NS_IMETHOD RemoveAttributeNS(const nsAString& aNamespaceURI,
+                                const nsAString& aLocalName);
+-  NS_IMETHOD GetAttributeNodeNS(const nsAString& aNamespaceURI,
+-                                const nsAString& aLocalName,
+-                                nsIDOMAttr** aReturn);
+-  NS_IMETHOD SetAttributeNodeNS(nsIDOMAttr* aNewAttr, nsIDOMAttr** aReturn);
+   NS_IMETHOD GetElementsByTagNameNS(const nsAString& aNamespaceURI,
+                                     const nsAString& aLocalName,
+                                     nsIDOMNodeList** aReturn);
+   NS_IMETHOD HasAttribute(const nsAString& aName, bool* aReturn);
+   NS_IMETHOD HasAttributeNS(const nsAString& aNamespaceURI,
+                             const nsAString& aLocalName,
+                             bool* aReturn);
+   nsresult CloneNode(bool aDeep, nsIDOMNode **aResult)
+diff --git a/content/html/document/src/nsHTMLDocument.cpp b/content/html/document/src/nsHTMLDocument.cpp
+--- a/content/html/document/src/nsHTMLDocument.cpp
++++ b/content/html/document/src/nsHTMLDocument.cpp
+@@ -1280,22 +1280,16 @@ nsHTMLDocument::CreateDocumentFragment(n
+ 
+ NS_IMETHODIMP
+ nsHTMLDocument::CreateComment(const nsAString& aData, nsIDOMComment** aReturn)
+ {
+   return nsDocument::CreateComment(aData, aReturn);
+ }
+ 
+ NS_IMETHODIMP
+-nsHTMLDocument::CreateAttribute(const nsAString& aName, nsIDOMAttr** aReturn)
+-{
+-  return nsDocument::CreateAttribute(aName, aReturn);
+-}
+-
+-NS_IMETHODIMP
+ nsHTMLDocument::CreateTextNode(const nsAString& aData, nsIDOMText** aReturn)
+ {
+   return nsDocument::CreateTextNode(aData, aReturn);
+ }
+ 
+ NS_IMETHODIMP
+ nsHTMLDocument::GetElementsByTagName(const nsAString& aTagname,
+                                      nsIDOMNodeList** aReturn)
+@@ -2175,24 +2169,16 @@ NS_IMETHODIMP
+ nsHTMLDocument::ImportNode(nsIDOMNode* aImportedNode,
+                            bool aDeep,
+                            nsIDOMNode** aReturn)
+ {
+   return nsDocument::ImportNode(aImportedNode, aDeep, aReturn);
+ }
+ 
+ NS_IMETHODIMP
+-nsHTMLDocument::CreateAttributeNS(const nsAString& aNamespaceURI,
+-                                  const nsAString& aQualifiedName,
+-                                  nsIDOMAttr** aReturn)
+-{
+-  return nsDocument::CreateAttributeNS(aNamespaceURI, aQualifiedName, aReturn);
+-}
+-
+-NS_IMETHODIMP
+ nsHTMLDocument::GetElementsByTagNameNS(const nsAString& aNamespaceURI,
+                                        const nsAString& aLocalName,
+                                        nsIDOMNodeList** aReturn)
+ {
+   return nsDocument::GetElementsByTagNameNS(aNamespaceURI, aLocalName, aReturn);
+ }
+ 
+ NS_IMETHODIMP
+diff --git a/content/xslt/src/xpath/txMozillaXPathTreeWalker.cpp b/content/xslt/src/xpath/txMozillaXPathTreeWalker.cpp
+--- a/content/xslt/src/xpath/txMozillaXPathTreeWalker.cpp
++++ b/content/xslt/src/xpath/txMozillaXPathTreeWalker.cpp
+@@ -810,32 +810,20 @@ txXPathNativeNode::createXPathNode(nsIDO
+     nsCOMPtr<nsIDocument> document = do_QueryInterface(aDocument);
+     return new txXPathNode(document);
+ }
+ 
+ /* static */
+ nsresult
+ txXPathNativeNode::getNode(const txXPathNode& aNode, nsIDOMNode** aResult)
+ {
+-    if (!aNode.isAttribute()) {
+-        return CallQueryInterface(aNode.mNode, aResult);
++    if (aNode.isAttribute()) {
++        return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
+     }
+-
+-    const nsAttrName* name = aNode.Content()->GetAttrNameAt(aNode.mIndex);
+-
+-    nsAutoString namespaceURI;
+-    nsContentUtils::NameSpaceManager()->GetNameSpaceURI(name->NamespaceID(), namespaceURI);
+-
+-    nsCOMPtr<nsIDOMElement> element = do_QueryInterface(aNode.mNode);
+-    nsCOMPtr<nsIDOMAttr> attr;
+-    element->GetAttributeNodeNS(namespaceURI,
+-                                nsDependentAtomString(name->LocalName()),
+-                                getter_AddRefs(attr));
+-
+-    return CallQueryInterface(attr, aResult);
++    return CallQueryInterface(aNode.mNode, aResult);
+ }
+ 
+ /* static */
+ nsIContent*
+ txXPathNativeNode::getContent(const txXPathNode& aNode)
+ {
+     NS_ASSERTION(aNode.isContent(),
+                  "Only call getContent on nsIContent wrappers!");
+diff --git a/content/xul/content/src/nsXULElement.cpp b/content/xul/content/src/nsXULElement.cpp
+--- a/content/xul/content/src/nsXULElement.cpp
++++ b/content/xul/content/src/nsXULElement.cpp
+@@ -1,11 +1,10 @@
+-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+- *
+- * ***** BEGIN LICENSE BLOCK *****
++/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
++/* ***** BEGIN LICENSE BLOCK *****
+  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+  *
+  * The contents of this file are subject to the Mozilla Public License Version
+  * 1.1 (the "License"); you may not use this file except in compliance with
+  * the License. You may obtain a copy of the License at
+  * http://www.mozilla.org/MPL/
+  *
+  * Software distributed under the License is distributed on an "AS IS" basis,
+@@ -59,17 +58,16 @@
+ #include "nsDOMCID.h"
+ #include "nsDOMError.h"
+ #include "nsDOMString.h"
+ #include "nsIDOMEvent.h"
+ #include "nsIPrivateDOMEvent.h"
+ #include "nsHashtable.h"
+ #include "nsIAtom.h"
+ #include "nsIBaseWindow.h"
+-#include "nsIDOMAttr.h"
+ #include "nsIDOMDocument.h"
+ #include "nsIDOMElement.h"
+ #include "nsIDOMMouseListener.h"
+ #include "nsIDOMMouseMotionListener.h"
+ #include "nsIDOMLoadListener.h"
+ #include "nsIDOMFocusListener.h"
+ #include "nsIDOMKeyListener.h"
+ #include "nsIDOMFormListener.h"
+@@ -1358,27 +1356,16 @@ nsXULElement::UnsetAttr(int32_t aNameSpa
+     uint32_t stateMask = 0;
+     if (aNotify) {
+         stateMask = uint32_t(IntrinsicState());
+  
+         nsNodeUtils::AttributeWillChange(this, aNameSpaceID, aName,
+                                          nsIDOMMutationEvent::REMOVAL);
+     }
+ 
+-    bool hasMutationListeners = aNotify &&
+-        nsContentUtils::HasMutationListeners(this,
+-            NS_EVENT_BITS_MUTATION_ATTRMODIFIED, this);
+-
+-    nsCOMPtr<nsIDOMAttr> attrNode;
+-    if (hasMutationListeners) {
+-        nsAutoString ns;
+-        nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNameSpaceID, ns);
+-        GetAttributeNodeNS(ns, nsDependentAtomString(aName), getter_AddRefs(attrNode));
+-    }
+-
+     nsDOMSlots *slots = GetExistingDOMSlots();
+     if (slots && slots->mAttributeMap) {
+       slots->mAttributeMap->DropAttribute(aNameSpaceID, aName);
+     }
+ 
+     // The id-handling code, and in the future possibly other code, need to
+     // react to unexpected attribute changes.
+     nsMutationGuard::DidMutate();
+@@ -1463,22 +1450,24 @@ nsXULElement::UnsetAttr(int32_t aNameSpa
+         if (stateMask && doc) {
+             MOZ_AUTO_DOC_UPDATE(doc, UPDATE_CONTENT_STATE, aNotify);
+             doc->ContentStatesChanged(this, nullptr, stateMask);
+         }
+         nsNodeUtils::AttributeChanged(this, aNameSpaceID, aName,
+                                       nsIDOMMutationEvent::REMOVAL);
+     }
+ 
+-    if (hasMutationListeners) {
++    if (aNotify &&
++        nsContentUtils::HasMutationListeners(this,
++            NS_EVENT_BITS_MUTATION_ATTRMODIFIED, this)) {
+         mozAutoRemovableBlockerRemover blockerRemover(GetOwnerDoc());
+ 
+         nsMutationEvent mutation(true, NS_MUTATION_ATTRMODIFIED);
+ 
+-        mutation.mRelatedNode = attrNode;
++        mutation.mRelatedNode = NULL;
+         mutation.mAttrName = aName;
+ 
+         if (!oldValue.IsEmpty())
+           mutation.mPrevAttrValue = do_GetAtom(oldValue);
+         mutation.mAttrChange = nsIDOMMutationEvent::REMOVAL;
+ 
+         mozAutoSubtreeModified subtree(GetOwnerDoc(), this);
+         nsEventDispatcher::Dispatch(static_cast<nsIContent*>(this),
+diff --git a/dom/interfaces/core/nsIDOMDocument.idl b/dom/interfaces/core/nsIDOMDocument.idl
+--- a/dom/interfaces/core/nsIDOMDocument.idl
++++ b/dom/interfaces/core/nsIDOMDocument.idl
+@@ -47,48 +47,42 @@
+  * cannot exist outside the context of a Document, the nsIDOMDocument 
+  * interface also contains the factory methods needed to create these 
+  * objects.
+  *
+  * For more information on this interface please see 
+  * http://www.w3.org/TR/DOM-Level-2-Core/
+  */
+ 
+-[scriptable, uuid(a6cf9075-15b3-11d2-932e-00805f8add32)]
++[scriptable, uuid(d9f9d9eb-a8a0-4e1a-8339-af4810f2819a)]
+ interface nsIDOMDocument : nsIDOMNode
+ {
+   readonly attribute nsIDOMDocumentType         doctype;
+   readonly attribute nsIDOMDOMImplementation    implementation;
+   readonly attribute nsIDOMElement              documentElement;
+   nsIDOMElement                 createElement(in DOMString tagName)
+                                   raises(DOMException);
+   nsIDOMDocumentFragment        createDocumentFragment();
+   nsIDOMText                    createTextNode(in DOMString data);
+   nsIDOMComment                 createComment(in DOMString data);
+   nsIDOMCDATASection            createCDATASection(in DOMString data)
+                                   raises(DOMException);
+   nsIDOMProcessingInstruction   createProcessingInstruction(in DOMString target, 
+                                                             in DOMString data)
+                                   raises(DOMException);
+-  nsIDOMAttr                    createAttribute(in DOMString name)
+-                                  raises(DOMException);
+   nsIDOMEntityReference         createEntityReference(in DOMString name)
+                                   raises(DOMException);
+   nsIDOMNodeList                getElementsByTagName(in DOMString tagname);
+ 
+   // Introduced in DOM Level 2:
+   nsIDOMNode                    importNode(in nsIDOMNode importedNode,
+                                            in boolean deep)
+                                   raises(DOMException);
+   // Introduced in DOM Level 2:
+   nsIDOMElement                 createElementNS(in DOMString namespaceURI,
+                                                 in DOMString qualifiedName)
+                                   raises(DOMException);
+   // Introduced in DOM Level 2:
+-  nsIDOMAttr                    createAttributeNS(in DOMString namespaceURI,
+-                                                  in DOMString qualifiedName)
+-                                  raises(DOMException);
+-  // Introduced in DOM Level 2:
+   nsIDOMNodeList                getElementsByTagNameNS(in DOMString namespaceURI,
+                                                        in DOMString localName);
+   // Introduced in DOM Level 2:
+   nsIDOMElement                 getElementById(in DOMString elementId);
+ };
+diff --git a/dom/interfaces/core/nsIDOMElement.idl b/dom/interfaces/core/nsIDOMElement.idl
+--- a/dom/interfaces/core/nsIDOMElement.idl
++++ b/dom/interfaces/core/nsIDOMElement.idl
+@@ -52,41 +52,30 @@ interface nsIDOMElement : nsIDOMNode
+ {
+   readonly attribute DOMString        tagName;
+   DOMString          getAttribute(in DOMString name);
+   void               setAttribute(in DOMString name, 
+                                   in DOMString value)
+                                         raises(DOMException);
+   void               removeAttribute(in DOMString name)
+                                         raises(DOMException);
+-  nsIDOMAttr         getAttributeNode(in DOMString name);
+-  nsIDOMAttr         setAttributeNode(in nsIDOMAttr newAttr)
+-                                        raises(DOMException);
+-  nsIDOMAttr         removeAttributeNode(in nsIDOMAttr oldAttr)
+-                                        raises(DOMException);
+   nsIDOMNodeList     getElementsByTagName(in DOMString name);
+   // Introduced in DOM Level 2:
+   DOMString          getAttributeNS(in DOMString namespaceURI, 
+                                     in DOMString localName);
+   // Introduced in DOM Level 2:
+   void               setAttributeNS(in DOMString namespaceURI, 
+                                     in DOMString qualifiedName, 
+                                     in DOMString value)
+                                         raises(DOMException);
+   // Introduced in DOM Level 2:
+   void               removeAttributeNS(in DOMString namespaceURI, 
+                                        in DOMString localName)
+                                         raises(DOMException);
+   // Introduced in DOM Level 2:
+-  nsIDOMAttr         getAttributeNodeNS(in DOMString namespaceURI, 
+-                                        in DOMString localName);
+-  // Introduced in DOM Level 2:
+-  nsIDOMAttr         setAttributeNodeNS(in nsIDOMAttr newAttr)
+-                                        raises(DOMException);
+-  // Introduced in DOM Level 2:
+   nsIDOMNodeList     getElementsByTagNameNS(in DOMString namespaceURI, 
+                                             in DOMString localName);
+   // Introduced in DOM Level 2:
+   boolean            hasAttribute(in DOMString name);
+   // Introduced in DOM Level 2:
+   boolean            hasAttributeNS(in DOMString namespaceURI, 
+                                     in DOMString localName);
+ };
+diff --git a/layout/inspector/src/inDOMView.cpp b/layout/inspector/src/inDOMView.cpp
+--- a/layout/inspector/src/inDOMView.cpp
++++ b/layout/inspector/src/inDOMView.cpp
+@@ -697,32 +697,34 @@ inDOMView::AttributeChanged(nsIDocument*
+   }
+ 
+   nsCOMPtr<nsIMutationObserver> kungFuDeathGrip(this);
+   
+   // get the dom attribute node, if there is any
+   nsCOMPtr<nsIDOMNode> content(do_QueryInterface(aElement));
+   nsCOMPtr<nsIDOMElement> el(do_QueryInterface(aElement));
+   nsCOMPtr<nsIDOMAttr> domAttr;
++  nsCOMPtr<nsIDOMNamedNodeMap> attributes;
++  el->GetAttributes(getter_AddRefs(attributes));
+   nsDependentAtomString attrStr(aAttribute);
+   if (aNameSpaceID) {
+     nsCOMPtr<nsINameSpaceManager> nsm =
+       do_GetService(NS_NAMESPACEMANAGER_CONTRACTID);
+     if (!nsm) {
+       // we can't find out which attribute we want :(
+       return;
+     }
+     nsString attrNS;
+     nsresult rv = nsm->GetNameSpaceURI(aNameSpaceID, attrNS);
+     if (NS_FAILED(rv)) {
+       return;
+     }
+-    (void)el->GetAttributeNodeNS(attrNS, attrStr, getter_AddRefs(domAttr));
++    (void)attributes->GetNamedItemNS(attrNS, attrStr, getter_AddRefs(domAttr));
+   } else {
+-    (void)el->GetAttributeNode(attrStr, getter_AddRefs(domAttr));
++    (void)attributes->GetNamedItem(attrStr, getter_AddRefs(domAttr));
+   }
+ 
+   if (aModType == nsIDOMMutationEvent::MODIFICATION) {
+     // No fancy stuff here, just invalidate the changed row
+     if (!domAttr) {
+       return;
+     }
+     int32_t row = 0;

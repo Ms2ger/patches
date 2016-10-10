@@ -1,0 +1,60 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -4293,36 +4293,39 @@ nsHTMLEditor::GetLastEditableLeaf(nsIDOM
+ {
+   // check parms
+   NS_ENSURE_TRUE(aOutLastLeaf && aNode, NS_ERROR_NULL_POINTER);
+   
+   // init out parms
+   *aOutLastLeaf = nullptr;
+   
+   // find rightmost leaf
+-  nsCOMPtr<nsIDOMNode> child = GetRightmostChild(aNode, false);
+-  nsresult res = NS_OK;
+-  while (child && (!IsEditable(child) || !nsEditorUtils::IsLeafNode(child)))
+-  {
+-    nsCOMPtr<nsIDOMNode> tmp;
+-    res = GetPriorHTMLNode(child, address_of(tmp));
+-    NS_ENSURE_SUCCESS(res, res);
++  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
++  if (!node) {
++    *aOutLastLeaf = nullptr;
++    return NS_OK;
++  }
++
++  nsIContent* child = GetRightmostChild(node);
++
++  while (child && (!IsEditable(child) || !child->HasChildNodes())) {
++    nsIContent* tmp = GetPriorHTMLNode(child);
+     NS_ENSURE_TRUE(tmp, NS_ERROR_FAILURE);
+-    
++
+     // only accept nodes that are descendants of aNode
+-    if (nsEditorUtils::IsDescendantOf(tmp, aNode))
+-      child = tmp;
+-    else
+-    {
+-      child = nullptr;
++    if (!nsContentUtils::ContentIsDescendantOf(tmp, node)) {
++      *aOutLastLeaf = nullptr;
++      return NS_OK;
+     }
++
++    child = tmp;
+   }
+   
+-  *aOutLastLeaf = child;
+-  return res;
++  *aOutLastLeaf = do_QueryInterface(child);
++  return NS_OK;
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // IsVisTextNode: figure out if textnode aTextNode has any visible content.
+ //                  
+ nsresult
+ nsHTMLEditor::IsVisTextNode(nsIContent* aNode,

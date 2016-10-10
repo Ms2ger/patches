@@ -1,0 +1,164 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/canvas/src/nsCanvasRenderingContext2D.cpp b/content/canvas/src/nsCanvasRenderingContext2D.cpp
+--- a/content/canvas/src/nsCanvasRenderingContext2D.cpp
++++ b/content/canvas/src/nsCanvasRenderingContext2D.cpp
+@@ -2030,18 +2030,23 @@ nsCanvasRenderingContext2D::ShadowFinali
+ }
+ 
+ nsresult
+ nsCanvasRenderingContext2D::DrawPath(Style style, gfxRect *dirtyRect)
+ {
+     if (!EnsureSurface())
+         return NS_ERROR_FAILURE;
+ 
++    nsCanvasGradient* gradient = CurrentState().gradientStyles[style];
++    if (gradient && gradient->GetPattern()->ZeroLengthLinearGradient()) {
++        return NS_OK;
++    }
++
+     bool doUseIntermediateSurface = false;
+-    
++
+     if (mSurface->GetType() == gfxASurface::SurfaceTypeD2D) {
+       if (style != STYLE_FILL) {
+         // D2D does all operators correctly even if transparent areas of SOURCE
+         // affect dest. We need to use an intermediate surface for STROKE because
+         // we can't clip to the actual stroke shape easily, but prefer a geometric
+         // clip over an intermediate surface for a FILL.
+         doUseIntermediateSurface = NeedIntermediateSurfaceToHandleGlobalAlpha(style);
+       }
+@@ -2892,16 +2897,25 @@ nsCanvasRenderingContext2D::DrawOrMeasur
+         NS_WARNING("Canvas element must be non-null or a docshell must be provided");
+         return NS_ERROR_FAILURE;
+     }
+ 
+     nsCOMPtr<nsIPresShell> presShell = GetPresShell();
+     if (!presShell)
+         return NS_ERROR_FAILURE;
+ 
++    Style style = aOp == TEXT_DRAW_OPERATION_FILL ? STYLE_FILL : STYLE_STROKE;
++
++    if (aOp != TEXT_DRAW_OPERATION_MEASURE) {
++        nsCanvasGradient* gradient = CurrentState().gradientStyles[style];
++        if (gradient && gradient->GetPattern()->ZeroLengthLinearGradient()) {
++            return NS_OK;
++        }
++    }
++
+     nsIDocument* document = presShell->GetDocument();
+ 
+     // replace all the whitespace characters with U+0020 SPACE
+     nsAutoString textToDraw(aRawText);
+     TextReplaceWhitespaceCharacters(textToDraw);
+ 
+     // for now, default to ltr if not in doc
+     bool isRTL = false;
+@@ -2915,18 +2929,16 @@ nsCanvasRenderingContext2D::DrawOrMeasur
+         if (!canvasStyle)
+             return NS_ERROR_FAILURE;
+         isRTL = canvasStyle->GetStyleVisibility()->mDirection ==
+             NS_STYLE_DIRECTION_RTL;
+     } else {
+       isRTL = GET_BIDI_OPTION_DIRECTION(document->GetBidiOptions()) == IBMBIDI_TEXTDIRECTION_RTL;
+     }
+ 
+-    Style style = aOp == TEXT_DRAW_OPERATION_FILL ? STYLE_FILL : STYLE_STROKE;
+-
+     bool doDrawShadow = NeedToDrawShadow();
+     bool doUseIntermediateSurface = NeedToUseIntermediateSurface()
+         || NeedIntermediateSurfaceToHandleGlobalAlpha(style);
+ 
+     // Clear the surface if we need to simulate unbounded SOURCE operator
+     ClearSurfaceForUnboundedSource();
+ 
+     nsCanvasBidiProcessor processor;
+diff --git a/content/canvas/test/test_canvas.html b/content/canvas/test/test_canvas.html
+--- a/content/canvas/test/test_canvas.html
++++ b/content/canvas/test/test_canvas.html
+@@ -5972,17 +5972,17 @@ ctx.fillStyle = '#0f0';
+ ctx.fillRect(0, 0, 100, 50);
+ 
+ var g = ctx.createLinearGradient(50, 25, 50, 25); // zero-length line (undefined direction)
+ g.addColorStop(0, '#f00');
+ g.addColorStop(1, '#f00');
+ ctx.fillStyle = g;
+ ctx.fillRect(0, 0, 100, 50);
+ 
+-todo_isPixel(ctx, 40,20, 0,255,0,255, 2);
++isPixel(ctx, 40,20, 0,255,0,255, 2);
+ 
+ }
+ </script>
+ 
+ <!-- [[[ test_2d.gradient.linear.nonfinite.html ]]] -->
+ 
+ <p>Canvas test: 2d.gradient.linear.nonfinite</p>
+ <!-- Testing: createLinearGradient() throws NOT_SUPPORTED_ERR if arguments are not finite -->
+diff --git a/gfx/thebes/gfxPattern.cpp b/gfx/thebes/gfxPattern.cpp
+--- a/gfx/thebes/gfxPattern.cpp
++++ b/gfx/thebes/gfxPattern.cpp
+@@ -1,10 +1,10 @@
+-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+- * This Source Code Form is subject to the terms of the Mozilla Public
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "gfxTypes.h"
+ #include "gfxPattern.h"
+ #include "gfxASurface.h"
+ #include "gfxPlatform.h"
+ 
+@@ -402,16 +402,24 @@ gfxPattern::CairoStatus()
+   if (mPattern) {
+     return cairo_pattern_status(mPattern);
+   } else {
+     // An Azure pattern as this point is never in error status.
+     return CAIRO_STATUS_SUCCESS;
+   }
+ }
+ 
++bool
++gfxPattern::ZeroLengthLinearGradient()
++{
++  double x0, y0, x1, y1;
++  return !cairo_pattern_get_linear_points(mPattern, &x0, &y0, &x1, &y1) &&
++         x0 == x1 && y0 == y1;
++}
++
+ void
+ gfxPattern::AdjustTransformForPattern(Matrix &aPatternTransform,
+                                       const Matrix &aCurrentTransform,
+                                       const Matrix *aOriginalTransform)
+ {
+   aPatternTransform.Invert();
+   if (!aOriginalTransform) {
+     // User space is unchanged, so to get from pattern space to user space,
+diff --git a/gfx/thebes/gfxPattern.h b/gfx/thebes/gfxPattern.h
+--- a/gfx/thebes/gfxPattern.h
++++ b/gfx/thebes/gfxPattern.h
+@@ -95,16 +95,22 @@ public:
+     void SetFilter(GraphicsFilter filter);
+     GraphicsFilter Filter() const;
+ 
+     /* returns TRUE if it succeeded */
+     bool GetSolidColor(gfxRGBA& aColor);
+ 
+     already_AddRefed<gfxASurface> GetSurface();
+ 
++    /**
++     * This function returns true if this object represents a linear gradient,
++     * and its two points are equal.
++     */
++    bool ZeroLengthLinearGradient();
++
+ protected:
+     cairo_pattern_t *mPattern;
+ 
+     /**
+      * aPatternTransform is the cairo pattern transform --- from user space at
+      * the time the pattern was set, to pattern space.
+      * aCurrentTransform is the DrawTarget's CTM --- from user space to device
+      * space.

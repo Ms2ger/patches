@@ -1,0 +1,600 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCCallContext.cpp b/js/xpconnect/src/XPCCallContext.cpp
+--- a/js/xpconnect/src/XPCCallContext.cpp
++++ b/js/xpconnect/src/XPCCallContext.cpp
+@@ -13,36 +13,58 @@
+ using namespace mozilla;
+ using namespace xpc;
+ using namespace JS;
+ 
+ XPCCallContext::XPCCallContext(XPCContext::LangType callerLanguage,
+                                JSContext* cx       /* = GetDefaultJSContext() */,
+                                HandleObject obj    /* = nullptr               */,
+                                HandleObject funobj /* = nullptr               */,
+-                               HandleId name       /* = JSID_VOID             */,
+-                               unsigned argc       /* = NO_ARGS               */,
+-                               jsval *argv         /* = nullptr               */,
+-                               jsval *rval         /* = nullptr               */)
++                               HandleId name       /* = JSID_VOID             */)
+     :   mState(INIT_FAILED),
+         mXPC(nsXPConnect::GetXPConnect()),
+         mXPCContext(nullptr),
+         mJSContext(cx),
+         mContextPopRequired(false),
+         mDestroyJSContextInDestructor(false),
+         mCallerLanguage(callerLanguage),
+         mScopeForNewJSObjects(cx),
+         mFlattenedJSObject(cx),
+         mWrapper(nullptr),
+         mTearOff(nullptr),
+         mName(cx)
+ {
+     MOZ_ASSERT(cx);
+     Init(callerLanguage, callerLanguage == NATIVE_CALLER, obj, funobj,
+-         INIT_SHOULD_LOOKUP_WRAPPER, name, argc, argv, rval);
++         INIT_SHOULD_LOOKUP_WRAPPER, name, /* argc = */ 0);
++}
++
++XPCCallContext::XPCCallContext(XPCContext::LangType callerLanguage,
++                               JSContext* cx,
++                               HandleObject obj,
++                               HandleObject funobj,
++                               HandleId name,
++                               const JS::CallArgs &args)
++    :   mState(INIT_FAILED),
++        mXPC(nsXPConnect::GetXPConnect()),
++        mXPCContext(nullptr),
++        mJSContext(cx),
++        mContextPopRequired(false),
++        mDestroyJSContextInDestructor(false),
++        mCallerLanguage(callerLanguage),
++        mScopeForNewJSObjects(cx),
++        mFlattenedJSObject(cx),
++        mWrapper(nullptr),
++        mTearOff(nullptr),
++        mName(cx)
++{
++    MOZ_ASSERT(cx);
++    Init(callerLanguage, callerLanguage == NATIVE_CALLER, obj, funobj,
++         INIT_SHOULD_LOOKUP_WRAPPER, name, args.length());
++    SetArgsAndResultPtr(args);
+ }
+ 
+ XPCCallContext::XPCCallContext(XPCContext::LangType callerLanguage,
+                                JSContext* cx,
+                                JSBool callBeginRequest,
+                                HandleObject obj,
+                                HandleObject flattenedJSObject,
+                                XPCWrappedNative* wrapper,
+@@ -57,18 +79,17 @@ XPCCallContext::XPCCallContext(XPCContex
+         mScopeForNewJSObjects(cx),
+         mFlattenedJSObject(cx, flattenedJSObject),
+         mWrapper(wrapper),
+         mTearOff(tearOff),
+         mName(cx)
+ {
+     MOZ_ASSERT(cx);
+     Init(callerLanguage, callBeginRequest, obj, NullPtr(),
+-         WRAPPER_PASSED_TO_CONSTRUCTOR, JSID_VOIDHANDLE, NO_ARGS,
+-         nullptr, nullptr);
++         WRAPPER_PASSED_TO_CONSTRUCTOR, JSID_VOIDHANDLE, /* args = */ 0);
+ }
+ 
+ #define IS_TEAROFF_CLASS(clazz) ((clazz) == &XPC_WN_Tearoff_JSClass)
+ 
+ 
+ // static
+ JSContext *
+ XPCCallContext::GetDefaultJSContext()
+@@ -89,19 +110,17 @@ XPCCallContext::GetDefaultJSContext()
+ 
+ void
+ XPCCallContext::Init(XPCContext::LangType callerLanguage,
+                      JSBool callBeginRequest,
+                      HandleObject obj,
+                      HandleObject funobj,
+                      WrapperInitOptions wrapperInitOptions,
+                      HandleId name,
+-                     unsigned argc,
+-                     jsval *argv,
+-                     jsval *rval)
++                     unsigned argc)
+ {
+     NS_ASSERTION(mJSContext, "No JSContext supplied to XPCCallContext");
+ 
+     if (!mXPC)
+         return;
+ 
+     XPCJSContextStack* stack = XPCJSRuntime::Get()->GetJSContextStack();
+     JSContext *topJSContext = stack->Peek();
+@@ -181,19 +200,16 @@ XPCCallContext::Init(XPCContext::LangTyp
+             NS_ABORT_IF_FALSE(!mFlattenedJSObject || IS_SLIM_WRAPPER(mFlattenedJSObject),
+                               "should have a slim wrapper");
+         }
+     }
+ 
+     if (!JSID_IS_VOID(name))
+         SetName(name);
+ 
+-    if (argc != NO_ARGS)
+-        SetArgsAndResultPtr(argc, argv, rval);
+-
+     CHECK_STATE(HAVE_OBJECT);
+ }
+ 
+ void
+ XPCCallContext::SetName(jsid name)
+ {
+     CHECK_STATE(HAVE_OBJECT);
+ 
+@@ -246,33 +262,28 @@ XPCCallContext::SetCallInfo(XPCNativeInt
+     mMethodIndex = mMember->GetIndex() + (isSetter ? 1 : 0);
+     mName = mMember->GetName();
+ 
+     if (mState < HAVE_NAME)
+         mState = HAVE_NAME;
+ }
+ 
+ void
+-XPCCallContext::SetArgsAndResultPtr(unsigned argc,
+-                                    jsval *argv,
+-                                    jsval *rval)
++XPCCallContext::SetArgsAndResultPtr(const JS::CallArgs &args)
+ {
+     CHECK_STATE(HAVE_OBJECT);
+ 
+     if (mState < HAVE_NAME) {
+         mSet = nullptr;
+         mInterface = nullptr;
+         mMember = nullptr;
+         mStaticMemberIsLocal = false;
+     }
+ 
+-    mArgc   = argc;
+-    mArgv   = argv;
+-    mRetVal = rval;
+-
++    mArgs = args;
+     mState = HAVE_ARGS;
+ }
+ 
+ nsresult
+ XPCCallContext::CanCallNow()
+ {
+     nsresult rv;
+ 
+@@ -375,18 +386,18 @@ XPCCallContext::GetJSContext(JSContext *
+     *aJSContext = mJSContext;
+     return NS_OK;
+ }
+ 
+ // virtual
+ void
+ XPCCallContext::GetArguments(uint32_t *aArgc, JS::Value **aArgv)
+ {
+-    *aArgc = (uint32_t) mArgc;
+-    *aArgv = mArgv;
++    *aArgc = (uint32_t) mArgs.length();
++    *aArgv = mArgs.array();
+ }
+ 
+ NS_IMETHODIMP
+ XPCCallContext::GetPreviousCallContext(nsAXPCNativeCallContext **aResult)
+ {
+   NS_ENSURE_ARG_POINTER(aResult);
+   *aResult = GetPrevCallContext();
+   return NS_OK;
+@@ -454,17 +465,17 @@ XPCCallContext::UnwrapThisIfAllowed(Hand
+     // theoretically fail during tearoff lookup for mismatched methods.
+     if (!wn->HasInterfaceNoQI(*interface->GetIID()))
+         return nullptr;
+ 
+     // See if the access is permitted.
+     //
+     // NB: This calculation of SET vs GET is a bit wonky, but that's what
+     // XPC_WN_GetterSetter does.
+-    bool set = argc && argc != NO_ARGS && member->IsWritableAttribute();
++    bool set = argc && member->IsWritableAttribute();
+     js::Wrapper::Action act = set ? js::Wrapper::SET : js::Wrapper::GET;
+     js::Wrapper *handler = js::Wrapper::wrapperHandler(obj);
+     bool ignored;
+     JS::Rooted<jsid> id(mJSContext, member->GetName());
+     if (!handler->enter(mJSContext, obj, id, act, &ignored))
+         return nullptr;
+ 
+     // Ok, this call is safe.
+diff --git a/js/xpconnect/src/XPCInlines.h b/js/xpconnect/src/XPCInlines.h
+--- a/js/xpconnect/src/XPCInlines.h
++++ b/js/xpconnect/src/XPCInlines.h
+@@ -221,39 +221,38 @@ XPCCallContext::GetStaticMemberIsLocal()
+     CHECK_STATE(HAVE_NAME);
+     return mStaticMemberIsLocal;
+ }
+ 
+ inline unsigned
+ XPCCallContext::GetArgc() const
+ {
+     CHECK_STATE(READY_TO_CALL);
+-    return mArgc;
++    return mArgs.length();
+ }
+ 
+ inline jsval*
+ XPCCallContext::GetArgv() const
+ {
+     CHECK_STATE(READY_TO_CALL);
+-    return mArgv;
++    return mArgs.array();
+ }
+ 
+ inline jsval*
+ XPCCallContext::GetRetVal() const
+ {
+     CHECK_STATE(READY_TO_CALL);
+-    return mRetVal;
++    return mArgs.rval().address();
+ }
+ 
+ inline void
+ XPCCallContext::SetRetVal(jsval val)
+ {
+     CHECK_STATE(HAVE_ARGS);
+-    if (mRetVal)
+-        *mRetVal = val;
++    mArgs.rval().set(val);
+ }
+ 
+ inline jsid
+ XPCCallContext::GetResolveName() const
+ {
+     CHECK_STATE(HAVE_CONTEXT);
+     return XPCJSRuntime::Get()->GetResolveName();
+ }
+diff --git a/js/xpconnect/src/XPCJSID.cpp b/js/xpconnect/src/XPCJSID.cpp
+--- a/js/xpconnect/src/XPCJSID.cpp
++++ b/js/xpconnect/src/XPCJSID.cpp
+@@ -834,18 +834,17 @@ nsJSCID::Construct(nsIXPConnectWrappedNa
+ {
+     RootedObject obj(cx, objArg);
+     XPCJSRuntime* rt = nsXPConnect::GetRuntimeInstance();
+     if (!rt)
+         return NS_ERROR_FAILURE;
+ 
+     // 'push' a call context and call on it
+     RootedId name(cx, rt->GetStringID(XPCJSRuntime::IDX_CREATE_INSTANCE));
+-    XPCCallContext ccx(JS_CALLER, cx, obj, NullPtr(), name, args.length(), args.array(),
+-                       args.rval().address());
++    XPCCallContext ccx(JS_CALLER, cx, obj, NullPtr(), name, args);
+ 
+     *_retval = XPCWrappedNative::CallMethod(ccx);
+     return NS_OK;
+ }
+ 
+ /* bool hasInstance (in nsIXPConnectWrappedNative wrapper, in JSContextPtr cx, in JSObjectPtr obj, in jsval val, out bool bp); */
+ NS_IMETHODIMP
+ nsJSCID::HasInstance(nsIXPConnectWrappedNative *wrapper,
+diff --git a/js/xpconnect/src/XPCWrappedNativeJSOps.cpp b/js/xpconnect/src/XPCWrappedNativeJSOps.cpp
+--- a/js/xpconnect/src/XPCWrappedNativeJSOps.cpp
++++ b/js/xpconnect/src/XPCWrappedNativeJSOps.cpp
+@@ -72,16 +72,17 @@ ToStringGuts(XPCCallContext& ccx)
+     return true;
+ }
+ 
+ /***************************************************************************/
+ 
+ static JSBool
+ XPC_WN_Shared_ToString(JSContext *cx, unsigned argc, jsval *vp)
+ {
++    JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+     RootedObject obj(cx, JS_THIS_OBJECT(cx, vp));
+     if (!obj)
+         return false;
+ 
+     if (IS_SLIM_WRAPPER(obj)) {
+         XPCNativeScriptableInfo *si =
+             GetSlimWrapperProto(obj)->GetScriptableInfo();
+ #ifdef DEBUG
+@@ -106,17 +107,17 @@ XPC_WN_Shared_ToString(JSContext *cx, un
+ 
+         return true;
+     }
+ 
+     XPCCallContext ccx(JS_CALLER, cx, obj);
+     if (!ccx.IsValid())
+         return Throw(NS_ERROR_XPC_BAD_OP_ON_WN_PROTO, cx);
+     ccx.SetName(ccx.GetRuntime()->GetStringID(XPCJSRuntime::IDX_TO_STRING));
+-    ccx.SetArgsAndResultPtr(argc, JS_ARGV(cx, vp), vp);
++    ccx.SetArgsAndResultPtr(args);
+     return ToStringGuts(ccx);
+ }
+ 
+ static JSBool
+ XPC_WN_Shared_ToSource(JSContext *cx, unsigned argc, jsval *vp)
+ {
+     static const char empty[] = "({})";
+     JSString *str = JS_NewStringCopyN(cx, empty, sizeof(empty)-1);
+@@ -540,17 +541,17 @@ XPC_WN_Shared_Convert(JSContext *cx, JSH
+             return true;
+         case JSTYPE_BOOLEAN:
+             vp.set(JSVAL_TRUE);
+             return true;
+         case JSTYPE_VOID:
+         case JSTYPE_STRING:
+         {
+             ccx.SetName(ccx.GetRuntime()->GetStringID(XPCJSRuntime::IDX_TO_STRING));
+-            ccx.SetArgsAndResultPtr(0, nullptr, vp.address());
++            ccx.SetArgsAndResultPtr(JS::CallArgsFromVp(0, vp.address()));
+ 
+             XPCNativeMember* member = ccx.GetMember();
+             if (member && member->IsMethod()) {
+                 if (!XPCWrappedNative::CallMethod(ccx))
+                     return false;
+ 
+                 if (JSVAL_IS_PRIMITIVE(vp))
+                     return true;
+@@ -955,18 +956,17 @@ XPC_WN_Helper_CheckAccess(JSContext *cx,
+ 
+ static JSBool
+ XPC_WN_Helper_Call(JSContext *cx, unsigned argc, jsval *vp)
+ {
+     JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+     // N.B. we want obj to be the callee, not JS_THIS(cx, vp)
+     RootedObject obj(cx, &args.callee());
+ 
+-    XPCCallContext ccx(JS_CALLER, cx, obj, NullPtr(), JSID_VOIDHANDLE, args.length(),
+-                       args.array(), args.rval().address());
++    XPCCallContext ccx(JS_CALLER, cx, obj, NullPtr(), JSID_VOIDHANDLE, args);
+     if (!ccx.IsValid())
+         return false;
+ 
+     MOZ_ASSERT(obj == ccx.GetFlattenedJSObject());
+ 
+     SLIM_LOG_WILL_MORPH(cx, obj);
+     PRE_HELPER_STUB_NO_SLIM
+     Call(wrapper, cx, obj, args, &retval);
+@@ -976,18 +976,17 @@ XPC_WN_Helper_Call(JSContext *cx, unsign
+ static JSBool
+ XPC_WN_Helper_Construct(JSContext *cx, unsigned argc, jsval *vp)
+ {
+     JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+     RootedObject obj(cx, &args.callee());
+     if (!obj)
+         return false;
+ 
+-    XPCCallContext ccx(JS_CALLER, cx, obj, NullPtr(), JSID_VOIDHANDLE, args.length(),
+-                       args.array(), args.rval().address());
++    XPCCallContext ccx(JS_CALLER, cx, obj, NullPtr(), JSID_VOIDHANDLE, args);
+     if (!ccx.IsValid())
+         return false;
+ 
+     MOZ_ASSERT(obj == ccx.GetFlattenedJSObject());
+ 
+     SLIM_LOG_WILL_MORPH(cx, obj);
+     PRE_HELPER_STUB_NO_SLIM
+     Construct(wrapper, cx, obj, args, &retval);
+@@ -1446,18 +1445,19 @@ FixUpThisIfBroken(JSObject *obj, JSObjec
+         }
+     }
+     return obj;
+ }
+ 
+ JSBool
+ XPC_WN_CallMethod(JSContext *cx, unsigned argc, jsval *vp)
+ {
+-    NS_ASSERTION(JS_TypeOfValue(cx, JS_CALLEE(cx, vp)) == JSTYPE_FUNCTION, "bad function");
+-    RootedObject funobj(cx, JSVAL_TO_OBJECT(JS_CALLEE(cx, vp)));
++    JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
++    NS_ASSERTION(JS_TypeOfValue(cx, args.calleev()) == JSTYPE_FUNCTION, "bad function");
++    RootedObject funobj(cx, &args.callee());
+ 
+     RootedObject obj(cx, JS_THIS_OBJECT(cx, vp));
+     if (!obj)
+         return false;
+ 
+ #ifdef DEBUG_slimwrappers
+     {
+         JSFunction* fun = funobj->getFunctionPrivate();
+@@ -1466,35 +1466,35 @@ XPC_WN_CallMethod(JSContext *cx, unsigne
+         const char *funname = !funid ? "" : bytes.encodeLatin1(cx, funid) ? bytes.ptr() : "<error>";
+         SLIM_LOG_WILL_MORPH_FOR_PROP(cx, obj, funname);
+     }
+ #endif
+     if (IS_SLIM_WRAPPER(obj) && !MorphSlimWrapper(cx, obj))
+         return Throw(NS_ERROR_XPC_BAD_OP_ON_WN_PROTO, cx);
+ 
+     obj = FixUpThisIfBroken(obj, funobj);
+-    XPCCallContext ccx(JS_CALLER, cx, obj, funobj, JSID_VOIDHANDLE, argc,
+-                       JS_ARGV(cx, vp), vp);
++    XPCCallContext ccx(JS_CALLER, cx, obj, funobj, JSID_VOIDHANDLE, args);
+     XPCWrappedNative* wrapper = ccx.GetWrapper();
+     THROW_AND_RETURN_IF_BAD_WRAPPER(cx, wrapper);
+ 
+     XPCNativeInterface* iface;
+     XPCNativeMember*    member;
+ 
+     if (!XPCNativeMember::GetCallInfo(funobj, &iface, &member))
+         return Throw(NS_ERROR_XPC_CANT_GET_METHOD_INFO, cx);
+     ccx.SetCallInfo(iface, member, false);
+     return XPCWrappedNative::CallMethod(ccx);
+ }
+ 
+ JSBool
+ XPC_WN_GetterSetter(JSContext *cx, unsigned argc, jsval *vp)
+ {
+-    NS_ASSERTION(JS_TypeOfValue(cx, JS_CALLEE(cx, vp)) == JSTYPE_FUNCTION, "bad function");
+-    RootedObject funobj(cx, JSVAL_TO_OBJECT(JS_CALLEE(cx, vp)));
++    JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
++    NS_ASSERTION(JS_TypeOfValue(cx, args.calleev()) == JSTYPE_FUNCTION, "bad function");
++    RootedObject funobj(cx, &args.callee());
+ 
+     RootedObject obj(cx, JS_THIS_OBJECT(cx, vp));
+     if (!obj)
+         return false;
+ 
+ #ifdef DEBUG_slimwrappers
+     {
+         const char* funname = nullptr;
+@@ -1506,18 +1506,17 @@ XPC_WN_GetterSetter(JSContext *cx, unsig
+         SLIM_LOG_WILL_MORPH_FOR_PROP(cx, obj, funname);
+     }
+ #endif
+     if (IS_SLIM_WRAPPER(obj) && !MorphSlimWrapper(cx, obj))
+         return Throw(NS_ERROR_XPC_BAD_OP_ON_WN_PROTO, cx);
+ 
+ 
+     obj = FixUpThisIfBroken(obj, funobj);
+-    XPCCallContext ccx(JS_CALLER, cx, obj, funobj, JSID_VOIDHANDLE, argc,
+-                       JS_ARGV(cx, vp), vp);
++    XPCCallContext ccx(JS_CALLER, cx, obj, funobj, JSID_VOIDHANDLE, args);
+     XPCWrappedNative* wrapper = ccx.GetWrapper();
+     THROW_AND_RETURN_IF_BAD_WRAPPER(cx, wrapper);
+ 
+     XPCNativeInterface* iface;
+     XPCNativeMember*    member;
+ 
+     if (!XPCNativeMember::GetCallInfo(funobj, &iface, &member))
+         return Throw(NS_ERROR_XPC_CANT_GET_METHOD_INFO, cx);
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -1119,28 +1119,29 @@ class MOZ_STACK_CLASS XPCCallContext : p
+ public:
+     virtual nsIXPConnectWrappedNative *GetCalleeWrapper();
+     virtual JSObject *GetCalleeWrapperJS();
+     NS_IMETHOD GetJSContext(JSContext **aResult);
+     virtual void GetArguments(uint32_t *aArgc, JS::Value **aArgv);
+     NS_IMETHOD GetPreviousCallContext(nsAXPCNativeCallContext **aResult);
+     NS_IMETHOD GetLanguage(uint16_t *aResult);
+ 
+-    enum {NO_ARGS = (unsigned) -1};
+-
+     static JSContext* GetDefaultJSContext();
+ 
+     XPCCallContext(XPCContext::LangType callerLanguage,
+                    JSContext* cx           = GetDefaultJSContext(),
+                    JS::HandleObject obj    = JS::NullPtr(),
+                    JS::HandleObject funobj = JS::NullPtr(),
+-                   JS::HandleId id         = JS::JSID_VOIDHANDLE,
+-                   unsigned argc           = NO_ARGS,
+-                   jsval *argv             = nullptr,
+-                   jsval *rval             = nullptr);
++                   JS::HandleId id         = JS::JSID_VOIDHANDLE);
++    XPCCallContext(XPCContext::LangType callerLanguage,
++                   JSContext* cx,
++                   JS::HandleObject obj,
++                   JS::HandleObject funobj,
++                   JS::HandleId id,
++                   const JS::CallArgs &args);
+ 
+     virtual ~XPCCallContext();
+ 
+     inline JSBool                       IsValid() const ;
+ 
+     inline nsXPConnect*                 GetXPConnect() const ;
+     inline XPCJSRuntime*                GetRuntime() const ;
+     inline XPCContext*                  GetXPCContext() const ;
+@@ -1192,17 +1193,17 @@ public:
+     inline jsid SetResolveName(JS::HandleId name);
+ 
+     inline XPCWrappedNative* GetResolvingWrapper() const;
+     inline XPCWrappedNative* SetResolvingWrapper(XPCWrappedNative* w);
+ 
+     inline void SetRetVal(jsval val);
+ 
+     void SetName(jsid name);
+-    void SetArgsAndResultPtr(unsigned argc, jsval *argv, jsval *rval);
++    void SetArgsAndResultPtr(const JS::CallArgs &args);
+     void SetCallInfo(XPCNativeInterface* iface, XPCNativeMember* member,
+                      JSBool isSetter);
+ 
+     nsresult  CanCallNow();
+ 
+     void SystemIsBeingShutDown();
+ 
+     operator JSContext*() const {return GetJSContext();}
+@@ -1228,19 +1229,17 @@ private:
+     };
+ 
+     void Init(XPCContext::LangType callerLanguage,
+               JSBool callBeginRequest,
+               JS::HandleObject obj,
+               JS::HandleObject funobj,
+               WrapperInitOptions wrapperInitOptions,
+               JS::HandleId name,
+-              unsigned argc,
+-              jsval *argv,
+-              jsval *rval);
++              unsigned argc);
+ 
+     XPCWrappedNative* UnwrapThisIfAllowed(JS::HandleObject obj, JS::HandleObject fun,
+                                           unsigned argc);
+ 
+ private:
+     // posible values for mState
+     enum State {
+         INIT_FAILED,
+@@ -1287,19 +1286,17 @@ private:
+ 
+     XPCNativeSet*                   mSet;
+     XPCNativeInterface*             mInterface;
+     XPCNativeMember*                mMember;
+ 
+     JS::RootedId                    mName;
+     JSBool                          mStaticMemberIsLocal;
+ 
+-    unsigned                        mArgc;
+-    jsval*                          mArgv;
+-    jsval*                          mRetVal;
++    JS::CallArgs                    mArgs;
+ 
+     uint16_t                        mMethodIndex;
+ };
+ 
+ class XPCLazyCallContext
+ {
+ public:
+     XPCLazyCallContext(XPCCallContext& ccx)
+diff --git a/js/xpconnect/wrappers/XrayWrapper.cpp b/js/xpconnect/wrappers/XrayWrapper.cpp
+--- a/js/xpconnect/wrappers/XrayWrapper.cpp
++++ b/js/xpconnect/wrappers/XrayWrapper.cpp
+@@ -1117,18 +1117,17 @@ XPCWrappedNativeXrayTraits::createHolder
+ bool
+ XPCWrappedNativeXrayTraits::call(JSContext *cx, HandleObject wrapper,
+                                  const JS::CallArgs &args,
+                                  js::Wrapper& baseInstance)
+ {
+     // Run the resolve hook of the wrapped native.
+     XPCWrappedNative *wn = getWN(wrapper);
+     if (NATIVE_HAS_FLAG(wn, WantCall)) {
+-        XPCCallContext ccx(JS_CALLER, cx, wrapper, NullPtr(), JSID_VOIDHANDLE, args.length(),
+-                           args.array(), args.rval().address());
++        XPCCallContext ccx(JS_CALLER, cx, wrapper, NullPtr(), JSID_VOIDHANDLE, args);
+         if (!ccx.IsValid())
+             return false;
+         bool ok = true;
+         nsresult rv = wn->GetScriptableInfo()->GetCallback()->Call(
+             wn, cx, wrapper, args, &ok);
+         if (NS_FAILED(rv)) {
+             if (ok)
+                 XPCThrower::Throw(rv, cx);
+@@ -1143,18 +1142,17 @@ XPCWrappedNativeXrayTraits::call(JSConte
+ bool
+ XPCWrappedNativeXrayTraits::construct(JSContext *cx, HandleObject wrapper,
+                                       const JS::CallArgs &args,
+                                       js::Wrapper& baseInstance)
+ {
+     // Run the resolve hook of the wrapped native.
+     XPCWrappedNative *wn = getWN(wrapper);
+     if (NATIVE_HAS_FLAG(wn, WantConstruct)) {
+-        XPCCallContext ccx(JS_CALLER, cx, wrapper, NullPtr(), JSID_VOIDHANDLE, args.length(),
+-                           args.array(), args.rval().address());
++        XPCCallContext ccx(JS_CALLER, cx, wrapper, NullPtr(), JSID_VOIDHANDLE, args);
+         if (!ccx.IsValid())
+             return false;
+         bool ok = true;
+         nsresult rv = wn->GetScriptableInfo()->GetCallback()->Construct(
+             wn, cx, wrapper, args, &ok);
+         if (NS_FAILED(rv)) {
+             if (ok)
+                 XPCThrower::Throw(rv, cx);

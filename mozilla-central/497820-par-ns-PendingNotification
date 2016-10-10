@@ -1,0 +1,129 @@
+* * *
+* * *
+
+diff --git a/parser/html/nsHtml5PendingNotification.h b/parser/html/PendingNotification.h
+rename from parser/html/nsHtml5PendingNotification.h
+rename to parser/html/PendingNotification.h
+--- a/parser/html/nsHtml5PendingNotification.h
++++ b/parser/html/PendingNotification.h
+@@ -35,25 +35,28 @@
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+-#ifndef nsHtml5PendingNotification_h__
+-#define nsHtml5PendingNotification_h__
++#ifndef mozilla_htmlparser_PendingNotification_h
++#define mozilla_htmlparser_PendingNotification_h
+ 
+ #include "nsNodeUtils.h"
+ 
+ class nsHtml5TreeBuilder;
+ 
+-class nsHtml5PendingNotification {
++namespace mozilla {
++namespace htmlparser {
++
++class PendingNotification {
+   public:
+ 
+-    nsHtml5PendingNotification(nsIContent* aParent)
+-     : mParent(aParent),
+-       mChildCount(aParent->GetChildCount())
++    PendingNotification(nsIContent* aParent)
++      : mParent(aParent)
++      , mChildCount(aParent->GetChildCount())
+     {
+-      MOZ_COUNT_CTOR(nsHtml5PendingNotification);
++      MOZ_COUNT_CTOR(PendingNotification);
+     }
+ 
+-    ~nsHtml5PendingNotification() {
+-      MOZ_COUNT_DTOR(nsHtml5PendingNotification);
++    ~PendingNotification() {
++      MOZ_COUNT_DTOR(PendingNotification);
+     }
+ 
+     inline void Fire() {
+@@ -81,4 +84,7 @@
+     uint32_t    mChildCount;
+ };
+ 
+-#endif // nsHtml5PendingNotification_h__
++} // namespace htmlparser
++} // namespace mozilla
++
++#endif // mozilla_htmlparser_PendingNotification_h
+diff --git a/parser/html/nsHtml5TreeBuilder.cpp b/parser/html/nsHtml5TreeBuilder.cpp
+--- a/parser/html/nsHtml5TreeBuilder.cpp
++++ b/parser/html/nsHtml5TreeBuilder.cpp
+@@ -47,7 +47,6 @@
+ #include "nsHtml5Atoms.h"
+ #include "nsHtml5ByteReadable.h"
+ #include "nsHtml5TreeOperation.h"
+-#include "nsHtml5PendingNotification.h"
+ #include "nsHtml5StateSnapshot.h"
+ #include "nsHtml5StackNode.h"
+ #include "nsHtml5TreeOpExecutor.h"
+diff --git a/parser/html/nsHtml5TreeBuilder.h b/parser/html/nsHtml5TreeBuilder.h
+--- a/parser/html/nsHtml5TreeBuilder.h
++++ b/parser/html/nsHtml5TreeBuilder.h
+@@ -48,7 +48,6 @@
+ #include "nsHtml5Atoms.h"
+ #include "nsHtml5ByteReadable.h"
+ #include "nsHtml5TreeOperation.h"
+-#include "nsHtml5PendingNotification.h"
+ #include "nsHtml5StateSnapshot.h"
+ #include "nsHtml5StackNode.h"
+ #include "nsHtml5TreeOpExecutor.h"
+diff --git a/parser/html/nsHtml5TreeOpExecutor.h b/parser/html/nsHtml5TreeOpExecutor.h
+--- a/parser/html/nsHtml5TreeOpExecutor.h
++++ b/parser/html/nsHtml5TreeOpExecutor.h
+@@ -46,7 +46,7 @@
+ #include "nsTraceRefcnt.h"
+ #include "nsHtml5TreeOperation.h"
+ #include "SpeculativeLoad.h"
+-#include "nsHtml5PendingNotification.h"
++#include "PendingNotification.h"
+ #include "nsTArray.h"
+ #include "nsContentSink.h"
+ #include "nsNodeInfoManager.h"
+@@ -100,7 +100,7 @@
+     bool                                 mReadingFromStage;
+     nsTArray<nsHtml5TreeOperation>       mOpQueue;
+     nsTArray<nsIContentPtr>              mElementsSeenInThisAppendBatch;
+-    nsTArray<nsHtml5PendingNotification> mPendingNotifications;
++    nsTArray<mozilla::htmlparser::PendingNotification> mPendingNotifications;
+     nsHtml5StreamParser*                 mStreamParser;
+     nsCOMArray<nsIContent>               mOwnedElements;
+     
+@@ -282,9 +282,9 @@
+     void FlushPendingAppendNotifications() {
+       NS_PRECONDITION(mFlushState == eInDocUpdate, "Notifications flushed outside update");
+       mFlushState = eNotifying;
+-      const nsHtml5PendingNotification* start = mPendingNotifications.Elements();
+-      const nsHtml5PendingNotification* end = start + mPendingNotifications.Length();
+-      for (nsHtml5PendingNotification* iter = (nsHtml5PendingNotification*)start; iter < end; ++iter) {
++      const mozilla::htmlparser::PendingNotification* start = mPendingNotifications.Elements();
++      const mozilla::htmlparser::PendingNotification* end = start + mPendingNotifications.Length();
++      for (mozilla::htmlparser::PendingNotification* iter = (mozilla::htmlparser::PendingNotification*)start; iter < end; ++iter) {
+         iter->Fire();
+       }
+       mPendingNotifications.Clear();
+@@ -300,14 +300,14 @@
+     
+     inline bool HaveNotified(nsIContent* aNode) {
+       NS_PRECONDITION(aNode, "HaveNotified called with null argument.");
+-      const nsHtml5PendingNotification* start = mPendingNotifications.Elements();
+-      const nsHtml5PendingNotification* end = start + mPendingNotifications.Length();
++      const mozilla::htmlparser::PendingNotification* start = mPendingNotifications.Elements();
++      const mozilla::htmlparser::PendingNotification* end = start + mPendingNotifications.Length();
+       for (;;) {
+         nsIContent* parent = aNode->GetParent();
+         if (!parent) {
+           return true;
+         }
+-        for (nsHtml5PendingNotification* iter = (nsHtml5PendingNotification*)start; iter < end; ++iter) {
++        for (mozilla::htmlparser::PendingNotification* iter = (mozilla::htmlparser::PendingNotification*)start; iter < end; ++iter) {
+           if (iter->Contains(parent)) {
+             return iter->HaveNotifiedIndex(parent->IndexOf(aNode));
+           }

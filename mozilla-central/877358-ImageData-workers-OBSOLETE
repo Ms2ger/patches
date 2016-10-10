@@ -1,0 +1,592 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 877358 - Move ImageData to WebIDL in workers; r=?bent
+
+diff --git a/dom/base/nsJSEnvironment.cpp b/dom/base/nsJSEnvironment.cpp
+--- a/dom/base/nsJSEnvironment.cpp
++++ b/dom/base/nsJSEnvironment.cpp
+@@ -3307,17 +3307,18 @@ NS_DOMReadStructuredClone(JSContext* cx,
+ 
+ JSBool
+ NS_DOMWriteStructuredClone(JSContext* cx,
+                            JSStructuredCloneWriter* writer,
+                            JS::Handle<JSObject*> obj,
+                            void *closure)
+ {
+   ImageData* imageData;
+-  nsresult rv = UnwrapObject<ImageData>(cx, obj, imageData);
++  nsresult rv = UnwrapObject<prototypes::id::ImageData, ImageData>
++                            (cx, obj, imageData);
+   if (NS_FAILED(rv)) {
+     // Don't know what this is. Bail.
+     xpc::Throw(cx, NS_ERROR_DOM_DATA_CLONE_ERR);
+     return JS_FALSE;
+   }
+ 
+   // Prepare the ImageData internals.
+   uint32_t width = imageData->Width();
+diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
+--- a/dom/bindings/Bindings.conf
++++ b/dom/bindings/Bindings.conf
+@@ -574,19 +574,24 @@ DOMInterfaces = {
+ {
+     'nativeType': 'nsIJSID',
+     'headerFile': 'xpcjsid.h',
+ },
+ {
+     'workers': True,
+ }],
+ 
+-'ImageData': {
+-   'wrapperCache': False
++'ImageData': [
++{
++    'wrapperCache': False
+ },
++{
++    'castable': True,
++    'workers': True,
++}],
+ 
+ 'InputStream': [
+ {
+     'nativeType': 'nsIInputStream',
+     'notflattened': True
+ },
+ {
+     'workers': True,
+diff --git a/dom/workers/DOMBindingInlines.h b/dom/workers/DOMBindingInlines.h
+--- a/dom/workers/DOMBindingInlines.h
++++ b/dom/workers/DOMBindingInlines.h
+@@ -2,24 +2,26 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_workers_dombindinginlines_h__
+ #define mozilla_dom_workers_dombindinginlines_h__
+ 
+ #include "mozilla/dom/FileReaderSyncBinding.h"
++#include "mozilla/dom/ImageDataBinding.h"
+ #include "mozilla/dom/TextDecoderBinding.h"
+ #include "mozilla/dom/TextEncoderBinding.h"
+ #include "mozilla/dom/XMLHttpRequestBinding.h"
+ #include "mozilla/dom/XMLHttpRequestUploadBinding.h"
+ 
+ BEGIN_WORKERS_NAMESPACE
+ 
+ class FileReaderSync;
++class ImageData;
+ class TextDecoder;
+ class TextEncoder;
+ class XMLHttpRequest;
+ class XMLHttpRequestUpload;
+ 
+ namespace {
+ 
+ template <class T>
+@@ -43,16 +45,17 @@ struct WrapPrototypeTraits
+     GetProtoObject(JSContext* aCx, JS::Handle<JSObject*> aGlobal)              \
+     {                                                                          \
+       using namespace mozilla::dom;                                            \
+       return _class##Binding_workers::GetProtoObject(aCx, aGlobal);            \
+     }                                                                          \
+   };
+ 
+ SPECIALIZE_PROTO_TRAITS(FileReaderSync)
++SPECIALIZE_PROTO_TRAITS(ImageData)
+ SPECIALIZE_PROTO_TRAITS(TextDecoder)
+ SPECIALIZE_PROTO_TRAITS(TextEncoder)
+ SPECIALIZE_PROTO_TRAITS(XMLHttpRequest)
+ SPECIALIZE_PROTO_TRAITS(XMLHttpRequestUpload)
+ 
+ #undef SPECIALIZE_PROTO_TRAITS
+ 
+ } // anonymous namespace
+diff --git a/dom/workers/ImageData.cpp b/dom/workers/ImageData.cpp
+--- a/dom/workers/ImageData.cpp
++++ b/dom/workers/ImageData.cpp
+@@ -1,205 +1,37 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "ImageData.h"
+ 
+-#include "jsfriendapi.h"
+-
+-#include "nsTraceRefcnt.h"
+-
+-#define PROPERTY_FLAGS \
+-  (JSPROP_ENUMERATE | JSPROP_SHARED)
+-
+-USING_WORKERS_NAMESPACE
+-
+-namespace {
+-
+-class ImageData
+-{
+-  static JSClass sClass;
+-  static const JSPropertySpec sProperties[];
+-
+-  enum SLOT {
+-    SLOT_width = 0,
+-    SLOT_height,
+-    SLOT_data,
+-
+-    SLOT_COUNT
+-  };
+-
+-public:
+-  static JSObject*
+-  InitClass(JSContext* aCx, JSObject* aObj)
+-  {
+-    return JS_InitClass(aCx, aObj, NULL, &sClass, Construct, 0, sProperties,
+-                        NULL, NULL, NULL);
+-  }
+-
+-  static JSObject*
+-  Create(JSContext* aCx, uint32_t aWidth,
+-         uint32_t aHeight, JS::Handle<JSObject*> aData)
+-  {
+-    MOZ_ASSERT(aData);
+-    MOZ_ASSERT(JS_IsTypedArrayObject(aData));
+-    MOZ_ASSERT(JS_IsUint8ClampedArray(aData));
+-
+-    JSObject* obj = JS_NewObject(aCx, &sClass, NULL, NULL);
+-    if (!obj) {
+-      return NULL;
+-    }
+-
+-    JS_SetReservedSlot(obj, SLOT_width, UINT_TO_JSVAL(aWidth));
+-    JS_SetReservedSlot(obj, SLOT_height, UINT_TO_JSVAL(aHeight));
+-    JS_SetReservedSlot(obj, SLOT_data, OBJECT_TO_JSVAL(aData));
+-
+-    // This is an empty object. The point is just to differentiate instances
+-    // from the interface object.
+-    ImageData* priv = new ImageData();
+-    JS_SetPrivate(obj, priv);
+-
+-    return obj;
+-  }
+-
+-  static bool
+-  IsInstance(JSObject* aObj)
+-  {
+-    return JS_GetClass(aObj) == &sClass;
+-  }
+-
+-  static uint32_t
+-  GetWidth(JSObject* aObj)
+-  {
+-    MOZ_ASSERT(IsInstance(aObj));
+-    return JS_DoubleToUint32(JS_GetReservedSlot(aObj, SLOT_width).toNumber());
+-  }
+-
+-  static uint32_t
+-  GetHeight(JSObject* aObj)
+-  {
+-    MOZ_ASSERT(IsInstance(aObj));
+-    return JS_DoubleToUint32(JS_GetReservedSlot(aObj, SLOT_height).toNumber());
+-  }
+-
+-  static
+-  JSObject* GetData(JSObject* aObj)
+-  {
+-    MOZ_ASSERT(IsInstance(aObj));
+-    return &JS_GetReservedSlot(aObj, SLOT_data).toObject();
+-  }
+-
+-private:
+-  ImageData()
+-  {
+-    MOZ_COUNT_CTOR(mozilla::dom::workers::ImageData);
+-  }
+-
+-  ~ImageData()
+-  {
+-    MOZ_COUNT_DTOR(mozilla::dom::workers::ImageData);
+-  }
+-
+-  static JSBool
+-  Construct(JSContext* aCx, unsigned aArgc, jsval* aVp)
+-  {
+-    JS_ReportErrorNumber(aCx, js_GetErrorMessage, NULL, JSMSG_WRONG_CONSTRUCTOR,
+-                         sClass.name);
+-    return false;
+-  }
+-
+-  static void
+-  Finalize(JSFreeOp* aFop, JSObject* aObj)
+-  {
+-    MOZ_ASSERT(JS_GetClass(aObj) == &sClass);
+-    delete static_cast<ImageData*>(JS_GetPrivate(aObj));
+-  }
+-
+-  static JSBool
+-  GetProperty(JSContext* aCx, JS::Handle<JSObject*> aObj, JS::Handle<jsid> aIdval,
+-              JS::MutableHandle<JS::Value> aVp)
+-  {
+-    JSClass* classPtr = JS_GetClass(aObj);
+-    if (classPtr != &sClass) {
+-      JS_ReportErrorNumber(aCx, js_GetErrorMessage, NULL,
+-                           JSMSG_INCOMPATIBLE_PROTO, sClass.name, "GetProperty",
+-                           classPtr->name);
+-      return false;
+-    }
+-
+-    MOZ_ASSERT(JSID_IS_INT(aIdval));
+-    MOZ_ASSERT(JSID_TO_INT(aIdval) >= 0 && JSID_TO_INT(aIdval) < SLOT_COUNT);
+-
+-    aVp.set(JS_GetReservedSlot(aObj, JSID_TO_INT(aIdval)));
+-    return true;
+-  }
+-};
+-
+-JSClass ImageData::sClass = {
+-  "ImageData",
+-  JSCLASS_HAS_PRIVATE | JSCLASS_HAS_RESERVED_SLOTS(SLOT_COUNT),
+-  JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
+-  JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, Finalize
+-};
+-
+-const JSPropertySpec ImageData::sProperties[] = {
+-  // These properties are read-only per spec, which means that sets must throw
+-  // in strict mode and silently fail otherwise. This is a problem for workers
+-  // in general (because js_GetterOnlyPropertyStub throws unconditionally). The
+-  // general plan for fixing this involves the new DOM bindings. But Peace
+-  // Keeper breaks if we throw when setting these properties, so we need to do
+-  // something about it in the mean time. So we use NULL, which defaults to the
+-  // class setter (JS_StrictPropertyStub), which is always a silent no-op,
+-  // regardless of strict mode. Not ideal, but good enough for now.
+-  { "width", SLOT_width, PROPERTY_FLAGS, JSOP_WRAPPER(GetProperty), JSOP_NULLWRAPPER },
+-  { "height", SLOT_height, PROPERTY_FLAGS, JSOP_WRAPPER(GetProperty), JSOP_NULLWRAPPER },
+-  { "data", SLOT_data, PROPERTY_FLAGS, JSOP_WRAPPER(GetProperty), JSOP_NULLWRAPPER },
+-  { 0, 0, 0, JSOP_NULLWRAPPER, JSOP_NULLWRAPPER }
+-};
+-
+-} // anonymous namespace
++#include "DOMBindingInlines.h"
++#include "mozilla/dom/ImageDataBinding.h"
+ 
+ BEGIN_WORKERS_NAMESPACE
+ 
+-namespace imagedata {
+-
+-bool
+-InitClass(JSContext* aCx, JSObject* aGlobal)
++/* static */ already_AddRefed<ImageData>
++ImageData::Create(JSContext* aCx, JS::Handle<JSObject*> aGlobal,
++                  uint32_t aWidth, uint32_t aHeight,
++                  JS::Handle<JSObject*> aData)
+ {
+-  return !!ImageData::InitClass(aCx, aGlobal);
++  nsRefPtr<ImageData> imageData = new ImageData(aCx, aWidth, aHeight, aData);
++  if (!Wrap(aCx, aGlobal, imageData)) {
++    return nullptr;
++  }
++  return imageData.forget();
+ }
+ 
+-JSObject*
+-Create(JSContext* aCx, uint32_t aWidth,
+-       uint32_t aHeight, JS::Handle<JSObject*> aData)
++void
++ImageData::_trace(JSTracer* aTrc)
+ {
+-  return ImageData::Create(aCx, aWidth, aHeight, aData);
++  JS_CallObjectTracer(aTrc, &mData, "mData");
++  DOMBindingBase::_trace(aTrc);
+ }
+ 
+-bool
+-IsImageData(JSObject* aObj)
++void
++ImageData::_finalize(JSFreeOp* aFop)
+ {
+-  return ImageData::IsInstance(aObj);
++  DOMBindingBase::_finalize(aFop);
+ }
+ 
+-uint32_t
+-GetWidth(JSObject* aObj)
+-{
+-  return ImageData::GetWidth(aObj);
+-}
+-
+-uint32_t
+-GetHeight(JSObject* aObj)
+-{
+-  return ImageData::GetHeight(aObj);
+-}
+-
+-JSObject*
+-GetData(JSObject* aObj)
+-{
+-  return ImageData::GetData(aObj);
+-}
+-
+-
+-} // namespace imagedata
+-
+ END_WORKERS_NAMESPACE
+diff --git a/dom/workers/ImageData.h b/dom/workers/ImageData.h
+--- a/dom/workers/ImageData.h
++++ b/dom/workers/ImageData.h
+@@ -1,42 +1,63 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_workers_imagedata_h__
+ #define mozilla_dom_workers_imagedata_h__
+ 
+ #include "Workers.h"
++#include "mozilla/dom/workers/bindings/DOMBindingBase.h"
+ 
+ BEGIN_WORKERS_NAMESPACE
+ 
+-namespace imagedata {
++class ImageData MOZ_FINAL : public DOMBindingBase
++{
++  uint32_t mWidth;
++  uint32_t mHeight;
++  JSObject* mData;
+ 
+-bool
+-InitClass(JSContext* aCx, JSObject* aGlobal);
++  ImageData(JSContext* aCx, uint32_t aWidth, uint32_t aHeight,
++            JS::Handle<JSObject*> aData)
++    : DOMBindingBase(aCx)
++    , mWidth(aWidth)
++    , mHeight(aHeight)
++    , mData(aData)
++  {
++    MOZ_COUNT_CTOR(mozilla::dom::workers::ImageData);
++    MOZ_ASSERT(JS_IsTypedArrayObject(aData));
++    MOZ_ASSERT(JS_IsUint8ClampedArray(aData));
++  }
+ 
+-JSObject*
+-Create(JSContext* aCx, uint32_t aWidth,
+-       uint32_t aHeight, JS::Handle<JSObject*> aData);
++public:
++  static already_AddRefed<ImageData>
++  Create(JSContext* aCx, JS::Handle<JSObject*> aGlobal,
++         uint32_t aWidth, uint32_t aHeight, JS::Handle<JSObject*> aData);
+ 
+-/*
+- * All data members live in private slots on the JS Object. Callers must
+- * first check IsImageData, after which they may call the data accessors.
+- */
++  virtual void
++  _trace(JSTracer* aTrc) MOZ_OVERRIDE;
+ 
+-bool
+-IsImageData(JSObject* aObj);
++  virtual void
++  _finalize(JSFreeOp* aFop) MOZ_OVERRIDE;
+ 
+-uint32_t
+-GetWidth(JSObject* aObj);
++  ~ImageData()
++  {
++    MOZ_COUNT_DTOR(mozilla::dom::workers::ImageData);
++  }
+ 
+-uint32_t
+-GetHeight(JSObject* aObj);
+-
+-JSObject*
+-GetData(JSObject* aObj);
+-
+-} // namespace imagedata
++  uint32_t Width() const
++  {
++    return mWidth;
++  }
++  uint32_t Height() const
++  {
++    return mHeight;
++  }
++  JSObject* Data(JSContext* = nullptr) const
++  {
++    return mData;
++  }
++};
+ 
+ END_WORKERS_NAMESPACE
+ 
+ #endif // mozilla_dom_workers_imagedata_h__
+diff --git a/dom/workers/WorkerPrivate.cpp b/dom/workers/WorkerPrivate.cpp
+--- a/dom/workers/WorkerPrivate.cpp
++++ b/dom/workers/WorkerPrivate.cpp
+@@ -30,16 +30,18 @@
+ 
+ #include <algorithm>
+ #include "jsfriendapi.h"
+ #include "jsdbgapi.h"
+ #include "jsfriendapi.h"
+ #include "jsprf.h"
+ #include "js/MemoryMetrics.h"
+ #include "mozilla/Attributes.h"
++#include "mozilla/dom/BindingUtils.h"
++#include "mozilla/dom/ImageDataBinding.h"
+ #include "mozilla/Likely.h"
+ #include "nsAlgorithm.h"
+ #include "nsContentUtils.h"
+ #include "nsCxPusher.h"
+ #include "nsError.h"
+ #include "nsDOMJSUtils.h"
+ #include "nsGUIEvent.h"
+ #include "nsJSEnvironment.h"
+@@ -200,18 +202,20 @@ struct WorkerStructuredCloneCallbacks
+           !JS_ReadTypedArray(aReader, dataArray.address()))
+       {
+         return nullptr;
+       }
+       MOZ_ASSERT(dataArray.isObject());
+ 
+       // Construct the ImageData.
+       JS::Rooted<JSObject*> dataObj(aCx, &dataArray.toObject());
+-      JSObject* obj = imagedata::Create(aCx, width, height, dataObj);
+-      return obj;
++      JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForScopeChain(aCx));
++      nsRefPtr<workers::ImageData> imageData =
++        workers::ImageData::Create(aCx, global, width, height, dataObj);
++      return imageData->GetJSObject();
+     }
+ 
+     Error(aCx, 0);
+     return nullptr;
+   }
+ 
+   static JSBool
+   Write(JSContext* aCx, JSStructuredCloneWriter* aWriter,
+@@ -245,26 +249,32 @@ struct WorkerStructuredCloneCallbacks
+             JS_WriteBytes(aWriter, &blob, sizeof(blob))) {
+           clonedObjects->AppendElement(blob);
+           return true;
+         }
+       }
+     }
+ 
+     // See if this is an ImageData object.
+-    if (imagedata::IsImageData(aObj)) {
+-      // Pull the properties off the object.
+-      uint32_t width = imagedata::GetWidth(aObj);
+-      uint32_t height = imagedata::GetHeight(aObj);
+-      JSObject* data = imagedata::GetData(aObj);
+-
+-      // Write the structured clone.
+-      return JS_WriteUint32Pair(aWriter, SCTAG_DOM_IMAGEDATA, 0) &&
+-             JS_WriteUint32Pair(aWriter, width, height) &&
+-             JS_WriteTypedArray(aWriter, OBJECT_TO_JSVAL(data));
++    {
++      workers::ImageData* imageData = nullptr;
++      nsresult rv = UnwrapObject<prototypes::id::ImageData_workers,
++                                 workers::ImageData>
++                                (aCx, aObj, imageData);
++      if (NS_SUCCEEDED(rv)) {
++        // Pull the properties off the object.
++        uint32_t width = imageData->Width();
++        uint32_t height = imageData->Height();
++        JSObject* data = imageData->Data(aCx);
++
++        // Write the structured clone.
++        return JS_WriteUint32Pair(aWriter, SCTAG_DOM_IMAGEDATA, 0) &&
++               JS_WriteUint32Pair(aWriter, width, height) &&
++               JS_WriteTypedArray(aWriter, OBJECT_TO_JSVAL(data));
++      }
+     }
+ 
+     Error(aCx, 0);
+     return false;
+   }
+ 
+   static void
+   Error(JSContext* aCx, uint32_t /* aErrorId */)
+diff --git a/dom/workers/WorkerScope.cpp b/dom/workers/WorkerScope.cpp
+--- a/dom/workers/WorkerScope.cpp
++++ b/dom/workers/WorkerScope.cpp
+@@ -8,16 +8,17 @@
+ 
+ #include "jsapi.h"
+ #include "jsdbgapi.h"
+ #include "mozilla/Util.h"
+ #include "mozilla/dom/DOMJSClass.h"
+ #include "mozilla/dom/EventTargetBinding.h"
+ #include "mozilla/dom/BindingUtils.h"
+ #include "mozilla/dom/FileReaderSyncBinding.h"
++#include "mozilla/dom/ImageDataBinding.h"
+ #include "mozilla/dom/TextDecoderBinding.h"
+ #include "mozilla/dom/TextEncoderBinding.h"
+ #include "mozilla/dom/XMLHttpRequestBinding.h"
+ #include "mozilla/dom/XMLHttpRequestUploadBinding.h"
+ #include "mozilla/dom/URLBinding.h"
+ #include "mozilla/OSFileConstants.h"
+ #include "nsTraceRefcnt.h"
+ #include "xpcpublic.h"
+@@ -29,17 +30,16 @@
+ #include "ChromeWorkerScope.h"
+ #include "Events.h"
+ #include "EventListenerManager.h"
+ #include "EventTarget.h"
+ #include "Exceptions.h"
+ #include "File.h"
+ #include "FileReaderSync.h"
+ #include "Location.h"
+-#include "ImageData.h"
+ #include "Navigator.h"
+ #include "Principal.h"
+ #include "ScriptLoader.h"
+ #include "Worker.h"
+ #include "WorkerPrivate.h"
+ #include "XMLHttpRequest.h"
+ 
+ #include "WorkerInlines.h"
+@@ -1032,23 +1032,23 @@ CreateDedicatedWorkerGlobalScope(JSConte
+     }
+   }
+ 
+   // Init other classes we care about.
+   if (!events::InitClasses(aCx, global, false) ||
+       !file::InitClasses(aCx, global) ||
+       !exceptions::InitClasses(aCx, global) ||
+       !location::InitClass(aCx, global) ||
+-      !imagedata::InitClass(aCx, global) ||
+       !navigator::InitClass(aCx, global)) {
+     return NULL;
+   }
+ 
+   // Init other paris-bindings.
+   if (!FileReaderSyncBinding_workers::GetConstructorObject(aCx, global) ||
++      !ImageDataBinding_workers::GetConstructorObject(aCx, global) ||
+       !TextDecoderBinding_workers::GetConstructorObject(aCx, global) ||
+       !TextEncoderBinding_workers::GetConstructorObject(aCx, global) ||
+       !XMLHttpRequestBinding_workers::GetConstructorObject(aCx, global) ||
+       !XMLHttpRequestUploadBinding_workers::GetConstructorObject(aCx, global) ||
+       !URLBinding_workers::GetConstructorObject(aCx, global)) {
+     return NULL;
+   }
+ 
+diff --git a/dom/workers/moz.build b/dom/workers/moz.build
+--- a/dom/workers/moz.build
++++ b/dom/workers/moz.build
+@@ -14,16 +14,17 @@ EXPORTS.mozilla.dom.workers += [
+ ]
+ 
+ # Stuff needed for the bindings, not really public though.
+ EXPORTS.mozilla.dom.workers.bindings += [
+     'DOMBindingBase.h',
+     'EventListenerManager.h',
+     'EventTarget.h',
+     'FileReaderSync.h',
++    'ImageData.h',
+     'TextDecoder.h',
+     'TextEncoder.h',
+     'URL.h',
+     'WorkerFeature.h',
+     'XMLHttpRequest.h',
+     'XMLHttpRequestEventTarget.h',
+     'XMLHttpRequestUpload.h',
+ ]

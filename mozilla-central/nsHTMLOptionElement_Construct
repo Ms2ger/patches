@@ -1,0 +1,174 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/content/src/nsHTMLOptionElement.cpp b/content/html/content/src/nsHTMLOptionElement.cpp
+--- a/content/html/content/src/nsHTMLOptionElement.cpp
++++ b/content/html/content/src/nsHTMLOptionElement.cpp
+@@ -362,97 +362,115 @@ nsHTMLOptionElement::GetSelect()
+     if (parent->Tag() != nsGkAtoms::optgroup) {
+       break;
+     }
+   }
+   
+   return nullptr;
+ }
+ 
++static bool
++GetString(const JS::Value& aVal, nsAutoString& aStr)
++{
++  JSString* jsstr = JS_ValueToString(aContext, aVal);
++  if (!jsstr) {
++    return false;
++  }
++
++  size_t length;
++  const jschar *chars = JS_GetStringCharsAndLength(aContext, jsstr, &length);
++  if (!chars) {
++    return false;
++  }
++
++  aStr.Assign(static_cast<const PRUnichar*>(chars), length);
++  return true;
++}
++
++static bool
++GetBoolean(const JS::Value& aVal)
++{
++  JSBool jsbool;
++  MOZ_ALWAYS_TRUE(JS_ValueToBoolean(aContext, aVal, &jsbool));
++  return !!jsbool;
++}
++
+ NS_IMETHODIMP    
+ nsHTMLOptionElement::Initialize(nsISupports* aOwner,
+                                 JSContext* aContext,
+                                 JSObject *aObj,
+                                 uint32_t argc, 
+                                 jsval *argv)
+ {
+   nsresult result = NS_OK;
+ 
++  nsAutoString text;
++  nsAutoString value;
++  bool defaultSelected = false;
++  bool selected = false;
++
+   if (argc > 0) {
+     // The first (optional) parameter is the text of the option
+-    JSString* jsstr = JS_ValueToString(aContext, argv[0]);
+-    if (!jsstr) {
++    if (!GetString(argv[0], text)) {
+       return NS_ERROR_FAILURE;
+     }
+ 
+-    // Create a new text node and append it to the option
+-    nsCOMPtr<nsIContent> textContent;
+-    result = NS_NewTextNode(getter_AddRefs(textContent),
+-                            mNodeInfo->NodeInfoManager());
+-    if (NS_FAILED(result)) {
+-      return result;
+-    }
+-
+-    size_t length;
+-    const jschar *chars = JS_GetStringCharsAndLength(aContext, jsstr, &length);
+-    if (!chars) {
+-      return NS_ERROR_FAILURE;
+-    }
+-
+-    textContent->SetText(chars, length, false);
+-    
+-    result = AppendChildTo(textContent, false);
+-    if (NS_FAILED(result)) {
+-      return result;
+-    }
+-
+     if (argc > 1) {
+       // The second (optional) parameter is the value of the option
+-      jsstr = JS_ValueToString(aContext, argv[1]);
+-      if (!jsstr) {
++      if (!GetString(argv[1], value)) {
+         return NS_ERROR_FAILURE;
+       }
+ 
+-      size_t length;
+-      const jschar *chars = JS_GetStringCharsAndLength(aContext, jsstr, &length);
+-      if (!chars) {
+-        return NS_ERROR_FAILURE;
+-      }
+-
+-      // Set the value attribute for this element
+-      nsAutoString value(chars, length);
+-
+-      result = SetAttr(kNameSpaceID_None, nsGkAtoms::value, value,
+-                       false);
+-      if (NS_FAILED(result)) {
+-        return result;
+-      }
+-
+       if (argc > 2) {
+         // The third (optional) parameter is the defaultSelected value
+-        JSBool defaultSelected;
+-        JS_ValueToBoolean(aContext, argv[2], &defaultSelected);
+-        if (defaultSelected) {
+-          result = SetAttr(kNameSpaceID_None, nsGkAtoms::selected,
+-                           EmptyString(), false);
+-          NS_ENSURE_SUCCESS(result, result);
+-        }
++        defaultSelected = GetBoolean(argv[2]);
+ 
+-        // XXX This is *untested* behavior.  Should work though.
+         if (argc > 3) {
+-          JSBool selected;
+-          JS_ValueToBoolean(aContext, argv[3], &selected);
+-
+-          return SetSelected(selected);
++          selected = GetBoolean(argv[2]);
+         }
+       }
+     }
+   }
+ 
+-  return result;
++  return Construct(text, value, defaultSelected, selected, NS_MAX(argc, 4));
++}
++
++nsresult
++nsHTMLOptionElement::Construct(const nsAString& aText, const nsAString& aValue,
++                               bool aDefaultSelected, bool aSelected,
++                               uint8_t aOptionalArgc)
++{
++  if (aOptionalArgc == 0) {
++    return NS_OK;
++  }
++
++  nsresult rv = nsContentUtils::SetNodeTextContent(this, aText, false);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  if (aOptionalArgc == 1) {
++    return NS_OK;
++  }
++
++  rv = SetAttr(kNameSpaceID_None, nsGkAtoms::value, aValue, false);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  if (aOptionalArgc == 2) {
++    return NS_OK;
++  }
++
++  if (aDefaultSelected) {
++    rv = SetAttr(kNameSpaceID_None, nsGkAtoms::selected, EmptyString(), false);
++    NS_ENSURE_SUCCESS(rv, rv);
++  }
++
++  if (aOptionalArgc == 3) {
++    return NS_OK;
++  }
++
++  return SetSelected(aSelected);
+ }
+ 
+ nsresult
+ nsHTMLOptionElement::CopyInnerTo(nsGenericElement* aDest) const
+ {
+   nsresult rv = nsGenericHTMLElement::CopyInnerTo(aDest);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 

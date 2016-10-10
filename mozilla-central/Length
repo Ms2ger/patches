@@ -1,0 +1,1412 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/accessible/src/html/HTMLFormControlAccessible.cpp b/accessible/src/html/HTMLFormControlAccessible.cpp
+--- a/accessible/src/html/HTMLFormControlAccessible.cpp
++++ b/accessible/src/html/HTMLFormControlAccessible.cpp
+@@ -157,17 +157,17 @@ HTMLRadioButtonAccessible::GetPositionAn
+   nsCOMPtr<nsIFormControl> formControlNode(do_QueryInterface(mContent));
+   dom::Element* formElm = formControlNode->GetFormElement();
+   if (formElm)
+     inputElms = NS_GetContentList(formElm, namespaceId, tagName);
+   else
+     inputElms = NS_GetContentList(mContent->OwnerDoc(), namespaceId, tagName);
+   MOZ_ASSERT(inputElms);
+ 
+-  uint32_t inputCount = inputElms->Length(false);
++  uint32_t inputCount = inputElms->InternalLength(false);
+ 
+   // Compute posinset and setsize.
+   int32_t indexOf = 0;
+   int32_t count = 0;
+ 
+   for (uint32_t index = 0; index < inputCount; index++) {
+     nsIContent* inputElm = inputElms->Item(index, false);
+     if (inputElm->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
+diff --git a/content/base/public/FragmentOrElement.h b/content/base/public/FragmentOrElement.h
+--- a/content/base/public/FragmentOrElement.h
++++ b/content/base/public/FragmentOrElement.h
+@@ -54,32 +54,35 @@ public:
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+   NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS(nsChildContentList)
+ 
+   // nsWrapperCache
+   virtual JSObject* WrapObject(JSContext *cx,
+                                JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+ 
+   // nsIDOMNodeList interface
+-  NS_DECL_NSIDOMNODELIST
++  NS_IMPL_NSIDOMNODELIST
+ 
+   // nsINodeList interface
+   virtual int32_t IndexOf(nsIContent* aContent) MOZ_OVERRIDE;
++  virtual nsINode* GetParentObject() MOZ_OVERRIDE
++  {
++    return mNode;
++  }
++  virtual uint32_t Length() MOZ_OVERRIDE
++  {
++    return mNode ? mNode->GetChildCount() : 0;
++  }
+   virtual nsIContent* Item(uint32_t aIndex) MOZ_OVERRIDE;
+ 
+   void DropReference()
+   {
+     mNode = nullptr;
+   }
+ 
+-  virtual nsINode* GetParentObject() MOZ_OVERRIDE
+-  {
+-    return mNode;
+-  }
+-
+ private:
+   // The node whose children make up the list (weak reference)
+   nsINode* mNode;
+ };
+ 
+ /**
+  * A tearoff class for FragmentOrElement to implement additional interfaces
+  */
+diff --git a/content/base/public/nsINodeList.h b/content/base/public/nsINodeList.h
+--- a/content/base/public/nsINodeList.h
++++ b/content/base/public/nsINodeList.h
+@@ -32,31 +32,39 @@ public:
+    */
+   virtual int32_t IndexOf(nsIContent* aContent) = 0;
+ 
+   /**
+    * Get the root node for this nodelist.
+    */
+   virtual nsINode* GetParentObject() = 0;
+ 
++  // WebIDL interface
++  virtual uint32_t Length() = 0;
++
++  // XPIDL interface
+   using nsIDOMNodeList::Item;
+ 
+-  uint32_t Length()
+-  {
+-    uint32_t length;
+-    GetLength(&length);
+-    return length;
+-  }
+   virtual nsIContent* Item(uint32_t aIndex) = 0;
+   nsIContent* IndexedGetter(uint32_t aIndex, bool& aFound)
+   {
+     nsIContent* item = Item(aIndex);
+     aFound = !!item;
+     return item;
+   }
+ };
+ 
++#define NS_IMPL_NSIDOMNODELIST                                                  \
++  NS_IMETHOD                                                                    \
++  GetLength(uint32_t* aLength) MOZ_OVERRIDE                                     \
++  {                                                                             \
++    *aLength = Length();                                                        \
++    return NS_OK;                                                               \
++  }                                                                             \
++  NS_IMETHOD                                                                    \
++  Item(uint32_t aIndex, nsIDOMNode** aRetval) MOZ_OVERRIDE;
++
+ #define NS_NODELIST_OFFSET_AND_INTERFACE_TABLE_BEGIN(_class)                  \
+   NS_OFFSET_AND_INTERFACE_TABLE_BEGIN_AMBIGUOUS(_class, nsINodeList)
+ 
+ NS_DEFINE_STATIC_IID_ACCESSOR(nsINodeList, NS_INODELIST_IID)
+ 
+ #endif /* nsINodeList_h___ */
+diff --git a/content/base/src/FragmentOrElement.cpp b/content/base/src/FragmentOrElement.cpp
+--- a/content/base/src/FragmentOrElement.cpp
++++ b/content/base/src/FragmentOrElement.cpp
+@@ -379,24 +379,16 @@ NS_INTERFACE_MAP_END
+ 
+ JSObject*
+ nsChildContentList::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
+ {
+   return NodeListBinding::Wrap(cx, scope, this);
+ }
+ 
+ NS_IMETHODIMP
+-nsChildContentList::GetLength(uint32_t* aLength)
+-{
+-  *aLength = mNode ? mNode->GetChildCount() : 0;
+-
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+ nsChildContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
+ {
+   nsINode* node = Item(aIndex);
+   if (!node) {
+     *aReturn = nullptr;
+ 
+     return NS_OK;
+   }
+diff --git a/content/base/src/nsContentList.cpp b/content/base/src/nsContentList.cpp
+--- a/content/base/src/nsContentList.cpp
++++ b/content/base/src/nsContentList.cpp
+@@ -79,24 +79,16 @@ NS_INTERFACE_TABLE_HEAD(nsBaseContentLis
+ NS_INTERFACE_MAP_END
+ 
+ 
+ NS_IMPL_CYCLE_COLLECTING_ADDREF(nsBaseContentList)
+ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsBaseContentList)
+ 
+ 
+ NS_IMETHODIMP
+-nsBaseContentList::GetLength(uint32_t* aLength)
+-{
+-  *aLength = mElements.Length();
+-
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+ nsBaseContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
+ {
+   nsISupports *tmp = Item(aIndex);
+ 
+   if (!tmp) {
+     *aReturn = nullptr;
+ 
+     return NS_OK;
+@@ -474,17 +466,17 @@ nsContentList::WrapObject(JSContext *cx,
+   return HTMLCollectionBinding::Wrap(cx, scope, this);
+ }
+ 
+ NS_IMPL_ISUPPORTS_INHERITED3(nsContentList, nsBaseContentList,
+                              nsIHTMLCollection, nsIDOMHTMLCollection,
+                              nsIMutationObserver)
+ 
+ uint32_t
+-nsContentList::Length(bool aDoFlush)
++nsContentList::InternalLength(bool aDoFlush)
+ {
+   BringSelfUpToDate(aDoFlush);
+     
+   return mElements.Length();
+ }
+ 
+ nsIContent *
+ nsContentList::Item(uint32_t aIndex, bool aDoFlush)
+@@ -593,24 +585,16 @@ nsContentList::NodeWillBeDestroyed(const
+   mRootNode = nullptr;
+ 
+   // We will get no more updates, so we can never know we're up to
+   // date
+   SetDirty();
+ }
+ 
+ NS_IMETHODIMP
+-nsContentList::GetLength(uint32_t* aLength)
+-{
+-  *aLength = Length(true);
+-
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+ nsContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
+ {
+   nsINode* node = Item(aIndex);
+ 
+   if (node) {
+     return CallQueryInterface(node, aReturn);
+   }
+ 
+diff --git a/content/base/src/nsContentList.h b/content/base/src/nsContentList.h
+--- a/content/base/src/nsContentList.h
++++ b/content/base/src/nsContentList.h
+@@ -41,26 +41,27 @@ public:
+   nsBaseContentList()
+   {
+     SetIsDOMBinding();
+   }
+   virtual ~nsBaseContentList();
+ 
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+ 
+-  // nsIDOMNodeList
+-  NS_DECL_NSIDOMNODELIST
++  // nsIDOMNodeList interface
++  NS_IMPL_NSIDOMNODELIST
+ 
+-  // nsINodeList
++  // nsINodeList interface
+   virtual int32_t IndexOf(nsIContent* aContent) MOZ_OVERRIDE;
+-  virtual nsIContent* Item(uint32_t aIndex) MOZ_OVERRIDE;
+-
+-  uint32_t Length() const { 
++  virtual nsINode* GetParentObject() MOZ_OVERRIDE = 0;
++  virtual uint32_t Length() MOZ_OVERRIDE
++  { 
+     return mElements.Length();
+   }
++  virtual nsIContent* Item(uint32_t aIndex) MOZ_OVERRIDE;
+ 
+   NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS(nsBaseContentList)
+ 
+   void AppendElement(nsIContent *aContent)
+   {
+     mElements.AppendElement(aContent);
+   }
+   void MaybeAppendElement(nsIContent* aContent)
+@@ -236,35 +237,44 @@ public:
+                 bool aFuncMayDependOnAttr = true);
+   virtual ~nsContentList();
+ 
+   // nsWrapperCache
+   using nsWrapperCache::GetWrapperPreserveColor;
+   virtual JSObject* WrapObject(JSContext *cx,
+                                JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+ 
+-  // nsIDOMHTMLCollection
+-  NS_DECL_NSIDOMHTMLCOLLECTION
++  // nsIDOMHTMLCollection interface
++  NS_IMPL_NSIDOMHTMLCOLLECTION
+ 
+-  // nsBaseContentList overrides
+-  virtual int32_t IndexOf(nsIContent *aContent, bool aDoFlush) MOZ_OVERRIDE;
+-  virtual int32_t IndexOf(nsIContent* aContent) MOZ_OVERRIDE;
++  // nsINodeList & nsIHTMLCollection interfaces
+   virtual nsINode* GetParentObject() MOZ_OVERRIDE
+   {
+     return mRootNode;
+   }
++  virtual uint32_t Length() MOZ_OVERRIDE
++  {
++    return InternalLength(true);
++  }
+ 
++  // nsINodeList interface
++  virtual int32_t IndexOf(nsIContent* aContent) MOZ_OVERRIDE;
+   virtual nsIContent* Item(uint32_t aIndex) MOZ_OVERRIDE;
++
++  // nsIHTMLCollection interface
+   virtual mozilla::dom::Element* GetElementAt(uint32_t index) MOZ_OVERRIDE;
+-  virtual JSObject* NamedItem(JSContext* cx, const nsAString& name,
+-                              mozilla::ErrorResult& error) MOZ_OVERRIDE;
++  virtual JSObject* NamedItem(JSContext* aCx, const nsAString& aName,
++                              mozilla::ErrorResult& aError) MOZ_OVERRIDE;
+   virtual void GetSupportedNames(nsTArray<nsString>& aNames) MOZ_OVERRIDE;
+ 
++  // nsBaseContentList overrides
++  virtual int32_t IndexOf(nsIContent* aContent, bool aDoFlush) MOZ_OVERRIDE;
++
+   // nsContentList public methods
+-  NS_HIDDEN_(uint32_t) Length(bool aDoFlush);
++  NS_HIDDEN_(uint32_t) InternalLength(bool aDoFlush);
+   NS_HIDDEN_(nsIContent*) Item(uint32_t aIndex, bool aDoFlush);
+   NS_HIDDEN_(nsIContent*) NamedItem(const nsAString& aName, bool aDoFlush);
+ 
+   // nsIMutationObserver
+   NS_DECL_NSIMUTATIONOBSERVER_ATTRIBUTECHANGED
+   NS_DECL_NSIMUTATIONOBSERVER_CONTENTAPPENDED
+   NS_DECL_NSIMUTATIONOBSERVER_CONTENTINSERTED
+   NS_DECL_NSIMUTATIONOBSERVER_CONTENTREMOVED
+diff --git a/content/base/src/nsDocument.cpp b/content/base/src/nsDocument.cpp
+--- a/content/base/src/nsDocument.cpp
++++ b/content/base/src/nsDocument.cpp
+@@ -5225,17 +5225,17 @@ nsDocument::Register(JSContext* aCx, con
+     }
+   }
+ 
+   // Associate the prototype with the custom element.
+   mCustomPrototypes.Put(lcName, protoObject);
+ 
+   // Do element upgrade.
+   nsRefPtr<nsContentList> list = GetElementsByTagName(lcName);
+-  for (uint32_t i = 0; i < list->Length(false); i++) {
++  for (uint32_t i = 0; i < list->InternalLength(false); i++) {
+     nsCOMPtr<nsINode> oldNode = list->Item(i, false);
+ 
+     // TODO(wchen): Perform upgrade on Shadow DOM when implemented.
+     // Bug 806506.
+     nsCOMPtr<nsINode> newNode;
+     rv = nsNodeUtils::Clone(oldNode, true, getter_AddRefs(newNode));
+     if (rv.Failed()) {
+       return nullptr;
+@@ -7545,17 +7545,17 @@ nsDocument::Sanitize()
+   // First locate all input elements, regardless of whether they are
+   // in a form, and reset the password and autocomplete=off elements.
+ 
+   nsRefPtr<nsContentList> nodes = GetElementsByTagName(NS_LITERAL_STRING("input"));
+ 
+   nsCOMPtr<nsIContent> item;
+   nsAutoString value;
+ 
+-  uint32_t length = nodes->Length(true);
++  uint32_t length = nodes->Length();
+   for (uint32_t i = 0; i < length; ++i) {
+     NS_ASSERTION(nodes->Item(i), "null item in node list!");
+ 
+     nsCOMPtr<nsIDOMHTMLInputElement> input = do_QueryInterface(nodes->Item(i));
+     if (!input)
+       continue;
+ 
+     bool resetValue = false;
+@@ -7573,17 +7573,17 @@ nsDocument::Sanitize()
+       nsCOMPtr<nsIFormControl> fc = do_QueryInterface(input);
+       fc->Reset();
+     }
+   }
+ 
+   // Now locate all _form_ elements that have autocomplete=off and reset them
+   nodes = GetElementsByTagName(NS_LITERAL_STRING("form"));
+ 
+-  length = nodes->Length(true);
++  length = nodes->Length();
+   for (uint32_t i = 0; i < length; ++i) {
+     NS_ASSERTION(nodes->Item(i), "null item in nodelist");
+ 
+     nsCOMPtr<nsIDOMHTMLFormElement> form = do_QueryInterface(nodes->Item(i));
+     if (!form)
+       continue;
+ 
+     form->GetAttribute(NS_LITERAL_STRING("autocomplete"), value);
+@@ -8028,17 +8028,17 @@ nsDocument::OnPageShow(bool aPersisted,
+ 
+   Element* root = GetRootElement();
+   if (aPersisted && root) {
+     // Send out notifications that our <link> elements are attached.
+     nsRefPtr<nsContentList> links = NS_GetContentList(root,
+                                                       kNameSpaceID_Unknown,
+                                                       NS_LITERAL_STRING("link"));
+ 
+-    uint32_t linkCount = links->Length(true);
++    uint32_t linkCount = links->Length();
+     for (uint32_t i = 0; i < linkCount; ++i) {
+       nsCOMPtr<nsILink> link = do_QueryInterface(links->Item(i, false));
+       if (link) {
+         link->LinkAdded();
+       }
+     }
+   }
+ 
+@@ -8092,17 +8092,17 @@ nsDocument::OnPageHide(bool aPersisted,
+   // Send out notifications that our <link> elements are detached,
+   // but only if this is not a full unload.
+   Element* root = GetRootElement();
+   if (aPersisted && root) {
+     nsRefPtr<nsContentList> links = NS_GetContentList(root,
+                                                       kNameSpaceID_Unknown,
+                                                       NS_LITERAL_STRING("link"));
+ 
+-    uint32_t linkCount = links->Length(true);
++    uint32_t linkCount = links->Length();
+     for (uint32_t i = 0; i < linkCount; ++i) {
+       nsCOMPtr<nsILink> link = do_QueryInterface(links->Item(i, false));
+       if (link) {
+         link->LinkRemoved();
+       }
+     }
+   }
+ 
+@@ -8992,17 +8992,17 @@ nsDocument::FindImageMap(const nsAString
+   }
+ 
+   const nsAString& mapName = Substring(start, end);
+ 
+   if (!mImageMaps) {
+     mImageMaps = new nsContentList(this, kNameSpaceID_XHTML, nsGkAtoms::map, nsGkAtoms::map);
+   }
+ 
+-  uint32_t i, n = mImageMaps->Length(true);
++  uint32_t i, n = mImageMaps->Length();
+   nsString name;
+   for (i = 0; i < n; ++i) {
+     nsIContent* map = mImageMaps->Item(i);
+     if (map->AttrValueIs(kNameSpaceID_None, nsGkAtoms::id, mapName,
+                          eCaseMatters) ||
+         (map->GetAttr(kNameSpaceID_None, nsGkAtoms::name, name) &&
+          mapName.Equals(name, nsCaseInsensitiveStringComparator()))) {
+       return map->AsElement();
+diff --git a/content/html/content/public/nsIHTMLCollection.h b/content/html/content/public/nsIHTMLCollection.h
+--- a/content/html/content/public/nsIHTMLCollection.h
++++ b/content/html/content/public/nsIHTMLCollection.h
+@@ -36,52 +36,62 @@ class nsIHTMLCollection : public nsIDOMH
+ public:
+   NS_DECLARE_STATIC_IID_ACCESSOR(NS_IHTMLCOLLECTION_IID)
+ 
+   /**
+    * Get the root node for this HTML collection.
+    */
+   virtual nsINode* GetParentObject() = 0;
+ 
++  // WebIDL interface
++  virtual uint32_t Length() = 0;
++
++  // XPIDL interface
+   using nsIDOMHTMLCollection::Item;
+   using nsIDOMHTMLCollection::NamedItem;
+ 
+-  uint32_t Length()
+-  {
+-    uint32_t length;
+-    GetLength(&length);
+-    return length;
+-  }
+   virtual mozilla::dom::Element* GetElementAt(uint32_t index) = 0;
+   mozilla::dom::Element* Item(uint32_t index)
+   {
+     return GetElementAt(index);
+   }
+   mozilla::dom::Element* IndexedGetter(uint32_t index, bool& aFound)
+   {
+     mozilla::dom::Element* item = Item(index);
+     aFound = !!item;
+     return item;
+   }
+-  virtual JSObject* NamedItem(JSContext* cx, const nsAString& name,
+-                              mozilla::ErrorResult& error) = 0;
+-  JSObject* NamedGetter(JSContext* cx, const nsAString& name,
+-                        bool& found, mozilla::ErrorResult& error)
++  virtual JSObject* NamedItem(JSContext* aCx, const nsAString& aName,
++                              mozilla::ErrorResult& aError) = 0;
++  JSObject* NamedGetter(JSContext* aCx, const nsAString& aName,
++                        bool& aFound, mozilla::ErrorResult& aError)
+   {
+-    JSObject* namedItem = NamedItem(cx, name, error);
+-    found = !!namedItem;
++    JSObject* namedItem = NamedItem(aCx, aName, aError);
++    aFound = !!namedItem;
+     return namedItem;
+   }
+ 
+   virtual void GetSupportedNames(nsTArray<nsString>& aNames) = 0;
+ 
+   JSObject* GetWrapperPreserveColor()
+   {
+     nsWrapperCache* cache;
+     CallQueryInterface(this, &cache);
+     return cache->GetWrapperPreserveColor();
+   }
+   virtual JSObject* WrapObject(JSContext *cx, JS::Handle<JSObject*> scope) = 0;
+ };
+ 
++#define NS_IMPL_NSIDOMHTMLCOLLECTION                                            \
++  NS_IMETHOD                                                                    \
++  GetLength(uint32_t* aLength) MOZ_OVERRIDE                                     \
++  {                                                                             \
++    *aLength = Length();                                                        \
++    return NS_OK;                                                               \
++  }                                                                             \
++  NS_IMETHOD                                                                    \
++  Item(uint32_t aIndex, nsIDOMNode** aRetval) MOZ_OVERRIDE;                     \
++  NS_IMETHOD                                                                    \
++  NamedItem(const nsAString& aName, nsIDOMNode** aRetval) MOZ_OVERRIDE;
++
+ NS_DEFINE_STATIC_IID_ACCESSOR(nsIHTMLCollection, NS_IHTMLCOLLECTION_IID)
+ 
+ #endif /* nsIHTMLCollection_h___ */
+diff --git a/content/html/content/src/HTMLFieldSetElement.cpp b/content/html/content/src/HTMLFieldSetElement.cpp
+--- a/content/html/content/src/HTMLFieldSetElement.cpp
++++ b/content/html/content/src/HTMLFieldSetElement.cpp
+@@ -86,18 +86,18 @@ HTMLFieldSetElement::AfterSetAttr(int32_
+ {
+   if (aNameSpaceID == kNameSpaceID_None && aName == nsGkAtoms::disabled &&
+       nsINode::GetFirstChild()) {
+     if (!mElements) {
+       mElements = new nsContentList(this, MatchListedElements, nullptr, nullptr,
+                                     true);
+     }
+ 
+-    uint32_t length = mElements->Length(true);
+-    for (uint32_t i=0; i<length; ++i) {
++    uint32_t length = mElements->Length();
++    for (uint32_t i = 0; i < length; ++i) {
+       static_cast<nsGenericHTMLFormElement*>(mElements->Item(i))
+         ->FieldSetDisabledChanged(aNotify);
+     }
+   }
+ 
+   return nsGenericHTMLFormElement::AfterSetAttr(aNameSpaceID, aName,
+                                                 aValue, aNotify);
+ }
+@@ -223,17 +223,17 @@ HTMLFieldSetElement::NotifyElementsForFi
+    * This should also make sure that mElements is set when we happen to be here.
+    * However, this method shouldn't be called very often in normal use cases.
+    */
+   if (!mElements) {
+     mElements = new nsContentList(this, MatchListedElements, nullptr, nullptr,
+                                   true);
+   }
+ 
+-  uint32_t length = mElements->Length(true);
++  uint32_t length = mElements->Length();
+   for (uint32_t i = 0; i < length; ++i) {
+     static_cast<nsGenericHTMLFormElement*>(mElements->Item(i))
+       ->FieldSetFirstLegendChanged(aNotify);
+   }
+ }
+ 
+ JSObject*
+ HTMLFieldSetElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+diff --git a/content/html/content/src/HTMLFormElement.cpp b/content/html/content/src/HTMLFormElement.cpp
+--- a/content/html/content/src/HTMLFormElement.cpp
++++ b/content/html/content/src/HTMLFormElement.cpp
+@@ -108,27 +108,32 @@ public:
+ 
+   nsresult Init();
+ 
+   void DropFormReference();
+ 
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+ 
+   // nsIDOMHTMLCollection interface
+-  NS_DECL_NSIDOMHTMLCOLLECTION
+-
+-  virtual Element* GetElementAt(uint32_t index);
+-  virtual nsINode* GetParentObject()
++  NS_IMPL_NSIDOMHTMLCOLLECTION
++
++  // nsIHTMLCollection interface
++  virtual nsINode* GetParentObject() MOZ_OVERRIDE
+   {
+     return mForm;
+   }
+-
+-  virtual JSObject* NamedItem(JSContext* cx, const nsAString& name,
+-                              mozilla::ErrorResult& error);
+-  virtual void GetSupportedNames(nsTArray<nsString>& aNames);
++  virtual uint32_t Length() MOZ_OVERRIDE
++  {
++    FlushPendingNotifications();
++    return mElements.Length();
++  }
++  virtual Element* GetElementAt(uint32_t aIndex) MOZ_OVERRIDE;
++  virtual JSObject* NamedItem(JSContext* aCx, const nsAString& aName,
++                              mozilla::ErrorResult& aError) MOZ_OVERRIDE;
++  virtual void GetSupportedNames(nsTArray<nsString>& aNames) MOZ_OVERRIDE;
+ 
+   nsresult AddElementToTable(nsGenericHTMLFormElement* aChild,
+                              const nsAString& aName);
+   nsresult AddImageElementToTable(HTMLImageElement* aChild,
+                                   const nsAString& aName);
+   nsresult RemoveElementFromTable(nsGenericHTMLFormElement* aChild,
+                                   const nsAString& aName);
+   nsresult IndexOfControl(nsIFormControl* aControl,
+@@ -1092,19 +1097,17 @@ HTMLFormElement::WalkFormElements(nsForm
+   return NS_OK;
+ }
+ 
+ // nsIForm
+ 
+ NS_IMETHODIMP_(uint32_t)
+ HTMLFormElement::GetElementCount() const 
+ {
+-  uint32_t count = 0;
+-  mControls->GetLength(&count); 
+-  return count;
++  return mControls->Length();
+ }
+ 
+ Element*
+ HTMLFormElement::IndexedGetter(uint32_t aIndex, bool &aFound)
+ {
+   Element* element = mControls->mElements.SafeElementAt(aIndex, nullptr);
+   aFound = element != nullptr;
+   return element;
+@@ -1363,17 +1366,16 @@ HTMLFormElement::AddElementToTable(nsGen
+ 
+ nsresult
+ HTMLFormElement::RemoveElement(nsGenericHTMLFormElement* aChild,
+                                bool aUpdateValidity)
+ {
+   //
+   // Remove it from the radio group if it's a radio button
+   //
+-  nsresult rv = NS_OK;
+   if (aChild->GetType() == NS_FORM_INPUT_RADIO) {
+     nsRefPtr<HTMLInputElement> radio =
+       static_cast<HTMLInputElement*>(aChild);
+     radio->WillRemoveFromRadioGroup();
+   }
+ 
+   // Determine whether to remove the child from the elements list
+   // or the not in elements list.
+@@ -1422,17 +1424,17 @@ HTMLFormElement::RemoveElement(nsGeneric
+   if (aUpdateValidity) {
+     nsCOMPtr<nsIConstraintValidation> cvElmt = do_QueryObject(aChild);
+     if (cvElmt &&
+         cvElmt->IsCandidateForConstraintValidation() && !cvElmt->IsValid()) {
+       UpdateValidity(true);
+     }
+   }
+ 
+-  return rv;
++  return NS_OK;
+ }
+ 
+ void
+ HTMLFormElement::HandleDefaultSubmitRemoval()
+ {
+   if (mDefaultSubmitElement) {
+     // Already got reset somehow; nothing else to do here
+     return;
+@@ -1488,19 +1490,17 @@ HTMLFormElement::RemoveElementFromTableI
+   nsCOMPtr<nsIDOMNodeList> nodeList(do_QueryInterface(supports));
+   NS_ENSURE_TRUE(nodeList, NS_ERROR_FAILURE);
+ 
+   // Upcast, uggly, but it works!
+   nsBaseContentList *list = static_cast<nsBaseContentList*>(nodeList.get());
+ 
+   list->RemoveElement(aChild);
+ 
+-  uint32_t length = 0;
+-  list->GetLength(&length);
+-
++  uint32_t length = list->Length();
+   if (!length) {
+     // If the list is empty we remove if from our hash, this shouldn't
+     // happen tho
+     aTable.Remove(aName);
+     ++mExpandoAndGeneration.generation;
+   } else if (length == 1) {
+     // Only one element left, replace the list in the hash with the
+     // single element.
+@@ -2441,24 +2441,16 @@ NS_INTERFACE_MAP_END
+ 
+ NS_IMPL_CYCLE_COLLECTING_ADDREF(nsFormControlList)
+ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsFormControlList)
+ 
+ 
+ // nsIDOMHTMLCollection interface
+ 
+ NS_IMETHODIMP
+-nsFormControlList::GetLength(uint32_t* aLength)
+-{
+-  FlushPendingNotifications();
+-  *aLength = mElements.Length();
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+ nsFormControlList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
+ {
+   nsISupports* item = GetElementAt(aIndex);
+   if (!item) {
+     *aReturn = nullptr;
+ 
+     return NS_OK;
+   }
+diff --git a/content/html/content/src/HTMLOptionsCollection.cpp b/content/html/content/src/HTMLOptionsCollection.cpp
+--- a/content/html/content/src/HTMLOptionsCollection.cpp
++++ b/content/html/content/src/HTMLOptionsCollection.cpp
+@@ -115,24 +115,16 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(HTMLOpt
+ 
+ JSObject*
+ HTMLOptionsCollection::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+ {
+   return HTMLOptionsCollectionBinding::Wrap(aCx, aScope, this);
+ }
+ 
+ NS_IMETHODIMP
+-HTMLOptionsCollection::GetLength(uint32_t* aLength)
+-{
+-  *aLength = mElements.Length();
+-
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+ HTMLOptionsCollection::SetLength(uint32_t aLength)
+ {
+   if (!mSelect) {
+     return NS_ERROR_UNEXPECTED;
+   }
+ 
+   return mSelect->SetLength(aLength);
+ }
+@@ -362,18 +354,17 @@ HTMLOptionsCollection::Add(const HTMLOpt
+ void
+ HTMLOptionsCollection::Remove(int32_t aIndex, ErrorResult& aError)
+ {
+   if (!mSelect) {
+     aError.Throw(NS_ERROR_UNEXPECTED);
+     return;
+   }
+ 
+-  uint32_t len = 0;
+-  mSelect->GetLength(&len);
++  uint32_t len = Length();
+   if (aIndex < 0 || (uint32_t)aIndex >= len)
+     aIndex = 0;
+ 
+   aError = mSelect->Remove(aIndex);
+ }
+ 
+ NS_IMETHODIMP
+ HTMLOptionsCollection::Remove(int32_t aIndex)
+diff --git a/content/html/content/src/HTMLOptionsCollection.h b/content/html/content/src/HTMLOptionsCollection.h
+--- a/content/html/content/src/HTMLOptionsCollection.h
++++ b/content/html/content/src/HTMLOptionsCollection.h
+@@ -40,24 +40,38 @@ public:
+ 
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+ 
+   // nsWrapperCache
+   using nsWrapperCache::GetWrapperPreserveColor;
+   virtual JSObject* WrapObject(JSContext* cx,
+                                JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+ 
++  // nsIHTMLCollection interface
++  virtual nsINode* GetParentObject() MOZ_OVERRIDE;
++  virtual uint32_t Length() MOZ_OVERRIDE
++  {
++    return mElements.Length();
++  }
++  virtual Element* GetElementAt(uint32_t aIndex) MOZ_OVERRIDE;
++  virtual JSObject* NamedItem(JSContext* aCx, const nsAString& aName,
++                              ErrorResult& aError) MOZ_OVERRIDE;
++  virtual void GetSupportedNames(nsTArray<nsString>& aNames) MOZ_OVERRIDE;
++
++  // nsIDOMHTMLCollection interface
++  NS_IMPL_NSIDOMHTMLCOLLECTION
++
+   // nsIDOMHTMLOptionsCollection interface
+-  NS_DECL_NSIDOMHTMLOPTIONSCOLLECTION
+-
+-  // nsIDOMHTMLCollection interface, all its methods are defined in
+-  // nsIDOMHTMLOptionsCollection
+-
+-  virtual Element* GetElementAt(uint32_t aIndex);
+-  virtual nsINode* GetParentObject() MOZ_OVERRIDE;
++  NS_IMETHOD SetLength(uint32_t aLength) MOZ_OVERRIDE;
++  NS_IMETHOD GetSelectedIndex(int32_t* aSelectedIndex) MOZ_OVERRIDE;
++  NS_IMETHOD SetSelectedIndex(int32_t aSelectedIndex) MOZ_OVERRIDE;
++  NS_IMETHOD SetOption(uint32_t index, nsIDOMHTMLOptionElement* option) MOZ_OVERRIDE;
++  NS_IMETHOD GetSelect(nsIDOMHTMLSelectElement** aSelect) MOZ_OVERRIDE;
++  NS_IMETHOD Add(nsIDOMHTMLOptionElement* option, nsIVariant* before) MOZ_OVERRIDE;
++  NS_IMETHOD Remove(int32_t index) MOZ_OVERRIDE;
+ 
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(HTMLOptionsCollection,
+                                                          nsIHTMLCollection)
+ 
+   // Helpers for HTMLSelectElement
+   /**
+    * Insert an option
+    * @param aOption the option to insert
+@@ -118,31 +132,27 @@ public:
+    * @param aForward TRUE to look forward, FALSE to look backward
+    * @return the option index
+    */
+   nsresult GetOptionIndex(Element* aOption,
+                           int32_t aStartIndex, bool aForward,
+                           int32_t* aIndex);
+ 
+   HTMLOptionElement* GetNamedItem(const nsAString& aName) const;
+-  virtual JSObject* NamedItem(JSContext* aCx, const nsAString& aName,
+-                              ErrorResult& error) MOZ_OVERRIDE;
+-
+   void Add(const HTMLOptionOrOptGroupElement& aElement,
+            const Nullable<HTMLElementOrLong>& aBefore,
+            ErrorResult& aError);
+   void Remove(int32_t aIndex, ErrorResult& aError);
+   int32_t GetSelectedIndex(ErrorResult& aError);
+   void SetSelectedIndex(int32_t aSelectedIndex, ErrorResult& aError);
+   void IndexedSetter(uint32_t aIndex, nsIDOMHTMLOptionElement* aOption,
+                      ErrorResult& aError)
+   {
+     aError = SetOption(aIndex, aOption);
+   }
+-  virtual void GetSupportedNames(nsTArray<nsString>& aNames) MOZ_OVERRIDE;
+ 
+ private:
+   /** The list of options (holds strong references).  This is infallible, so
+    * various members such as InsertOptionAt are also infallible. */
+   nsTArray<nsRefPtr<mozilla::dom::HTMLOptionElement> > mElements;
+   /** The select element that contains this array */
+   HTMLSelectElement* mSelect;
+ };
+diff --git a/content/html/content/src/HTMLPropertiesCollection.cpp b/content/html/content/src/HTMLPropertiesCollection.cpp
+--- a/content/html/content/src/HTMLPropertiesCollection.cpp
++++ b/content/html/content/src/HTMLPropertiesCollection.cpp
+@@ -96,24 +96,16 @@ HTMLPropertiesCollection::SetDocument(ns
+ 
+ JSObject*
+ HTMLPropertiesCollection::WrapObject(JSContext* cx, JS::Handle<JSObject*> scope)
+ {
+   return HTMLPropertiesCollectionBinding::Wrap(cx, scope, this);
+ }
+ 
+ NS_IMETHODIMP
+-HTMLPropertiesCollection::GetLength(uint32_t* aLength)
+-{
+-  EnsureFresh();
+-  *aLength = mProperties.Length();
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+ HTMLPropertiesCollection::Item(uint32_t aIndex, nsIDOMNode** aResult)
+ {
+   nsINode* result = nsIHTMLCollection::Item(aIndex);
+   if (result) {
+     NS_ADDREF(*aResult = result->AsDOMNode());
+   } else {
+     *aResult = nullptr;
+   }
+@@ -358,24 +350,16 @@ PropertyNodeList::SetDocument(nsIDocumen
+   mDoc = aDoc;
+   if (mDoc) {
+     mDoc->AddMutationObserver(this);
+   }
+   mIsDirty = true;
+ }
+ 
+ NS_IMETHODIMP
+-PropertyNodeList::GetLength(uint32_t* aLength)
+-{
+-  EnsureFresh();
+-  *aLength = mElements.Length();
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+ PropertyNodeList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
+ {
+   EnsureFresh();
+   nsINode* element = mElements.SafeElementAt(aIndex);
+   if (!element) {
+     *aReturn = nullptr;
+     return NS_OK;
+   }
+diff --git a/content/html/content/src/HTMLPropertiesCollection.h b/content/html/content/src/HTMLPropertiesCollection.h
+--- a/content/html/content/src/HTMLPropertiesCollection.h
++++ b/content/html/content/src/HTMLPropertiesCollection.h
+@@ -51,40 +51,48 @@ class HTMLPropertiesCollection : public 
+                                  public nsWrapperCache
+ {
+   friend class PropertyNodeList;
+   friend class PropertyStringList;
+ public:
+   HTMLPropertiesCollection(nsGenericHTMLElement* aRoot);
+   virtual ~HTMLPropertiesCollection();
+ 
++  // nsWrapperCache
+   using nsWrapperCache::GetWrapperPreserveColor;
+   virtual JSObject* WrapObject(JSContext *cx,
+                                JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+ 
+-  virtual Element* GetElementAt(uint32_t aIndex);
++  // nsIDOMHTMLCollection interface
++  NS_IMPL_NSIDOMHTMLCOLLECTION
++
++  // nsIHTMLCollection interface
++  virtual nsINode* GetParentObject() MOZ_OVERRIDE;
++  virtual uint32_t Length() MOZ_OVERRIDE
++  {
++    EnsureFresh();
++    return mProperties.Length();
++  }
++  virtual Element* GetElementAt(uint32_t aIndex) MOZ_OVERRIDE;
++  virtual JSObject* NamedItem(JSContext* aCx, const nsAString& aName,
++                              ErrorResult& aError) MOZ_OVERRIDE;
++  virtual void GetSupportedNames(nsTArray<nsString>& aNames) MOZ_OVERRIDE;
+ 
+   void SetDocument(nsIDocument* aDocument);
+-  nsINode* GetParentObject() MOZ_OVERRIDE;
+-  virtual JSObject* NamedItem(JSContext* cx, const nsAString& name,
+-                              mozilla::ErrorResult& error) MOZ_OVERRIDE;
+   PropertyNodeList* NamedItem(const nsAString& aName);
+   PropertyNodeList* NamedGetter(const nsAString& aName, bool& aFound)
+   {
+     aFound = IsSupportedNamedProperty(aName);
+     return aFound ? NamedItem(aName) : nullptr;
+   }
+   nsDOMStringList* Names()
+   {
+     EnsureFresh();
+     return mNames;
+   }
+-  virtual void GetSupportedNames(nsTArray<nsString>& aNames) MOZ_OVERRIDE;
+-
+-  NS_DECL_NSIDOMHTMLCOLLECTION
+ 
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+ 
+   NS_DECL_NSIMUTATIONOBSERVER_ATTRIBUTECHANGED
+   NS_DECL_NSIMUTATIONOBSERVER_CONTENTAPPENDED
+   NS_DECL_NSIMUTATIONOBSERVER_CONTENTINSERTED
+   NS_DECL_NSIMUTATIONOBSERVER_CONTENTREMOVED
+ 
+@@ -129,41 +137,48 @@ protected:
+ class PropertyNodeList : public nsINodeList,
+                          public nsStubMutationObserver
+ {
+ public:
+   PropertyNodeList(HTMLPropertiesCollection* aCollection,
+                    nsIContent* aRoot, const nsAString& aName);
+   virtual ~PropertyNodeList();
+ 
++  // nsWrapperCache
+   virtual JSObject* WrapObject(JSContext *cx,
+                                JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+ 
++  // nsIDOMNodeList interface
++  NS_IMPL_NSIDOMNODELIST
++
++  // nsINodeList interface
++  virtual int32_t IndexOf(nsIContent* aContent) MOZ_OVERRIDE;
++  virtual nsINode* GetParentObject() MOZ_OVERRIDE;
++  virtual uint32_t Length() MOZ_OVERRIDE
++  {
++    EnsureFresh();
++    return mElements.Length();
++  }
++  virtual nsIContent* Item(uint32_t aIndex) MOZ_OVERRIDE;
++
+   void SetDocument(nsIDocument* aDocument);
+ 
+   void GetValues(JSContext* aCx, nsTArray<JS::Value >& aResult,
+                  ErrorResult& aError);
+ 
+-  virtual nsIContent* Item(uint32_t aIndex) MOZ_OVERRIDE;
+-
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+ 
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(PropertyNodeList,
+                                                          nsINodeList)
+-  NS_DECL_NSIDOMNODELIST
+ 
+   NS_DECL_NSIMUTATIONOBSERVER_ATTRIBUTECHANGED
+   NS_DECL_NSIMUTATIONOBSERVER_CONTENTAPPENDED
+   NS_DECL_NSIMUTATIONOBSERVER_CONTENTINSERTED
+   NS_DECL_NSIMUTATIONOBSERVER_CONTENTREMOVED
+ 
+-  // nsINodeList interface
+-  virtual int32_t IndexOf(nsIContent* aContent) MOZ_OVERRIDE;
+-  virtual nsINode* GetParentObject() MOZ_OVERRIDE;
+-
+   void AppendElement(nsGenericHTMLElement* aElement)
+   {
+     mElements.AppendElement(aElement);
+   }
+ 
+   void Clear()
+   {
+     mElements.Clear();
+diff --git a/content/html/content/src/HTMLSelectElement.cpp b/content/html/content/src/HTMLSelectElement.cpp
+--- a/content/html/content/src/HTMLSelectElement.cpp
++++ b/content/html/content/src/HTMLSelectElement.cpp
+@@ -521,19 +521,17 @@ HTMLSelectElement::GetOptionIndexAt(nsIC
+ int32_t
+ HTMLSelectElement::GetOptionIndexAfter(nsIContent* aOptions)
+ {
+   // - If this is the select, the next option is the last.
+   // - If not, search all the options after aOptions and up to the last option
+   //   in the parent.
+   // - If it's not there, search for the first option after the parent.
+   if (aOptions == this) {
+-    uint32_t len;
+-    GetLength(&len);
+-    return len;
++    return Length();
+   }
+ 
+   int32_t retval = -1;
+ 
+   nsCOMPtr<nsIContent> parent = aOptions->GetParent();
+ 
+   if (parent) {
+     int32_t index = parent->IndexOf(aOptions);
+@@ -727,30 +725,27 @@ HTMLSelectElement::GetType(nsAString& aT
+   }
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ HTMLSelectElement::GetLength(uint32_t* aLength)
+ {
+-  return mOptions->GetLength(aLength);
++  *aLength = Length();
++  return NS_OK;
+ }
+ 
+ #define MAX_DYNAMIC_SELECT_LENGTH 10000
+ 
+ NS_IMETHODIMP
+ HTMLSelectElement::SetLength(uint32_t aLength)
+ {
+-  uint32_t curlen;
+-  nsresult rv = GetLength(&curlen);
+-  if (NS_FAILED(rv)) {
+-    curlen = 0;
+-  }
+-
++  uint32_t curlen = Length();
++  nsresult rv = NS_OK;
+   if (curlen > aLength) { // Remove extra options
+     for (uint32_t i = curlen; i > aLength && NS_SUCCEEDED(rv); --i) {
+       rv = Remove(i - 1);
+     }
+   } else if (aLength > curlen) {
+     if (aLength > MAX_DYNAMIC_SELECT_LENGTH) {
+       return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
+     }
+@@ -884,18 +879,17 @@ HTMLSelectElement::OnOptionSelected(nsIS
+   UpdateState(aNotify);
+ }
+ 
+ void
+ HTMLSelectElement::FindSelectedIndex(int32_t aStartIndex, bool aNotify)
+ {
+   mSelectedIndex = -1;
+   SetSelectionChanged(true, aNotify);
+-  uint32_t len;
+-  GetLength(&len);
++  uint32_t len = Length();
+   for (int32_t i = aStartIndex; i < int32_t(len); i++) {
+     if (IsOptionSelectedByIndex(i)) {
+       mSelectedIndex = i;
+       SetSelectionChanged(true, aNotify);
+       break;
+     }
+   }
+ }
+@@ -943,18 +937,17 @@ HTMLSelectElement::SetOptionsSelectedByI
+   }
+ 
+   // Don't bother if the select is disabled
+   if (!aSetDisabled && IsDisabled()) {
+     return NS_OK;
+   }
+ 
+   // Don't bother if there are no options
+-  uint32_t numItems = 0;
+-  GetLength(&numItems);
++  uint32_t numItems = Length();
+   if (numItems == 0) {
+     return NS_OK;
+   }
+ 
+   // First, find out whether multiple items can be selected
+   bool isMultiple = HasAttr(kNameSpaceID_None, nsGkAtoms::multiple);
+ 
+   // These variables tell us whether any options were selected
+@@ -1285,18 +1278,17 @@ HTMLSelectElement::CheckSelectSomething(
+ bool
+ HTMLSelectElement::SelectSomething(bool aNotify)
+ {
+   // If we're not done building the select, don't play with this yet.
+   if (!mIsDoneAddingChildren) {
+     return false;
+   }
+ 
+-  uint32_t count;
+-  GetLength(&count);
++  uint32_t count = Length();
+   for (uint32_t i = 0; i < count; i++) {
+     bool disabled;
+     nsresult rv = IsOptionDisabled(i, &disabled);
+ 
+     if (NS_FAILED(rv) || !disabled) {
+       rv = SetSelectedIndexInternal(i, aNotify);
+       NS_ENSURE_SUCCESS(rv, false);
+ 
+@@ -1591,18 +1583,17 @@ HTMLSelectElement::IntrinsicState() cons
+ 
+ // nsIFormControl
+ 
+ NS_IMETHODIMP
+ HTMLSelectElement::SaveState()
+ {
+   nsRefPtr<SelectState> state = new SelectState();
+ 
+-  uint32_t len;
+-  GetLength(&len);
++  uint32_t len = Length();
+ 
+   for (uint32_t optIndex = 0; optIndex < len; optIndex++) {
+     nsIDOMHTMLOptionElement* option = mOptions->ItemAsOption(optIndex);
+     if (option) {
+       bool isSelected;
+       option->GetSelected(&isSelected);
+       if (isSelected) {
+         nsAutoString value;
+@@ -1652,18 +1643,17 @@ HTMLSelectElement::RestoreState(nsPresSt
+ void
+ HTMLSelectElement::RestoreStateTo(SelectState* aNewSelected)
+ {
+   if (!mIsDoneAddingChildren) {
+     mRestoreState = aNewSelected;
+     return;
+   }
+ 
+-  uint32_t len;
+-  GetLength(&len);
++  uint32_t len = Length();
+ 
+   // First clear all
+   SetOptionsSelectedByIndex(-1, -1, true, true, true, true, nullptr);
+ 
+   // Next set the proper ones
+   for (int32_t i = 0; i < int32_t(len); i++) {
+     nsIDOMHTMLOptionElement* option = mOptions->ItemAsOption(i);
+     if (option) {
+@@ -1679,23 +1669,20 @@ HTMLSelectElement::RestoreStateTo(Select
+ NS_IMETHODIMP
+ HTMLSelectElement::Reset()
+ {
+   uint32_t numSelected = 0;
+ 
+   //
+   // Cycle through the options array and reset the options
+   //
+-  uint32_t numOptions;
+-  nsresult rv = GetLength(&numOptions);
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
++  uint32_t numOptions = Length();
+   for (uint32_t i = 0; i < numOptions; i++) {
+     nsCOMPtr<nsIDOMNode> node;
+-    rv = Item(i, getter_AddRefs(node));
++    nsresult rv = Item(i, getter_AddRefs(node));
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     nsCOMPtr<nsIDOMHTMLOptionElement> option(do_QueryInterface(node));
+ 
+     NS_ASSERTION(option, "option not an OptionElement");
+     if (option) {
+       //
+       // Reset the option to its default value
+@@ -1747,18 +1734,17 @@ HTMLSelectElement::SubmitNamesValues(nsF
+   GetAttr(kNameSpaceID_None, nsGkAtoms::name, name);
+   if (name.IsEmpty()) {
+     return NS_OK;
+   }
+ 
+   //
+   // Submit
+   //
+-  uint32_t len;
+-  GetLength(&len);
++  uint32_t len = Length();
+ 
+   nsAutoString mozType;
+   nsCOMPtr<nsIFormProcessor> keyGenProcessor;
+   if (GetAttr(kNameSpaceID_None, nsGkAtoms::_moz_type, mozType) &&
+       mozType.EqualsLiteral("-mozilla-keygen")) {
+     keyGenProcessor = do_GetService(kFormProcessorCID);
+   }
+ 
+@@ -1847,18 +1833,17 @@ HTMLSelectElement::RebuildOptionsArray(b
+ 
+ bool
+ HTMLSelectElement::IsValueMissing()
+ {
+   if (!HasAttr(kNameSpaceID_None, nsGkAtoms::required)) {
+     return false;
+   }
+ 
+-  uint32_t length;
+-  mOptions->GetLength(&length);
++  uint32_t length = Length();
+ 
+   for (uint32_t i = 0; i < length; ++i) {
+     nsIDOMHTMLOptionElement* option = mOptions->ItemAsOption(i);
+     bool selected;
+     NS_ENSURE_SUCCESS(option->GetSelected(&selected), false);
+ 
+     if (!selected) {
+       continue;
+diff --git a/content/html/content/src/HTMLTableElement.cpp b/content/html/content/src/HTMLTableElement.cpp
+--- a/content/html/content/src/HTMLTableElement.cpp
++++ b/content/html/content/src/HTMLTableElement.cpp
+@@ -29,27 +29,28 @@ namespace dom {
+ class TableRowsCollection : public nsIHTMLCollection,
+                             public nsWrapperCache
+ {
+ public:
+   TableRowsCollection(HTMLTableElement *aParent);
+   virtual ~TableRowsCollection();
+ 
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+-  NS_DECL_NSIDOMHTMLCOLLECTION
++  NS_IMPL_NSIDOMHTMLCOLLECTION
+ 
+-  virtual Element* GetElementAt(uint32_t aIndex);
+-  virtual nsINode* GetParentObject()
++  // nsIHTMLCollection interface
++  virtual nsINode* GetParentObject() MOZ_OVERRIDE
+   {
+     return mParent;
+   }
+-
+-  virtual JSObject* NamedItem(JSContext* cx, const nsAString& name,
+-                              ErrorResult& error);
+-  virtual void GetSupportedNames(nsTArray<nsString>& aNames);
++  virtual uint32_t Length() MOZ_OVERRIDE;
++  virtual Element* GetElementAt(uint32_t aIndex) MOZ_OVERRIDE;
++  virtual JSObject* NamedItem(JSContext* aCx, const nsAString& aName,
++                              mozilla::ErrorResult& aError) MOZ_OVERRIDE;
++  virtual void GetSupportedNames(nsTArray<nsString>& aNames) MOZ_OVERRIDE;
+ 
+   NS_IMETHOD    ParentDestroyed();
+ 
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(TableRowsCollection)
+ 
+   // nsWrapperCache
+   virtual JSObject* WrapObject(JSContext *cx,
+                                JS::Handle<JSObject*> scope) MOZ_OVERRIDE
+@@ -149,26 +150,26 @@ CountRowsInRowGroup(nsIDOMHTMLCollection
+   }
+   
+   return length;
+ }
+ 
+ // we re-count every call.  A better implementation would be to set
+ // ourselves up as an observer of contentAppended, contentInserted,
+ // and contentDeleted
+-NS_IMETHODIMP 
+-TableRowsCollection::GetLength(uint32_t* aLength)
++/* virtual */ uint32_t
++TableRowsCollection::Length()
+ {
+-  *aLength=0;
++  uint32_t length = 0;
+ 
+   DO_FOR_EACH_ROWGROUP(
+-    *aLength += CountRowsInRowGroup(rows);
++    length += CountRowsInRowGroup(rows);
+   );
+ 
+-  return NS_OK;
++  return length;
+ }
+ 
+ // Returns the item at index aIndex if available. If null is returned,
+ // then aCount will be set to the number of rows in this row collection.
+ // Otherwise, the value of aCount is undefined.
+ static Element*
+ GetItemOrCountInRowGroup(nsIDOMHTMLCollection* rows,
+                          uint32_t aIndex, uint32_t* aCount)
+diff --git a/content/xbl/src/nsXBLChildrenElement.cpp b/content/xbl/src/nsXBLChildrenElement.cpp
+--- a/content/xbl/src/nsXBLChildrenElement.cpp
++++ b/content/xbl/src/nsXBLChildrenElement.cpp
+@@ -76,22 +76,21 @@ NS_INTERFACE_TABLE_HEAD(nsAnonymousConte
+   NS_INTERFACE_TABLE_INHERITED3(nsAnonymousContentList, nsINodeList,
+                                                         nsIDOMNodeList,
+                                                         nsAnonymousContentList)
+   NS_INTERFACE_TABLE_TO_MAP_SEGUE
+   NS_INTERFACE_MAP_ENTRIES_CYCLE_COLLECTION(nsAnonymousContentList)
+   NS_INTERFACE_MAP_ENTRY(nsISupports)
+ NS_INTERFACE_MAP_END
+ 
+-NS_IMETHODIMP
+-nsAnonymousContentList::GetLength(uint32_t* aLength)
++uint32_t
++nsAnonymousContentList::Length()
+ {
+   if (!mParent) {
+-    *aLength = 0;
+-    return NS_OK;
++    return 0;
+   }
+ 
+   uint32_t count = 0;
+   for (nsIContent* child = mParent->GetFirstChild();
+        child;
+        child = child->GetNextSibling()) {
+     if (child->NodeInfo()->Equals(nsGkAtoms::children, kNameSpaceID_XBL)) {
+       nsXBLChildrenElement* point = static_cast<nsXBLChildrenElement*>(child);
+@@ -102,19 +101,17 @@ nsAnonymousContentList::GetLength(uint32
+         count += point->GetChildCount();
+       }
+     }
+     else {
+       ++count;
+     }
+   }
+ 
+-  *aLength = count;
+-
+-  return NS_OK;
++  return count;
+ }
+ 
+ NS_IMETHODIMP
+ nsAnonymousContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
+ {
+   nsIContent* item = Item(aIndex);
+   if (!item) {
+     return NS_ERROR_FAILURE;
+diff --git a/content/xbl/src/nsXBLChildrenElement.h b/content/xbl/src/nsXBLChildrenElement.h
+--- a/content/xbl/src/nsXBLChildrenElement.h
++++ b/content/xbl/src/nsXBLChildrenElement.h
+@@ -161,22 +161,23 @@ public:
+   virtual ~nsAnonymousContentList()
+   {
+     MOZ_COUNT_DTOR(nsAnonymousContentList);
+   }
+ 
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsAnonymousContentList)
+   // nsIDOMNodeList interface
+-  NS_DECL_NSIDOMNODELIST
++  NS_IMPL_NSIDOMNODELIST
+ 
+   // nsINodeList interface
+-  virtual int32_t IndexOf(nsIContent* aContent);
+-  virtual nsINode* GetParentObject() { return mParent; }
+-  virtual nsIContent* Item(uint32_t aIndex);
++  virtual uint32_t Length() MOZ_OVERRIDE;
++  virtual int32_t IndexOf(nsIContent* aContent) MOZ_OVERRIDE;
++  virtual nsINode* GetParentObject() MOZ_OVERRIDE { return mParent; }
++  virtual nsIContent* Item(uint32_t aIndex) MOZ_OVERRIDE;
+ 
+   virtual JSObject* WrapObject(JSContext *cx, JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+ 
+   bool IsListFor(nsIContent* aContent) {
+     return mParent == aContent;
+   }
+ 
+ private:
+diff --git a/layout/base/nsPresShell.cpp b/layout/base/nsPresShell.cpp
+--- a/layout/base/nsPresShell.cpp
++++ b/layout/base/nsPresShell.cpp
+@@ -2778,17 +2778,17 @@ PresShell::GoToAnchor(const nsAString& a
+   }
+ 
+   // Search for an anchor element in the HTML namespace with a matching "name"
+   // attribute.
+   if (!content) {
+     nsRefPtr<nsContentList> anchors =
+       NS_GetContentList(mDocument, kNameSpaceID_XHTML, NS_LITERAL_STRING("a"));
+     // Loop through the named nodes looking for the first anchor
+-    for (uint32_t i = 0, len = anchors->Length(true); i < len; i++) {
++    for (uint32_t i = 0, len = anchors->Length(); i < len; i++) {
+       nsIContent* node = anchors->Item(i);
+       if (node->AttrValueIs(kNameSpaceID_None,
+                             nsGkAtoms::name,
+                             aAnchorName,
+                             eCaseMatters)) {
+         content = node;
+         break;
+       }
+diff --git a/layout/printing/nsPrintEngine.cpp b/layout/printing/nsPrintEngine.cpp
+--- a/layout/printing/nsPrintEngine.cpp
++++ b/layout/printing/nsPrintEngine.cpp
+@@ -2703,17 +2703,17 @@ DocHasPrintCallbackCanvas(nsIDocument* a
+   }
+   Element* root = aDoc->GetRootElement();
+   if (!root) {
+     return true;
+   }
+   nsRefPtr<nsContentList> canvases = NS_GetContentList(root,
+                                                        kNameSpaceID_XHTML,
+                                                        NS_LITERAL_STRING("canvas"));
+-  uint32_t canvasCount = canvases->Length(true);
++  uint32_t canvasCount = canvases->Length();
+   for (uint32_t i = 0; i < canvasCount; ++i) {
+     nsCOMPtr<nsIDOMHTMLCanvasElement> canvas = do_QueryInterface(canvases->Item(i, false));
+     nsCOMPtr<nsIPrintCallback> printCallback;
+     if (canvas && NS_SUCCEEDED(canvas->GetMozPrintCallback(getter_AddRefs(printCallback))) &&
+         printCallback) {
+       // This subdocument has a print callback. Set result and return false to
+       // stop iteration.
+       *static_cast<bool*>(aData) = true;

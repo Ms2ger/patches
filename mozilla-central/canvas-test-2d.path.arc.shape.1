@@ -1,0 +1,197 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 665345 - Split 2d.path.arc.shape.1 into its own file
+
+It fails in some peculiar conditions; it is not useful to increase
+the complexity of the generating script to account for this issue.
+
+diff --git a/content/canvas/test/standalone.dat b/content/canvas/test/standalone.dat
+--- a/content/canvas/test/standalone.dat
++++ b/content/canvas/test/standalone.dat
+@@ -64,16 +64,18 @@ test_2d.strokeRect.zero.1.html
+ test_2d.path.arcTo.shape.curve1.html
+ test_2d.path.arcTo.shape.curve2.html
+ test_2d.path.stroke.prune.closed.html
+ test_2d.path.stroke.prune.curve.html
+ test_2d.path.stroke.prune.line.html
+ test_2d.path.stroke.prune.rect.html
+ test_2d.transformation.setTransform.skewed.html
+ test_2d.transformation.transform.skewed.html
++# Azure-on-Cairo-on-Linux
++test_2d.path.arc.shape.1.html
+ # setTimeout
+ test_2d.drawImage.animated.apng.html
+ test_2d.drawImage.animated.gif.html
+ test_2d.pattern.animated.gif.html
+ test_2d.text.draw.align.center.html
+ test_2d.text.draw.align.end.ltr.html
+ test_2d.text.draw.align.end.rtl.html
+ test_2d.text.draw.align.left.html
+diff --git a/content/canvas/test/test_2d.path.arc.shape.1.html b/content/canvas/test/test_2d.path.arc.shape.1.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_2d.path.arc.shape.1.html
+@@ -0,0 +1,52 @@
++<!DOCTYPE HTML>
++<title>Canvas test: 2d.path.arc.shape.1</title>
++<!-- Testing: arc() from 0 to pi does not draw anything in the wrong half -->
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++ctx.fillStyle = '#0f0';
++ctx.fillRect(0, 0, 100, 50);
++ctx.lineWidth = 50;
++ctx.strokeStyle = '#f00';
++ctx.beginPath();
++ctx.arc(50, 50, 50, 0, Math.PI, false);
++ctx.stroke();
++isPixel(ctx, 50,25, 0,255,0,255, "50,25", "0,255,0,255", 0);
++isPixel(ctx, 1,1, 0,255,0,255, "1,1", "0,255,0,255", 0);
++isPixel(ctx, 98,1, 0,255,0,255, "98,1", "0,255,0,255", 0);
++isPixel(ctx, 1,48, 0,255,0,255, "1,48", "0,255,0,255", 0);
++// Fails on Linux with Azure/Cairo only
++// The arc is drawn badly due to Cairo limitations, the error only becomes
++// apparent on Linux because of anti-aliasing, probably due to X.
++// The limitation is that Cairo draws arcs by stroking perpendicular to the arc,
++// and at very large stroke thicknesses, this becomes a fan. Where exactly the
++// 'blades' of the fan appear seems to depend on exactly how the arc is defined
++// and the platform. So if the blades of the fan are where pixels are tested it
++// passes the test, if the testing pixels fall in between the blades, then we fail.
++// With Thebes/Cairo, we were rendering wrong, but got lucky with the test, now
++// we are not so lucky.
++// Bug 764125
++if (SpecialPowers.isAzureCairo &&
++    navigator.platform.startsWith("Linux") &&
++    !navigator.appVersion.contains("Android")) {
++  todo_isPixel(ctx, 20,48, 0,255,0,255, 0);
++} else {
++  isPixel(ctx, 20,48, 0,255,0,255, 0);
++}
++isPixel(ctx, 98,48, 0,255,0,255, "98,48", "0,255,0,255", 0);
++
++SimpleTest.finish();
++
++});
++</script>
++
+diff --git a/content/canvas/test/test_canvas.html b/content/canvas/test/test_canvas.html
+--- a/content/canvas/test/test_canvas.html
++++ b/content/canvas/test/test_canvas.html
+@@ -2,25 +2,16 @@
+ <script src="/tests/SimpleTest/SimpleTest.js"></script>
+ <script src="canvas-tests.js"></script>
+ <link href="/tests/SimpleTest/test.css" rel="stylesheet">
+ <body>
+ <script>
+ 
+ SimpleTest.waitForExplicitFinish();
+ 
+-function IsLinux() {
+-    return navigator.platform.indexOf("Linux") == 0 &&
+-           navigator.appVersion.indexOf("Android") == -1;
+-}
+-
+-function IsAzureCairo() {
+-  return SpecialPowers.isAzureCairo;
+-}
+-
+ </script>
+ <!-- Includes all the tests in the content/canvas/tests except for test_bug397524.html -->
+ 
+ <!-- [[[ test_2d.canvas.readonly.html ]]] -->
+ 
+ <p>Canvas test: 2d.canvas.readonly</p>
+ <!-- Testing: CanvasRenderingContext2D.canvas is readonly -->
+ <canvas height="50" id="c1" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+@@ -9309,60 +9300,16 @@ isPixel(ctx, 97,1, 0,255,0,255, 0);
+ isPixel(ctx, 97,2, 0,255,0,255, 0);
+ isPixel(ctx, 97,3, 0,255,0,255, 0);
+ isPixel(ctx, 2,48, 0,255,0,255, 0);
+ 
+ 
+ }
+ </script>
+ 
+-<!-- [[[ test_2d.path.arc.shape.1.html ]]] -->
+-
+-<p>Canvas test: 2d.path.arc.shape.1</p>
+-<!-- Testing: arc() from 0 to pi does not draw anything in the wrong half -->
+-<canvas height="50" id="c347" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-function test_2d_path_arc_shape_1() {
+-
+-var canvas = document.getElementById('c347');
+-var ctx = canvas.getContext('2d');
+-
+-ctx.fillStyle = '#0f0';
+-ctx.fillRect(0, 0, 100, 50);
+-ctx.lineWidth = 50;
+-ctx.strokeStyle = '#f00';
+-ctx.beginPath();
+-ctx.arc(50, 50, 50, 0, Math.PI, false);
+-ctx.stroke();
+-isPixel(ctx, 50,25, 0,255,0,255, 0);
+-isPixel(ctx, 1,1, 0,255,0,255, 0);
+-isPixel(ctx, 98,1, 0,255,0,255, 0);
+-isPixel(ctx, 1,48, 0,255,0,255, 0);
+-// Fails on Linux with Azure/Cairo only
+-// The arc is drawn badly due to Cairo limitations, the error only becomes
+-// apparent on Linux because of anti-aliasing, probably due to X.
+-// The limitation is that Cairo draws arcs by stroking perpendicular to the arc,
+-// and at very large stroke thicknesses, this becomes a fan. Where exactly the
+-// 'blades' of the fan appear seems to depend on exactly how the arc is defined
+-// and the platform. So if the blades of the fan are where pixels are tested it
+-// passes the test, if the testing pixels fall in between the blades, then we fail.
+-// With Thebes/Cairo, we were rendering wrong, but got lucky with the test, now
+-// we are not so lucky.
+-// Bug 764125
+-if (IsAzureCairo() && IsLinux()) {
+-    todo_isPixel(ctx, 20,48, 0,255,0,255, 0);
+-} else {
+-    isPixel(ctx, 20,48, 0,255,0,255, 0);
+-}
+-isPixel(ctx, 98,48, 0,255,0,255, 0);
+-
+-}
+-</script>
+-
+ <!-- [[[ test_2d.path.arc.shape.2.html ]]] -->
+ 
+ <p>Canvas test: 2d.path.arc.shape.2</p>
+ <!-- Testing: arc() from 0 to pi draws stuff in the right half -->
+ <canvas height="50" id="c348" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+ <script>
+ 
+ function test_2d_path_arc_shape_2() {
+@@ -19401,21 +19348,16 @@ function runTests() {
+   ok(false, "unexpected exception thrown in: test_2d_path_arc_selfintersect_1");
+  }
+  try {
+   test_2d_path_arc_selfintersect_2();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_path_arc_selfintersect_2");
+  }
+  try {
+-  test_2d_path_arc_shape_1();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_2d_path_arc_shape_1");
+- }
+- try {
+   test_2d_path_arc_shape_2();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_path_arc_shape_2");
+  }
+  try {
+   test_2d_path_arc_shape_4();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_path_arc_shape_4");

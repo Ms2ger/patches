@@ -1,0 +1,225 @@
+diff --git a/content/html/content/src/nsGenericHTMLElement.cpp b/content/html/content/src/nsGenericHTMLElement.cpp
+--- a/content/html/content/src/nsGenericHTMLElement.cpp
++++ b/content/html/content/src/nsGenericHTMLElement.cpp
+@@ -1275,9 +1275,8 @@
+   return nullptr;
+ }
+ 
+-/* static */ nsresult
+-nsGenericHTMLElement::GetPrimaryPresState(nsGenericHTMLElement* aContent,
+-                                          nsPresState** aPresState)
++nsresult
++nsGenericHTMLElement::GetPrimaryPresState(nsPresState** aPresState)
+ {
+   NS_ENSURE_ARG_POINTER(aPresState);
+   *aPresState = nullptr;
+@@ -1286,7 +1285,7 @@
+ 
+   nsCOMPtr<nsILayoutHistoryState> history;
+   nsAutoCString key;
+-  GetLayoutHistoryAndKey(aContent, false, getter_AddRefs(history), key);
++  GetLayoutHistoryAndKey(false, getter_AddRefs(history), key);
+ 
+   if (history) {
+     // Get the pres state for this key, if it doesn't exist, create one
+@@ -1306,15 +1305,14 @@
+ 
+ 
+ nsresult
+-nsGenericHTMLElement::GetLayoutHistoryAndKey(nsGenericHTMLElement* aContent,
+-                                             bool aRead,
++nsGenericHTMLElement::GetLayoutHistoryAndKey(bool aRead,
+                                              nsILayoutHistoryState** aHistory,
+                                              nsACString& aKey)
+ {
+   //
+   // Get the pres shell
+   //
+-  nsCOMPtr<nsIDocument> doc = aContent->GetDocument();
++  nsCOMPtr<nsIDocument> doc = GetDocument();
+   if (!doc) {
+     return NS_OK;
+   }
+@@ -1335,7 +1333,8 @@
+   //
+   // Get the state key
+   //
+-  nsresult rv = nsContentUtils::GenerateStateKey(aContent, doc,
++  nsresult rv = nsContentUtils::GenerateStateKey(this,
++                                                 doc,
+                                                  nsIStatefulFrame::eNoID,
+                                                  aKey);
+   if (NS_FAILED(rv)) {
+@@ -1357,13 +1356,13 @@
+ }
+ 
+ bool
+-nsGenericHTMLElement::RestoreFormControlState(nsGenericHTMLElement* aContent,
+-                                              nsIFormControl* aControl)
++nsGenericHTMLElement::RestoreFormControlState(nsIFormControl* aControl)
+ {
+   nsCOMPtr<nsILayoutHistoryState> history;
+   nsAutoCString key;
+-  nsresult rv = GetLayoutHistoryAndKey(aContent, true,
+-                                       getter_AddRefs(history), key);
++  nsresult rv = GetLayoutHistoryAndKey(true,
++                                       getter_AddRefs(history),
++                                       key);
+   if (!history) {
+     return false;
+   }
+diff --git a/content/html/content/src/nsGenericHTMLElement.h b/content/html/content/src/nsGenericHTMLElement.h
+--- a/content/html/content/src/nsGenericHTMLElement.h
++++ b/content/html/content/src/nsGenericHTMLElement.h
+@@ -425,40 +425,39 @@
+    */
+   static void MapScrollingAttributeInto(const nsMappedAttributes* aAttributes,
+                                         nsRuleData* aData);
++
+   /**
+    * Get the presentation state for a piece of content, or create it if it does
+    * not exist.  Generally used by SaveState().
+    *
+-   * @param aContent the content to get presentation state for.
+    * @param aPresState the presentation state (out param)
+    */
+-  static nsresult GetPrimaryPresState(nsGenericHTMLElement* aContent,
+-                                      nsPresState** aPresState);
++  nsresult GetPrimaryPresState(nsPresState** aPresState);
++
++private:
+   /**
+    * Get the layout history object *and* generate the key for a particular
+    * piece of content.
+    *
+-   * @param aContent the content to generate the key for
+    * @param aRead if true, won't return a layout history state (and won't
+    *              generate a key) if the layout history state is empty.
+    * @param aState the history state object (out param)
+    * @param aKey the key (out param)
+    */
+-  static nsresult GetLayoutHistoryAndKey(nsGenericHTMLElement* aContent,
+-                                         bool aRead,
+-                                         nsILayoutHistoryState** aState,
+-                                         nsACString& aKey);
++  nsresult GetLayoutHistoryAndKey(bool aRead,
++                                  nsILayoutHistoryState** aState,
++                                  nsACString& aKey);
++
++public:
+   /**
+    * Restore the state for a form control.  Ends up calling
+    * nsIFormControl::RestoreState().
+    *
+-   * @param aContent an nsGenericHTMLElement* pointing to the form control
+    * @param aControl an nsIFormControl* pointing to the form control
+    * @return false if RestoreState() was not called, the return
+    *         value of RestoreState() otherwise.
+    */
+-  static bool RestoreFormControlState(nsGenericHTMLElement* aContent,
+-                                        nsIFormControl* aControl);
++  bool RestoreFormControlState(nsIFormControl* aControl);
+ 
+   /**
+    * Get the presentation context for this content node.
+diff --git a/content/html/content/src/nsHTMLButtonElement.cpp b/content/html/content/src/nsHTMLButtonElement.cpp
+--- a/content/html/content/src/nsHTMLButtonElement.cpp
++++ b/content/html/content/src/nsHTMLButtonElement.cpp
+@@ -578,7 +578,7 @@
+ nsHTMLButtonElement::DoneCreatingElement()
+ {
+   // Restore state as needed.
+-  RestoreFormControlState(this, this);
++  RestoreFormControlState(this);
+ }
+ 
+ nsresult
+@@ -615,7 +615,7 @@
+   }
+   
+   nsPresState *state = nullptr;
+-  nsresult rv = GetPrimaryPresState(this, &state);
++  nsresult rv = GetPrimaryPresState(&state);
+   if (state) {
+     bool disabled;
+     GetDisabled(&disabled);
+diff --git a/content/html/content/src/nsHTMLInputElement.cpp b/content/html/content/src/nsHTMLInputElement.cpp
+--- a/content/html/content/src/nsHTMLInputElement.cpp
++++ b/content/html/content/src/nsHTMLInputElement.cpp
+@@ -2942,14 +2942,14 @@
+   
+   nsPresState* state = nullptr;
+   if (inputState) {
+-    rv = GetPrimaryPresState(this, &state);
++    rv = GetPrimaryPresState(&state);
+     if (state) {
+       state->SetStateProperty(inputState);
+     }
+   }
+ 
+   if (GET_BOOLBIT(mBitField, BF_DISABLED_CHANGED)) {
+-    rv |= GetPrimaryPresState(this, &state);
++    rv |= GetPrimaryPresState(&state);
+     if (state) {
+       bool disabled;
+       GetDisabled(&disabled);
+@@ -2972,7 +2972,7 @@
+   bool restoredCheckedState =
+       GET_BOOLBIT(mBitField, BF_INHIBIT_RESTORATION) ?
+       false :
+-      RestoreFormControlState(this, this);
++      RestoreFormControlState(this);
+ 
+   //
+   // If restore does not occur, we initialize .checked using the CHECKED
+diff --git a/content/html/content/src/nsHTMLSelectElement.cpp b/content/html/content/src/nsHTMLSelectElement.cpp
+--- a/content/html/content/src/nsHTMLSelectElement.cpp
++++ b/content/html/content/src/nsHTMLSelectElement.cpp
+@@ -1356,7 +1356,7 @@
+ 
+   // Restore state
+   if (!mInhibitStateRestoration) {
+-    RestoreFormControlState(this, this);
++    RestoreFormControlState(this);
+   }
+ 
+   // Now that we're done, select something (if it's a single select something
+@@ -1473,7 +1473,7 @@
+   }
+ 
+   nsPresState *presState = nullptr;
+-  nsresult rv = GetPrimaryPresState(this, &presState);
++  nsresult rv = GetPrimaryPresState(&presState);
+   if (presState) {
+     presState->SetStateProperty(state);
+ 
+diff --git a/content/html/content/src/nsHTMLTextAreaElement.cpp b/content/html/content/src/nsHTMLTextAreaElement.cpp
+--- a/content/html/content/src/nsHTMLTextAreaElement.cpp
++++ b/content/html/content/src/nsHTMLTextAreaElement.cpp
+@@ -670,7 +670,7 @@
+       Reset();
+     }
+     if (!mInhibitStateRestoration) {
+-      RestoreFormControlState(this, this);
++      RestoreFormControlState(this);
+     }
+   }
+ 
+@@ -866,7 +866,7 @@
+   // Only save if value != defaultValue (bug 62713)
+   nsPresState *state = nullptr;
+   if (mValueChanged) {
+-    rv = GetPrimaryPresState(this, &state);
++    rv = GetPrimaryPresState(&state);
+     if (state) {
+       nsAutoString value;
+       GetValueInternal(value, true);
+@@ -889,7 +889,7 @@
+ 
+   if (mDisabledChanged) {
+     if (!state) {
+-      rv = GetPrimaryPresState(this, &state);
++      rv = GetPrimaryPresState(&state);
+     }
+     if (state) {
+       bool disabled;

@@ -1,0 +1,296 @@
+diff --git a/parser/html/Makefile.in b/parser/html/Makefile.in
+--- a/parser/html/Makefile.in
++++ b/parser/html/Makefile.in
+@@ -74,7 +74,7 @@
+ 		nsHtml5TreeOpExecutor.cpp \
+ 		nsHtml5StreamParser.cpp \
+ 		Speculation.cpp \
+-		nsHtml5SpeculativeLoad.cpp \
++		SpeculativeLoad.cpp \
+ 		$(NULL)
+ 
+ FORCE_STATIC_LIB = 1
+diff --git a/parser/html/nsHtml5SpeculativeLoad.cpp b/parser/html/SpeculativeLoad.cpp
+rename from parser/html/nsHtml5SpeculativeLoad.cpp
+rename to parser/html/SpeculativeLoad.cpp
+--- a/parser/html/nsHtml5SpeculativeLoad.cpp
++++ b/parser/html/SpeculativeLoad.cpp
+@@ -35,26 +35,29 @@
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+-#include "nsHtml5SpeculativeLoad.h"
++#include "SpeculativeLoad.h"
+ #include "nsHtml5TreeOpExecutor.h"
+ 
+-nsHtml5SpeculativeLoad::nsHtml5SpeculativeLoad()
++namespace mozilla {
++namespace htmlparser {
++
++SpeculativeLoad::SpeculativeLoad()
+ #ifdef DEBUG
+  : mOpCode(eSpeculativeLoadUninitialized)
+ #endif
+ {
+-  MOZ_COUNT_CTOR(nsHtml5SpeculativeLoad);
++  MOZ_COUNT_CTOR(SpeculativeLoad);
+ }
+ 
+-nsHtml5SpeculativeLoad::~nsHtml5SpeculativeLoad()
++SpeculativeLoad::~SpeculativeLoad()
+ {
+-  MOZ_COUNT_DTOR(nsHtml5SpeculativeLoad);
++  MOZ_COUNT_DTOR(SpeculativeLoad);
+   NS_ASSERTION(mOpCode != eSpeculativeLoadUninitialized,
+                "Uninitialized speculative load.");
+ }
+ 
+ void
+-nsHtml5SpeculativeLoad::Perform(nsHtml5TreeOpExecutor* aExecutor)
++SpeculativeLoad::Perform(nsHtml5TreeOpExecutor* aExecutor)
+ {
+   switch (mOpCode) {
+     case eSpeculativeLoadImage:
+@@ -66,7 +69,7 @@
+     case eSpeculativeLoadStyle:
+         aExecutor->PreloadStyle(mUrl, mCharset);
+       break;
+-    case eSpeculativeLoadManifest:  
++    case eSpeculativeLoadManifest:
+         aExecutor->ProcessOfflineManifest(mUrl);
+       break;
+     default:
+@@ -74,3 +77,6 @@
+       break;
+   }
+ }
++
++} // namespace htmlparser
++} // namespace mozilla
+diff --git a/parser/html/nsHtml5SpeculativeLoad.h b/parser/html/SpeculativeLoad.h
+rename from parser/html/nsHtml5SpeculativeLoad.h
+rename to parser/html/SpeculativeLoad.h
+--- a/parser/html/nsHtml5SpeculativeLoad.h
++++ b/parser/html/SpeculativeLoad.h
+@@ -34,29 +34,32 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+- 
+-#ifndef nsHtml5SpeculativeLoad_h_
+-#define nsHtml5SpeculativeLoad_h_
++
++#ifndef mozilla_htmlparser_SpeculativeLoad_h
++#define mozilla_htmlparser_SpeculativeLoad_h
+ 
+ #include "nsString.h"
+ 
+ class nsHtml5TreeOpExecutor;
+ 
+-enum eHtml5SpeculativeLoad {
++namespace mozilla {
++namespace htmlparser {
++
++enum eSpeculativeLoad {
+ #ifdef DEBUG
+   eSpeculativeLoadUninitialized,
+ #endif
+   eSpeculativeLoadImage,
+   eSpeculativeLoadScript,
+   eSpeculativeLoadStyle,
+-  eSpeculativeLoadManifest  
++  eSpeculativeLoadManifest
+ };
+ 
+-class nsHtml5SpeculativeLoad {
++class SpeculativeLoad {
+   public:
+-    nsHtml5SpeculativeLoad();
+-    ~nsHtml5SpeculativeLoad();
+-    
++    SpeculativeLoad();
++    ~SpeculativeLoad();
++
+     inline void InitImage(const nsAString& aUrl) {
+       NS_PRECONDITION(mOpCode == eSpeculativeLoadUninitialized,
+                       "Trying to reinitialize a speculative load!");
+@@ -74,7 +77,7 @@
+       mCharset.Assign(aCharset);
+       mType.Assign(aType);
+     }
+-    
++
+     inline void InitStyle(const nsAString& aUrl, const nsAString& aCharset) {
+       NS_PRECONDITION(mOpCode == eSpeculativeLoadUninitialized,
+                       "Trying to reinitialize a speculative load!");
+@@ -102,12 +105,15 @@
+     }
+ 
+     void Perform(nsHtml5TreeOpExecutor* aExecutor);
+-    
++
+   private:
+-    eHtml5SpeculativeLoad mOpCode;
++    eSpeculativeLoad mOpCode;
+     nsString mUrl;
+     nsString mCharset;
+     nsString mType;
+ };
+ 
+-#endif // nsHtml5SpeculativeLoad_h_
++} // namespace htmlparser
++} // namespace mozilla
++
++#endif // mozilla_htmlparser_SpeculativeLoad_h
+diff --git a/parser/html/nsHtml5TreeBuilderHSupplement.h b/parser/html/nsHtml5TreeBuilderHSupplement.h
+--- a/parser/html/nsHtml5TreeBuilderHSupplement.h
++++ b/parser/html/nsHtml5TreeBuilderHSupplement.h
+@@ -40,7 +40,8 @@
+   private:
+ 
+     nsTArray<nsHtml5TreeOperation>         mOpQueue;
+-    nsTArray<nsHtml5SpeculativeLoad>       mSpeculativeLoadQueue;
++    nsTArray<mozilla::htmlparser::SpeculativeLoad>
++                                           mSpeculativeLoadQueue;
+     nsAHtml5TreeOpSink*                    mOpSink;
+     nsAutoArrayPtr<nsIContent*>            mHandles;
+     int32_t                                mHandlesUsed;
+diff --git a/parser/html/nsHtml5TreeOpExecutor.cpp b/parser/html/nsHtml5TreeOpExecutor.cpp
+--- a/parser/html/nsHtml5TreeOpExecutor.cpp
++++ b/parser/html/nsHtml5TreeOpExecutor.cpp
+@@ -57,6 +57,8 @@
+ #include "nsHtml5Tokenizer.h"
+ #include "nsHtml5TreeBuilder.h"
+ #include "nsHtml5StreamParser.h"
++
++using namespace mozilla::htmlparser;
+ 
+ NS_IMPL_CYCLE_COLLECTION_CLASS(nsHtml5TreeOpExecutor)
+ 
+@@ -345,11 +347,11 @@
+   if (NS_UNLIKELY(!mParser)) {
+     return;
+   }
+-  nsTArray<nsHtml5SpeculativeLoad> speculativeLoadQueue;
++  nsTArray<SpeculativeLoad> speculativeLoadQueue;
+   mStage.MoveSpeculativeLoadsTo(speculativeLoadQueue);
+-  const nsHtml5SpeculativeLoad* start = speculativeLoadQueue.Elements();
+-  const nsHtml5SpeculativeLoad* end = start + speculativeLoadQueue.Length();
+-  for (nsHtml5SpeculativeLoad* iter = (nsHtml5SpeculativeLoad*)start;
++  const SpeculativeLoad* start = speculativeLoadQueue.Elements();
++  const SpeculativeLoad* end = start + speculativeLoadQueue.Length();
++  for (SpeculativeLoad* iter = (SpeculativeLoad*)start;
+        iter < end; 
+        ++iter) {
+     iter->Perform(this);
+@@ -433,13 +435,13 @@
+     }
+ 
+     if (mReadingFromStage) {
+-      nsTArray<nsHtml5SpeculativeLoad> speculativeLoadQueue;
++      nsTArray<SpeculativeLoad> speculativeLoadQueue;
+       mStage.MoveOpsAndSpeculativeLoadsTo(mOpQueue, speculativeLoadQueue);
+       // Make sure speculative loads never start after the corresponding
+       // normal loads for the same URLs.
+-      const nsHtml5SpeculativeLoad* start = speculativeLoadQueue.Elements();
+-      const nsHtml5SpeculativeLoad* end = start + speculativeLoadQueue.Length();
+-      for (nsHtml5SpeculativeLoad* iter = (nsHtml5SpeculativeLoad*)start;
++      const SpeculativeLoad* start = speculativeLoadQueue.Elements();
++      const SpeculativeLoad* end = start + speculativeLoadQueue.Length();
++      for (SpeculativeLoad* iter = (SpeculativeLoad*)start;
+            iter < end;
+            ++iter) {
+         iter->Perform(this);
+diff --git a/parser/html/nsHtml5TreeOpExecutor.h b/parser/html/nsHtml5TreeOpExecutor.h
+--- a/parser/html/nsHtml5TreeOpExecutor.h
++++ b/parser/html/nsHtml5TreeOpExecutor.h
+@@ -45,7 +45,7 @@
+ #include "nsIDocument.h"
+ #include "nsTraceRefcnt.h"
+ #include "nsHtml5TreeOperation.h"
+-#include "nsHtml5SpeculativeLoad.h"
++#include "SpeculativeLoad.h"
+ #include "nsHtml5PendingNotification.h"
+ #include "nsTArray.h"
+ #include "nsContentSink.h"
+diff --git a/parser/html/nsHtml5TreeOpStage.cpp b/parser/html/nsHtml5TreeOpStage.cpp
+--- a/parser/html/nsHtml5TreeOpStage.cpp
++++ b/parser/html/nsHtml5TreeOpStage.cpp
+@@ -37,6 +37,8 @@
+ 
+ #include "nsHtml5TreeOpStage.h"
+ 
++using namespace mozilla::htmlparser;
++
+ nsHtml5TreeOpStage::nsHtml5TreeOpStage()
+  : mMutex("nsHtml5TreeOpStage mutex")
+ {
+@@ -59,7 +61,7 @@
+     
+ void
+ nsHtml5TreeOpStage::MoveOpsAndSpeculativeLoadsTo(nsTArray<nsHtml5TreeOperation>& aOpQueue,
+-    nsTArray<nsHtml5SpeculativeLoad>& aSpeculativeLoadQueue)
++    nsTArray<SpeculativeLoad>& aSpeculativeLoadQueue)
+ {
+   mozilla::MutexAutoLock autoLock(mMutex);
+   if (aOpQueue.IsEmpty()) {
+@@ -75,7 +77,7 @@
+ }
+ 
+ void
+-nsHtml5TreeOpStage::MoveSpeculativeLoadsFrom(nsTArray<nsHtml5SpeculativeLoad>& aSpeculativeLoadQueue)
++nsHtml5TreeOpStage::MoveSpeculativeLoadsFrom(nsTArray<SpeculativeLoad>& aSpeculativeLoadQueue)
+ {
+   mozilla::MutexAutoLock autoLock(mMutex);
+   if (mSpeculativeLoadQueue.IsEmpty()) {
+@@ -86,7 +88,7 @@
+ }
+ 
+ void
+-nsHtml5TreeOpStage::MoveSpeculativeLoadsTo(nsTArray<nsHtml5SpeculativeLoad>& aSpeculativeLoadQueue)
++nsHtml5TreeOpStage::MoveSpeculativeLoadsTo(nsTArray<SpeculativeLoad>& aSpeculativeLoadQueue)
+ {
+   mozilla::MutexAutoLock autoLock(mMutex);
+   if (aSpeculativeLoadQueue.IsEmpty()) {
+diff --git a/parser/html/nsHtml5TreeOpStage.h b/parser/html/nsHtml5TreeOpStage.h
+--- a/parser/html/nsHtml5TreeOpStage.h
++++ b/parser/html/nsHtml5TreeOpStage.h
+@@ -42,7 +42,7 @@
+ #include "nsHtml5TreeOperation.h"
+ #include "nsTArray.h"
+ #include "nsAHtml5TreeOpSink.h"
+-#include "nsHtml5SpeculativeLoad.h"
++#include "SpeculativeLoad.h"
+ 
+ class nsHtml5TreeOpStage : public nsAHtml5TreeOpSink {
+   public:
+@@ -61,17 +61,17 @@
+      * Retrieve the staged operations and speculative loads into the arguments.
+      */
+     void MoveOpsAndSpeculativeLoadsTo(nsTArray<nsHtml5TreeOperation>& aOpQueue,
+-        nsTArray<nsHtml5SpeculativeLoad>& aSpeculativeLoadQueue);
++        nsTArray<mozilla::htmlparser::SpeculativeLoad>& aSpeculativeLoadQueue);
+ 
+     /**
+      * Move the speculative loads from the argument into the staging queue.
+      */
+-    void MoveSpeculativeLoadsFrom(nsTArray<nsHtml5SpeculativeLoad>& aSpeculativeLoadQueue);
++    void MoveSpeculativeLoadsFrom(nsTArray<mozilla::htmlparser::SpeculativeLoad>& aSpeculativeLoadQueue);
+ 
+     /**
+      * Retrieve the staged speculative loads into the argument.
+      */
+-    void MoveSpeculativeLoadsTo(nsTArray<nsHtml5SpeculativeLoad>& aSpeculativeLoadQueue);
++    void MoveSpeculativeLoadsTo(nsTArray<mozilla::htmlparser::SpeculativeLoad>& aSpeculativeLoadQueue);
+ 
+ #ifdef DEBUG
+     void AssertEmpty();
+@@ -79,7 +79,7 @@
+ 
+   private:
+     nsTArray<nsHtml5TreeOperation> mOpQueue;
+-    nsTArray<nsHtml5SpeculativeLoad> mSpeculativeLoadQueue;
++    nsTArray<mozilla::htmlparser::SpeculativeLoad> mSpeculativeLoadQueue;
+     mozilla::Mutex mMutex;
+     
+ };

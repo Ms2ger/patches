@@ -1,0 +1,237 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/content/src/nsGenericHTMLElement.cpp b/content/html/content/src/nsGenericHTMLElement.cpp
+--- a/content/html/content/src/nsGenericHTMLElement.cpp
++++ b/content/html/content/src/nsGenericHTMLElement.cpp
+@@ -1089,17 +1089,17 @@ nsGenericHTMLElement::GetHrefURIForAncho
+ {
+   // This is used by the three nsILink implementations and
+   // nsHTMLStyleElement.
+ 
+   // Get href= attribute (relative URI).
+ 
+   // We use the nsAttrValue's copy of the URI string to avoid copying.
+   nsCOMPtr<nsIURI> uri;
+-  GetURIAttr(nsGkAtoms::href, nullptr, getter_AddRefs(uri));
++  GetURIAttr(nsGkAtoms::href, getter_AddRefs(uri));
+ 
+   return uri.forget();
+ }
+ 
+ nsresult
+ nsGenericHTMLElement::AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
+                                    const nsAString* aValue, bool aNotify)
+ {
+@@ -2178,20 +2178,20 @@ nsGenericHTMLElement::SetDoubleAttr(nsIA
+ {
+   nsAutoString value;
+   value.AppendFloat(aValue);
+ 
+   return SetAttr(kNameSpaceID_None, aAttr, value, true);
+ }
+ 
+ nsresult
+-nsGenericHTMLElement::GetURIAttr(nsIAtom* aAttr, nsIAtom* aBaseAttr, nsAString& aResult)
++nsGenericHTMLElement::GetURIAttr(nsIAtom* aAttr, nsAString& aResult)
+ {
+   nsCOMPtr<nsIURI> uri;
+-  bool hadAttr = GetURIAttr(aAttr, aBaseAttr, getter_AddRefs(uri));
++  bool hadAttr = GetURIAttr(aAttr, getter_AddRefs(uri));
+   if (!hadAttr) {
+     aResult.Truncate();
+     return NS_OK;
+   }
+ 
+   if (!uri) {
+     // Just return the attr value
+     GetAttr(kNameSpaceID_None, aAttr, aResult);
+@@ -2200,42 +2200,27 @@ nsGenericHTMLElement::GetURIAttr(nsIAtom
+ 
+   nsAutoCString spec;
+   uri->GetSpec(spec);
+   CopyUTF8toUTF16(spec, aResult);
+   return NS_OK;
+ }
+ 
+ bool
+-nsGenericHTMLElement::GetURIAttr(nsIAtom* aAttr, nsIAtom* aBaseAttr, nsIURI** aURI) const
++nsGenericHTMLElement::GetURIAttr(nsIAtom* aAttr, nsIURI** aURI) const
+ {
+   *aURI = nullptr;
+ 
+   const nsAttrValue* attr = mAttrsAndChildren.GetAttr(aAttr);
+   if (!attr) {
+     return false;
+   }
+ 
+   nsCOMPtr<nsIURI> baseURI = GetBaseURI();
+ 
+-  if (aBaseAttr) {
+-    nsAutoString baseAttrValue;
+-    if (GetAttr(kNameSpaceID_None, aBaseAttr, baseAttrValue)) {
+-      nsCOMPtr<nsIURI> baseAttrURI;
+-      nsresult rv =
+-        nsContentUtils::NewURIWithDocumentCharset(getter_AddRefs(baseAttrURI),
+-                                                  baseAttrValue, GetOwnerDoc(),
+-                                                  baseURI);
+-      if (NS_FAILED(rv)) {
+-        return true;
+-      }
+-      baseURI.swap(baseAttrURI);
+-    }
+-  }
+-
+   // Don't care about return value.  If it fails, we still want to
+   // return true, and *aURI will be null.
+   nsContentUtils::NewURIWithDocumentCharset(aURI,
+                                             attr->GetStringValue(),
+                                             GetOwnerDoc(), baseURI);
+   return true;
+ }
+ 
+diff --git a/content/html/content/src/nsGenericHTMLElement.h b/content/html/content/src/nsGenericHTMLElement.h
+--- a/content/html/content/src/nsGenericHTMLElement.h
++++ b/content/html/content/src/nsGenericHTMLElement.h
+@@ -503,20 +503,19 @@ public:
+   /**
+    * Helper method for NS_IMPL_URI_ATTR macro.
+    * Gets the absolute URI value of an attribute, by resolving any relative
+    * URIs in the attribute against the baseuri of the element. If the attribute
+    * isn't a relative URI the value of the attribute is returned as is. Only
+    * works for attributes in null namespace.
+    *
+    * @param aAttr      name of attribute.
+-   * @param aBaseAttr  name of base attribute.
+    * @param aResult    result value [out]
+    */
+-  NS_HIDDEN_(nsresult) GetURIAttr(nsIAtom* aAttr, nsIAtom* aBaseAttr, nsAString& aResult);
++  NS_HIDDEN_(nsresult) GetURIAttr(nsIAtom* aAttr, nsAString& aResult);
+ 
+   /**
+    * Returns the current disabled state of the element.
+    */
+   virtual bool IsDisabled() const {
+     return HasAttr(kNameSpaceID_None, nsGkAtoms::disabled);
+   }
+ 
+@@ -691,17 +690,17 @@ protected:
+   NS_HIDDEN_(nsresult) SetDoubleAttr(nsIAtom* aAttr, double aValue);
+ 
+   /**
+    * Helper for GetURIAttr and GetHrefURIForAnchors which returns an
+    * nsIURI in the out param.
+    *
+    * @return true if we had the attr, false otherwise.
+    */
+-  NS_HIDDEN_(bool) GetURIAttr(nsIAtom* aAttr, nsIAtom* aBaseAttr, nsIURI** aURI) const;
++  NS_HIDDEN_(bool) GetURIAttr(nsIAtom* aAttr, nsIURI** aURI) const;
+ 
+   /**
+    * This method works like GetURIAttr, except that it supports multiple
+    * URIs separated by whitespace (one or more U+0020 SPACE characters).
+    *
+    * Gets the absolute URI values of an attribute, by resolving any relative
+    * URIs in the attribute against the baseuri of the element. If a substring
+    * isn't a relative URI, the substring is returned as is. Only works for
+@@ -1176,50 +1175,38 @@ protected:
+  * uses the generic GetAttr and SetAttr methods.  This macro is much
+  * like the NS_IMPL_STRING_ATTR macro, except we make sure the URI is
+  * absolute.
+  */
+ #define NS_IMPL_URI_ATTR(_class, _method, _atom)                    \
+   NS_IMETHODIMP                                                     \
+   _class::Get##_method(nsAString& aValue)                           \
+   {                                                                 \
+-    return GetURIAttr(nsGkAtoms::_atom, nullptr, aValue);          \
++    return GetURIAttr(nsGkAtoms::_atom, aValue);                    \
+   }                                                                 \
+   NS_IMETHODIMP                                                     \
+   _class::Set##_method(const nsAString& aValue)                     \
+   {                                                                 \
+-    return SetAttrHelper(nsGkAtoms::_atom, aValue);               \
+-  }
+-
+-#define NS_IMPL_URI_ATTR_WITH_BASE(_class, _method, _atom, _base_atom)       \
+-  NS_IMETHODIMP                                                              \
+-  _class::Get##_method(nsAString& aValue)                                    \
+-  {                                                                          \
+-    return GetURIAttr(nsGkAtoms::_atom, nsGkAtoms::_base_atom, aValue);  \
+-  }                                                                          \
+-  NS_IMETHODIMP                                                              \
+-  _class::Set##_method(const nsAString& aValue)                              \
+-  {                                                                          \
+-    return SetAttrHelper(nsGkAtoms::_atom, aValue);                        \
++    return SetAttrHelper(nsGkAtoms::_atom, aValue);                 \
+   }
+ 
+ /**
+  * A macro to implement getter and setter for action and form action content
+  * attributes. It's very similar to NS_IMPL_URI_ATTR excepted that if the
+  * content attribute is the empty string, the empty string is returned.
+  */
+ #define NS_IMPL_ACTION_ATTR(_class, _method, _atom)                 \
+   NS_IMETHODIMP                                                     \
+   _class::Get##_method(nsAString& aValue)                           \
+   {                                                                 \
+     GetAttr(kNameSpaceID_None, nsGkAtoms::_atom, aValue);           \
+     if (aValue.IsEmpty()) {                                         \
+       return NS_OK;                                                 \
+     }                                                               \
+-    return GetURIAttr(nsGkAtoms::_atom, nullptr, aValue);            \
++    return GetURIAttr(nsGkAtoms::_atom, aValue);                    \
+   }                                                                 \
+   NS_IMETHODIMP                                                     \
+   _class::Set##_method(const nsAString& aValue)                     \
+   {                                                                 \
+     return SetAttrHelper(nsGkAtoms::_atom, aValue);                 \
+   }
+ 
+ /**
+diff --git a/content/html/content/src/nsHTMLObjectElement.cpp b/content/html/content/src/nsHTMLObjectElement.cpp
+--- a/content/html/content/src/nsHTMLObjectElement.cpp
++++ b/content/html/content/src/nsHTMLObjectElement.cpp
+@@ -399,20 +399,20 @@ nsHTMLObjectElement::SubmitNamesValues(n
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   return aFormSubmission->AddNameValuePair(name, value);
+ }
+ 
+ NS_IMPL_STRING_ATTR(nsHTMLObjectElement, Align, align)
+ NS_IMPL_STRING_ATTR(nsHTMLObjectElement, Archive, archive)
+ NS_IMPL_STRING_ATTR(nsHTMLObjectElement, Border, border)
+-NS_IMPL_URI_ATTR_WITH_BASE(nsHTMLObjectElement, Code, code, codebase)
++NS_IMPL_URI_ATTR(nsHTMLObjectElement, Code, code)
+ NS_IMPL_URI_ATTR(nsHTMLObjectElement, CodeBase, codebase)
+ NS_IMPL_STRING_ATTR(nsHTMLObjectElement, CodeType, codetype)
+-NS_IMPL_URI_ATTR_WITH_BASE(nsHTMLObjectElement, Data, data, codebase)
++NS_IMPL_URI_ATTR(nsHTMLObjectElement, Data, data)
+ NS_IMPL_BOOL_ATTR(nsHTMLObjectElement, Declare, declare)
+ NS_IMPL_STRING_ATTR(nsHTMLObjectElement, Height, height)
+ NS_IMPL_INT_ATTR(nsHTMLObjectElement, Hspace, hspace)
+ NS_IMPL_STRING_ATTR(nsHTMLObjectElement, Name, name)
+ NS_IMPL_STRING_ATTR(nsHTMLObjectElement, Standby, standby)
+ NS_IMPL_INT_ATTR_DEFAULT_VALUE(nsHTMLObjectElement, TabIndex, tabindex,
+                                IsFocusableForTabIndex() ? 0 : -1)
+ NS_IMPL_STRING_ATTR(nsHTMLObjectElement, Type, type)
+diff --git a/content/html/content/src/nsHTMLSharedObjectElement.cpp b/content/html/content/src/nsHTMLSharedObjectElement.cpp
+--- a/content/html/content/src/nsHTMLSharedObjectElement.cpp
++++ b/content/html/content/src/nsHTMLSharedObjectElement.cpp
+@@ -348,17 +348,17 @@ nsHTMLSharedObjectElement::GetDesiredIME
+ NS_IMPL_STRING_ATTR(nsHTMLSharedObjectElement, Align, align)
+ NS_IMPL_STRING_ATTR(nsHTMLSharedObjectElement, Alt, alt)
+ NS_IMPL_STRING_ATTR(nsHTMLSharedObjectElement, Archive, archive)
+ NS_IMPL_STRING_ATTR(nsHTMLSharedObjectElement, Code, code)
+ NS_IMPL_URI_ATTR(nsHTMLSharedObjectElement, CodeBase, codebase)
+ NS_IMPL_STRING_ATTR(nsHTMLSharedObjectElement, Height, height)
+ NS_IMPL_INT_ATTR(nsHTMLSharedObjectElement, Hspace, hspace)
+ NS_IMPL_STRING_ATTR(nsHTMLSharedObjectElement, Name, name)
+-NS_IMPL_URI_ATTR_WITH_BASE(nsHTMLSharedObjectElement, Object, object, codebase)
++NS_IMPL_URI_ATTR(nsHTMLSharedObjectElement, Object, object)
+ NS_IMPL_URI_ATTR(nsHTMLSharedObjectElement, Src, src)
+ NS_IMPL_INT_ATTR_DEFAULT_VALUE(nsHTMLSharedObjectElement, TabIndex, tabindex, -1)
+ NS_IMPL_STRING_ATTR(nsHTMLSharedObjectElement, Type, type)
+ NS_IMPL_INT_ATTR(nsHTMLSharedObjectElement, Vspace, vspace)
+ NS_IMPL_STRING_ATTR(nsHTMLSharedObjectElement, Width, width)
+ 
+ NS_IMETHODIMP
+ nsHTMLSharedObjectElement::GetSVGDocument(nsIDOMDocument **aResult)

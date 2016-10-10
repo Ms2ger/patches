@@ -1,0 +1,243 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/xbl/src/nsXBLDocumentInfo.cpp b/content/xbl/src/nsXBLDocumentInfo.cpp
+--- a/content/xbl/src/nsXBLDocumentInfo.cpp
++++ b/content/xbl/src/nsXBLDocumentInfo.cpp
+@@ -260,24 +260,18 @@ nsXBLDocGlobalObject::EnsureScriptEnviro
+     return NS_OK;
+   }
+ 
+   nsCOMPtr<nsIScriptRuntime> scriptRuntime;
+   NS_GetJSRuntime(getter_AddRefs(scriptRuntime));
+   NS_ENSURE_TRUE(scriptRuntime, NS_OK);
+ 
+   nsCOMPtr<nsIScriptContext> newCtx = scriptRuntime->CreateContext(false, nullptr);
+-  MOZ_ASSERT(newCtx);
++  NS_ENSURE_TRUE(newCtx, NS_ERROR_OUT_OF_MEMORY);
+ 
+-  newCtx->WillInitializeContext();
+-  // NOTE: We init this context with a nullptr global, so we automatically
+-  // hook up to the existing nsIScriptGlobalObject global setup by
+-  // nsGlobalWindow.
+-  DebugOnly<nsresult> rv = newCtx->InitContext();
+-  NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "Script Language's InitContext failed");
+   newCtx->DidInitializeContext();
+ 
+   mScriptContext = newCtx;
+ 
+   AutoPushJSContext cx(mScriptContext->GetNativeContext());
+ 
+   // nsJSEnvironment set the error reporter to NS_ScriptErrorReporter so
+   // we must apparently override that with our own (although it isn't clear 
+diff --git a/content/xul/document/src/nsXULPrototypeDocument.cpp b/content/xul/document/src/nsXULPrototypeDocument.cpp
+--- a/content/xul/document/src/nsXULPrototypeDocument.cpp
++++ b/content/xul/document/src/nsXULPrototypeDocument.cpp
+@@ -750,17 +750,19 @@ nsXULPDGlobalObject::EnsureScriptEnviron
+   }
+   NS_ASSERTION(!mJSObject, "Have global without context?");
+ 
+   nsCOMPtr<nsIScriptRuntime> languageRuntime;
+   nsresult rv = NS_GetJSRuntime(getter_AddRefs(languageRuntime));
+   NS_ENSURE_SUCCESS(rv, NS_OK);
+ 
+   nsCOMPtr<nsIScriptContext> ctxNew = languageRuntime->CreateContext(false, nullptr);
+-  MOZ_ASSERT(ctxNew);
++  NS_ENSURE_TRUE(ctxNew, NS_ERROR_OUT_OF_MEMORY);
++
++  ctxNew->DidInitializeContext();
+ 
+   // We have to setup a special global object.  We do this then
+   // attach it as the global for this context.  Then, we
+   // will re-fetch the global and set it up in our language globals array.
+   {
+     AutoPushJSContext cx(ctxNew->GetNativeContext());
+     JS::CompartmentOptions options;
+     options.setZone(JS::SystemZone);
+@@ -773,23 +775,16 @@ nsXULPDGlobalObject::EnsureScriptEnviron
+     ::JS_SetGlobalObject(cx, newGlob);
+ 
+     // Add an owning reference from JS back to us. This'll be
+     // released when the JSObject is finalized.
+     ::JS_SetPrivate(newGlob, this);
+     NS_ADDREF(this);
+   }
+ 
+-  // should probably assert the context is clean???
+-  ctxNew->WillInitializeContext();
+-  rv = ctxNew->InitContext();
+-  NS_ENSURE_SUCCESS(rv, NS_OK);
+-
+-  ctxNew->DidInitializeContext();
+-
+   JSObject* global = ctxNew->GetNativeGlobal();
+   NS_ASSERTION(global, "GetNativeGlobal returned nullptr!");
+ 
+   mContext = ctxNew;
+   mJSObject = global;
+ 
+   // Set the location information for the new global, so that tools like
+   // about:memory may use that information
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -1803,36 +1803,30 @@ nsresult
+ nsGlobalWindow::EnsureScriptEnvironment()
+ {
+   FORWARD_TO_OUTER(EnsureScriptEnvironment, (), NS_ERROR_NOT_INITIALIZED);
+ 
+   if (mJSObject) {
+     return NS_OK;
+   }
+ 
++  NS_ASSERTION(!mContext, "Will overwrite mContext!");
+   NS_ASSERTION(!GetCurrentInnerWindowInternal(),
+                "mJSObject is null, but we have an inner window?");
+ 
+   nsCOMPtr<nsIScriptRuntime> scriptRuntime;
+   nsresult rv = NS_GetJSRuntime(getter_AddRefs(scriptRuntime));
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   // If this window is a [i]frame, don't bother GC'ing when the frame's context
+   // is destroyed since a GC will happen when the frameset or host document is
+   // destroyed anyway.
+   nsCOMPtr<nsIScriptContext> context =
+     scriptRuntime->CreateContext(!IsFrame(), this);
+-
+-  NS_ASSERTION(!mContext, "Will overwrite mContext!");
+-
+-  // should probably assert the context is clean???
+-  context->WillInitializeContext();
+-
+-  rv = context->InitContext();
+-  NS_ENSURE_SUCCESS(rv, rv);
++  NS_ENSURE_TRUE(context, NS_ERROR_OUT_OF_MEMORY);
+ 
+   mContext = context;
+   return NS_OK;
+ }
+ 
+ nsIScriptContext *
+ nsGlobalWindow::GetScriptContext()
+ {
+diff --git a/dom/base/nsIScriptContext.h b/dom/base/nsIScriptContext.h
+--- a/dom/base/nsIScriptContext.h
++++ b/dom/base/nsIScriptContext.h
+@@ -146,21 +146,16 @@ public:
+ 
+   /**
+    * Return the native global object for this context.
+    *
+    **/
+   virtual JSObject* GetNativeGlobal() = 0;
+ 
+   /**
+-   * Initialize the context generally. Does not create a global object.
+-   **/
+-  virtual nsresult InitContext() = 0;
+-
+-  /**
+    * Check to see if context is as yet intialized. Used to prevent
+    * reentrancy issues during the initialization process.
+    *
+    * @return true if initialized, false if not
+    *
+    */
+   virtual bool IsContextInitialized() = 0;
+ 
+diff --git a/dom/base/nsIScriptRuntime.h b/dom/base/nsIScriptRuntime.h
+--- a/dom/base/nsIScriptRuntime.h
++++ b/dom/base/nsIScriptRuntime.h
+@@ -16,17 +16,17 @@
+  * initializing and cleaning up the global language environment, and a factory
+  * for language contexts
+  */
+ class nsIScriptRuntime : public nsISupports
+ {
+ public:
+   NS_DECLARE_STATIC_IID_ACCESSOR(NS_ISCRIPTRUNTIME_IID)
+ 
+-  /* Factory for a new context for this language */
++  /* Factory for a new context for this language. Returns null on OOM. */
+   virtual already_AddRefed<nsIScriptContext>
+   CreateContext(bool aGCOnDestruction,
+                 nsIScriptGlobalObject* aGlobalObject) = 0;
+ };
+ 
+ NS_DEFINE_STATIC_IID_ACCESSOR(nsIScriptRuntime, NS_ISCRIPTRUNTIME_IID)
+ 
+ /* helper functions */
+diff --git a/dom/base/nsJSEnvironment.cpp b/dom/base/nsJSEnvironment.cpp
+--- a/dom/base/nsJSEnvironment.cpp
++++ b/dom/base/nsJSEnvironment.cpp
+@@ -1618,24 +1618,20 @@ JSContext*
+ nsJSContext::GetNativeContext()
+ {
+   return xpc_UnmarkGrayContext(mContext);
+ }
+ 
+ nsresult
+ nsJSContext::InitContext()
+ {
+-  // Make sure callers of this use
+-  // WillInitializeContext/DidInitializeContext around this call.
+-  NS_ENSURE_TRUE(!mIsInitialized, NS_ERROR_ALREADY_INITIALIZED);
+-
+   if (!mContext)
+     return NS_ERROR_OUT_OF_MEMORY;
+ 
+-  ::JS_SetErrorReporter(mContext, NS_ScriptErrorReporter);
++  JS_SetErrorReporter(mContext, NS_ScriptErrorReporter);
+ 
+   JSOptionChangedCallback(js_options_dot_str, this);
+ 
+   return NS_OK;
+ }
+ 
+ nsresult
+ nsJSContext::InitializeExternalClasses()
+@@ -3129,18 +3125,22 @@ NS_INTERFACE_MAP_END
+ 
+ NS_IMPL_ADDREF(nsJSRuntime)
+ NS_IMPL_RELEASE(nsJSRuntime)
+ 
+ already_AddRefed<nsIScriptContext>
+ nsJSRuntime::CreateContext(bool aGCOnDestruction,
+                            nsIScriptGlobalObject* aGlobalObject)
+ {
+-  nsCOMPtr<nsIScriptContext> scriptContext =
++  nsRefPtr<nsJSContext> scriptContext =
+     new nsJSContext(sRuntime, aGCOnDestruction, aGlobalObject);
++
++  nsresult rv = scriptContext->InitContext();
++  NS_ENSURE_SUCCESS(rv, nullptr);
++
+   return scriptContext.forget();
+ }
+ 
+ //static
+ void
+ nsJSRuntime::Startup()
+ {
+   // initialize all our statics, so that we can restart XPCOM
+diff --git a/dom/base/nsJSEnvironment.h b/dom/base/nsJSEnvironment.h
+--- a/dom/base/nsJSEnvironment.h
++++ b/dom/base/nsJSEnvironment.h
+@@ -66,17 +66,17 @@ public:
+                                             JS::Handle<JSObject*> aHandler,
+                                             JS::MutableHandle<JSObject*> aBoundHandler) MOZ_OVERRIDE;
+ 
+   virtual nsIScriptGlobalObject *GetGlobalObject() MOZ_OVERRIDE;
+   inline nsIScriptGlobalObject *GetGlobalObjectRef() { return mGlobalObjectRef; }
+ 
+   virtual JSContext* GetNativeContext() MOZ_OVERRIDE;
+   virtual JSObject* GetNativeGlobal() MOZ_OVERRIDE;
+-  virtual nsresult InitContext() MOZ_OVERRIDE;
++  nsresult InitContext();
+   virtual bool IsContextInitialized() MOZ_OVERRIDE;
+ 
+   virtual void ScriptEvaluated(bool aTerminated) MOZ_OVERRIDE;
+   virtual bool GetScriptsEnabled() MOZ_OVERRIDE;
+   virtual void SetScriptsEnabled(bool aEnabled, bool aFireTimeouts) MOZ_OVERRIDE;
+ 
+   virtual nsresult SetProperty(JS::Handle<JSObject*> aTarget, const char* aPropName, nsISupports* aVal) MOZ_OVERRIDE;
+ 

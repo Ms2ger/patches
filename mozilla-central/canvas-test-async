@@ -1,0 +1,350 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 665345 - Move asynchronous tests out of test_canvas.html
+
+This patch moves three tests that use setTimeout to their own
+files, to avoid them interfering with other tests and simplify
+the meta-code in test_canvas.html.
+
+diff --git a/content/canvas/test/Makefile.in b/content/canvas/test/Makefile.in
+--- a/content/canvas/test/Makefile.in
++++ b/content/canvas/test/Makefile.in
+@@ -130,16 +130,23 @@ MOCHITEST_FILES += \
+   test_2d.path.stroke.prune.closed.html \
+   test_2d.path.stroke.prune.curve.html \
+   test_2d.path.stroke.prune.line.html \
+   test_2d.path.stroke.prune.rect.html \
+   test_2d.transformation.setTransform.skewed.html \
+   test_2d.transformation.transform.skewed.html \
+   $(NULL)
+ 
++# Tests that use setTimeout.
++MOCHITEST_FILES += \
++  test_2d.drawImage.animated.apng.html \
++  test_2d.drawImage.animated.gif.html \
++  test_2d.pattern.animated.gif.html \
++  $(NULL)
++
+ ifneq (1_Linux,$(MOZ_SUITE)_$(OS_ARCH))
+ # This test fails in Suite on Linux for some reason, disable it there
+ MOCHITEST_FILES += test_2d.composite.uncovered.image.destination-atop.html
+ endif
+ 
+ # xor and lighter aren't well handled by cairo; they mostly work, but we don't want
+ # to test that
+ #	test_2d.composite.solid.xor.html \
+diff --git a/content/canvas/test/standalone.dat b/content/canvas/test/standalone.dat
+--- a/content/canvas/test/standalone.dat
++++ b/content/canvas/test/standalone.dat
+@@ -7,8 +7,12 @@ test_2d.strokeRect.zero.1.html
+ test_2d.path.arcTo.shape.curve1.html
+ test_2d.path.arcTo.shape.curve2.html
+ test_2d.path.stroke.prune.closed.html
+ test_2d.path.stroke.prune.curve.html
+ test_2d.path.stroke.prune.line.html
+ test_2d.path.stroke.prune.rect.html
+ test_2d.transformation.setTransform.skewed.html
+ test_2d.transformation.transform.skewed.html
++# setTimeout
++test_2d.drawImage.animated.apng.html
++test_2d.drawImage.animated.gif.html
++test_2d.pattern.animated.gif.html
+diff --git a/content/canvas/test/test_2d.drawImage.animated.apng.html b/content/canvas/test/test_2d.drawImage.animated.apng.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_2d.drawImage.animated.apng.html
+@@ -0,0 +1,27 @@
++<!DOCTYPE HTML>
++<title>Canvas test: 2d.drawImage.animated.apng</title>
++<!-- Testing: drawImage() of an APNG with no poster frame draws the first frame -->
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++deferTest();
++setTimeout(wrapFunction(function () {
++    ctx.drawImage(document.getElementById('anim-gr.png'), 0, 0);
++    isPixel(ctx, 50,25, 0,255,0,255, "50,25", "0,255,0,255", 2);
++}), 500);
++
++
++});
++</script>
++<img src="image_anim-gr.png" id="anim-gr.png" class="resource">
++
+diff --git a/content/canvas/test/test_2d.drawImage.animated.gif.html b/content/canvas/test/test_2d.drawImage.animated.gif.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_2d.drawImage.animated.gif.html
+@@ -0,0 +1,27 @@
++<!DOCTYPE HTML>
++<title>Canvas test: 2d.drawImage.animated.gif</title>
++<!-- Testing: drawImage() of an animated GIF draws the first frame -->
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++deferTest();
++setTimeout(wrapFunction(function () {
++    ctx.drawImage(document.getElementById('anim-gr.gif'), 0, 0);
++    isPixel(ctx, 50,25, 0,255,0,255, "50,25", "0,255,0,255", 2);
++}), 500);
++
++
++});
++</script>
++<img src="image_anim-gr.gif" id="anim-gr.gif" class="resource">
++
+diff --git a/content/canvas/test/test_2d.pattern.animated.gif.html b/content/canvas/test/test_2d.pattern.animated.gif.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_2d.pattern.animated.gif.html
+@@ -0,0 +1,33 @@
++<!DOCTYPE HTML>
++<title>Canvas test: 2d.pattern.animated.gif</title>
++<!-- Testing: createPattern() of an animated GIF draws the first frame -->
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++deferTest();
++setTimeout(function () {
++    var pattern = ctx.createPattern(document.getElementById('anim-gr.gif'), 'repeat');
++    ctx.fillStyle = pattern;
++    ctx.fillRect(0, 0, 50, 50);
++    setTimeout(wrapFunction(function () {
++        ctx.fillRect(50, 0, 50, 50);
++        isPixel(ctx, 25,25, 0,255,0,255, "25,25", "0,255,0,255", 2);
++        isPixel(ctx, 75,25, 0,255,0,255, "75,25", "0,255,0,255", 2);
++    }), 250);
++}, 250);
++
++
++});
++</script>
++<img src="image_anim-gr.gif" id="anim-gr.gif" class="resource">
++
+diff --git a/content/canvas/test/test_canvas.html b/content/canvas/test/test_canvas.html
+--- a/content/canvas/test/test_canvas.html
++++ b/content/canvas/test/test_canvas.html
+@@ -2626,66 +2626,16 @@ ctx.globalAlpha = 0;
+ ctx.drawImage(document.getElementById('red_7.png'), 0, 0);
+ isPixel(ctx, 50,25, 0,255,0,255, 2);
+ 
+ 
+ }
+ </script>
+ <img class="resource" id="red_7.png" src="image_red.png">
+ 
+-<!-- [[[ test_2d.drawImage.animated.apng.html ]]] -->
+-
+-<p>Canvas test: 2d.drawImage.animated.apng</p>
+-<!-- Testing: drawImage() of an APNG with no poster frame draws the first frame -->
+-<canvas height="50" id="c108" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-var canvas108 = document.getElementById('c108');
+-var ctx108 = canvas108.getContext('2d');
+-var isDone_test_2d_drawImage_animated_apng = false;
+-
+-function test_2d_drawImage_animated_apng() {
+-
+-deferTest();
+-setTimeout(wrapFunction(function () {
+-    ctx108.drawImage(document.getElementById('anim-gr_1.png'), 0, 0);
+-    isPixel(ctx108, 50,25, 0,255,0,255, 2);
+-	isDone_test_2d_drawImage_animated_apng = true;
+-}), 5000);
+-
+-
+-}
+-</script>
+-<img class="resource" id="anim-gr_1.png" src="image_anim-gr.png">
+-
+-<!-- [[[ test_2d.drawImage.animated.gif.html ]]] -->
+-
+-<p>Canvas test: 2d.drawImage.animated.gif</p>
+-<!-- Testing: drawImage() of an animated GIF draws the first frame -->
+-<canvas height="50" id="c109" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-var canvas109 = document.getElementById('c109');
+-var ctx109 = canvas109.getContext('2d');
+-var isDone_test_2d_drawImage_animated_gif = false;
+-
+-function test_2d_drawImage_animated_gif() {
+-
+-deferTest();
+-setTimeout(wrapFunction(function () {
+-    ctx109.drawImage(document.getElementById('anim-gr_1.gif'), 0, 0);
+-    isPixel(ctx109, 50,25, 0,255,0,255, 2);
+-	isDone_test_2d_drawImage_animated_gif = true;
+-}), 5000);
+-
+-
+-}
+-</script>
+-<img class="resource" id="anim-gr_1.gif" src="image_anim-gr.gif">
+-
+ <!-- [[[ test_2d.drawImage.animated.poster.html ]]] -->
+ 
+ <p>Canvas test: 2d.drawImage.animated.poster</p>
+ <!-- Testing: drawImage() of an APNG draws the poster frame -->
+ <canvas height="50" id="c110" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+ <script>
+ 
+ var canvas110 = document.getElementById('c110');
+@@ -13713,47 +13663,16 @@ ctx.fillStyle = '#0f0';
+ ctx.fill();
+ 
+ isPixel(ctx, 50,25, 0,255,0,255, 0);
+ 
+ 
+ }
+ </script>
+ 
+-<!-- [[[ test_2d.pattern.animated.gif.html ]]] -->
+-
+-<p>Canvas test: 2d.pattern.animated.gif</p>
+-<!-- Testing: createPattern() of an animated GIF draws the first frame -->
+-<canvas height="50" id="c458" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-var canvas458 = document.getElementById('c458');
+-var ctx458 = canvas458.getContext('2d');
+-var isDone_test_2d_pattern_animated_gif = false;
+-
+-function test_2d_pattern_animated_gif() {
+-
+-deferTest();
+-setTimeout(function () {
+-    var pattern = ctx458.createPattern(document.getElementById('anim-gr_2.gif'), 'repeat');
+-    ctx458.fillStyle = pattern;
+-    ctx458.fillRect(0, 0, 50, 50);
+-    setTimeout(wrapFunction(function () {
+-        ctx458.fillRect(50, 0, 50, 50);
+-        isPixel(ctx458, 25,25, 0,255,0,255, 2);
+-        isPixel(ctx458, 75,25, 0,255,0,255, 2);
+-		isDone_test_2d_pattern_animated_gif = true;
+-    }), 2500);
+-}, 2500);
+-
+-
+-}
+-</script>
+-<img class="resource" id="anim-gr_2.gif" src="image_anim-gr.gif">
+-
+ <!-- [[[ test_2d.pattern.basic.canvas.html ]]] -->
+ 
+ <p>Canvas test: 2d.pattern.basic.canvas</p>
+ <canvas height="50" id="c459" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+ <script>
+ 
+ function test_2d_pattern_basic_canvas() {
+ 
+@@ -19971,26 +19890,16 @@ function test_getImageData_after_zero_ca
+     ok(imgdata.data.length === oldimgdata.data.length, "not the same length");
+     for (var i = 0; i < imgdata.data.length; ++i)
+         same = imgdata.data[i] === oldimgdata.data[i];
+     ok(same, "changing dimensions broke canvas");
+ }
+ </script>
+ 
+ <script>
+-
+-function asyncTestsDone() {
+-	if (isDone_test_2d_drawImage_animated_apng &&
+-		isDone_test_2d_drawImage_animated_gif) {
+-		SimpleTest.finish();
+-	} else {
+-		setTimeout(asyncTestsDone, 500);
+-	}
+- }
+- 
+ function runTests() {
+ /**
+  * xor and lighter aren't well handled by cairo; they mostly work, but we don't want
+  * to test that
+  */
+  //test_2d_composite_solid_lighter();
+  //test_2d_composite_transparent_xor();
+  //test_2d_composite_solid_xor();
+@@ -22080,21 +21989,16 @@ function runTests() {
+   ok(false, "unexpected exception thrown in: test_2d_path_transformation_changing");
+  }
+  try {
+   test_2d_path_transformation_multiple();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_path_transformation_multiple");
+  }
+  try {
+-  test_2d_pattern_animated_gif();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_2d_pattern_animated_gif");
+- }
+- try {
+   test_2d_pattern_basic_canvas();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_pattern_basic_canvas");
+  }
+  try {
+   test_2d_pattern_basic_image();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_pattern_basic_image");
+@@ -23206,27 +23110,16 @@ function runTests() {
+   ok(false, "unexpected exception thrown in: test_getImageData_after_zero_canvas");
+  }
+  try {
+   // run this test last since it replaces the getContext method
+   test_type_replace();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_type_replace");
+  }
+- 
+- //run the asynchronous tests
+- try {
+-  test_2d_drawImage_animated_apng();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_2d_drawImage_animated_apng");
+- }
+- try {
+-  test_2d_drawImage_animated_gif();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_2d_drawImage_animated_gif");
+- }
+- 
+- setTimeout(asyncTestsDone, 500);
++
++
++ SimpleTest.finish();
+ }
+ 
+ addLoadEvent(runTests);
+ 
+ </script>

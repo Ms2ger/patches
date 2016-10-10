@@ -1,0 +1,459 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 665345 - Split more event-using tests out of test_canvas.html
+
+This patch moves two tests that use image.onload out of
+test_canvas.html, to avoid interference with other tests,
+and adds three related tests with the same issues.
+
+diff --git a/content/canvas/test/Makefile.in b/content/canvas/test/Makefile.in
+--- a/content/canvas/test/Makefile.in
++++ b/content/canvas/test/Makefile.in
+@@ -141,16 +141,21 @@ MOCHITEST_FILES += \
+   test_2d.drawImage.animated.gif.html \
+   test_2d.pattern.animated.gif.html \
+   $(NULL)
+ 
+ # Tests that use events.
+ MOCHITEST_FILES += \
+   test_2d.pattern.modify.image1.html \
+   test_2d.pattern.modify.image2.html \
++  test_toDataURL.jpeg.alpha.html \
++  test_toDataURL.jpeg.primarycolours.html \
++  test_toDataURL.jpeg.quality.basic.html \
++  test_toDataURL.png.complexcolours.html \
++  test_toDataURL.png.primarycolours.html \
+   $(NULL)
+ 
+ # WebIDL tests that don't play well with other tests.
+ MOCHITEST_FILES += \
+   test_2d.type.prototype.html \
+   test_2d.type.replace.html \
+   test_type.prototype.html \
+   test_type.replace.html \
+diff --git a/content/canvas/test/standalone.dat b/content/canvas/test/standalone.dat
+--- a/content/canvas/test/standalone.dat
++++ b/content/canvas/test/standalone.dat
+@@ -71,13 +71,18 @@ test_2d.transformation.setTransform.skew
+ test_2d.transformation.transform.skewed.html
+ # setTimeout
+ test_2d.drawImage.animated.apng.html
+ test_2d.drawImage.animated.gif.html
+ test_2d.pattern.animated.gif.html
+ # Events
+ test_2d.pattern.modify.image1.html
+ test_2d.pattern.modify.image2.html
++test_toDataURL.jpeg.alpha.html
++test_toDataURL.jpeg.primarycolours.html
++test_toDataURL.jpeg.quality.basic.html
++test_toDataURL.png.complexcolours.html
++test_toDataURL.png.primarycolours.html
+ # Clashes
+ test_2d.type.prototype.html
+ test_2d.type.replace.html
+ test_type.prototype.html
+ test_type.replace.html
+diff --git a/content/canvas/test/test_canvas.html b/content/canvas/test/test_canvas.html
+--- a/content/canvas/test/test_canvas.html
++++ b/content/canvas/test/test_canvas.html
+@@ -17598,55 +17598,16 @@ var ctx = canvas.getContext('2d');
+ // More arguments that should not raise exceptions
+ var data = canvas.toDataURL('image/png', null, null, null);
+ ok(/^data:image\/png[;,]/.test(data), "data =~ /^data:image\\/png[;,]/");
+ 
+ 
+ }
+ </script>
+ 
+-<!-- [[[ test_toDataURL.complexcolours.html ]]] -->
+-
+-<p>Canvas test: toDataURL.complexcolours</p>
+-<!-- Testing: toDataURL handles non-primary and non-solid colours correctly -->
+-<canvas height="50" id="c667" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-var canvas667 = document.getElementById('c667');
+-var ctx667 = canvas667.getContext('2d');
+-
+-function test_toDataURL_complexcolours() {
+-
+-// (These values are chosen to survive relatively alright through being premultiplied)
+-ctx667.fillStyle = 'rgba(1, 3, 254, 1)';
+-ctx667.fillRect(0, 0, 25, 25);
+-ctx667.fillStyle = 'rgba(8, 252, 248, 0.75)';
+-ctx667.fillRect(25, 0, 25, 25);
+-ctx667.fillStyle = 'rgba(6, 10, 250, 0.502)';
+-ctx667.fillRect(50, 0, 25, 25);
+-ctx667.fillStyle = 'rgba(12, 16, 244, 0.25)';
+-ctx667.fillRect(75, 0, 25, 25);
+-var img = new Image();
+-deferTest();
+-img.onload = wrapFunction(function ()
+-{
+-    ctx667.drawImage(img, 0, 25);
+-    // (The alpha values do not really survive float->int conversion, so just
+-    // do approximate comparisons)
+-    isPixel(ctx667, 12,40, 1,3,254,255, 0);
+-    isPixel(ctx667, 37,40, 8,252,248,191, 2);
+-    isPixel(ctx667, 62,40, 6,10,250,127, 4);
+-    isPixel(ctx667, 87,40, 12,16,244,63, 8);
+-});
+-img.src = canvas667.toDataURL();
+-
+-
+-}
+-</script>
+-
+ <!-- [[[ test_toDataURL.default.html ]]] -->
+ 
+ <p>Canvas test: toDataURL.default</p>
+ <!-- Testing: toDataURL with no arguments returns a PNG -->
+ <canvas height="50" id="c668" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+ <script>
+ 
+ function test_toDataURL_default() {
+@@ -17721,56 +17682,16 @@ var ctx = canvas.getContext('2d');
+ 
+ var data = canvas.toDataURL('image/png');
+ ok(/^data:image\/png[;,]/.test(data), "data =~ /^data:image\\/png[;,]/");
+ 
+ 
+ }
+ </script>
+ 
+-<!-- [[[ test_toDataURL.primarycolours.html ]]] -->
+-
+-<p>Canvas test: toDataURL.primarycolours</p>
+-<!-- Testing: toDataURL handles simple colours correctly -->
+-<canvas height="50" id="c672" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-
+-var canvas672 = document.getElementById('c672');
+-var ctx672 = canvas672.getContext('2d');
+-
+-function test_toDataURL_primarycolours() {
+-
+-ctx672.fillStyle = '#ff0';
+-ctx672.fillRect(0, 0, 25, 40);
+-ctx672.fillStyle = '#0ff';
+-ctx672.fillRect(25, 0, 50, 40);
+-ctx672.fillStyle = '#00f';
+-ctx672.fillRect(75, 0, 25, 40);
+-ctx672.fillStyle = '#fff';
+-ctx672.fillRect(0, 40, 100, 10);
+-var data = canvas672.toDataURL();
+-ctx672.fillStyle = '#f00';
+-ctx672.fillRect(0, 0, 100, 50);
+-var img = new Image();
+-deferTest();
+-img.onload = wrapFunction(function ()
+-{
+-    ctx672.drawImage(img, 0, 0);
+-    isPixel(ctx672, 12,20, 255,255,0,255, 0);
+-    isPixel(ctx672, 50,20, 0,255,255,255, 0);
+-    isPixel(ctx672, 87,20, 0,0,255,255, 0);
+-    isPixel(ctx672, 50,45, 255,255,255,255, 0);
+-});
+-img.src = data;
+-
+-
+-}
+-</script>
+-
+ <!-- [[[ test_toDataURL.unrecognised.html ]]] -->
+ 
+ <p>Canvas test: toDataURL.unrecognised - bug 401795</p>
+ <!-- Testing: toDataURL with an unhandled type returns a PNG -->
+ <canvas height="50" id="c673" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+ <script>
+ 
+ function test_toDataURL_unrecognised() {
+@@ -20867,21 +20788,16 @@ function runTests() {
+   ok(false, "unexpected exception thrown in: test_toDataURL_arguments_2");
+  }
+  try {
+   test_toDataURL_arguments_3();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_toDataURL_arguments_3");
+  }
+  try {
+-  test_toDataURL_complexcolours();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_toDataURL_complexcolours");
+- }
+- try {
+   test_toDataURL_default();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_toDataURL_default");
+  }
+  try {
+   test_toDataURL_lowercase_ascii();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_toDataURL_lowercase_ascii");
+@@ -20892,21 +20808,16 @@ function runTests() {
+   ok(false, "unexpected exception thrown in: test_toDataURL_nocontext");
+  }
+  try {
+   test_toDataURL_png();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_toDataURL_png");
+  }
+  try {
+-  test_toDataURL_primarycolours();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_toDataURL_primarycolours");
+- }
+- try {
+   test_toDataURL_unrecognised();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_toDataURL_unrecognised");
+  }
+  try {
+   test_toDataURL_zerosize();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_toDataURL_zerosize");
+diff --git a/content/canvas/test/test_toDataURL.jpeg.alpha.html b/content/canvas/test/test_toDataURL.jpeg.alpha.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_toDataURL.jpeg.alpha.html
+@@ -0,0 +1,40 @@
++<!DOCTYPE HTML>
++<title>Canvas test: toDataURL.jpeg.alpha</title>
++<!-- Testing: toDataURL with JPEG composites onto black -->
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++ctx.fillStyle = 'rgba(128, 255, 128, 0.5)';
++ctx.fillRect(0, 0, 100, 50);
++ctx.globalCompositeOperation = 'destination-over'; // should be ignored by toDataURL
++var data = canvas.toDataURL('image/jpeg');
++ctx.globalCompositeOperation = 'source-over';
++if (!data.match(/^data:image\/jpeg[;,]/)) {
++  ok(true, "true");
++} else {
++  ctx.fillStyle = '#f00';
++  ctx.fillRect(0, 0, 100, 50);
++  var img = new Image();
++  deferTest();
++  img.onload = wrapFunction(function ()
++  {
++      ctx.drawImage(img, 0, 0);
++      isPixel(ctx, 50,25, 63,127,63,255, "50,25", "63,127,63,255", 8);
++  });
++  img.src = data;
++}
++
++
++});
++</script>
++
+diff --git a/content/canvas/test/test_toDataURL.jpeg.primarycolours.html b/content/canvas/test/test_toDataURL.jpeg.primarycolours.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_toDataURL.jpeg.primarycolours.html
+@@ -0,0 +1,43 @@
++<!DOCTYPE HTML>
++<title>Canvas test: toDataURL.jpeg.primarycolours</title>
++<!-- Testing: toDataURL with JPEG handles simple colours correctly -->
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++ctx.fillStyle = '#ff0';
++ctx.fillRect(0, 0, 25, 40);
++ctx.fillStyle = '#0ff';
++ctx.fillRect(25, 0, 50, 40);
++ctx.fillStyle = '#00f';
++ctx.fillRect(75, 0, 25, 40);
++ctx.fillStyle = '#fff';
++ctx.fillRect(0, 40, 100, 10);
++var data = canvas.toDataURL('image/jpeg'); // it is okay if this returns a PNG instead
++ctx.fillStyle = '#f00';
++ctx.fillRect(0, 0, 100, 50);
++var img = new Image();
++deferTest();
++img.onload = wrapFunction(function ()
++{
++    ctx.drawImage(img, 0, 0);
++    isPixel(ctx, 12,20, 255,255,0,255, "12,20", "255,255,0,255", 8);
++    isPixel(ctx, 50,20, 0,255,255,255, "50,20", "0,255,255,255", 8);
++    isPixel(ctx, 87,20, 0,0,255,255, "87,20", "0,0,255,255", 8);
++    isPixel(ctx, 50,45, 255,255,255,255, "50,45", "255,255,255,255", 8);
++});
++img.src = data;
++
++
++});
++</script>
++
+diff --git a/content/canvas/test/test_toDataURL.jpeg.quality.basic.html b/content/canvas/test/test_toDataURL.jpeg.quality.basic.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_toDataURL.jpeg.quality.basic.html
+@@ -0,0 +1,51 @@
++<!DOCTYPE HTML>
++<title>Canvas test: toDataURL.jpeg.quality.basic</title>
++<!-- Testing: toDataURL with JPEG uses the quality parameter -->
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++ctx.fillStyle = '#00f';
++ctx.fillRect(0, 0, 100, 50);
++ctx.fillStyle = '#0ff';
++ctx.fillRect(0, 3, 100, 1);
++// Check for JPEG support first
++var data = canvas.toDataURL('image/jpeg');
++if (!data.match(/^data:image\/jpeg[;,]/)) {
++  ok(true, "true");
++} else {
++  var data_hi = canvas.toDataURL('image/jpeg', 0.99);
++  var data_lo = canvas.toDataURL('image/jpeg', 0.01);
++  ctx.fillStyle = '#f00';
++  ctx.fillRect(0, 0, 100, 50);
++  deferTest();
++  var img_hi = new Image();
++  img_hi.onload = function ()
++  {
++      var img_lo = new Image();
++      img_lo.onload = wrapFunction(function ()
++      {
++          ctx.drawImage(img_hi, 0, 0, 50, 50, 0, 0, 50, 50);
++          ctx.drawImage(img_lo, 0, 0, 50, 50, 50, 0, 50, 50);
++          ok(data_hi.length > data_lo.length, "data_hi.length > data_lo.length");
++          isPixel(ctx, 25,25, 0,0,255,255, "25,25", "0,0,255,255", 8);
++          isPixel(ctx, 75,25, 0,0,255,255, "75,25", "0,0,255,255", 32);
++      });
++      img_lo.src = data_lo;
++  };
++  img_hi.src = data_hi;
++}
++
++
++});
++</script>
++
+diff --git a/content/canvas/test/test_toDataURL.png.complexcolours.html b/content/canvas/test/test_toDataURL.png.complexcolours.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_toDataURL.png.complexcolours.html
+@@ -0,0 +1,43 @@
++<!DOCTYPE HTML>
++<title>Canvas test: toDataURL.png.complexcolours</title>
++<!-- Testing: toDataURL with PNG handles non-primary and non-solid colours correctly -->
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++// (These values are chosen to survive relatively alright through being premultiplied)
++ctx.fillStyle = 'rgba(1, 3, 254, 1)';
++ctx.fillRect(0, 0, 25, 25);
++ctx.fillStyle = 'rgba(8, 252, 248, 0.75)';
++ctx.fillRect(25, 0, 25, 25);
++ctx.fillStyle = 'rgba(6, 10, 250, 0.502)';
++ctx.fillRect(50, 0, 25, 25);
++ctx.fillStyle = 'rgba(12, 16, 244, 0.25)';
++ctx.fillRect(75, 0, 25, 25);
++var img = new Image();
++deferTest();
++img.onload = wrapFunction(function ()
++{
++    ctx.drawImage(img, 0, 25);
++    // (The alpha values do not really survive float->int conversion, so just
++    // do approximate comparisons)
++    isPixel(ctx, 12,40, 1,3,254,255, "12,40", "1,3,254,255", 0);
++    isPixel(ctx, 37,40, 8,252,248,191, "37,40", "8,252,248,191", 2);
++    isPixel(ctx, 62,40, 6,10,250,127, "62,40", "6,10,250,127", 4);
++    isPixel(ctx, 87,40, 12,16,244,63, "87,40", "12,16,244,63", 8);
++});
++img.src = canvas.toDataURL();
++
++
++});
++</script>
++
+diff --git a/content/canvas/test/test_toDataURL.png.primarycolours.html b/content/canvas/test/test_toDataURL.png.primarycolours.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_toDataURL.png.primarycolours.html
+@@ -0,0 +1,43 @@
++<!DOCTYPE HTML>
++<title>Canvas test: toDataURL.png.primarycolours</title>
++<!-- Testing: toDataURL with PNG handles simple colours correctly -->
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++ctx.fillStyle = '#ff0';
++ctx.fillRect(0, 0, 25, 40);
++ctx.fillStyle = '#0ff';
++ctx.fillRect(25, 0, 50, 40);
++ctx.fillStyle = '#00f';
++ctx.fillRect(75, 0, 25, 40);
++ctx.fillStyle = '#fff';
++ctx.fillRect(0, 40, 100, 10);
++var data = canvas.toDataURL();
++ctx.fillStyle = '#f00';
++ctx.fillRect(0, 0, 100, 50);
++var img = new Image();
++deferTest();
++img.onload = wrapFunction(function ()
++{
++    ctx.drawImage(img, 0, 0);
++    isPixel(ctx, 12,20, 255,255,0,255, "12,20", "255,255,0,255", 0);
++    isPixel(ctx, 50,20, 0,255,255,255, "50,20", "0,255,255,255", 0);
++    isPixel(ctx, 87,20, 0,0,255,255, "87,20", "0,0,255,255", 0);
++    isPixel(ctx, 50,45, 255,255,255,255, "50,45", "255,255,255,255", 0);
++});
++img.src = data;
++
++
++});
++</script>
++

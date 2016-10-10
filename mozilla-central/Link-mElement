@@ -1,0 +1,205 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/Link.cpp b/content/base/src/Link.cpp
+--- a/content/base/src/Link.cpp
++++ b/content/base/src/Link.cpp
+@@ -51,20 +51,20 @@
+ #include "mozilla/Services.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ Link::Link(nsGenericElement* aElement)
+   : mLinkState(defaultState)
+   , mRegistered(false)
+-  , mContent(aElement)
++  , mElement(aElement)
+   , mHistory(services::GetHistoryService())
+ {
+-  NS_ABORT_IF_FALSE(mContent, "No element provided!");
++  NS_ABORT_IF_FALSE(mElement, "No element provided!");
+ }
+ 
+ Link::~Link()
+ {
+   UnregisterFromHistory();
+ }
+ 
+ nsLinkState
+@@ -90,37 +90,35 @@ Link::SetLinkState(nsLinkState aState)
+ 
+   // Set our current state as appropriate.
+   mLinkState = aState;
+ 
+   // Per IHistory interface documentation, we are no longer registered.
+   mRegistered = false;
+ 
+   // Notify the document that our visited state has changed.
+-  nsIContent *content = Content();
+-  nsIDocument *doc = content->GetCurrentDoc();
++  nsIDocument *doc = mElement->GetCurrentDoc();
+   NS_ASSERTION(doc, "Registered but we have no document?!");
+   nsEventStates newLinkState = LinkState();
+   NS_ASSERTION(newLinkState == NS_EVENT_STATE_VISITED ||
+                newLinkState == NS_EVENT_STATE_UNVISITED,
+                "Unexpected state obtained from LinkState()!");
+   mozAutoDocUpdate update(doc, UPDATE_CONTENT_STATE, true);
+-  doc->ContentStateChanged(content, oldLinkState ^ newLinkState);
++  doc->ContentStateChanged(mElement, oldLinkState ^ newLinkState);
+ }
+ 
+ nsEventStates
+ Link::LinkState() const
+ {
+   // We are a constant method, but we are just lazily doing things and have to
+   // track that state.  Cast away that constness!
+   Link *self = const_cast<Link *>(this);
+ 
+   // If we are not in the document, default to not visited.
+-  nsIContent *content = self->Content();
+-  if (!content->IsInDoc()) {
++  if (!mElement->IsInDoc()) {
+     self->mLinkState = eLinkState_Unvisited;
+   }
+ 
+   // If we have not yet registered for notifications and are in an unknown
+   // state, register now!
+   if (!mRegistered && mLinkState == eLinkState_Unknown) {
+     // First, make sure the href attribute has a valid link (bug 23209).
+     nsCOMPtr<nsIURI> hrefURI(GetURI());
+@@ -133,17 +131,17 @@ Link::LinkState() const
+     nsresult rv = mHistory->RegisterVisitedCallback(hrefURI, self);
+     if (NS_SUCCEEDED(rv)) {
+       self->mRegistered = true;
+ 
+       // Assume that we are not visited until we are told otherwise.
+       self->mLinkState = eLinkState_Unvisited;
+ 
+       // And make sure we are in the document's link map.
+-      nsIDocument *doc = content->GetCurrentDoc();
++      nsIDocument *doc = mElement->GetCurrentDoc();
+       if (doc) {
+         doc->AddStyleRelevantLink(self);
+       }
+     }
+   }
+ 
+   // Otherwise, return our known state.
+   if (mLinkState == eLinkState_Visited) {
+@@ -163,22 +161,20 @@ Link::GetURI() const
+   nsCOMPtr<nsIURI> uri(mCachedURI);
+ 
+   // If we have this URI cached, use it.
+   if (uri) {
+     return uri.forget();
+   }
+ 
+   // Otherwise obtain it.
+-  Link *self = const_cast<Link *>(this);
+-  nsIContent *content = self->Content();
+-  uri = content->GetHrefURI();
++  uri = mElement->GetHrefURI();
+ 
+   // We want to cache the URI if the node is in the document.
+-  if (uri && content->IsInDoc()) {
++  if (uri && mElement->IsInDoc()) {
+     mCachedURI = uri;
+   }
+ 
+   return uri.forget();
+ }
+ 
+ nsresult
+ Link::SetProtocol(const nsAString &aProtocol)
+@@ -465,20 +461,18 @@ Link::GetHash(nsAString &_hash)
+ void
+ Link::ResetLinkState(bool aNotify)
+ {
+   // If we are in our default state, bail early.
+   if (mLinkState == defaultState) {
+     return;
+   }
+ 
+-  nsIContent *content = Content();
+-
+   // Tell the document to forget about this link if we were a link before.
+-  nsIDocument *doc = content->GetCurrentDoc();
++  nsIDocument *doc = mElement->GetCurrentDoc();
+   if (doc && mLinkState != eLinkState_NotLink) {
+     doc->ForgetLink(this);
+   }
+ 
+   UnregisterFromHistory();
+ 
+   // Update our state back to the default.
+   mLinkState = defaultState;
+@@ -489,17 +483,17 @@ Link::ResetLinkState(bool aNotify)
+   // If aNotify is true, notify both of the visited-related states.  We have
+   // to do that, because we might be racing with a response from history and
+   // hence need to make sure that we get restyled whether we were visited or
+   // not before.  In particular, we need to make sure that our LinkState() is
+   // called so that we'll start a new history query as needed.
+   if (aNotify && doc) {
+     nsEventStates changedState = NS_EVENT_STATE_VISITED ^ NS_EVENT_STATE_UNVISITED;
+     MOZ_AUTO_DOC_UPDATE(doc, UPDATE_STYLE, aNotify);
+-    doc->ContentStateChanged(content, changedState);
++    doc->ContentStateChanged(mElement, changedState);
+   }
+ }
+ 
+ void
+ Link::UnregisterFromHistory()
+ {
+   // If we are not registered, we have nothing to do.
+   if (!mRegistered) {
+@@ -530,21 +524,14 @@ Link::GetURIToMutate()
+ 
+ void
+ Link::SetHrefAttribute(nsIURI *aURI)
+ {
+   NS_ASSERTION(aURI, "Null URI is illegal!");
+ 
+   nsAutoCString href;
+   (void)aURI->GetSpec(href);
+-  (void)Content()->SetAttr(kNameSpaceID_None, nsGkAtoms::href,
+-                           NS_ConvertUTF8toUTF16(href), true);
+-}
+-
+-nsGenericElement*
+-Link::Content()
+-{
+-  NS_ABORT_IF_FALSE(mContent, "No element provided!");
+-  return mContent;
++  (void)mElement->SetAttr(kNameSpaceID_None, nsGkAtoms::href,
++                          NS_ConvertUTF8toUTF16(href), true);
+ }
+ 
+ } // namespace dom
+ } // namespace mozilla
+diff --git a/content/base/src/Link.h b/content/base/src/Link.h
+--- a/content/base/src/Link.h
++++ b/content/base/src/Link.h
+@@ -125,21 +125,20 @@ private:
+ 
+   nsLinkState mLinkState;
+ 
+   mutable nsCOMPtr<nsIURI> mCachedURI;
+ 
+   bool mRegistered;
+ 
+   /**
+-   * Obtains a pointer to the nsIContent interface that classes inheriting from
++   * Obtains a pointer to the nsGenericElement that classes inheriting from
+    * this should also inherit from.
+    */
+-  nsGenericElement* Content();
+-  nsGenericElement* mContent;
++  nsGenericElement* mElement;
+ 
+   // Strong reference to History.  The link has to unregister before History
+   // can disappear.
+   nsCOMPtr<IHistory> mHistory;
+ };
+ 
+ NS_DEFINE_STATIC_IID_ACCESSOR(Link, MOZILLA_DOM_LINK_IMPLEMENTATION_IID)
+ 

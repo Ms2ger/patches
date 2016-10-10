@@ -1,0 +1,295 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/base/ChangeAttributeTxn.cpp b/editor/libeditor/base/ChangeAttributeTxn.cpp
+--- a/editor/libeditor/base/ChangeAttributeTxn.cpp
++++ b/editor/libeditor/base/ChangeAttributeTxn.cpp
+@@ -33,16 +33,18 @@
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "ChangeAttributeTxn.h"
+ #include "nsIDOMElement.h"
+ 
++using namespace mozilla;
++
+ ChangeAttributeTxn::ChangeAttributeTxn()
+   : EditTxn()
+ {
+ }
+ 
+ NS_IMPL_CYCLE_COLLECTION_CLASS(ChangeAttributeTxn)
+ 
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(ChangeAttributeTxn, EditTxn)
+@@ -59,81 +61,89 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(
+ NS_INTERFACE_MAP_END_INHERITING(EditTxn)
+ 
+ NS_IMETHODIMP ChangeAttributeTxn::Init(nsIEditor      *aEditor,
+                                        nsIDOMElement  *aElement,
+                                        const nsAString& aAttribute,
+                                        const nsAString& aValue,
+                                        bool aRemoveAttribute)
+ {
++  nsCOMPtr<dom::Element> element = do_QueryInterface(aElement);
++  return Init(aEditor, element, aAttribute, aValue, aRemoveAttribute);
++}
++
++NS_IMETHODIMP ChangeAttributeTxn::Init(nsIEditor      *aEditor,
++                                       dom::Element  *aElement,
++                                       const nsAString& aAttribute,
++                                       const nsAString& aValue,
++                                       bool aRemoveAttribute)
++{
+   NS_ASSERTION(aEditor && aElement, "bad arg");
+   if (!aEditor || !aElement) { return NS_ERROR_NULL_POINTER; }
+ 
+   mEditor = aEditor;
+-  mElement = do_QueryInterface(aElement);
+-  mAttribute = aAttribute;
++  mElement = aElement;
++  mAttribute = do_GetAtom(aAttribute);
+   mValue = aValue;
+   mRemoveAttribute = aRemoveAttribute;
+-  mAttributeWasSet=false;
++  mAttributeWasSet = false;
+   mUndoValue.Truncate();
+   return NS_OK;
+ }
+ 
+-NS_IMETHODIMP ChangeAttributeTxn::DoTransaction(void)
++NS_IMETHODIMP ChangeAttributeTxn::DoTransaction()
+ {
+   NS_ASSERTION(mEditor && mElement, "bad state");
+   if (!mEditor || !mElement) { return NS_ERROR_NOT_INITIALIZED; }
+ 
+-  // need to get the current value of the attribute and save it, and set mAttributeWasSet
+-  nsresult result = mEditor->GetAttributeValue(mElement, mAttribute, mUndoValue, &mAttributeWasSet);
+-  // XXX: hack until attribute-was-set code is implemented
+-  if (!mUndoValue.IsEmpty())
+-    mAttributeWasSet = true;
+-  // XXX: end hack
++  // Need to get the current value of the attribute and save it, and set
++  // mAttributeWasSet.
++  mAttributeWasSet = mElement->GetAttr(kNameSpaceID_None, mAttribute, mUndoValue);
+   
+-  // now set the attribute to the new value
++  // Now set the attribute to the new value.
+   if (!mRemoveAttribute)
+-    result = mElement->SetAttribute(mAttribute, mValue);
++    mElement->SetAttr(kNameSpaceID_None, mAttribute, mValue, true);
+   else
+-    result = mElement->RemoveAttribute(mAttribute);
++    mElement->UnsetAttr(kNameSpaceID_None, mAttribute, true);
+ 
+-  return result;
++  return NS_OK;
+ }
+ 
+ NS_IMETHODIMP ChangeAttributeTxn::UndoTransaction(void)
+ {
+   NS_ASSERTION(mEditor && mElement, "bad state");
+   if (!mEditor || !mElement) { return NS_ERROR_NOT_INITIALIZED; }
+ 
+-  nsresult result;
+   if (mAttributeWasSet)
+-    result = mElement->SetAttribute(mAttribute, mUndoValue);
++    mElement->SetAttr(kNameSpaceID_None, mAttribute, mUndoValue, true);
+   else
+-    result = mElement->RemoveAttribute(mAttribute);
++    mElement->UnsetAttr(kNameSpaceID_None, mAttribute, true);
+ 
+-  return result;
++  return NS_OK;
+ }
+ 
+ NS_IMETHODIMP ChangeAttributeTxn::RedoTransaction(void)
+ {
+   NS_ASSERTION(mEditor && mElement, "bad state");
+   if (!mEditor || !mElement) { return NS_ERROR_NOT_INITIALIZED; }
+ 
+-  nsresult result;
+   if (!mRemoveAttribute)
+-    result = mElement->SetAttribute(mAttribute, mValue);
++    mElement->SetAttr(kNameSpaceID_None, mAttribute, mValue, true);
+   else
+-    result = mElement->RemoveAttribute(mAttribute);
++    mElement->UnsetAttr(kNameSpaceID_None, mAttribute, true);
+ 
+-  return result;
++  return NS_OK;
+ }
+ 
+ NS_IMETHODIMP ChangeAttributeTxn::GetTxnDescription(nsAString& aString)
+ {
+   aString.AssignLiteral("ChangeAttributeTxn: [mRemoveAttribute == ");
+ 
+   if (!mRemoveAttribute)
+     aString.AppendLiteral("false] ");
+   else
+     aString.AppendLiteral("true] ");
+-  aString += mAttribute;
++
++  nsAutoString name;
++  mAttribute->ToString(name);
++  aString += name;
+   return NS_OK;
+ }
+diff --git a/editor/libeditor/base/ChangeAttributeTxn.h b/editor/libeditor/base/ChangeAttributeTxn.h
+--- a/editor/libeditor/base/ChangeAttributeTxn.h
++++ b/editor/libeditor/base/ChangeAttributeTxn.h
+@@ -35,17 +35,18 @@
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #ifndef ChangeAttributeTxn_h__
+ #define ChangeAttributeTxn_h__
+ 
+ #include "EditTxn.h"
+ #include "nsCOMPtr.h"
+-#include "nsIDOMElement.h"
++#include "mozilla/dom/Element.h"
++#include "nsIAtom.h"
+ #include "nsIEditor.h"
+ 
+ /**
+  * A transaction that changes an attribute of a content node. 
+  * This transaction covers add, remove, and change attribute.
+  */
+ class ChangeAttributeTxn : public EditTxn
+ {
+@@ -53,17 +54,22 @@ public:
+   /** Initialize the transaction.
+     * @param aEditor the object providing core editing operations
+     * @param aNode   the node whose attribute will be changed
+     * @param aAttribute the name of the attribute to change
+     * @param aValue     the new value for aAttribute, if aRemoveAttribute is false
+     * @param aRemoveAttribute if true, remove aAttribute from aNode
+     */
+   NS_IMETHOD Init(nsIEditor      *aEditor,
+-                  nsIDOMElement  *aNode,
++                  mozilla::dom::Element* aNode,
++                  const nsAString& aAttribute,
++                  const nsAString& aValue,
++                  bool aRemoveAttribute);
++  NS_IMETHOD Init(nsIEditor      *aEditor,
++                  nsIDOMElement* aNode,
+                   const nsAString& aAttribute,
+                   const nsAString& aValue,
+                   bool aRemoveAttribute);
+ 
+   ChangeAttributeTxn();
+ 
+   NS_DECL_ISUPPORTS_INHERITED
+   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(ChangeAttributeTxn, EditTxn)
+@@ -73,20 +79,20 @@ public:
+   NS_IMETHOD RedoTransaction();
+ 
+ protected:
+ 
+   /** the editor that created this transaction */
+   nsIEditor*  mEditor;
+   
+   /** the element to operate upon */
+-  nsCOMPtr<nsIDOMElement> mElement;
++  nsRefPtr<mozilla::dom::Element> mElement;
+   
+   /** the attribute to change */
+-  nsString mAttribute;
++  nsCOMPtr<nsIAtom> mAttribute;
+ 
+   /** the value to set the attribute to (ignored if mRemoveAttribute==true) */
+   nsString mValue;
+ 
+   /** the value to set the attribute to for undo */
+   nsString mUndoValue;
+ 
+   /** true if the mAttribute was set on mElement at the time of execution */
+diff --git a/editor/libeditor/base/nsEditor.cpp b/editor/libeditor/base/nsEditor.cpp
+--- a/editor/libeditor/base/nsEditor.cpp
++++ b/editor/libeditor/base/nsEditor.cpp
+@@ -1258,32 +1258,32 @@ nsEditor::GetAttributeValue(nsIDOMElemen
+     aResultValue = value;
+   }
+   return rv;
+ }
+ 
+ nsresult
+ nsEditor::RemoveAttribute(dom::Element *aElement, const nsAString& aAttribute)
+ {
+-  nsCOMPtr<nsIDOMElement> element = do_QueryInterface(aElement);
+-  return RemoveAttribute(element, aAttribute);
+-}
+-
+-NS_IMETHODIMP
+-nsEditor::RemoveAttribute(nsIDOMElement *aElement, const nsAString& aAttribute)
+-{
+   nsRefPtr<ChangeAttributeTxn> txn;
+   nsresult result = CreateTxnForRemoveAttribute(aElement, aAttribute,
+                                                 getter_AddRefs(txn));
+   if (NS_SUCCEEDED(result))  {
+     result = DoTransaction(txn);  
+   }
+   return result;
+ }
+ 
++NS_IMETHODIMP
++nsEditor::RemoveAttribute(nsIDOMElement *aElement, const nsAString& aAttribute)
++{
++  nsCOMPtr<dom::Element> element = do_QueryInterface(aElement);
++  return RemoveAttribute(element, aAttribute);
++}
++
+ 
+ NS_IMETHODIMP
+ nsEditor::MarkNodeDirty(nsIDOMNode* aNode)
+ {  
+   //  mark the node dirty.
+   nsCOMPtr<nsIContent> element (do_QueryInterface(aNode));
+   if (element)
+     element->SetAttr(kNameSpaceID_None, nsEditProperty::mozdirty,
+@@ -4534,17 +4534,17 @@ nsEditor::CreateTxnForSetAttribute(nsIDO
+     txn.forget(aTxn);
+   }
+ 
+   return rv;
+ }
+ 
+ 
+ NS_IMETHODIMP 
+-nsEditor::CreateTxnForRemoveAttribute(nsIDOMElement *aElement, 
++nsEditor::CreateTxnForRemoveAttribute(dom::Element* aElement,
+                                       const nsAString& aAttribute,
+                                       ChangeAttributeTxn ** aTxn)
+ {
+   NS_ENSURE_TRUE(aElement, NS_ERROR_NULL_POINTER);
+ 
+   nsRefPtr<ChangeAttributeTxn> txn = new ChangeAttributeTxn();
+ 
+   nsresult rv = txn->Init(this, aElement, aAttribute, EmptyString(), true);
+diff --git a/editor/libeditor/base/nsEditor.h b/editor/libeditor/base/nsEditor.h
+--- a/editor/libeditor/base/nsEditor.h
++++ b/editor/libeditor/base/nsEditor.h
+@@ -258,19 +258,19 @@ protected:
+     */
+   NS_IMETHOD CreateTxnForSetAttribute(nsIDOMElement *aElement, 
+                                       const nsAString &  aAttribute, 
+                                       const nsAString &  aValue,
+                                       ChangeAttributeTxn ** aTxn);
+ 
+   /** create a transaction for removing aAttribute on aElement
+     */
+-  NS_IMETHOD CreateTxnForRemoveAttribute(nsIDOMElement *aElement, 
+-                                         const nsAString &  aAttribute,
+-                                         ChangeAttributeTxn ** aTxn);
++  NS_IMETHOD CreateTxnForRemoveAttribute(mozilla::dom::Element* aElement,
++                                         const nsAString& aAttribute,
++                                         ChangeAttributeTxn** aTxn);
+ 
+   /** create a transaction for creating a new child node of aParent of type aTag.
+     */
+   NS_IMETHOD CreateTxnForCreateElement(const nsAString & aTag,
+                                        nsIDOMNode     *aParent,
+                                        int32_t         aPosition,
+                                        CreateElementTxn ** aTxn);
+ 

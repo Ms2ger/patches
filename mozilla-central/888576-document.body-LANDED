@@ -1,0 +1,168 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 888576 - Follow the spec for document.body; r=mounir sr=smaug
+
+diff --git a/content/html/document/src/nsHTMLDocument.cpp b/content/html/document/src/nsHTMLDocument.cpp
+--- a/content/html/document/src/nsHTMLDocument.cpp
++++ b/content/html/document/src/nsHTMLDocument.cpp
+@@ -1067,30 +1067,30 @@ nsHTMLDocument::SetDomain(const nsAStrin
+   }
+ 
+   rv = NodePrincipal()->SetDomain(newURI);
+ }
+ 
+ nsGenericHTMLElement*
+ nsHTMLDocument::GetBody()
+ {
+-  Element* body = GetBodyElement();
+-
+-  if (body) {
+-    // There is a body element, return that as the body.
+-    return static_cast<nsGenericHTMLElement*>(body);
++  Element* html = GetHtmlElement();
++  if (!html) {
++    return nullptr;
+   }
+ 
+-  // The document is most likely a frameset document so look for the
+-  // outer most frameset element
+-  nsRefPtr<nsContentList> nodeList =
+-    NS_GetContentList(this, kNameSpaceID_XHTML, NS_LITERAL_STRING("frameset"));
+-  Element* frameset = nodeList->GetElementAt(0);
+-  MOZ_ASSERT(!frameset || frameset->IsHTML());
+-  return static_cast<nsGenericHTMLElement*>(frameset);
++  for (nsIContent* child = html->GetFirstChild();
++       child;
++       child = child->GetNextSibling()) {
++    if (child->IsHTML(nsGkAtoms::body) || child->IsHTML(nsGkAtoms::frameset)) {
++      return static_cast<nsGenericHTMLElement*>(child);
++    }
++  }
++
++  return nullptr;
+ }
+ 
+ NS_IMETHODIMP
+ nsHTMLDocument::GetBody(nsIDOMHTMLElement** aBody)
+ {
+   *aBody = nullptr;
+ 
+   nsIContent *body = GetBody();
+diff --git a/content/html/document/test/Makefile.in b/content/html/document/test/Makefile.in
+--- a/content/html/document/test/Makefile.in
++++ b/content/html/document/test/Makefile.in
+@@ -63,17 +63,16 @@ MOCHITEST_FILES = 	test_bug1682.html \
+ 		test_bug482659.html \
+ 		test_bug486741.html \
+ 		test_bug489532.html \
+ 		test_bug497242.xhtml \
+ 		test_bug499092.html \
+ 		bug499092.xml \
+ 		bug499092.html \
+ 		test_bug512367.html \
+-		test_bug571981.html \
+ 		test_bug677495.html \
+ 		test_bug677495-1.html \
+ 		test_bug741266.html \
+ 		test_non-ascii-cookie.html \
+ 		test_non-ascii-cookie.html^headers^ \
+ 		test_bug765780.html \
+ 		$(NULL)
+ 
+diff --git a/content/html/document/test/test_bug571981.html b/content/html/document/test/test_bug571981.html
+deleted file mode 100644
+--- a/content/html/document/test/test_bug571981.html
++++ /dev/null
+@@ -1,58 +0,0 @@
+-<!DOCTYPE HTML>
+-<html>
+-<!--
+-https://bugzilla.mozilla.org/show_bug.cgi?id=571981
+--->
+-<head>
+-  <title>Test for Bug 571981</title>
+-  <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+-  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
+-</head>
+-<body>
+-<a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=571981">Mozilla Bug 571981</a>
+-<p id="display"></p>
+-<div id="content" style="display: none">
+-  <iframe id="testframe"></iframe>
+-</div>
+-<pre id="test">
+-<script type="application/javascript">
+-
+-/** Test for Bug 571981 **/
+-
+-SimpleTest.waitForExplicitFinish();
+-addLoadEvent(function() {
+-  var doc = document.getElementById("testframe").contentDocument;
+-  var elem = doc.documentElement;
+-  ok(elem.nodeName == "HTML" &&
+-     elem.namespaceURI == "http://www.w3.org/1999/xhtml",
+-     "documentElement should be an html element with nodename 'HTML'");
+-  var childNodes = elem.childNodes;
+-  elem = null;
+-  for (var i = 0; i < childNodes.length; ++i) {
+-    if (childNodes[i].nodeName == "BODY" &&
+-        childNodes[i].namespaceURI == "http://www.w3.org/1999/xhtml") {
+-      elem = childNodes[i];
+-    }
+-  }
+-  ok(elem && doc.body == elem,
+-     "HTMLDocument.body should be an html element with nodeName 'BODY' " +
+-     "and a child of the documentElement");
+-  doc.removeChild(doc.documentElement);
+-  elem = doc.appendChild(doc.createElementNS("http://www.w3.org/1999/xhtml",
+-                                             "frameset"));
+-  var framesets = doc.getElementsByTagNameNS("http://www.w3.org/1999/xhtml",
+-                                             "frameset");
+-  ok(doc.body && doc.body == framesets[0],
+-     "HTMLDocument.body should be the first html element in the document " +
+-     "with nodename 'frameset'");
+-  doc.removeChild(doc.documentElement);
+-  doc.appendChild(doc.createElementNS('wrongnamespace', 'frameset'));
+-  is(doc.body, null,
+-     "HTMLDocument.body should not return non-html elements");
+-  SimpleTest.finish();
+-});
+-
+-</script>
+-</pre>
+-</body>
+-</html>
+diff --git a/dom/imptests/failures/html/html/dom/documents/dta/Makefile.in b/dom/imptests/failures/html/html/dom/documents/dta/Makefile.in
+--- a/dom/imptests/failures/html/html/dom/documents/dta/Makefile.in
++++ b/dom/imptests/failures/html/html/dom/documents/dta/Makefile.in
+@@ -5,17 +5,16 @@ DEPTH := @DEPTH@
+ topsrcdir := @top_srcdir@
+ srcdir := @srcdir@
+ VPATH := @srcdir@
+ relativesrcdir := @relativesrcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ MOCHITEST_FILES := \
+-  test_document.body-getter.html.json \
+   test_document.title-03.html.json \
+   test_document.title-04.xhtml.json \
+   test_document.title-06.html.json \
+   test_document.title-07.html.json \
+   test_nameditem-02.html.json \
+   test_nameditem-03.html.json \
+   test_nameditem-04.html.json \
+   test_nameditem-05.html.json \
+diff --git a/dom/imptests/failures/html/html/dom/documents/dta/test_document.body-getter.html.json b/dom/imptests/failures/html/html/dom/documents/dta/test_document.body-getter.html.json
+deleted file mode 100644
+--- a/dom/imptests/failures/html/html/dom/documents/dta/test_document.body-getter.html.json
++++ /dev/null
+@@ -1,9 +0,0 @@
+-{
+-  "Frameset followed by body inside the html element": true,
+-  "Body followed by frameset inside a non-HTML html element": true,
+-  "Frameset followed by body inside a non-HTML html element": true,
+-  "Frameset inside an x element followed by a frameset": true,
+-  "Frameset as the root node": true,
+-  "Body as the root node with a frameset child": true,
+-  "Frameset as the root node with a body child": true
+-}

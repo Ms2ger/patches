@@ -1,0 +1,67 @@
+diff --git a/xpfe/appshell/src/nsAppShellService.cpp b/xpfe/appshell/src/nsAppShellService.cpp
+--- a/xpfe/appshell/src/nsAppShellService.cpp
++++ b/xpfe/appshell/src/nsAppShellService.cpp
+@@ -486,17 +486,16 @@ nsAppShellService::JustCreateTopWindow(n
+   *aResult = nullptr;
+   NS_ENSURE_STATE(!mXPCOMWillShutDown);
+ 
+   nsCOMPtr<nsIXULWindow> parent;
+   if (aChromeMask & nsIWebBrowserChrome::CHROME_DEPENDENT)
+     parent = aParent;
+ 
+   nsRefPtr<nsWebShellWindow> window = new nsWebShellWindow(aChromeMask);
+-  NS_ENSURE_TRUE(window, NS_ERROR_OUT_OF_MEMORY);
+ 
+ #ifdef XP_WIN
+   // If the parent is currently fullscreen, tell the child to ignore persisted
+   // full screen states. This way new browser windows open on top of fullscreen
+   // windows normally.
+   if (window && CheckForFullscreenWindow())
+     window->IgnoreXULSizeMode(true);
+ #endif
+diff --git a/xpfe/appshell/src/nsWindowMediator.cpp b/xpfe/appshell/src/nsWindowMediator.cpp
+--- a/xpfe/appshell/src/nsWindowMediator.cpp
++++ b/xpfe/appshell/src/nsWindowMediator.cpp
+@@ -520,19 +520,16 @@ nsWindowMediator::CalculateZPosition(
+ }
+ 
+ NS_IMETHODIMP
+ nsWindowMediator::SetZPosition(
+                 nsIXULWindow *inWindow,
+                 uint32_t      inPosition,
+                 nsIXULWindow *inBelow)
+ {
+-  nsWindowInfo *inInfo,
+-               *belowInfo;
+-
+   if ((inPosition != nsIWindowMediator::zLevelTop &&
+        inPosition != nsIWindowMediator::zLevelBottom &&
+        inPosition != nsIWindowMediator::zLevelBelow) ||
+       !inWindow) {
+     return NS_ERROR_INVALID_ARG;
+   }
+ 
+   if (mSortingZOrder) // don't fight SortZOrder()
+@@ -540,20 +537,21 @@ nsWindowMediator::SetZPosition(
+ 
+   NS_ENSURE_STATE(mReady);
+   MutexAutoLock lock(mListLock);
+ 
+   /* Locate inWindow and unlink it from the z-order list.
+      It's important we look for it in the age list, not the z-order list.
+      This is because the former is guaranteed complete, while
+      now may be this window's first exposure to the latter. */
+-  inInfo = GetInfoFor(inWindow);
++  nsWindowInfo* inInfo = GetInfoFor(inWindow);
+   if (!inInfo)
+     return NS_ERROR_INVALID_ARG;
+ 
++  nsWindowInfo* belowInfo = NULL;
+   // locate inBelow, place inWindow behind it
+   if (inPosition == nsIWindowMediator::zLevelBelow) {
+     belowInfo = GetInfoFor(inBelow);
+     // it had better also be in the z-order list
+     if (belowInfo &&
+         belowInfo->mYounger != belowInfo && belowInfo->mLower == belowInfo) {
+       belowInfo = nullptr;
+     }

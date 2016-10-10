@@ -1,0 +1,149 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsINode.cpp b/content/base/src/nsINode.cpp
+--- a/content/base/src/nsINode.cpp
++++ b/content/base/src/nsINode.cpp
+@@ -957,23 +957,16 @@ nsINode::IsEqualNode(nsINode* aOther)
+         }
+     
+         // System ID
+         docType1->GetSystemId(string1);
+         docType2->GetSystemId(string2);
+         if (!string1.Equals(string2)) {
+           return false;
+         }
+-    
+-        // Internal subset
+-        docType1->GetInternalSubset(string1);
+-        docType2->GetInternalSubset(string2);
+-        if (!string1.Equals(string2)) {
+-          return false;
+-        }
+ 
+         break;
+       }
+       default:
+         NS_ABORT_IF_FALSE(false, "Unknown node type");
+     }
+ 
+     nsINode* nextNode = node1->GetFirstChild();
+diff --git a/content/base/test/Makefile.in b/content/base/test/Makefile.in
+--- a/content/base/test/Makefile.in
++++ b/content/base/test/Makefile.in
+@@ -172,17 +172,16 @@ MOCHITEST_FILES_A = \
+ 		test_bug428847.html \
+ 		file_bug428847-1.xhtml \
+ 		file_bug428847-2.xhtml \
+ 		test_bug431701.html \
+ 		test_bug431833.html \
+ 		test_bug435425.html \
+ 		bug435425.sjs \
+ 		bug435425_redirect.sjs \
+-		test_bug438519.html \
+ 		test_bug444722.html \
+ 		test_bug451376.html \
+ 		test_text_wholeText.html \
+ 		test_bug433533.html \
+ 		wholeTexty-helper.xml \
+ 		test_bug444030.xhtml \
+ 		test_NodeIterator_basics_filters.xhtml \
+ 		test_NodeIterator_mutations_1.xhtml \
+diff --git a/content/base/test/test_bug438519.html b/content/base/test/test_bug438519.html
+deleted file mode 100644
+--- a/content/base/test/test_bug438519.html
++++ /dev/null
+@@ -1,44 +0,0 @@
+-<!DOCTYPE HTML>
+-<html>
+-<!--
+-https://bugzilla.mozilla.org/show_bug.cgi?id=438519
+--->
+-<head>
+-  <title>Test for Bug 438519</title>
+-  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>        
+-  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
+-</head>
+-<body onload="doTest()">
+-<a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=438519">Mozilla Bug 438519</a>
+-<p id="display"></p>
+-<div id="content" style="display:none">
+-
+-<iframe id="empty" src="data:text/xml,<!DOCTYPE HTML []><html></html>"></iframe>
+-<iframe id="missing" src="data:text/xml,<!DOCTYPE HTML><html></html>"></iframe>
+-<iframe id="entity" src="data:text/xml,<!DOCTYPE HTML [ <!ENTITY foo 'foo'> ]><html></html>"></iframe>
+-
+-</div>
+-<pre id="test">
+-<script class="testbody" type="text/javascript">
+-
+-/** Test for Bug 218236 **/
+-
+-SimpleTest.waitForExplicitFinish();
+-
+-function doTest() {
+-  function checkInternalSubset(id, expected) {
+-    var e = document.getElementById(id);
+-    is(e.contentDocument.doctype.internalSubset, expected, "checking '" + id + "'");
+-  }
+-
+-  checkInternalSubset("empty", "");
+-  checkInternalSubset("missing", null);
+-  checkInternalSubset("entity", " <!ENTITY foo 'foo'> ");
+-  SimpleTest.finish();
+-}
+-
+-</script>
+-</pre>
+-</body>
+-</html>
+-
+diff --git a/dom/interfaces/core/nsIDOMDocumentType.idl b/dom/interfaces/core/nsIDOMDocumentType.idl
+--- a/dom/interfaces/core/nsIDOMDocumentType.idl
++++ b/dom/interfaces/core/nsIDOMDocumentType.idl
+@@ -16,13 +16,13 @@
+  */
+ 
+ [scriptable, uuid(aa7d28b2-7122-422d-8fcf-634771fb9ac1)]
+ interface nsIDOMDocumentType : nsIDOMNode
+ {
+   readonly attribute  DOMString            name;
+   readonly attribute  DOMString            publicId;
+   readonly attribute  DOMString            systemId;
+-  readonly attribute  DOMString            internalSubset;
++  [noscript] readonly attribute  DOMString internalSubset;
+ 
+   [binaryname(MozRemove)]
+   void remove();
+ };
+diff --git a/dom/tests/mochitest/dom-level2-core/exclusions.js b/dom/tests/mochitest/dom-level2-core/exclusions.js
+--- a/dom/tests/mochitest/dom-level2-core/exclusions.js
++++ b/dom/tests/mochitest/dom-level2-core/exclusions.js
+@@ -25,26 +25,27 @@ dtdTests = ["attrgetownerelement01", "do
+ 
+ bug371552 = ["elementhasattributens02"];
+ wrongDocError = ["elementsetattributenodens05", "namednodemapsetnameditemns03",
+                  "setAttributeNodeNS05", "setNamedItemNS02"];
+ attrExodus = ["elementsetattributenodens06", "importNode01",
+               "hc_namednodemapinvalidtype1"];
+ bogusPrefix = ["nodesetprefix05", "nodesetprefix09", "prefix06", "prefix07"];
+ prefixReplacement = ["setAttributeNodeNS04"];
++var doctype = ["internalSubset01", "documenttypeinternalSubset01"]
+ 
+ function concat(lst/*...*/) {
+   var f = [];
+   if (arguments !== null) {
+     f = arguments[0];
+   }
+   for (var i = 1; i < arguments.length; i++) {
+     f = f.concat(arguments[i]);
+   }
+   return f;
+ }
+ 
+ var todoTests = {};
+ var exclusions = concat(dtdTests, bug371552, wrongDocError, attrExodus,
+-                        bogusPrefix, prefixReplacement);
++                        bogusPrefix, prefixReplacement, doctype);
+ for (var excludedTestName in exclusions) { 
+   todoTests[exclusions[excludedTestName]] = true; 
+ }

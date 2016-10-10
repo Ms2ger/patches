@@ -1,0 +1,128 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/content/src/HTMLTableElement.cpp b/content/html/content/src/HTMLTableElement.cpp
+--- a/content/html/content/src/HTMLTableElement.cpp
++++ b/content/html/content/src/HTMLTableElement.cpp
+@@ -925,20 +925,16 @@ HTMLTableElement::ParseAttribute(int32_t
+       return aResult.ParseColor(aValue);
+     }
+     if (aAttribute == nsGkAtoms::frame) {
+       return aResult.ParseEnumValue(aValue, kFrameTable, false);
+     }
+     if (aAttribute == nsGkAtoms::rules) {
+       return aResult.ParseEnumValue(aValue, kRulesTable, false);
+     }
+-    if (aAttribute == nsGkAtoms::hspace ||
+-        aAttribute == nsGkAtoms::vspace) {
+-      return aResult.ParseIntWithBounds(aValue, 0);
+-    }
+   }
+ 
+   return nsGenericHTMLElement::ParseBackgroundAttribute(aNamespaceID,
+                                                         aAttribute, aValue,
+                                                         aResult) ||
+          nsGenericHTMLElement::ParseAttribute(aNamespaceID, aAttribute, aValue,
+                                               aResult);
+ }
+@@ -954,19 +950,16 @@ MapAttributesIntoRule(const nsMappedAttr
+   // table cells.  (nsHTMLTableCellElement overrides
+   // WalkContentStyleRules so that this happens.)  This violates the
+   // nsIStyleRule contract, since it's the same style rule object doing
+   // the mapping in two different ways.  It's also incorrect since it's
+   // testing the display type of the style context rather than checking
+   // which *element* it's matching (style rules should not stop matching
+   // when the display type is changed).
+ 
+-  nsPresContext* presContext = aData->mPresContext;
+-  nsCompatibility mode = presContext->CompatibilityMode();
+-
+   if (aData->mSIDs & NS_STYLE_INHERIT_BIT(TableBorder)) {
+     // cellspacing
+     const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::cellspacing);
+     nsCSSValue* borderSpacing = aData->ValueForBorderSpacing();
+     if (value && value->Type() == nsAttrValue::eInteger &&
+         borderSpacing->GetUnit() == eCSSUnit_Null) {
+       borderSpacing->
+         SetFloatValue(float(value->GetIntegerValue()), eCSSUnit_Pixel);
+@@ -983,43 +976,16 @@ MapAttributesIntoRule(const nsMappedAttr
+         nsCSSValue* marginLeft = aData->ValueForMarginLeftValue();
+         if (marginLeft->GetUnit() == eCSSUnit_Null)
+           marginLeft->SetAutoValue();
+         nsCSSValue* marginRight = aData->ValueForMarginRightValue();
+         if (marginRight->GetUnit() == eCSSUnit_Null)
+           marginRight->SetAutoValue();
+       }
+     }
+-
+-    // hspace is mapped into left and right margin,
+-    // vspace is mapped into top and bottom margins
+-    // - *** Quirks Mode only ***
+-    if (eCompatibility_NavQuirks == mode) {
+-      value = aAttributes->GetAttr(nsGkAtoms::hspace);
+-
+-      if (value && value->Type() == nsAttrValue::eInteger) {
+-        nsCSSValue* marginLeft = aData->ValueForMarginLeftValue();
+-        if (marginLeft->GetUnit() == eCSSUnit_Null)
+-          marginLeft->SetFloatValue((float)value->GetIntegerValue(), eCSSUnit_Pixel); 
+-        nsCSSValue* marginRight = aData->ValueForMarginRightValue();
+-        if (marginRight->GetUnit() == eCSSUnit_Null)
+-          marginRight->SetFloatValue((float)value->GetIntegerValue(), eCSSUnit_Pixel);
+-      }
+-
+-      value = aAttributes->GetAttr(nsGkAtoms::vspace);
+-
+-      if (value && value->Type() == nsAttrValue::eInteger) {
+-        nsCSSValue* marginTop = aData->ValueForMarginTop();
+-        if (marginTop->GetUnit() == eCSSUnit_Null)
+-          marginTop->SetFloatValue((float)value->GetIntegerValue(), eCSSUnit_Pixel); 
+-        nsCSSValue* marginBottom = aData->ValueForMarginBottom();
+-        if (marginBottom->GetUnit() == eCSSUnit_Null)
+-          marginBottom->SetFloatValue((float)value->GetIntegerValue(), eCSSUnit_Pixel); 
+-      }
+-    }
+   }
+   if (aData->mSIDs & NS_STYLE_INHERIT_BIT(Position)) {
+     // width: value
+     nsCSSValue* width = aData->ValueForWidth();
+     if (width->GetUnit() == eCSSUnit_Null) {
+       const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::width);
+       if (value && value->Type() == nsAttrValue::eInteger)
+         width->SetFloatValue((float)value->GetIntegerValue(), eCSSUnit_Pixel);
+@@ -1036,17 +1002,17 @@ MapAttributesIntoRule(const nsMappedAttr
+       else if (value && value->Type() == nsAttrValue::ePercent)
+         height->SetPercentValue(value->GetPercentValue());
+     }
+   }
+   if (aData->mSIDs & NS_STYLE_INHERIT_BIT(Border)) {
+     // bordercolor
+     const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::bordercolor);
+     nscolor color;
+-    if (value && presContext->UseDocumentColors() &&
++    if (value && aData->mPresContext->UseDocumentColors() &&
+         value->GetColorValue(color)) {
+       nsCSSValue* borderLeftColor = aData->ValueForBorderLeftColorValue();
+       if (borderLeftColor->GetUnit() == eCSSUnit_Null)
+         borderLeftColor->SetColorValue(color);
+       nsCSSValue* borderRightColor = aData->ValueForBorderRightColorValue();
+       if (borderRightColor->GetUnit() == eCSSUnit_Null)
+         borderRightColor->SetColorValue(color);
+       nsCSSValue* borderTopColor = aData->ValueForBorderTopColor();
+@@ -1089,18 +1055,16 @@ NS_IMETHODIMP_(bool)
+ HTMLTableElement::IsAttributeMapped(const nsIAtom* aAttribute) const
+ {
+   static const MappedAttributeEntry attributes[] = {
+     { &nsGkAtoms::cellpadding },
+     { &nsGkAtoms::cellspacing },
+     { &nsGkAtoms::border },
+     { &nsGkAtoms::width },
+     { &nsGkAtoms::height },
+-    { &nsGkAtoms::hspace },
+-    { &nsGkAtoms::vspace },
+     
+     { &nsGkAtoms::bordercolor },
+     
+     { &nsGkAtoms::align },
+     { nullptr }
+   };
+ 
+   static const MappedAttributeEntry* const map[] = {

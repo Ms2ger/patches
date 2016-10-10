@@ -1,0 +1,320 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/layout/style/CSSRule.h b/layout/style/CSSRule.h
+new file mode 100644
+--- /dev/null
++++ b/layout/style/CSSRule.h
+@@ -0,0 +1,77 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_CSSRule_h
++#define mozilla_dom_CSSRule_h
++
++#include "mozilla/ErrorResult.h"
++#include "nsStringGlue.h"
++
++class nsIDOMCSSRule;
++
++namespace mozilla {
++namespace css {
++class Rule;
++} // namespace css
++
++namespace dom {
++
++class CSSRule
++{
++public:
++  virtual uint16_t Type() const = 0;
++  virtual void GetDOMCssText(nsAString& aCssText) = 0;
++  void SetDOMCssText(const nsAString& aCssText, ErrorResult& aRv)
++  {
++    aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
++  }
++  virtual CSSRule* GetParentRule() = 0;
++  virtual nsCSSStyleSheet* GetParentStyleSheet() = 0;
++
++  virtual nsIDOMCSSRule* AsDOMCSSRule() = 0;
++  virtual css::Rule* AsRule() = 0;
++};
++
++#define FORWARD_NSIDOMCSSRULE_TO_CSSRULE                                       \
++  NS_IMETHOD                                                                   \
++  GetType(uint16_t* aType)                                                     \
++  {                                                                            \
++    *aType = Type();                                                           \
++    return NS_OK;                                                              \
++  }                                                                            \
++  NS_IMETHOD                                                                   \
++  GetCssText(nsAString& aCssText)                                              \
++  {                                                                            \
++    GetDOMCssText(aCssText);                                                   \
++    return NS_OK;                                                              \
++  }                                                                            \
++  NS_IMETHOD                                                                   \
++  SetCssText(const nsAString& aCssText)                                        \
++  {                                                                            \
++    return NS_ERROR_NOT_IMPLEMENTED;                                           \
++  }                                                                            \
++  NS_IMETHOD                                                                   \
++  GetParentRule(nsIDOMCSSRule** aParentRule)                                   \
++  {                                                                            \
++    mozilla::dom::CSSRule* rule = GetParentRule();                             \
++    if (rule) {                                                                \
++      NS_ADDREF(*aParentRule = rule->AsDOMCSSRule());                          \
++    } else {                                                                   \
++      *aParentRule = nullptr;                                                  \
++    }                                                                          \
++    return NS_OK;                                                              \
++  }                                                                            \
++  NS_IMETHOD                                                                   \
++  GetParentStyleSheet(nsIDOMCSSStyleSheet** aSheet)                            \
++  {                                                                            \
++    NS_IF_ADDREF(*aSheet = GetParentStyleSheet());                             \
++    return NS_OK;                                                              \
++  }
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_CSSRule_h
+diff --git a/layout/style/Rule.h b/layout/style/Rule.h
+--- a/layout/style/Rule.h
++++ b/layout/style/Rule.h
+@@ -15,16 +15,20 @@
+ 
+ class nsIStyleSheet;
+ class nsIDocument;
+ struct nsRuleData;
+ template<class T> struct already_AddRefed;
+ class nsHTMLCSSStyleSheet;
+ 
+ namespace mozilla {
++namespace dom {
++class CSSRule;
++} // namespace dom
++
+ namespace css {
+ class GroupRule;
+ 
+ #define DECL_STYLE_RULE_INHERIT_NO_DOMRULE  \
+ virtual void MapRuleInfoInto(nsRuleData* aRuleData);
+ 
+ #define DECL_STYLE_RULE_INHERIT                   \
+   DECL_STYLE_RULE_INHERIT_NO_DOMRULE              \
+@@ -101,17 +105,23 @@ public:
+ 
+   // Note that this returns null for inline style rules since they aren't
+   // supposed to have a DOM rule representation (and our code wouldn't work).
+   virtual nsIDOMCSSRule* GetDOMRule() = 0;
+ 
+   // Like GetDOMRule(), but won't create one if we don't have one yet
+   virtual nsIDOMCSSRule* GetExistingDOMRule() = 0;
+ 
++  virtual dom::CSSRule* AsCSSRule()
++  {
++    return nullptr;
++  }
++
+   // to implement methods on nsIDOMCSSRule
++  dom::CSSRule* GetParentRule();
+   nsresult GetParentRule(nsIDOMCSSRule** aParentRule);
+   nsresult GetParentStyleSheet(nsIDOMCSSStyleSheet** aSheet);
+ 
+   // This is pure virtual because all of Rule's data members are non-owning and
+   // thus measured elsewhere.
+   virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
+     const MOZ_MUST_OVERRIDE = 0;
+ 
+diff --git a/layout/style/moz.build b/layout/style/moz.build
+--- a/layout/style/moz.build
++++ b/layout/style/moz.build
+@@ -55,16 +55,17 @@ EXPORTS += [
+     'nsStyleStructInlines.h',
+     'nsStyleStructList.h',
+     'nsStyleTransformMatrix.h',
+     'nsStyleUtil.h',
+ ]
+ 
+ EXPORTS.mozilla.dom += [
+     'CSS.h',
++    'CSSRule.h',
+     'CSSValue.h',
+ ]
+ 
+ EXPORTS.mozilla.css += [
+     'Declaration.h',
+     'ErrorReporter.h',
+     'GroupRule.h',
+     'ImageLoader.h',
+diff --git a/layout/style/nsCSSRules.cpp b/layout/style/nsCSSRules.cpp
+--- a/layout/style/nsCSSRules.cpp
++++ b/layout/style/nsCSSRules.cpp
+@@ -102,16 +102,25 @@ Rule::GetParentRule(nsIDOMCSSRule** aPar
+   if (mParentRule) {
+     NS_IF_ADDREF(*aParentRule = mParentRule->GetDOMRule());
+   } else {
+     *aParentRule = nullptr;
+   }
+   return NS_OK;
+ }
+ 
++dom::CSSRule*
++Rule::GetParentRule()
++{
++  if (!mParentRule) {
++    return nullptr;
++  }
++  return mParentRule->AsCSSRule();
++}
++
+ nsresult
+ Rule::GetParentStyleSheet(nsIDOMCSSStyleSheet** aSheet)
+ {
+   NS_ENSURE_ARG_POINTER(aSheet);
+ 
+   NS_IF_ADDREF(*aSheet = GetStyleSheet());
+   return NS_OK;
+ }
+@@ -866,48 +875,34 @@ MediaRule::SetMedia(nsMediaList* aMedia)
+ {
+   mMedia = aMedia;
+   if (aMedia)
+     mMedia->SetStyleSheet(GetStyleSheet());
+   return NS_OK;
+ }
+ 
+ // nsIDOMCSSRule methods
+-NS_IMETHODIMP
+-MediaRule::GetType(uint16_t* aType)
+-{
+-  *aType = nsIDOMCSSRule::MEDIA_RULE;
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+-MediaRule::GetCssText(nsAString& aCssText)
++void
++MediaRule::GetDOMCssText(nsAString& aCssText)
+ {
+   aCssText.AssignLiteral("@media ");
+   AppendConditionText(aCssText);
+   GroupRule::AppendRulesToCssText(aCssText);
+-  return NS_OK;
+ }
+ 
+-NS_IMETHODIMP
+-MediaRule::SetCssText(const nsAString& aCssText)
++dom::CSSRule*
++MediaRule::GetParentRule()
+ {
+-  return NS_ERROR_NOT_IMPLEMENTED;
++  return GroupRule::GetParentRule();
+ }
+ 
+-NS_IMETHODIMP
+-MediaRule::GetParentStyleSheet(nsIDOMCSSStyleSheet** aSheet)
++nsCSSStyleSheet*
++MediaRule::GetParentStyleSheet()
+ {
+-  return GroupRule::GetParentStyleSheet(aSheet);
+-}
+-
+-NS_IMETHODIMP
+-MediaRule::GetParentRule(nsIDOMCSSRule** aParentRule)
+-{
+-  return GroupRule::GetParentRule(aParentRule);
++  return GetStyleSheet();
+ }
+ 
+ // nsIDOMCSSGroupingRule methods
+ NS_IMETHODIMP
+ MediaRule::GetCssRules(nsIDOMCSSRuleList* *aRuleList)
+ {
+   return GroupRule::GetCssRules(aRuleList);
+ }
+diff --git a/layout/style/nsCSSRules.h b/layout/style/nsCSSRules.h
+--- a/layout/style/nsCSSRules.h
++++ b/layout/style/nsCSSRules.h
+@@ -8,16 +8,17 @@
+ 
+ #ifndef nsCSSRules_h_
+ #define nsCSSRules_h_
+ 
+ #include "mozilla/Attributes.h"
+ 
+ #include "mozilla/MemoryReporting.h"
+ #include "mozilla/css/GroupRule.h"
++#include "mozilla/dom/CSSRule.h"
+ #include "mozilla/Preferences.h"
+ #include "nsIDOMCSSConditionRule.h"
+ #include "nsIDOMCSSFontFaceRule.h"
+ #include "nsIDOMCSSFontFeatureValuesRule.h"
+ #include "nsIDOMCSSGroupingRule.h"
+ #include "nsIDOMCSSMediaRule.h"
+ #include "nsIDOMCSSMozDocumentRule.h"
+ #include "nsIDOMCSSSupportsRule.h"
+@@ -39,16 +40,17 @@ class nsMediaList;
+ 
+ namespace mozilla {
+ 
+ class ErrorResult;
+ 
+ namespace css {
+ 
+ class MediaRule MOZ_FINAL : public GroupRule,
++                            public dom::CSSRule,
+                             public nsIDOMCSSMediaRule
+ {
+ public:
+   MediaRule();
+ private:
+   MediaRule(const MediaRule& aCopy);
+   ~MediaRule();
+ public:
+@@ -67,19 +69,40 @@ public:
+   virtual nsIDOMCSSRule* GetDOMRule()
+   {
+     return this;
+   }
+   virtual nsIDOMCSSRule* GetExistingDOMRule()
+   {
+     return this;
+   }
++  virtual dom::CSSRule* AsCSSRule() MOZ_OVERRIDE
++  {
++    return this;
++  }
++  virtual nsIDOMCSSRule* AsDOMCSSRule() MOZ_OVERRIDE
++  {
++    return this;
++  }
++  virtual css::Rule* AsRule() MOZ_OVERRIDE
++  {
++    return this;
++  }
++
++  // dom::CSSRule
++  virtual uint16_t Type() const MOZ_OVERRIDE
++  {
++    return nsIDOMCSSRule::MEDIA_RULE;
++  }
++  virtual void GetDOMCssText(nsAString& aCssText) MOZ_OVERRIDE;
++  virtual dom::CSSRule* GetParentRule() MOZ_OVERRIDE;
++  virtual nsCSSStyleSheet* GetParentStyleSheet() MOZ_OVERRIDE;
+ 
+   // nsIDOMCSSRule interface
+-  NS_DECL_NSIDOMCSSRULE
++  FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+   // nsIDOMCSSGroupingRule interface
+   NS_DECL_NSIDOMCSSGROUPINGRULE
+ 
+   // nsIDOMCSSConditionRule interface
+   NS_DECL_NSIDOMCSSCONDITIONRULE
+ 
+   // nsIDOMCSSMediaRule interface

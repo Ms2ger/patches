@@ -1,0 +1,615 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/content/src/nsHTMLBodyElement.cpp b/content/html/content/src/nsHTMLBodyElement.cpp
+--- a/content/html/content/src/nsHTMLBodyElement.cpp
++++ b/content/html/content/src/nsHTMLBodyElement.cpp
+@@ -416,17 +416,17 @@ NS_IMETHODIMP
+ nsHTMLBodyElement::WalkContentStyleRules(nsRuleWalker* aRuleWalker)
+ {
+   nsGenericHTMLElement::WalkContentStyleRules(aRuleWalker);
+ 
+   if (!mContentStyleRule && IsInDoc()) {
+     // XXXbz should this use GetOwnerDoc() or GetCurrentDoc()?
+     // sXBL/XBL2 issue!
+     mContentStyleRule = new BodyRule(this);
+-    NS_IF_ADDREF(mContentStyleRule);
++    NS_ADDREF(mContentStyleRule);
+   }
+   if (aRuleWalker && mContentStyleRule) {
+     aRuleWalker->Forward(mContentStyleRule);
+   }
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP_(bool)
+diff --git a/content/html/content/src/nsHTMLDNSPrefetch.cpp b/content/html/content/src/nsHTMLDNSPrefetch.cpp
+--- a/content/html/content/src/nsHTMLDNSPrefetch.cpp
++++ b/content/html/content/src/nsHTMLDNSPrefetch.cpp
+@@ -78,40 +78,33 @@ nsresult
+ nsHTMLDNSPrefetch::Initialize()
+ {
+   if (sInitialized) {
+     NS_WARNING("Initialize() called twice");
+     return NS_OK;
+   }
+   
+   sPrefetches = new nsHTMLDNSPrefetch::nsDeferrals();
+-  if (!sPrefetches)
+-    return NS_ERROR_OUT_OF_MEMORY;
+   NS_ADDREF(sPrefetches);
+ 
+   sDNSListener = new nsHTMLDNSPrefetch::nsListener();
+-  if (!sDNSListener) {
+-    NS_IF_RELEASE(sPrefetches);
+-    return NS_ERROR_OUT_OF_MEMORY;
+-  }
+   NS_ADDREF(sDNSListener);
+ 
+   sPrefetches->Activate();
+ 
+   nsContentUtils::AddBoolPrefVarCache("network.dns.disablePrefetchFromHTTPS", 
+                                       &sDisablePrefetchHTTPSPref);
+   
+   // Default is false, so we need an explicit call to prime the cache.
+   sDisablePrefetchHTTPSPref = 
+     nsContentUtils::GetBoolPref("network.dns.disablePrefetchFromHTTPS", true);
+   
+   NS_IF_RELEASE(sDNSService);
+-  nsresult rv;
+-  rv = CallGetService(kDNSServiceCID, &sDNSService);
+-  if (NS_FAILED(rv)) return rv;
++  nsresult rv = CallGetService(kDNSServiceCID, &sDNSService);
++  NS_ENSURE_SUCCESS(rv, rv);
+   
+ #ifdef MOZ_IPC
+   if (IsNeckoChild())
+     NeckoChild::InitNeckoChild();
+ #endif
+ 
+   sInitialized = true;
+   return NS_OK;
+@@ -121,18 +114,18 @@ nsresult
+ nsHTMLDNSPrefetch::Shutdown()
+ {
+   if (!sInitialized) {
+     NS_WARNING("Not Initialized");
+     return NS_OK;
+   }
+   sInitialized = false;
+   NS_IF_RELEASE(sDNSService);
+-  NS_IF_RELEASE(sPrefetches);
+-  NS_IF_RELEASE(sDNSListener);
++  NS_RELEASE(sPrefetches);
++  NS_RELEASE(sDNSListener);
+   
+   return NS_OK;
+ }
+ 
+ bool
+ nsHTMLDNSPrefetch::IsAllowed (nsIDocument *aDocument)
+ {
+   // There is no need to do prefetch on non UI scenarios such as XMLHttpRequest.
+diff --git a/content/html/content/src/nsHTMLFormElement.cpp b/content/html/content/src/nsHTMLFormElement.cpp
+--- a/content/html/content/src/nsHTMLFormElement.cpp
++++ b/content/html/content/src/nsHTMLFormElement.cpp
+@@ -276,20 +276,16 @@ nsHTMLFormElement::~nsHTMLFormElement()
+     mControls->DropFormReference();
+   }
+ }
+ 
+ nsresult
+ nsHTMLFormElement::Init()
+ {
+   mControls = new nsFormControlList(this);
+-  if (!mControls) {
+-    return NS_ERROR_OUT_OF_MEMORY;
+-  }
+-
+   nsresult rv = mControls->Init();
+   
+   if (NS_FAILED(rv))
+   {
+     mControls = nullptr;
+     return rv;
+   }
+   
+@@ -2316,18 +2312,17 @@ nsFormControlList::AddElementToTable(nsG
+       // happen if a form control has both a name and an id with the same
+       // value
+       if (content == aChild) {
+         return NS_OK;
+       }
+ 
+       // Found an element, create a list, add the element to the list and put
+       // the list in the hash
+-      nsBaseContentList *list = new nsBaseContentList();
+-      NS_ENSURE_TRUE(list, NS_ERROR_OUT_OF_MEMORY);
++      nsBaseContentList* list = new nsBaseContentList();
+ 
+       NS_ASSERTION(content->GetParent(), "Item in list without parent");
+ 
+       // Determine the ordering between the new and old element.
+       bool newFirst = nsContentUtils::PositionIsBefore(aChild, content);
+ 
+       list->AppendElement(newFirst ? aChild : content);
+       list->AppendElement(newFirst ? content : aChild);
+diff --git a/content/html/content/src/nsHTMLFrameSetElement.cpp b/content/html/content/src/nsHTMLFrameSetElement.cpp
+--- a/content/html/content/src/nsHTMLFrameSetElement.cpp
++++ b/content/html/content/src/nsHTMLFrameSetElement.cpp
+@@ -208,20 +208,16 @@ nsHTMLFrameSetElement::GetRowSpec(PRInt3
+     if (value && value->Type() == nsAttrValue::eString) {
+       nsresult rv = ParseRowCol(value->GetStringValue(), mNumRows,
+                                 getter_Transfers(mRowSpecs));
+       NS_ENSURE_SUCCESS(rv, rv);
+     }
+ 
+     if (!mRowSpecs) {  // we may not have had an attr or had an empty attr
+       mRowSpecs = new nsFramesetSpec[1];
+-      if (!mRowSpecs) {
+-        mNumRows = 0;
+-        return NS_ERROR_OUT_OF_MEMORY;
+-      }
+       mNumRows = 1;
+       mRowSpecs[0].mUnit  = eFramesetUnit_Relative;
+       mRowSpecs[0].mValue = 1;
+     }
+   }
+ 
+   *aSpecs = mRowSpecs;
+   *aNumValues = mNumRows;
+@@ -242,20 +238,16 @@ nsHTMLFrameSetElement::GetColSpec(PRInt3
+     if (value && value->Type() == nsAttrValue::eString) {
+       nsresult rv = ParseRowCol(value->GetStringValue(), mNumCols,
+                                 getter_Transfers(mColSpecs));
+       NS_ENSURE_SUCCESS(rv, rv);
+     }
+ 
+     if (!mColSpecs) {  // we may not have had an attr or had an empty attr
+       mColSpecs = new nsFramesetSpec[1];
+-      if (!mColSpecs) {
+-        mNumCols = 0;
+-        return NS_ERROR_OUT_OF_MEMORY;
+-      }
+       mNumCols = 1;
+       mColSpecs[0].mUnit  = eFramesetUnit_Relative;
+       mColSpecs[0].mValue = 1;
+     }
+   }
+ 
+   *aSpecs = mColSpecs;
+   *aNumValues = mNumCols;
+@@ -328,21 +320,16 @@ nsHTMLFrameSetElement::ParseRowCol(const
+   int32_t commaX = spec.FindChar(sComma);
+   int32_t count = 1;
+   while (commaX != kNotFound && count < MAX_FRAMESET_SPEC_COUNT) {
+     count++;
+     commaX = spec.FindChar(sComma, commaX + 1);
+   }
+ 
+   nsFramesetSpec* specs = new nsFramesetSpec[count];
+-  if (!specs) {
+-    *aSpecs = nullptr;
+-    aNumSpecs = 0;
+-    return NS_ERROR_OUT_OF_MEMORY;
+-  }
+ 
+   // Pre-grab the compat mode; we may need it later in the loop.
+   bool isInQuirks = InNavQuirksMode(GetOwnerDoc());
+       
+   // Parse each comma separated token
+ 
+   int32_t start = 0;
+   int32_t specLen = spec.Length();
+diff --git a/content/html/content/src/nsHTMLInputElement.cpp b/content/html/content/src/nsHTMLInputElement.cpp
+--- a/content/html/content/src/nsHTMLInputElement.cpp
++++ b/content/html/content/src/nsHTMLInputElement.cpp
+@@ -3169,34 +3169,30 @@ nsHTMLInputElement::SubmitNamesValues(ns
+ }
+ 
+ 
+ NS_IMETHODIMP
+ nsHTMLInputElement::SaveState()
+ {
+   nsresult rv = NS_OK;
+ 
+-  nsRefPtr<nsHTMLInputElementState> inputState = nullptr;
++  nsRefPtr<nsHTMLInputElementState> inputState;
+ 
+   switch (mType) {
+     case NS_FORM_INPUT_CHECKBOX:
+     case NS_FORM_INPUT_RADIO:
+       {
+         bool checked = GetChecked();
+         bool defaultChecked = false;
+         GetDefaultChecked(&defaultChecked);
+         // Only save if checked != defaultChecked (bug 62713)
+         // (always save if it's a radio button so that the checked
+         // state of all radio buttons is restored)
+         if (mType == NS_FORM_INPUT_RADIO || checked != defaultChecked) {
+           inputState = new nsHTMLInputElementState();
+-          if (!inputState) {
+-            return NS_ERROR_OUT_OF_MEMORY;
+-          }
+-
+           inputState->SetChecked(checked);
+         }
+         break;
+       }
+ 
+     // Never save passwords in session history
+     case NS_FORM_INPUT_PASSWORD:
+       break;
+@@ -3204,39 +3200,32 @@ nsHTMLInputElement::SaveState()
+     case NS_FORM_INPUT_SEARCH:
+     case NS_FORM_INPUT_TEXT:
+     case NS_FORM_INPUT_TEL:
+     case NS_FORM_INPUT_URL:
+     case NS_FORM_INPUT_HIDDEN:
+       {
+         if (GetValueChanged()) {
+           inputState = new nsHTMLInputElementState();
+-          if (!inputState) {
+-            return NS_ERROR_OUT_OF_MEMORY;
+-          }
+ 
+           nsAutoString value;
+           GetValue(value);
+           rv = nsLinebreakConverter::ConvertStringLineBreaks(
+                  value,
+                  nsLinebreakConverter::eLinebreakPlatform,
+                  nsLinebreakConverter::eLinebreakContent);
+           NS_ASSERTION(NS_SUCCEEDED(rv), "Converting linebreaks failed!");
+           inputState->SetValue(value);
+        }
+       break;
+     }
+     case NS_FORM_INPUT_FILE:
+       {
+         if (mFiles.Count()) {
+           inputState = new nsHTMLInputElementState();
+-          if (!inputState) {
+-            return NS_ERROR_OUT_OF_MEMORY;
+-          }
+-
+           inputState->SetFiles(mFiles);
+         }
+         break;
+       }
+   }
+   
+   nsPresState* state = nullptr;
+   if (inputState) {
+@@ -4352,38 +4341,32 @@ NS_GetRadioSetCheckedChangedVisitor(PRBo
+   static nsIRadioVisitor* sVisitorFalse = nullptr;
+ 
+   //
+   // Get the visitor that sets them to true
+   //
+   if (aCheckedChanged) {
+     if (!sVisitorTrue) {
+       sVisitorTrue = new nsRadioSetCheckedChangedVisitor(true);
+-      if (!sVisitorTrue) {
+-        return NS_ERROR_OUT_OF_MEMORY;
+-      }
+       NS_ADDREF(sVisitorTrue);
+       nsresult rv =
+         nsContentUtils::ReleasePtrOnShutdown((nsISupports**)&sVisitorTrue);
+       if (NS_FAILED(rv)) {
+         NS_RELEASE(sVisitorTrue);
+         return rv;
+       }
+     }
+     *aVisitor = sVisitorTrue;
+   }
+   //
+   // Get the visitor that sets them to false
+   //
+   else {
+     if (!sVisitorFalse) {
+       sVisitorFalse = new nsRadioSetCheckedChangedVisitor(false);
+-      if (!sVisitorFalse) {
+-        return NS_ERROR_OUT_OF_MEMORY;
+-      }
+       NS_ADDREF(sVisitorFalse);
+       nsresult rv =
+         nsContentUtils::ReleasePtrOnShutdown((nsISupports**)&sVisitorFalse);
+       if (NS_FAILED(rv)) {
+         NS_RELEASE(sVisitorFalse);
+         return rv;
+       }
+     }
+@@ -4396,19 +4379,16 @@ NS_GetRadioSetCheckedChangedVisitor(PRBo
+ 
+ nsresult
+ NS_GetRadioGetCheckedChangedVisitor(bool* aCheckedChanged,
+                                     nsIFormControl* aExcludeElement,
+                                     nsIRadioVisitor** aVisitor)
+ {
+   *aVisitor = new nsRadioGetCheckedChangedVisitor(aCheckedChanged,
+                                                   aExcludeElement);
+-  if (!*aVisitor) {
+-    return NS_ERROR_OUT_OF_MEMORY;
+-  }
+   NS_ADDREF(*aVisitor);
+ 
+   return NS_OK;
+ }
+ 
+ /*
+  * These methods are factores: they let callers to create an instance of
+  * a radio group visitor without the class declaration and definition.
+diff --git a/content/html/content/src/nsHTMLLinkElement.cpp b/content/html/content/src/nsHTMLLinkElement.cpp
+--- a/content/html/content/src/nsHTMLLinkElement.cpp
++++ b/content/html/content/src/nsHTMLLinkElement.cpp
+@@ -270,21 +270,19 @@ nsHTMLLinkElement::CreateAndDispatchEven
+   if (!nsContentUtils::HasNonEmptyAttr(this, kNameSpaceID_None,
+                                        nsGkAtoms::rev) &&
+       FindAttrValueIn(kNameSpaceID_None, nsGkAtoms::rel,
+                       strings, eIgnoreCase) != ATTR_VALUE_NO_MATCH)
+     return;
+ 
+   nsRefPtr<nsPLDOMEvent> event = new nsPLDOMEvent(this, aEventName, true,
+                                                   true);
+-  if (event) {
+-    // Always run async in order to avoid running script when the content
+-    // sink isn't expecting it.
+-    event->PostDOMEvent();
+-  }
++  // Always run async in order to avoid running script when the content
++  // sink isn't expecting it.
++  event->PostDOMEvent();
+ }
+ 
+ nsresult
+ nsHTMLLinkElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+                            nsIAtom* aPrefix, const nsAString& aValue,
+                            bool aNotify)
+ {
+   nsresult rv = nsGenericHTMLElement::SetAttr(aNameSpaceID, aName, aPrefix,
+diff --git a/content/html/content/src/nsHTMLMediaElement.cpp b/content/html/content/src/nsHTMLMediaElement.cpp
+--- a/content/html/content/src/nsHTMLMediaElement.cpp
++++ b/content/html/content/src/nsHTMLMediaElement.cpp
+@@ -1763,42 +1763,42 @@ nsHTMLMediaElement::CanPlayType(const ns
+ }
+ 
+ already_AddRefed<nsMediaDecoder>
+ nsHTMLMediaElement::CreateDecoder(const nsACString& aType)
+ {
+ #ifdef MOZ_RAW
+   if (IsRawType(aType)) {
+     nsRefPtr<nsRawDecoder> decoder = new nsRawDecoder();
+-    if (decoder && decoder->Init(this)) {
+-      return decoder.forget().get();
++    if (decoder->Init(this)) {
++      return decoder.forget();
+     }
+   }
+ #endif
+ #ifdef MOZ_OGG
+   if (IsOggType(aType)) {
+     nsRefPtr<nsOggDecoder> decoder = new nsOggDecoder();
+-    if (decoder && decoder->Init(this)) {
+-      return decoder.forget().get();
++    if (decoder->Init(this)) {
++      return decoder.forget();
+     }
+   }
+ #endif
+ #ifdef MOZ_WAVE
+   if (IsWaveType(aType)) {
+     nsRefPtr<nsWaveDecoder> decoder = new nsWaveDecoder();
+-    if (decoder && decoder->Init(this)) {
+-      return decoder.forget().get();
++    if (decoder->Init(this)) {
++      return decoder.forget();
+     }
+   }
+ #endif
+ #ifdef MOZ_WEBM
+   if (IsWebMType(aType)) {
+     nsRefPtr<nsWebMDecoder> decoder = new nsWebMDecoder();
+-    if (decoder && decoder->Init(this)) {
+-      return decoder.forget().get();
++    if (decoder->Init(this)) {
++      return decoder.forget();
+     }
+   }
+ #endif
+   return nullptr;
+ }
+ 
+ nsresult nsHTMLMediaElement::InitializeDecoderAsClone(nsMediaDecoder* aOriginal)
+ {
+diff --git a/content/html/content/src/nsHTMLMetaElement.cpp b/content/html/content/src/nsHTMLMetaElement.cpp
+--- a/content/html/content/src/nsHTMLMetaElement.cpp
++++ b/content/html/content/src/nsHTMLMetaElement.cpp
+@@ -144,12 +144,10 @@ void
+ nsHTMLMetaElement::CreateAndDispatchEvent(nsIDocument* aDoc,
+                                           const nsAString& aEventName)
+ {
+   if (!aDoc)
+     return;
+ 
+   nsRefPtr<nsPLDOMEvent> event = new nsPLDOMEvent(this, aEventName, true,
+                                                   true);
+-  if (event) {
+-    event->PostDOMEvent();
+-  }
++  event->PostDOMEvent();
+ }
+diff --git a/content/html/content/src/nsHTMLScriptElement.cpp b/content/html/content/src/nsHTMLScriptElement.cpp
+--- a/content/html/content/src/nsHTMLScriptElement.cpp
++++ b/content/html/content/src/nsHTMLScriptElement.cpp
+@@ -240,30 +240,27 @@ nsHTMLScriptEventHandler::Invoke(nsISupp
+   // are NOT copied.  Instead each element points into the underlying buffer
+   // of the corresponding element in the mArgNames array...
+   //
+   // Remember, this is the number of arguments to compile the function with...
+   // So, use mArgNames.Count()
+   //
+   const int kMaxArgsOnStack = 10;
+ 
+-  int32_t argc, i;
+-  const char** args;
+-  const char*  stackArgs[kMaxArgsOnStack];
+-
+-  args = stackArgs;
+-  argc = int32_t(mArgNames.Length());
++  const char* stackArgs[kMaxArgsOnStack];
++  const char** args = stackArgs;
++  int32_t argc = int32_t(mArgNames.Length());
+ 
+   // If there are too many arguments then allocate the array from the heap
+   // otherwise build it up on the stack...
+   if (argc >= kMaxArgsOnStack) {
+     args = new const char*[argc+1];
+-    if (!args) return NS_ERROR_OUT_OF_MEMORY;
+   }
+ 
++  int32_t i;
+   for(i=0; i<argc; i++) {
+     args[i] = mArgNames[i].get();
+   }
+ 
+   // Null terminate for good luck ;-)
+   args[i] = nullptr;
+ 
+   // Compile the event handler script...
+@@ -589,17 +586,16 @@ nsHTMLScriptElement::MaybeProcessScript(
+     rv = NS_OK;
+ 
+     // We tried to evaluate the script but realized it was an eventhandler
+     // mEvaluated will already be set at this point
+     NS_ASSERTION(mAlreadyStarted, "should have set mIsEvaluated already");
+     NS_ASSERTION(!mScriptEventHandler, "how could we have an SEH already?");
+ 
+     mScriptEventHandler = new nsHTMLScriptEventHandler(this);
+-    NS_ENSURE_TRUE(mScriptEventHandler, NS_ERROR_OUT_OF_MEMORY);
+ 
+     nsAutoString event_val;
+     GetAttr(kNameSpaceID_None, nsGkAtoms::event, event_val);
+     mScriptEventHandler->ParseEventString(event_val);
+   }
+ 
+   return rv;
+ }
+diff --git a/content/html/content/src/nsHTMLSelectElement.cpp b/content/html/content/src/nsHTMLSelectElement.cpp
+--- a/content/html/content/src/nsHTMLSelectElement.cpp
++++ b/content/html/content/src/nsHTMLSelectElement.cpp
+@@ -149,28 +149,23 @@ nsHTMLSelectElement::nsHTMLSelectElement
+     mSelectionHasChanged(false),
+     mDefaultSelectionSet(false),
+     mCanShowInvalidUI(true),
+     mCanShowValidUI(true),
+     mNonOptionChildren(0),
+     mOptGroupCount(0),
+     mSelectedIndex(-1)
+ {
+-  // FIXME: Bug 328908, set mOptions in an Init function and get rid of null
+-  // checks.
+-
+   // DoneAddingChildren() will be called later if it's from the parser,
+   // otherwise it is
+ }
+ 
+ nsHTMLSelectElement::~nsHTMLSelectElement()
+ {
+-  if (mOptions) {
+-    mOptions->DropReference();
+-  }
++  mOptions->DropReference();
+ }
+ 
+ // ISupports
+ 
+ NS_IMPL_CYCLE_COLLECTION_CLASS(nsHTMLSelectElement)
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsHTMLSelectElement,
+                                                   nsGenericHTMLFormElement)
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR_AMBIGUOUS(mOptions,
+@@ -1632,19 +1627,16 @@ nsHTMLSelectElement::IntrinsicState() co
+ }
+ 
+ // nsIFormControl
+ 
+ NS_IMETHODIMP
+ nsHTMLSelectElement::SaveState()
+ {
+   nsRefPtr<nsSelectState> state = new nsSelectState();
+-  if (!state) {
+-    return NS_ERROR_OUT_OF_MEMORY;
+-  }
+ 
+   uint32_t len;
+   GetLength(&len);
+ 
+   for (uint32_t optIndex = 0; optIndex < len; optIndex++) {
+     nsIDOMHTMLOptionElement *option = mOptions->ItemAsOption(optIndex);
+     if (option) {
+       bool isSelected;
+diff --git a/content/html/content/src/nsHTMLTableElement.cpp b/content/html/content/src/nsHTMLTableElement.cpp
+--- a/content/html/content/src/nsHTMLTableElement.cpp
++++ b/content/html/content/src/nsHTMLTableElement.cpp
+@@ -572,19 +572,17 @@ nsHTMLTableElement::SetTFoot(nsIDOMHTMLT
+ 
+   return rv;
+ }
+ 
+ NS_IMETHODIMP
+ nsHTMLTableElement::GetRows(nsIDOMHTMLCollection** aValue)
+ {
+   if (!mRows) {
+-    // XXX why was this here NS_ADDREF(nsGkAtoms::tr);
+     mRows = new TableRowsCollection(this);
+-    NS_ENSURE_TRUE(mRows, NS_ERROR_OUT_OF_MEMORY);
+ 
+     nsresult rv = mRows->Init();
+     if (NS_FAILED(rv)) {
+       mRows = nullptr;
+       return rv;
+     }
+   }
+ 
+diff --git a/content/html/content/src/nsHTMLTableRowElement.cpp b/content/html/content/src/nsHTMLTableRowElement.cpp
+--- a/content/html/content/src/nsHTMLTableRowElement.cpp
++++ b/content/html/content/src/nsHTMLTableRowElement.cpp
+@@ -250,18 +250,16 @@ nsHTMLTableRowElement::GetCells(nsIDOMHT
+     mCells = new nsContentList(this,
+                                IsCell,
+                                nullptr, // destroy func
+                                nullptr, // closure data
+                                false,
+                                nullptr,
+                                kNameSpaceID_XHTML,
+                                false);
+-
+-    NS_ENSURE_TRUE(mCells, NS_ERROR_OUT_OF_MEMORY);
+   }
+ 
+   NS_ADDREF(*aValue = mCells);
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsHTMLTableRowElement::InsertCell(int32_t aIndex, nsIDOMHTMLElement** aValue)
+diff --git a/content/html/content/src/nsHTMLTableSectionElement.cpp b/content/html/content/src/nsHTMLTableSectionElement.cpp
+--- a/content/html/content/src/nsHTMLTableSectionElement.cpp
++++ b/content/html/content/src/nsHTMLTableSectionElement.cpp
+@@ -132,18 +132,16 @@ nsHTMLTableSectionElement::GetRows(nsIDO
+   *aValue = nullptr;
+ 
+   if (!mRows) {
+     mRows = new nsContentList(this,
+                               mNodeInfo->NamespaceID(),
+                               nsGkAtoms::tr,
+                               nsGkAtoms::tr,
+                               false);
+-
+-    NS_ENSURE_TRUE(mRows, NS_ERROR_OUT_OF_MEMORY);
+   }
+ 
+   NS_ADDREF(*aValue = mRows);
+   return NS_OK;
+ }
+ 
+ 
+ NS_IMETHODIMP

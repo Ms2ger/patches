@@ -1,0 +1,248 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 890821 - Make nsIScrollableFrame::GetScrollPositionCSSPixels return CSSIntPoint; r=roc
+
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -4805,17 +4805,17 @@ nsGlobalWindow::GetScrollXY(int32_t* aSc
+   nsPoint scrollPos = sf->GetScrollPosition();
+   if (scrollPos != nsPoint(0,0) && !aDoFlush) {
+     // Oh, well.  This is the expensive case -- the window is scrolled and we
+     // didn't actually flush yet.  Repeat, but with a flush, since the content
+     // may get shorter and hence our scroll position may decrease.
+     return GetScrollXY(aScrollX, aScrollY, true);
+   }
+ 
+-  nsIntPoint scrollPosCSSPixels = sf->GetScrollPositionCSSPixels();
++  CSSIntPoint scrollPosCSSPixels = sf->GetScrollPositionCSSPixels();
+   if (aScrollX) {
+     *aScrollX = scrollPosCSSPixels.x;
+   }
+   if (aScrollY) {
+     *aScrollY = scrollPosCSSPixels.y;
+   }
+   return NS_OK;
+ }
+@@ -6059,18 +6059,17 @@ nsGlobalWindow::ScrollTo(const CSSIntPoi
+ NS_IMETHODIMP
+ nsGlobalWindow::ScrollBy(int32_t aXScrollDif, int32_t aYScrollDif)
+ {
+   FlushPendingNotifications(Flush_Layout);
+   nsIScrollableFrame *sf = GetScrollFrame();
+ 
+   if (sf) {
+     CSSIntPoint scrollPos =
+-      CSSIntPoint::FromAppUnitsRounded(sf->GetScrollPosition()) +
+-      CSSIntPoint(aXScrollDif, aYScrollDif);
++      sf->GetScrollPositionCSSPixels() + CSSIntPoint(aXScrollDif, aYScrollDif);
+     // It seems like it would make more sense for ScrollBy to use
+     // SMOOTH mode, but tests seem to depend on the synchronous behaviour.
+     // Perhaps Web content does too.
+     ScrollTo(scrollPos);
+   }
+ 
+   return NS_OK;
+ }
+diff --git a/layout/generic/nsGfxScrollFrame.cpp b/layout/generic/nsGfxScrollFrame.cpp
+--- a/layout/generic/nsGfxScrollFrame.cpp
++++ b/layout/generic/nsGfxScrollFrame.cpp
+@@ -1575,17 +1575,17 @@ nsGfxScrollFrameInner::AsyncScrollCallba
+   // up scrolling to.
+   self->mDestination = self->GetScrollPosition();
+ }
+ 
+ void
+ nsGfxScrollFrameInner::ScrollToCSSPixels(const CSSIntPoint& aScrollPosition)
+ {
+   nsPoint current = GetScrollPosition();
+-  nsIntPoint currentCSSPixels = GetScrollPositionCSSPixels();
++  CSSIntPoint currentCSSPixels = GetScrollPositionCSSPixels();
+   nsPoint pt = CSSPoint::ToAppUnits(aScrollPosition);
+   nscoord halfPixel = nsPresContext::CSSPixelsToAppUnits(0.5f);
+   nsRect range(pt.x - halfPixel, pt.y - halfPixel, 2*halfPixel - 1, 2*halfPixel - 1);
+   // XXX I don't think the following blocks are needed anymore, now that
+   // ScrollToImpl simply tries to scroll an integer number of layer
+   // pixels from the current position
+   if (currentCSSPixels.x == aScrollPosition.x) {
+     pt.x = current.x;
+@@ -1604,22 +1604,20 @@ void
+ nsGfxScrollFrameInner::ScrollToCSSPixelsApproximate(const CSSPoint& aScrollPosition)
+ {
+   nsPoint pt = CSSPoint::ToAppUnits(aScrollPosition);
+   nscoord halfRange = nsPresContext::CSSPixelsToAppUnits(1000);
+   nsRect range(pt.x - halfRange, pt.y - halfRange, 2*halfRange - 1, 2*halfRange - 1);
+   ScrollTo(pt, nsIScrollableFrame::INSTANT, &range);
+ }
+ 
+-nsIntPoint
++CSSIntPoint
+ nsGfxScrollFrameInner::GetScrollPositionCSSPixels()
+ {
+-  nsPoint pt = GetScrollPosition();
+-  return nsIntPoint(nsPresContext::AppUnitsToIntCSSPixels(pt.x),
+-                    nsPresContext::AppUnitsToIntCSSPixels(pt.y));
++  return CSSIntPoint::FromAppUnitsRounded(GetScrollPosition());
+ }
+ 
+ /*
+  * this method wraps calls to ScrollToImpl(), either in one shot or incrementally,
+  *  based on the setting of the smoothness scroll pref
+  */
+ void
+ nsGfxScrollFrameInner::ScrollToWithOrigin(nsPoint aScrollPosition,
+diff --git a/layout/generic/nsGfxScrollFrame.h b/layout/generic/nsGfxScrollFrame.h
+--- a/layout/generic/nsGfxScrollFrame.h
++++ b/layout/generic/nsGfxScrollFrame.h
+@@ -165,19 +165,19 @@ public:
+    * aRange is the range of allowable scroll positions around the desired
+    * aScrollPosition. Null means only aScrollPosition is allowed.
+    * This is a closed-ended range --- aRange.XMost()/aRange.YMost() are allowed.
+    */
+   void ScrollTo(nsPoint aScrollPosition, nsIScrollableFrame::ScrollMode aMode,
+                 const nsRect* aRange = nullptr) {
+     ScrollToWithOrigin(aScrollPosition, aMode, nsGkAtoms::other, aRange);
+   }
+-  void ScrollToCSSPixels(const mozilla::CSSIntPoint& aScrollPosition);
++  void ScrollToCSSPixels(const CSSIntPoint& aScrollPosition);
+   void ScrollToCSSPixelsApproximate(const mozilla::CSSPoint& aScrollPosition);
+-  nsIntPoint GetScrollPositionCSSPixels();
++  CSSIntPoint GetScrollPositionCSSPixels();
+   void ScrollToImpl(nsPoint aScrollPosition, const nsRect& aRange);
+   void ScrollVisual(nsPoint aOldScrolledFramePosition);
+   void ScrollBy(nsIntPoint aDelta, nsIScrollableFrame::ScrollUnit aUnit,
+                 nsIScrollableFrame::ScrollMode aMode, nsIntPoint* aOverflow, nsIAtom *aOrigin = nullptr);
+   void ScrollToRestoredPosition();
+   nsSize GetLineScrollAmount() const;
+   nsSize GetPageScrollAmount() const;
+ 
+@@ -514,23 +514,23 @@ public:
+   }
+   virtual nsSize GetPageScrollAmount() const MOZ_OVERRIDE {
+     return mInner.GetPageScrollAmount();
+   }
+   virtual void ScrollTo(nsPoint aScrollPosition, ScrollMode aMode,
+                         const nsRect* aRange = nullptr) MOZ_OVERRIDE {
+     mInner.ScrollTo(aScrollPosition, aMode, aRange);
+   }
+-  virtual void ScrollToCSSPixels(const mozilla::CSSIntPoint& aScrollPosition) MOZ_OVERRIDE {
++  virtual void ScrollToCSSPixels(const CSSIntPoint& aScrollPosition) MOZ_OVERRIDE {
+     mInner.ScrollToCSSPixels(aScrollPosition);
+   }
+   virtual void ScrollToCSSPixelsApproximate(const mozilla::CSSPoint& aScrollPosition) MOZ_OVERRIDE {
+     mInner.ScrollToCSSPixelsApproximate(aScrollPosition);
+   }
+-  virtual nsIntPoint GetScrollPositionCSSPixels() MOZ_OVERRIDE {
++  virtual CSSIntPoint GetScrollPositionCSSPixels() MOZ_OVERRIDE {
+     return mInner.GetScrollPositionCSSPixels();
+   }
+   virtual void ScrollBy(nsIntPoint aDelta, ScrollUnit aUnit, ScrollMode aMode,
+                         nsIntPoint* aOverflow, nsIAtom *aOrigin = nullptr) MOZ_OVERRIDE {
+     mInner.ScrollBy(aDelta, aUnit, aMode, aOverflow, aOrigin);
+   }
+   virtual void ScrollToRestoredPosition() MOZ_OVERRIDE {
+     mInner.ScrollToRestoredPosition();
+@@ -778,23 +778,23 @@ public:
+   }
+   virtual nsSize GetPageScrollAmount() const MOZ_OVERRIDE {
+     return mInner.GetPageScrollAmount();
+   }
+   virtual void ScrollTo(nsPoint aScrollPosition, ScrollMode aMode,
+                         const nsRect* aRange = nullptr) MOZ_OVERRIDE {
+     mInner.ScrollTo(aScrollPosition, aMode, aRange);
+   }
+-  virtual void ScrollToCSSPixels(const mozilla::CSSIntPoint& aScrollPosition) MOZ_OVERRIDE {
++  virtual void ScrollToCSSPixels(const CSSIntPoint& aScrollPosition) MOZ_OVERRIDE {
+     mInner.ScrollToCSSPixels(aScrollPosition);
+   }
+   virtual void ScrollToCSSPixelsApproximate(const mozilla::CSSPoint& aScrollPosition) MOZ_OVERRIDE {
+     mInner.ScrollToCSSPixelsApproximate(aScrollPosition);
+   }
+-  virtual nsIntPoint GetScrollPositionCSSPixels() MOZ_OVERRIDE {
++  virtual CSSIntPoint GetScrollPositionCSSPixels() MOZ_OVERRIDE {
+     return mInner.GetScrollPositionCSSPixels();
+   }
+   virtual void ScrollBy(nsIntPoint aDelta, ScrollUnit aUnit, ScrollMode aMode,
+                         nsIntPoint* aOverflow, nsIAtom *aOrigin = nullptr) MOZ_OVERRIDE {
+     mInner.ScrollBy(aDelta, aUnit, aMode, aOverflow, aOrigin);
+   }
+   virtual void ScrollToRestoredPosition() MOZ_OVERRIDE {
+     mInner.ScrollToRestoredPosition();
+diff --git a/layout/generic/nsIScrollableFrame.h b/layout/generic/nsIScrollableFrame.h
+--- a/layout/generic/nsIScrollableFrame.h
++++ b/layout/generic/nsIScrollableFrame.h
+@@ -26,16 +26,18 @@ class nsIFrame;
+ 
+ /**
+  * Interface for frames that are scrollable. This interface exposes
+  * APIs for examining scroll state, observing changes to scroll state,
+  * and triggering scrolling.
+  */
+ class nsIScrollableFrame : public nsIScrollbarOwner {
+ public:
++  typedef mozilla::CSSIntPoint CSSIntPoint;
++
+   NS_DECL_QUERYFRAME_TARGET(nsIScrollableFrame)
+ 
+   /**
+    * Get the frame for the content that we are scrolling within
+    * this scrollable frame.
+    */
+   virtual nsIFrame* GetScrolledFrame() const = 0;
+ 
+@@ -151,32 +153,32 @@ public:
+    * Keeps the exact current horizontal or vertical position if the current
+    * position, rounded to CSS pixels, matches aScrollPosition. If
+    * aScrollPosition.x/y is different from the current CSS pixel position,
+    * makes sure we only move in the direction given by the difference.
+    * Ensures that GetScrollPositionCSSPixels (the scroll position after
+    * rounding to CSS pixels) will be exactly aScrollPosition.
+    * The scroll mode is INSTANT.
+    */
+-  virtual void ScrollToCSSPixels(const mozilla::CSSIntPoint& aScrollPosition) = 0;
++  virtual void ScrollToCSSPixels(const CSSIntPoint& aScrollPosition) = 0;
+   /**
+    * Scrolls to a particular position in float CSS pixels.
+    * This does not guarantee that GetScrollPositionCSSPixels equals
+    * aScrollPosition afterward. It tries to scroll as close to
+    * aScrollPosition as possible while scrolling by an integer
+    * number of layer pixels (so the operation is fast and looks clean).
+    * The scroll mode is INSTANT.
+    */
+   virtual void ScrollToCSSPixelsApproximate(const mozilla::CSSPoint& aScrollPosition) = 0;
+ 
+   /**
+    * Returns the scroll position in integer CSS pixels, rounded to the nearest
+    * pixel.
+    */
+-  virtual nsIntPoint GetScrollPositionCSSPixels() = 0;
++  virtual CSSIntPoint GetScrollPositionCSSPixels() = 0;
+   /**
+    * When scrolling by a relative amount, we can choose various units.
+    */
+   enum ScrollUnit { DEVICE_PIXELS, LINES, PAGES, WHOLE };
+   /**
+    * Modifies the current scroll position by aDelta units given by aUnit,
+    * clamping it to GetScrollRange. If WHOLE is specified as the unit,
+    * content is scrolled all the way in the direction(s) given by aDelta.
+diff --git a/layout/xul/base/src/nsScrollBoxObject.cpp b/layout/xul/base/src/nsScrollBoxObject.cpp
+--- a/layout/xul/base/src/nsScrollBoxObject.cpp
++++ b/layout/xul/base/src/nsScrollBoxObject.cpp
+@@ -260,17 +260,17 @@ NS_IMETHODIMP nsScrollBoxObject::ScrollT
+ 
+ /* void getPosition (out long x, out long y); */
+ NS_IMETHODIMP nsScrollBoxObject::GetPosition(int32_t *x, int32_t *y)
+ {
+   nsIScrollableFrame* sf = GetScrollFrame();
+   if (!sf)
+      return NS_ERROR_FAILURE;
+ 
+-  nsIntPoint pt = sf->GetScrollPositionCSSPixels();
++  CSSIntPoint pt = sf->GetScrollPositionCSSPixels();
+   *x = pt.x;
+   *y = pt.y;
+ 
+   return NS_OK;  
+ }
+ 
+ /* void getScrolledSize (out long width, out long height); */
+ NS_IMETHODIMP nsScrollBoxObject::GetScrolledSize(int32_t *width, int32_t *height)

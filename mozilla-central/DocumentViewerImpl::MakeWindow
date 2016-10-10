@@ -1,0 +1,84 @@
+diff --git a/layout/base/nsDocumentViewer.cpp b/layout/base/nsDocumentViewer.cpp
+--- a/layout/base/nsDocumentViewer.cpp
++++ b/layout/base/nsDocumentViewer.cpp
+@@ -352,10 +352,8 @@
+    * Creates a view manager, root view, and widget for the root view, setting
+    * mViewManager and mWindow.
+    * @param aSize the initial size in appunits
+-   * @param aContainerView the container view to hook our root view up
+-   * to as a child, or null if this will be the root view manager
+-   */
+-  nsresult MakeWindow(const nsSize& aSize, nsIView* aContainerView);
++   */
++  nsresult MakeWindow(const nsSize& aSize);
+ 
+   /**
+    * Find the view to use as the container view for MakeWindow. Returns
+@@ -886,8 +884,7 @@
+       // FlushPendingNotifications() calls down the road...
+ 
+       rv = MakeWindow(nsSize(mPresContext->DevPixelsToAppUnits(aBounds.width),
+-                             mPresContext->DevPixelsToAppUnits(aBounds.height)),
+-                      containerView);
++                             mPresContext->DevPixelsToAppUnits(aBounds.height)));
+       NS_ENSURE_SUCCESS(rv, rv);
+       Hide();
+ 
+@@ -1740,11 +1737,9 @@
+ 
+     DestroyPresShell();
+ 
+-    nsIView* containerView = FindContainerView();
+-
+     // This destroys the root view because it was associated with the root frame,
+     // which has been torn down. Recreate the viewmanager and root view.
+-    MakeWindow(currentSize, containerView);
++    MakeWindow(currentSize);
+   }
+ 
+   // And if we're already given a prescontext...
+@@ -1982,8 +1977,7 @@
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     rv = MakeWindow(nsSize(mPresContext->DevPixelsToAppUnits(mBounds.width),
+-                           mPresContext->DevPixelsToAppUnits(mBounds.height)),
+-                           containerView);
++                           mPresContext->DevPixelsToAppUnits(mBounds.height)));
+     if (NS_FAILED(rv))
+       return rv;
+ 
+@@ -2243,7 +2237,7 @@
+ //-------------------------------------------------------
+ 
+ nsresult
+-DocumentViewerImpl::MakeWindow(const nsSize& aSize, nsIView* aContainerView)
++DocumentViewerImpl::MakeWindow(const nsSize& aSize)
+ {
+   if (GetIsPrintPreview())
+     return NS_OK;
+@@ -2285,13 +2279,14 @@
+   // The root view is always at 0,0.
+   nsRect tbounds(nsPoint(0, 0), aSize);
+   // Create a view
+-  nsIView* view = mViewManager->CreateView(tbounds, aContainerView);
++  nsIView* containerView = FindContainerView();
++  nsIView* view = mViewManager->CreateView(tbounds, containerView);
+   if (!view)
+     return NS_ERROR_OUT_OF_MEMORY;
+ 
+   // Don't create a widget if we weren't given a parent widget but we
+   // have a container view we can hook up to without a widget
+-  if (mParentWidget || !aContainerView) {
++  if (mParentWidget || !containerView) {
+     // pass in a native widget to be the parent widget ONLY if the view hierarchy will stand alone.
+     // otherwise the view will find its own parent widget and "do the right thing" to
+     // establish a parent/child widget relationship
+@@ -2313,7 +2308,7 @@
+       rv = view->AttachToTopLevelWidget(mParentWidget);
+     }
+     else {
+-      nsNativeWidget nw = (aContainerView != nullptr || !mParentWidget) ?
++      nsNativeWidget nw = (aContainerView || !mParentWidget) ?
+                  nullptr : mParentWidget->GetNativeData(NS_NATIVE_WIDGET);
+       rv = view->CreateWidget(kWidgetCID, initDataPtr,
+                               nw, true, false);

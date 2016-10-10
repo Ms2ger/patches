@@ -1,0 +1,879 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 660660 - Part d: Remove CDATASection; r=?sicking
+
+diff --git a/content/base/public/nsContentCreatorFunctions.h b/content/base/public/nsContentCreatorFunctions.h
+--- a/content/base/public/nsContentCreatorFunctions.h
++++ b/content/base/public/nsContentCreatorFunctions.h
+@@ -89,23 +89,16 @@ NS_NewXMLProcessingInstruction(nsIConten
+ /**
+  * aNodeInfoManager must not be null.
+  */
+ nsresult
+ NS_NewXMLStylesheetProcessingInstruction(nsIContent** aInstancePtrResult,
+                                          nsNodeInfoManager *aNodeInfoManager,
+                                          const nsAString& aData);
+ 
+-/**
+- * aNodeInfoManager must not be null.
+- */
+-nsresult
+-NS_NewXMLCDATASection(nsIContent** aInstancePtrResult,
+-                      nsNodeInfoManager *aNodeInfoManager);
+-
+ nsresult
+ NS_NewHTMLElement(nsIContent** aResult, already_AddRefed<nsINodeInfo> aNodeInfo,
+                   mozilla::dom::FromParser aFromParser);
+ 
+ // First argument should be nsHTMLTag, but that adds dependency to parser
+ // for a bunch of files.
+ already_AddRefed<nsGenericHTMLElement>
+ CreateHTMLElement(uint32_t aNodeType, already_AddRefed<nsINodeInfo> aNodeInfo,
+diff --git a/content/base/src/nsDocument.cpp b/content/base/src/nsDocument.cpp
+--- a/content/base/src/nsDocument.cpp
++++ b/content/base/src/nsDocument.cpp
+@@ -4726,17 +4726,16 @@ nsDocument::ImportNode(nsIDOMNode* aImpo
+   uint16_t nodeType;
+   aImportedNode->GetNodeType(&nodeType);
+   switch (nodeType) {
+     case nsIDOMNode::ATTRIBUTE_NODE:
+     case nsIDOMNode::DOCUMENT_FRAGMENT_NODE:
+     case nsIDOMNode::ELEMENT_NODE:
+     case nsIDOMNode::PROCESSING_INSTRUCTION_NODE:
+     case nsIDOMNode::TEXT_NODE:
+-    case nsIDOMNode::CDATA_SECTION_NODE:
+     case nsIDOMNode::COMMENT_NODE:
+     {
+       nsCOMPtr<nsINode> imported = do_QueryInterface(aImportedNode);
+       NS_ENSURE_TRUE(imported, NS_ERROR_FAILURE);
+ 
+       nsCOMPtr<nsIDOMNode> newNode;
+       nsCOMArray<nsINode> nodesWithProperties;
+       rv = nsNodeUtils::Clone(imported, aDeep, mNodeInfoManager,
+@@ -4750,16 +4749,17 @@ nsDocument::ImportNode(nsIDOMNode* aImpo
+                                                true);
+         NS_ENSURE_SUCCESS(rv, rv);
+       }
+ 
+       newNode.swap(*aResult);
+ 
+       return NS_OK;
+     }
++    case nsIDOMNode::CDATA_SECTION_NODE:
+     case nsIDOMNode::ENTITY_NODE:
+     case nsIDOMNode::ENTITY_REFERENCE_NODE:
+     case nsIDOMNode::NOTATION_NODE:
+     {
+       return NS_ERROR_NOT_IMPLEMENTED;
+     }
+     default:
+     {
+@@ -5988,17 +5988,16 @@ nsDocument::AdoptNode(nsIDOMNode *aAdopt
+       }
+ 
+       break;
+     }
+     case nsIDOMNode::DOCUMENT_FRAGMENT_NODE:
+     case nsIDOMNode::ELEMENT_NODE:
+     case nsIDOMNode::PROCESSING_INSTRUCTION_NODE:
+     case nsIDOMNode::TEXT_NODE:
+-    case nsIDOMNode::CDATA_SECTION_NODE:
+     case nsIDOMNode::COMMENT_NODE:
+     {
+       // We don't want to adopt an element into its own contentDocument or into
+       // a descendant contentDocument, so we check if the frameElement of this
+       // document or any of its parents is the adopted node or one of its
+       // descendants.
+       nsIDocument *doc = this;
+       do {
+@@ -6018,16 +6017,17 @@ nsDocument::AdoptNode(nsIDOMNode *aAdopt
+       if (parent) {
+         rv = parent->RemoveChildAt(parent->IndexOf(adoptedNode), true);
+         NS_ENSURE_SUCCESS(rv, rv);
+       }
+ 
+       break;
+     }
+     case nsIDOMNode::ENTITY_REFERENCE_NODE:
++    case nsIDOMNode::CDATA_SECTION_NODE:
+     {
+       return NS_ERROR_NOT_IMPLEMENTED;
+     }
+     case nsIDOMNode::DOCUMENT_NODE:
+     case nsIDOMNode::DOCUMENT_TYPE_NODE:
+     case nsIDOMNode::ENTITY_NODE:
+     case nsIDOMNode::NOTATION_NODE:
+     {
+diff --git a/content/base/src/nsDocumentEncoder.cpp b/content/base/src/nsDocumentEncoder.cpp
+--- a/content/base/src/nsDocumentEncoder.cpp
++++ b/content/base/src/nsDocumentEncoder.cpp
+@@ -52,17 +52,16 @@
+ #include "nsIDocument.h"
+ #include "nsIHTMLDocument.h"
+ #include "nsCOMPtr.h"
+ #include "nsIContentSerializer.h"
+ #include "nsIUnicodeEncoder.h"
+ #include "nsIOutputStream.h"
+ #include "nsIDOMElement.h"
+ #include "nsIDOMText.h"
+-#include "nsIDOMCDATASection.h"
+ #include "nsIDOMComment.h"
+ #include "nsIDOMProcessingInstruction.h"
+ #include "nsIDOMDocumentType.h"
+ #include "nsIDOMNodeList.h"
+ #include "nsIRange.h"
+ #include "nsIDOMRange.h"
+ #include "nsIDOMDocument.h"
+ #include "nsICharsetConverterManager.h"
+diff --git a/content/base/src/nsGenericDOMDataNode.cpp b/content/base/src/nsGenericDOMDataNode.cpp
+--- a/content/base/src/nsGenericDOMDataNode.cpp
++++ b/content/base/src/nsGenericDOMDataNode.cpp
+@@ -32,17 +32,17 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /*
+  * Base class for DOM Core's nsIDOMComment, nsIDOMDocumentType, nsIDOMText,
+- * nsIDOMCDATASection, and nsIDOMProcessingInstruction nodes.
++ * and nsIDOMProcessingInstruction nodes.
+  */
+ 
+ #include "nsGenericDOMDataNode.h"
+ #include "nsGenericElement.h"
+ #include "nsIDocument.h"
+ #include "nsIEventListenerManager.h"
+ #include "nsIDOMDocument.h"
+ #include "nsReadableUtils.h"
+diff --git a/content/base/src/nsGenericDOMDataNode.h b/content/base/src/nsGenericDOMDataNode.h
+--- a/content/base/src/nsGenericDOMDataNode.h
++++ b/content/base/src/nsGenericDOMDataNode.h
+@@ -32,17 +32,17 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /*
+  * Base class for DOM Core's nsIDOMComment, nsIDOMDocumentType, nsIDOMText,
+- * nsIDOMCDATASection, and nsIDOMProcessingInstruction nodes.
++ * and nsIDOMProcessingInstruction nodes.
+  */
+ 
+ #ifndef nsGenericDOMDataNode_h___
+ #define nsGenericDOMDataNode_h___
+ 
+ #include "nsIContent.h"
+ #include "nsIDOMCharacterData.h"
+ #include "nsIDOMEventTarget.h"
+diff --git a/content/base/src/nsPlainTextSerializer.cpp b/content/base/src/nsPlainTextSerializer.cpp
+--- a/content/base/src/nsPlainTextSerializer.cpp
++++ b/content/base/src/nsPlainTextSerializer.cpp
+@@ -43,17 +43,16 @@
+  * (eg for copy/paste as plaintext).
+  */
+ 
+ #include "nsPlainTextSerializer.h"
+ #include "nsLWBrkCIID.h"
+ #include "nsIServiceManager.h"
+ #include "nsGkAtoms.h"
+ #include "nsIDOMText.h"
+-#include "nsIDOMCDATASection.h"
+ #include "nsIDOMElement.h"
+ #include "nsINameSpaceManager.h"
+ #include "nsTextFragment.h"
+ #include "nsContentUtils.h"
+ #include "nsReadableUtils.h"
+ #include "nsUnicharUtils.h"
+ #include "nsCRT.h"
+ #include "nsIParserService.h"
+diff --git a/content/base/src/nsTraversal.cpp b/content/base/src/nsTraversal.cpp
+--- a/content/base/src/nsTraversal.cpp
++++ b/content/base/src/nsTraversal.cpp
+@@ -85,19 +85,16 @@ nsresult nsTraversal::TestNode(nsINode* 
+     if (aNode->IsElement()) {
+         nodeType = nsIDOMNode::ELEMENT_NODE;
+     }
+     else if (aNode->IsNodeOfType(nsINode::eCONTENT)) {
+         nsIAtom* tag = static_cast<nsIContent*>(aNode)->Tag();
+         if (tag == nsGkAtoms::textTagName) {
+             nodeType = nsIDOMNode::TEXT_NODE;
+         }
+-        else if (tag == nsGkAtoms::cdataTagName) {
+-            nodeType = nsIDOMNode::CDATA_SECTION_NODE;
+-        }
+         else if (tag == nsGkAtoms::commentTagName) {
+             nodeType = nsIDOMNode::COMMENT_NODE;
+         }
+         else if (tag == nsGkAtoms::processingInstructionTagName) {
+             nodeType = nsIDOMNode::PROCESSING_INSTRUCTION_NODE;
+         }
+     }
+ 
+diff --git a/content/base/src/nsXMLContentSerializer.cpp b/content/base/src/nsXMLContentSerializer.cpp
+--- a/content/base/src/nsXMLContentSerializer.cpp
++++ b/content/base/src/nsXMLContentSerializer.cpp
+@@ -41,17 +41,16 @@
+  * nsIDocumentEncoder to convert an XML DOM to an XML string that
+  * could be parsed into more or less the original DOM.
+  */
+ 
+ #include "nsXMLContentSerializer.h"
+ 
+ #include "nsGkAtoms.h"
+ #include "nsIDOMText.h"
+-#include "nsIDOMCDATASection.h"
+ #include "nsIDOMProcessingInstruction.h"
+ #include "nsIDOMComment.h"
+ #include "nsIDOMDocument.h"
+ #include "nsIDOMDocumentType.h"
+ #include "nsIDOMElement.h"
+ #include "nsIContent.h"
+ #include "nsIDocument.h"
+ #include "nsIDocumentEncoder.h"
+diff --git a/content/base/test/test_bug352728.xhtml b/content/base/test/test_bug352728.xhtml
+--- a/content/base/test/test_bug352728.xhtml
++++ b/content/base/test/test_bug352728.xhtml
+@@ -92,47 +92,16 @@ function testComment(aText, aShouldSucce
+     if (aShouldSucceed) {
+       ok(0, "Correct functioning of comment stuff", "something broke: " + e);
+     } else {
+       is(e.code, DOMException.INVALID_CHARACTER_ERR, "Check exception code");
+     }
+   }
+ }
+ 
+-function testCDATASection(aText, aShouldSucceed)
+-{
+-  try {
+-    var cdataSection = document.createCDATASection(aText);
+-    var types = [ CDATASection, CharacterData, Node ];
+-    checkTypes(cdataSection, "CDATA section", types);
+-
+-    var interfaces = [ "nsIDOMCDATASection", "nsIDOMCharacterData",
+-                       "nsIDOMNode", "nsIDOM3Node", "nsIDOMEventTarget" ];
+-    checkInterfaces(cdataSection, "CDATA section", interfaces);
+-
+-    testCharacterData(cdataSection, aText);
+-    is(cdataSection.nodeName, "#cdata-section", "Check nodeName");
+-    is(cdataSection.nodeType, Node.CDATA_SECTION_NODE, "Check nodeType");
+-
+-    if (!aShouldSucceed) {
+-      ok(0, "Invalid CDATA section creation",
+-]]>
+-         "Shouldn't create CDATA section with embedded \"]]&gt;\"");
+-<![CDATA[
+-    }
+-  } catch (e) {
+-    if (aShouldSucceed) {
+-      ok(0, "Correct functioning of CDATA section stuff",
+-         "something broke: " + e);
+-    } else {
+-      is(e.code, DOMException.INVALID_CHARACTER_ERR, "Check exception code");
+-    }
+-  }
+-}
+-
+ function testPI(aTarget, aData, aShouldSucceed, aReason)
+ {
+   try {
+     var pi = document.createProcessingInstruction(aTarget, aData);
+     var types = [ ProcessingInstruction, Node ];
+     checkTypes(pi, "processing instruction", types);
+ 
+     var interfaces = [ "nsIDOMProcessingInstruction", "nsIDOMNode",
+@@ -162,27 +131,16 @@ function testPI(aTarget, aData, aShouldS
+ }
+ 
+ testComment("Some text", true);
+ testComment("Some text with a '-' in it", true);
+ testComment("Some text with a '-' and a '-' and another '-'", true);
+ testComment("Some text -- this shouldn't create a node!", false);
+ testComment("<!-- This is an HTML comment -->", false);
+ 
+-testCDATASection("Some text", true);
+-testCDATASection("Some text with a '?' in it", true);
+-testCDATASection("Some text with a '>' in it", true);
+-testCDATASection("Some text with a '?' and a '>' in it", true);
+-testCDATASection("Some text with a '? >' in it", true);
+-testCDATASection("Some text -- ?> this should be ok", true);
+-]]>
+-testCDATASection("Some text ]]&gt; this should not create a node!", false);
+-
+-<![CDATA[
+-
+ testPI("foo", "bar", true);
+ testPI("foo:bar", "baz", true);
+ testPI("foo", "bar?", true);
+ testPI("foo", "bar>", true);
+ testPI("foo", "bar? >", true);
+ testPI("<aaa", "bar", false, "Target should not contain '<'");
+ testPI("aaa>", "bar", false, "Target should not contain '>'");
+ testPI("aa?", "bar", false, "Target should not contain '?'");
+diff --git a/content/test/unit/head_content.js b/content/test/unit/head_content.js
+--- a/content/test/unit/head_content.js
++++ b/content/test/unit/head_content.js
+@@ -139,17 +139,16 @@ function do_check_equiv(dom1, dom2) {
+   // There's no classinfo around, so we'll need to do some QIing to
+   // make sure the right interfaces are flattened as needed.
+   switch (dom1.nodeType) {
+   case nsIDOMNode.PROCESSING_INSTRUCTION_NODE:
+     do_check_eq(dom1.QueryInterface(nsIDOMProcessingInstruction).target, 
+                 dom2.QueryInterface(nsIDOMProcessingInstruction).target);
+     do_check_eq(dom1.data, dom2.data);
+   case nsIDOMNode.TEXT_NODE:
+-  case nsIDOMNode.CDATA_SECTION_NODE:
+   case nsIDOMNode.COMMENT_NODE:
+     do_check_eq(dom1.QueryInterface(nsIDOMCharacterData).data,
+                 dom2.QueryInterface(nsIDOMCharacterData).data);
+     break;
+   case nsIDOMNode.ELEMENT_NODE:
+     do_check_eq(dom1.namespaceURI, dom2.namespaceURI);
+     do_check_eq(dom1.localName, dom2.localName);
+     // Compare attrs in both directions -- do_compare_attrs does a
+diff --git a/content/xml/content/src/Makefile.in b/content/xml/content/src/Makefile.in
+--- a/content/xml/content/src/Makefile.in
++++ b/content/xml/content/src/Makefile.in
+@@ -44,17 +44,16 @@ include $(DEPTH)/config/autoconf.mk
+ 
+ MODULE		= content
+ LIBRARY_NAME	= gkconxmlcon_s
+ LIBXUL_LIBRARY	= 1
+ 
+ 
+ CPPSRCS		= \
+ 		nsXMLElement.cpp \
+-		nsXMLCDATASection.cpp \
+ 		nsXMLProcessingInstruction.cpp \
+ 		nsXMLStylesheetPI.cpp \
+ 		$(NULL)
+ 
+ # we don't want the shared lib, but we want to force the creation of a static lib.
+ FORCE_STATIC_LIB = 1
+ 
+ include $(topsrcdir)/config/rules.mk
+diff --git a/content/xml/content/src/nsXMLCDATASection.cpp b/content/xml/content/src/nsXMLCDATASection.cpp
+deleted file mode 100644
+--- a/content/xml/content/src/nsXMLCDATASection.cpp
++++ /dev/null
+@@ -1,187 +0,0 @@
+-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+-/* ***** BEGIN LICENSE BLOCK *****
+- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+- *
+- * The contents of this file are subject to the Mozilla Public License Version
+- * 1.1 (the "License"); you may not use this file except in compliance with
+- * the License. You may obtain a copy of the License at
+- * http://www.mozilla.org/MPL/
+- *
+- * Software distributed under the License is distributed on an "AS IS" basis,
+- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
+- * for the specific language governing rights and limitations under the
+- * License.
+- *
+- * The Original Code is Mozilla Communicator client code.
+- *
+- * The Initial Developer of the Original Code is
+- * Netscape Communications Corporation.
+- * Portions created by the Initial Developer are Copyright (C) 1998
+- * the Initial Developer. All Rights Reserved.
+- *
+- * Contributor(s):
+- *
+- * Alternatively, the contents of this file may be used under the terms of
+- * either of the GNU General Public License Version 2 or later (the "GPL"),
+- * or the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+- * in which case the provisions of the GPL or the LGPL are applicable instead
+- * of those above. If you wish to allow use of your version of this file only
+- * under the terms of either the GPL or the LGPL, and not to allow others to
+- * use your version of this file under the terms of the MPL, indicate your
+- * decision by deleting the provisions above and replace them with the notice
+- * and other provisions required by the GPL or the LGPL. If you do not delete
+- * the provisions above, a recipient may use your version of this file under
+- * the terms of any one of the MPL, the GPL or the LGPL.
+- *
+- * ***** END LICENSE BLOCK ***** */
+-
+-#include "nsIDOMCDATASection.h"
+-#include "nsGenericDOMDataNode.h"
+-#include "nsGkAtoms.h"
+-#include "nsIDocument.h"
+-#include "nsContentUtils.h"
+-
+-
+-class nsXMLCDATASection : public nsGenericDOMDataNode,
+-                          public nsIDOMCDATASection
+-{
+-public:
+-  nsXMLCDATASection(already_AddRefed<nsINodeInfo> aNodeInfo);
+-  virtual ~nsXMLCDATASection();
+-
+-  // nsISupports
+-  NS_DECL_ISUPPORTS_INHERITED
+-
+-  // nsIDOMNode
+-  NS_IMPL_NSIDOMNODE_USING_GENERIC_DOM_DATA
+-
+-  // nsIDOMCharacterData
+-  NS_FORWARD_NSIDOMCHARACTERDATA(nsGenericDOMDataNode::)
+-
+-  // nsIDOMText
+-  NS_FORWARD_NSIDOMTEXT(nsGenericDOMDataNode::)
+-
+-  // nsIDOMCDATASection
+-  // Empty interface
+-
+-  // nsIContent
+-  virtual bool IsNodeOfType(uint32_t aFlags) const;
+-
+-  virtual nsXPCClassInfo* GetClassInfo();
+-#ifdef DEBUG
+-  virtual void List(FILE* out, int32_t aIndent) const;
+-  virtual void DumpContent(FILE* out, int32_t aIndent,bool aDumpAll) const;
+-#endif
+-};
+-
+-nsresult
+-NS_NewXMLCDATASection(nsIContent** aInstancePtrResult,
+-                      nsNodeInfoManager *aNodeInfoManager)
+-{
+-  NS_PRECONDITION(aNodeInfoManager, "Missing nodeinfo manager");
+-
+-  *aInstancePtrResult = nullptr;
+-
+-  nsCOMPtr<nsINodeInfo> ni;
+-  ni = aNodeInfoManager->GetNodeInfo(nsGkAtoms::cdataTagName,
+-                                     nullptr, kNameSpaceID_None);
+-  NS_ENSURE_TRUE(ni, NS_ERROR_OUT_OF_MEMORY);
+-
+-  nsXMLCDATASection *instance = new nsXMLCDATASection(ni.forget());
+-  if (!instance) {
+-    return NS_ERROR_OUT_OF_MEMORY;
+-  }
+-
+-  NS_ADDREF(*aInstancePtrResult = instance);
+-
+-  return NS_OK;
+-}
+-
+-nsXMLCDATASection::nsXMLCDATASection(already_AddRefed<nsINodeInfo> aNodeInfo)
+-  : nsGenericDOMDataNode(aNodeInfo)
+-{
+-}
+-
+-nsXMLCDATASection::~nsXMLCDATASection()
+-{
+-}
+-
+-
+-DOMCI_NODE_DATA(CDATASection, nsXMLCDATASection)
+-
+-// QueryInterface implementation for nsXMLCDATASection
+-NS_INTERFACE_TABLE_HEAD(nsXMLCDATASection)
+-  NS_NODE_INTERFACE_TABLE4(nsXMLCDATASection, nsIDOMNode, nsIDOMCharacterData,
+-                           nsIDOMText, nsIDOMCDATASection)
+-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(CDATASection)
+-NS_INTERFACE_MAP_END_INHERITING(nsGenericDOMDataNode)
+-
+-NS_IMPL_ADDREF_INHERITED(nsXMLCDATASection, nsGenericDOMDataNode)
+-NS_IMPL_RELEASE_INHERITED(nsXMLCDATASection, nsGenericDOMDataNode)
+-
+-
+-bool
+-nsXMLCDATASection::IsNodeOfType(uint32_t aFlags) const
+-{
+-  return !(aFlags & ~(eCONTENT | eTEXT | eDATA_NODE));
+-}
+-
+-NS_IMETHODIMP
+-nsXMLCDATASection::GetNodeName(nsAString& aNodeName)
+-{
+-  aNodeName.AssignLiteral("#cdata-section");
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+-nsXMLCDATASection::GetNodeValue(nsAString& aNodeValue)
+-{
+-  return nsGenericDOMDataNode::GetNodeValue(aNodeValue);
+-}
+-
+-NS_IMETHODIMP
+-nsXMLCDATASection::SetNodeValue(const nsAString& aNodeValue)
+-{
+-  return nsGenericDOMDataNode::SetNodeValue(aNodeValue);
+-}
+-
+-NS_IMETHODIMP
+-nsXMLCDATASection::GetNodeType(uint16_t* aNodeType)
+-{
+-  *aNodeType = (uint16_t)nsIDOMNode::CDATA_SECTION_NODE;
+-  return NS_OK;
+-}
+-
+-nsGenericDOMDataNode*
+-nsXMLCDATASection::CloneDataNode(nsINodeInfo *aNodeInfo, bool aCloneText) const
+-{
+-  nsCOMPtr<nsINodeInfo> ni = aNodeInfo;
+-  nsXMLCDATASection *it = new nsXMLCDATASection(ni.forget());
+-  if (it && aCloneText) {
+-    it->mText = mText;
+-  }
+-
+-  return it;
+-}
+-
+-#ifdef DEBUG
+-void
+-nsXMLCDATASection::List(FILE* out, int32_t aIndent) const
+-{
+-  int32_t index;
+-  for (index = aIndent; --index >= 0; ) fputs("  ", out);
+-
+-  fprintf(out, "CDATASection refcount=%d<", mRefCnt.get());
+-
+-  nsAutoString tmp;
+-  ToCString(tmp, 0, mText.GetLength());
+-  fputs(NS_LossyConvertUTF16toASCII(tmp).get(), out);
+-
+-  fputs(">\n", out);
+-}
+-
+-void
+-nsXMLCDATASection::DumpContent(FILE* out, int32_t aIndent,
+-                               bool aDumpAll) const {
+-}
+-#endif
+diff --git a/content/xslt/src/xpath/nsXPathExpression.cpp b/content/xslt/src/xpath/nsXPathExpression.cpp
+--- a/content/xslt/src/xpath/nsXPathExpression.cpp
++++ b/content/xslt/src/xpath/nsXPathExpression.cpp
+@@ -107,30 +107,28 @@ nsXPathExpression::EvaluateWithContext(n
+         }
+     }
+ 
+     nsresult rv;
+     uint16_t nodeType;
+     rv = aContextNode->GetNodeType(&nodeType);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+-    if (nodeType == nsIDOMNode::TEXT_NODE ||
+-        nodeType == nsIDOMNode::CDATA_SECTION_NODE) {
++    if (nodeType == nsIDOMNode::TEXT_NODE) {
+         nsCOMPtr<nsIDOMCharacterData> textNode = do_QueryInterface(aContextNode);
+         NS_ENSURE_TRUE(textNode, NS_ERROR_FAILURE);
+ 
+         if (textNode) {
+             uint32_t textLength;
+             textNode->GetLength(&textLength);
+             if (textLength == 0)
+                 return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
+         }
+ 
+-        // XXX Need to get logical XPath text node for CDATASection
+-        //     and Text nodes.
++        // XXX Need to get logical XPath text node for Text nodes.
+     }
+     else if (nodeType != nsIDOMNode::DOCUMENT_NODE &&
+              nodeType != nsIDOMNode::ELEMENT_NODE &&
+              nodeType != nsIDOMNode::ATTRIBUTE_NODE &&
+              nodeType != nsIDOMNode::COMMENT_NODE &&
+              nodeType != nsIDOMNode::PROCESSING_INSTRUCTION_NODE &&
+              nodeType != nsIDOMXPathNamespace::XPATH_NAMESPACE_NODE) {
+         return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -221,17 +221,16 @@
+ #include "nsIDOMBarProp.h"
+ #include "nsIDOMScreen.h"
+ #include "nsIDOMDocumentType.h"
+ #include "nsIDOMDOMImplementation.h"
+ #include "nsIDOMDocumentFragment.h"
+ #include "nsDOMAttribute.h"
+ #include "nsIDOMText.h"
+ #include "nsIDOMComment.h"
+-#include "nsIDOMCDATASection.h"
+ #include "nsIDOMProcessingInstruction.h"
+ #include "nsIDOMNSEvent.h"
+ #include "nsIDOMDataContainerEvent.h"
+ #include "nsIDOMKeyEvent.h"
+ #include "nsIDOMMouseEvent.h"
+ #include "nsIDOMMouseScrollEvent.h"
+ #include "nsIDOMDragEvent.h"
+ #include "nsIDOMCommandEvent.h"
+@@ -721,17 +720,16 @@ static nsDOMClassInfoData sClassInfoData
+   NS_DEFINE_CLASSINFO_DATA(Element, nsElementSH,
+                            ELEMENT_SCRIPTABLE_FLAGS)
+   NS_DEFINE_CLASSINFO_DATA(Attr, nsAttributeSH,
+                            NODE_SCRIPTABLE_FLAGS)
+   NS_DEFINE_CLASSINFO_DATA(Text, nsNodeSH,
+                            NODE_SCRIPTABLE_FLAGS)
+   NS_DEFINE_CLASSINFO_DATA(Comment, nsNodeSH,
+                            NODE_SCRIPTABLE_FLAGS)
+-  NS_DEFINE_CLASSINFO_DATA(CDATASection, nsNodeSH, NODE_SCRIPTABLE_FLAGS)
+   NS_DEFINE_CLASSINFO_DATA(ProcessingInstruction, nsNodeSH,
+                            NODE_SCRIPTABLE_FLAGS)
+   NS_DEFINE_CLASSINFO_DATA(NodeList, nsNodeListSH, ARRAY_SCRIPTABLE_FLAGS)
+   NS_DEFINE_CLASSINFO_DATA(NamedNodeMap, nsNamedNodeMapSH,
+                            ARRAY_SCRIPTABLE_FLAGS)
+ 
+   // Misc Core related classes
+ 
+@@ -2537,23 +2535,16 @@ nsDOMClassInfo::Init()
+ 
+   DOM_CLASSINFO_MAP_BEGIN(Comment, nsIDOMComment)
+     DOM_CLASSINFO_MAP_ENTRY(nsIDOMComment)
+     DOM_CLASSINFO_MAP_ENTRY(nsIDOMNSEventTarget)
+     DOM_CLASSINFO_MAP_ENTRY(nsIDOMEventTarget)
+     DOM_CLASSINFO_MAP_ENTRY(nsIDOM3Node)
+   DOM_CLASSINFO_MAP_END
+ 
+-  DOM_CLASSINFO_MAP_BEGIN(CDATASection, nsIDOMCDATASection)
+-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMCDATASection)
+-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMNSEventTarget)
+-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMEventTarget)
+-    DOM_CLASSINFO_MAP_ENTRY(nsIDOM3Node)
+-  DOM_CLASSINFO_MAP_END
+-
+   DOM_CLASSINFO_MAP_BEGIN(ProcessingInstruction, nsIDOMProcessingInstruction)
+     DOM_CLASSINFO_MAP_ENTRY(nsIDOMProcessingInstruction)
+     DOM_CLASSINFO_MAP_ENTRY(nsIDOMNSEventTarget)
+     DOM_CLASSINFO_MAP_ENTRY(nsIDOMEventTarget)
+     DOM_CLASSINFO_MAP_ENTRY(nsIDOM3Node)
+   DOM_CLASSINFO_MAP_END
+ 
+   DOM_CLASSINFO_MAP_BEGIN(NodeList, nsIDOMNodeList)
+diff --git a/dom/interfaces/base/domstubs.idl b/dom/interfaces/base/domstubs.idl
+--- a/dom/interfaces/base/domstubs.idl
++++ b/dom/interfaces/base/domstubs.idl
+@@ -38,17 +38,16 @@
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsISupports.idl"
+ 
+ typedef unsigned long long DOMTimeStamp;
+ 
+ // Core
+ interface nsIDOMAttr;
+-interface nsIDOMCDATASection;
+ interface nsIDOMCharacterData;
+ interface nsIDOMComment;
+ interface nsIDOMDOMImplementation;
+ interface nsIDOMDocument;
+ interface nsIDOMDocumentFragment;
+ interface nsIDOMDocumentType;
+ interface nsIDOMElement;
+ interface nsIDOMNSElement;
+diff --git a/dom/interfaces/core/Makefile.in b/dom/interfaces/core/Makefile.in
+--- a/dom/interfaces/core/Makefile.in
++++ b/dom/interfaces/core/Makefile.in
+@@ -43,17 +43,16 @@ VPATH		= @srcdir@
+ include $(DEPTH)/config/autoconf.mk
+ 
+ MODULE		= dom
+ XPIDL_MODULE	= dom_core
+ GRE_MODULE	= 1
+ 
+ SDK_XPIDLSRCS =                                 \
+ 	nsIDOMAttr.idl				\
+-	nsIDOMCDATASection.idl			\
+ 	nsIDOMCharacterData.idl			\
+ 	nsIDOMComment.idl			\
+ 	nsIDOMDOMException.idl			\
+ 	nsIDOMDOMImplementation.idl		\
+ 	nsIDOMDocument.idl			\
+ 	nsIDOMDocumentFragment.idl		\
+ 	nsIDOMDocumentType.idl			\
+ 	nsIDOMElement.idl			\
+diff --git a/dom/interfaces/core/nsIDOMCDATASection.idl b/dom/interfaces/core/nsIDOMCDATASection.idl
+deleted file mode 100644
+--- a/dom/interfaces/core/nsIDOMCDATASection.idl
++++ /dev/null
+@@ -1,55 +0,0 @@
+-/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+-/* ***** BEGIN LICENSE BLOCK *****
+- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+- *
+- * The contents of this file are subject to the Mozilla Public License Version
+- * 1.1 (the "License"); you may not use this file except in compliance with
+- * the License. You may obtain a copy of the License at
+- * http://www.mozilla.org/MPL/
+- *
+- * Software distributed under the License is distributed on an "AS IS" basis,
+- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
+- * for the specific language governing rights and limitations under the
+- * License.
+- *
+- * The Original Code is mozilla.org code.
+- *
+- * The Initial Developer of the Original Code is
+- * Netscape Communications Corporation.
+- * Portions created by the Initial Developer are Copyright (C) 2000
+- * the Initial Developer. All Rights Reserved.
+- *
+- * Contributor(s):
+- *   Vidur Apparao <vidur@netscape.com> (original author)
+- *   Johnny Stenback <jst@netscape.com>
+- *
+- * Alternatively, the contents of this file may be used under the terms of
+- * either of the GNU General Public License Version 2 or later (the "GPL"),
+- * or the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+- * in which case the provisions of the GPL or the LGPL are applicable instead
+- * of those above. If you wish to allow use of your version of this file only
+- * under the terms of either the GPL or the LGPL, and not to allow others to
+- * use your version of this file under the terms of the MPL, indicate your
+- * decision by deleting the provisions above and replace them with the notice
+- * and other provisions required by the GPL or the LGPL. If you do not delete
+- * the provisions above, a recipient may use your version of this file under
+- * the terms of any one of the MPL, the GPL or the LGPL.
+- *
+- * ***** END LICENSE BLOCK ***** */
+-
+-#include "nsIDOMText.idl"
+-
+-/**
+- * CDATA sections are used to escape blocks of text containing characters 
+- * that would otherwise be regarded as markup.
+- * Their primary purpose is for including material such as XML fragments, 
+- * without needing to escape all the delimiters.
+- * 
+- * For more information on this interface please see 
+- * http://www.w3.org/TR/DOM-Level-2-Core/
+- */
+-
+-[scriptable, uuid(f1eea89d-8af3-4c2a-90df-6c3a75cb5005)]
+-interface nsIDOMCDATASection : nsIDOMText
+-{
+-};
+diff --git a/embedding/components/find/src/nsFind.cpp b/embedding/components/find/src/nsFind.cpp
+--- a/embedding/components/find/src/nsFind.cpp
++++ b/embedding/components/find/src/nsFind.cpp
+@@ -803,18 +803,17 @@ bool nsFind::IsBlockNode(nsIContent* a
+   return isBlock;
+ }
+ 
+ bool nsFind::IsTextNode(nsIDOMNode* aNode)
+ {
+   uint16_t nodeType;
+   aNode->GetNodeType(&nodeType);
+ 
+-  return nodeType == nsIDOMNode::TEXT_NODE ||
+-         nodeType == nsIDOMNode::CDATA_SECTION_NODE;
++  return nodeType == nsIDOMNode::TEXT_NODE;
+ }
+ 
+ bool nsFind::IsVisibleNode(nsIDOMNode *aDOMNode)
+ {
+   nsCOMPtr<nsIContent> content(do_QueryInterface(aDOMNode));
+   if (!content)
+     return false;
+ 
+diff --git a/layout/inspector/src/inDOMView.cpp b/layout/inspector/src/inDOMView.cpp
+--- a/layout/inspector/src/inDOMView.cpp
++++ b/layout/inspector/src/inDOMView.cpp
+@@ -345,19 +345,16 @@ inDOMView::GetCellProperties(int32_t row
+       properties->AppendElement(kElementNodeAtom);
+       break;
+     case nsIDOMNode::ATTRIBUTE_NODE:
+       properties->AppendElement(kAttributeNodeAtom);
+       break;
+     case nsIDOMNode::TEXT_NODE:
+       properties->AppendElement(kTextNodeAtom);
+       break;
+-    case nsIDOMNode::CDATA_SECTION_NODE:
+-      properties->AppendElement(kCDataSectionNodeAtom);
+-      break;
+     case nsIDOMNode::ENTITY_REFERENCE_NODE:
+       properties->AppendElement(kEntityReferenceNodeAtom);
+       break;
+     case nsIDOMNode::ENTITY_NODE:
+       properties->AppendElement(kEntityNodeAtom);
+       break;
+     case nsIDOMNode::PROCESSING_INSTRUCTION_NODE:
+       properties->AppendElement(kProcessingInstructionNodeAtom);
+diff --git a/layout/inspector/src/inDOMViewAtomList.h b/layout/inspector/src/inDOMViewAtomList.h
+--- a/layout/inspector/src/inDOMViewAtomList.h
++++ b/layout/inspector/src/inDOMViewAtomList.h
+@@ -34,17 +34,16 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ DOMVIEW_ATOM(kAnonymousAtom, "anonymous")
+ DOMVIEW_ATOM(kElementNodeAtom, "ELEMENT_NODE")
+ DOMVIEW_ATOM(kAttributeNodeAtom, "ATTRIBUTE_NODE")
+ DOMVIEW_ATOM(kTextNodeAtom, "TEXT_NODE")
+-DOMVIEW_ATOM(kCDataSectionNodeAtom, "CDATA_SECTION_NODE")
+ DOMVIEW_ATOM(kEntityReferenceNodeAtom, "ENTITY_REFERENCE_NODE")
+ DOMVIEW_ATOM(kEntityNodeAtom, "ENTITY_NODE")
+ DOMVIEW_ATOM(kProcessingInstructionNodeAtom, "PROCESSING_INSTRUCTION_NODE")
+ DOMVIEW_ATOM(kCommentNodeAtom, "COMMENT_NODE")
+ DOMVIEW_ATOM(kDocumentNodeAtom, "DOCUMENT_NODE")
+ DOMVIEW_ATOM(kDocumentTypeNodeAtom, "DOCUMENT_TYPE_NODE")
+ DOMVIEW_ATOM(kDocumentFragmentNodeAtom, "DOCUMENT_FRAGMENT_NODE")
+ DOMVIEW_ATOM(kNotationNodeAtom, "NOTATION_NODE")
+diff --git a/toolkit/components/viewsource/content/viewPartialSource.js b/toolkit/components/viewsource/content/viewPartialSource.js
+--- a/toolkit/components/viewsource/content/viewPartialSource.js
++++ b/toolkit/components/viewsource/content/viewPartialSource.js
+@@ -99,18 +99,17 @@ function viewPartialSourceForSelection(s
+   var doc = ancestorContainer.ownerDocument;
+ 
+   var startContainer = range.startContainer;
+   var endContainer = range.endContainer;
+   var startOffset = range.startOffset;
+   var endOffset = range.endOffset;
+ 
+   // let the ancestor be an element
+-  if (ancestorContainer.nodeType == Node.TEXT_NODE ||
+-      ancestorContainer.nodeType == Node.CDATA_SECTION_NODE)
++  if (ancestorContainer.nodeType == Node.TEXT_NODE)
+     ancestorContainer = ancestorContainer.parentNode;
+ 
+   // for selectAll, let's use the entire document, including <html>...</html>
+   // @see DocumentViewerImpl::SelectAll() for how selectAll is implemented
+   try {
+     if (ancestorContainer == doc.body)
+       ancestorContainer = doc.documentElement;
+   } catch (e) { }
+@@ -139,18 +138,17 @@ function viewPartialSourceForSelection(s
+       endContainer = endContainer.childNodes.item(endPath[i]);
+     }
+ 
+     // add special markers to record the extent of the selection
+     // note: |startOffset| and |endOffset| are interpreted either as
+     // offsets in the text data or as child indices (see the Range spec)
+     // (here, munging the end point first to keep the start point safe...)
+     var tmpNode;
+-    if (endContainer.nodeType == Node.TEXT_NODE ||
+-        endContainer.nodeType == Node.CDATA_SECTION_NODE) {
++    if (endContainer.nodeType == Node.TEXT_NODE) {
+       // do some extra tweaks to try to avoid the view-source output to look like
+       // ...<tag>]... or ...]</tag>... (where ']' marks the end of the selection).
+       // To get a neat output, the idea here is to remap the end point from:
+       // 1. ...<tag>]...   to   ...]<tag>...
+       // 2. ...]</tag>...  to   ...</tag>]...
+       if ((endOffset > 0 && endOffset < endContainer.data.length) ||
+           !endContainer.parentNode || !endContainer.parentNode.parentNode)
+         endContainer.insertData(endOffset, MARK_SELECTION_END);
+@@ -163,18 +161,17 @@ function viewPartialSourceForSelection(s
+           endContainer.parentNode.insertBefore(tmpNode, endContainer.nextSibling);
+       }
+     }
+     else {
+       tmpNode = doc.createTextNode(MARK_SELECTION_END);
+       endContainer.insertBefore(tmpNode, endContainer.childNodes.item(endOffset));
+     }
+ 
+-    if (startContainer.nodeType == Node.TEXT_NODE ||
+-        startContainer.nodeType == Node.CDATA_SECTION_NODE) {
++    if (startContainer.nodeType == Node.TEXT_NODE) {
+       // do some extra tweaks to try to avoid the view-source output to look like
+       // ...<tag>[... or ...[</tag>... (where '[' marks the start of the selection).
+       // To get a neat output, the idea here is to remap the start point from:
+       // 1. ...<tag>[...   to   ...[<tag>...
+       // 2. ...[</tag>...  to   ...</tag>[...
+       if ((startOffset > 0 && startOffset < startContainer.data.length) ||
+           !startContainer.parentNode || !startContainer.parentNode.parentNode ||
+           startContainer != startContainer.parentNode.lastChild)

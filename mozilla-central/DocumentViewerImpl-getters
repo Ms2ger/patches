@@ -1,0 +1,351 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/layout/base/nsDocumentViewer.cpp b/layout/base/nsDocumentViewer.cpp
+--- a/layout/base/nsDocumentViewer.cpp
++++ b/layout/base/nsDocumentViewer.cpp
+@@ -370,21 +370,16 @@ private:
+ #endif // NS_PRINTING
+ 
+   // Whether we should attach to the top level widget. This is true if we
+   // are sharing/recycling a single base widget and not creating multiple
+   // child widgets.
+   bool ShouldAttachToTopLevel();
+ 
+ protected:
+-  // These return the current shell/prescontext etc.
+-  nsIPresShell* GetPresShell();
+-  nsPresContext* GetPresContext();
+-  nsViewManager* GetViewManager();
+-
+   void DetachFromTopLevelWidget();
+ 
+   // IMPORTANT: The ownership implicit in the following member
+   // variables has been explicitly checked and set using nsCOMPtr
+   // for owning pointers and raw COM interface pointers for weak
+   // (ie, non owning) references. If you add any members to this
+   // class, please make the ownership explicit (pinkerton, scc).
+ 
+@@ -1387,19 +1382,18 @@ nsDocumentViewer::Open(nsISupports *aSta
+   // page B, we detach. So page A's view has no widget. If we then go
+   // back to it, and it is in the bfcache, we will use that view, which
+   // doesn't have a widget. The attach call here will properly attach us.
+   if (nsIWidget::UsePuppetWidgets() && mPresContext &&
+       ShouldAttachToTopLevel()) {
+     // If the old view is already attached to our parent, detach
+     DetachFromTopLevelWidget();
+ 
+-    nsViewManager *vm = GetViewManager();
+-    NS_ABORT_IF_FALSE(vm, "no view manager");
+-    nsView* v = vm->GetRootView();
++    NS_ABORT_IF_FALSE(mViewManager, "no view manager");
++    nsView* v = mViewManager->GetRootView();
+     NS_ABORT_IF_FALSE(v, "no root view");
+     NS_ABORT_IF_FALSE(mParentWidget, "no mParentWidget to set");
+     v->AttachToTopLevelWidget(mParentWidget);
+ 
+     mAttachedToParent = true;
+   }
+ 
+   return NS_OK;
+@@ -1766,47 +1760,29 @@ nsDocumentViewer::SetDocumentInternal(ns
+ 
+     mWindow = nullptr;
+     InitInternal(mParentWidget, nullptr, mBounds, true, true, false);
+   }
+ 
+   return rv;
+ }
+ 
+-nsIPresShell*
+-nsDocumentViewer::GetPresShell()
+-{
+-  return mPresShell;
+-}
+-
+-nsPresContext*
+-nsDocumentViewer::GetPresContext()
+-{
+-  return mPresContext;
+-}
+-
+-nsViewManager*
+-nsDocumentViewer::GetViewManager()
+-{
+-  return mViewManager;
+-}
+-
+ NS_IMETHODIMP
+ nsDocumentViewer::GetPresShell(nsIPresShell** aResult)
+ {
+-  nsIPresShell* shell = GetPresShell();
+-  NS_IF_ADDREF(*aResult = shell);
++  nsCOMPtr<nsIPresShell> shell = mPresShell;
++  shell.forget(aResult);
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsDocumentViewer::GetPresContext(nsPresContext** aResult)
+ {
+-  nsPresContext* pc = GetPresContext();
+-  NS_IF_ADDREF(*aResult = pc);
++  nsRefPtr<nsPresContext> pc = mPresContext;
++  pc.forget(aResult);
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsDocumentViewer::GetBounds(nsIntRect& aResult)
+ {
+   NS_ENSURE_TRUE(mDocument, NS_ERROR_NOT_AVAILABLE);
+   aResult = mBounds;
+@@ -2641,33 +2617,30 @@ nsDocumentViewer::GetPrintable(bool *aPr
+ //*****************************************************************************
+ // nsIMarkupDocumentViewer
+ //*****************************************************************************
+ 
+ NS_IMETHODIMP nsDocumentViewer::ScrollToNode(nsIDOMNode* aNode)
+ {
+   NS_ENSURE_ARG(aNode);
+   NS_ENSURE_TRUE(mDocument, NS_ERROR_NOT_AVAILABLE);
+-  nsCOMPtr<nsIPresShell> presShell;
+-  NS_ENSURE_SUCCESS(GetPresShell(getter_AddRefs(presShell)), NS_ERROR_FAILURE);
+ 
+   // Get the nsIContent interface, because that's what we need to
+   // get the primary frame
+-
+-  nsCOMPtr<nsIContent> content(do_QueryInterface(aNode));
++  nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
+   NS_ENSURE_TRUE(content, NS_ERROR_FAILURE);
+ 
+   // Tell the PresShell to scroll to the primary frame of the content.
+   NS_ENSURE_SUCCESS(
+-    presShell->ScrollContentIntoView(content,
+-                                     nsIPresShell::ScrollAxis(
+-                                       nsIPresShell::SCROLL_TOP,
+-                                       nsIPresShell::SCROLL_ALWAYS),
+-                                     nsIPresShell::ScrollAxis(),
+-                                     nsIPresShell::SCROLL_OVERFLOW_HIDDEN),
++    mPresShell->ScrollContentIntoView(content,
++                                      nsIPresShell::ScrollAxis(
++                                        nsIPresShell::SCROLL_TOP,
++                                        nsIPresShell::SCROLL_ALWAYS),
++                                      nsIPresShell::ScrollAxis(),
++                                      nsIPresShell::SCROLL_OVERFLOW_HIDDEN),
+     NS_ERROR_FAILURE);
+   return NS_OK;
+ }
+ 
+ void
+ nsDocumentViewer::CallChildren(CallChildFunc aFunc, void* aClosure)
+ {
+   nsCOMPtr<nsIDocShellTreeNode> docShellNode(do_QueryReferent(mContainer));
+@@ -2800,33 +2773,31 @@ nsDocumentViewer::SetTextZoom(float aTex
+   // Set the text zoom on all children of mContainer (even if our zoom didn't
+   // change, our children's zoom may be different, though it would be unusual).
+   // Do this first, in case kids are auto-sizing and post reflow commands on
+   // our presshell (which should be subsumed into our own style change reflow).
+   struct ZoomInfo ZoomInfo = { aTextZoom };
+   CallChildren(SetChildTextZoom, &ZoomInfo);
+ 
+   // Now change our own zoom
+-  nsPresContext* pc = GetPresContext();
+-  if (pc && aTextZoom != mPresContext->TextZoom()) {
+-      pc->SetTextZoom(aTextZoom);
++  if (mPresContext && aTextZoom != mPresContext->TextZoom()) {
++      mPresContext->SetTextZoom(aTextZoom);
+   }
+ 
+   // And do the external resources
+   mDocument->EnumerateExternalResources(SetExtResourceTextZoom, &ZoomInfo);
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsDocumentViewer::GetTextZoom(float* aTextZoom)
+ {
+   NS_ENSURE_ARG_POINTER(aTextZoom);
+-  nsPresContext* pc = GetPresContext();
+-  *aTextZoom = pc ? pc->TextZoom() : 1.0f;
++  *aTextZoom = mPresContext ? mPresContext->TextZoom() : 1.0f;
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsDocumentViewer::SetMinFontSize(int32_t aMinFontSize)
+ {
+   // If we don't have a document, then we need to bail.
+   if (!mDocument) {
+@@ -2841,54 +2812,51 @@ nsDocumentViewer::SetMinFontSize(int32_t
+ 
+   // Set the min font on all children of mContainer (even if our min font didn't
+   // change, our children's min font may be different, though it would be unusual).
+   // Do this first, in case kids are auto-sizing and post reflow commands on
+   // our presshell (which should be subsumed into our own style change reflow).
+   CallChildren(SetChildMinFontSize, NS_INT32_TO_PTR(aMinFontSize));
+ 
+   // Now change our own min font
+-  nsPresContext* pc = GetPresContext();
+-  if (pc && aMinFontSize != mPresContext->MinFontSize(nullptr)) {
+-    pc->SetMinFontSize(aMinFontSize);
++  if (mPresContext && aMinFontSize != mPresContext->MinFontSize(nullptr)) {
++    mPresContext->SetMinFontSize(aMinFontSize);
+   }
+ 
+   // And do the external resources
+   mDocument->EnumerateExternalResources(SetExtResourceMinFontSize,
+                                         NS_INT32_TO_PTR(aMinFontSize));
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsDocumentViewer::GetMinFontSize(int32_t* aMinFontSize)
+ {
+   NS_ENSURE_ARG_POINTER(aMinFontSize);
+-  nsPresContext* pc = GetPresContext();
+-  *aMinFontSize = pc ? pc->MinFontSize(nullptr) : 0;
++  *aMinFontSize = mPresContext ? mPresContext->MinFontSize(NULL) : 0;
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsDocumentViewer::SetFullZoom(float aFullZoom)
+ {
+ #ifdef NS_PRINT_PREVIEW
+   if (GetIsPrintPreview()) {
+-    nsPresContext* pc = GetPresContext();
+-    NS_ENSURE_TRUE(pc, NS_OK);
+-    nsCOMPtr<nsIPresShell> shell = pc->GetPresShell();
++    NS_ENSURE_TRUE(mPresContext, NS_OK);
++    nsCOMPtr<nsIPresShell> shell = mPresContext->GetPresShell();
+     NS_ENSURE_TRUE(shell, NS_OK);
+ 
+     if (!mPrintPreviewZoomed) {
+-      mOriginalPrintPreviewScale = pc->GetPrintPreviewScale();
++      mOriginalPrintPreviewScale = mPresContext->GetPrintPreviewScale();
+       mPrintPreviewZoomed = true;
+     }
+ 
+     mPrintPreviewZoom = aFullZoom;
+-    pc->SetPrintPreviewScale(aFullZoom * mOriginalPrintPreviewScale);
++    mPresContext->SetPrintPreviewScale(aFullZoom * mOriginalPrintPreviewScale);
+     nsIPageSequenceFrame* pf = shell->GetPageSequenceFrame();
+     if (pf) {
+       nsIFrame* f = do_QueryFrame(pf);
+       shell->FrameNeedsReflow(f, nsIPresShell::eResize, NS_FRAME_IS_DIRTY);
+     }
+ 
+     nsIFrame* rootFrame = shell->GetRootFrame();
+     if (rootFrame) {
+@@ -2903,19 +2871,18 @@ nsDocumentViewer::SetFullZoom(float aFul
+     return NS_ERROR_FAILURE;
+   }
+ 
+   mPageZoom = aFullZoom;
+ 
+   struct ZoomInfo ZoomInfo = { aFullZoom };
+   CallChildren(SetChildFullZoom, &ZoomInfo);
+ 
+-  nsPresContext* pc = GetPresContext();
+-  if (pc) {
+-    pc->SetFullZoom(aFullZoom);
++  if (mPresContext) {
++    mPresContext->SetFullZoom(aFullZoom);
+   }
+ 
+   // And do the external resources
+   mDocument->EnumerateExternalResources(SetExtResourceFullZoom, &ZoomInfo);
+ 
+   return NS_OK;
+ }
+ 
+@@ -2926,18 +2893,17 @@ nsDocumentViewer::GetFullZoom(float* aFu
+ #ifdef NS_PRINT_PREVIEW
+   if (GetIsPrintPreview()) {
+     *aFullZoom = mPrintPreviewZoom;
+     return NS_OK;
+   }
+ #endif
+   // Check the prescontext first because it might have a temporary
+   // setting for print-preview
+-  nsPresContext* pc = GetPresContext();
+-  *aFullZoom = pc ? pc->GetFullZoom() : mPageZoom;
++  *aFullZoom = mPresContext ? mPresContext->GetFullZoom() : mPageZoom;
+   return NS_OK;
+ }
+ 
+ static void
+ SetChildAuthorStyleDisabled(nsIMarkupDocumentViewer* aChild, void* aClosure)
+ {
+   bool styleDisabled  = *static_cast<bool*>(aClosure);
+   aChild->SetAuthorStyleDisabled(styleDisabled);
+@@ -3240,19 +3206,18 @@ NS_IMETHODIMP nsDocumentViewer::ChangeMa
+ {
+   // Change the max line box width for all children.
+   struct LineBoxInfo lbi = { aMaxLineBoxWidth };
+   CallChildren(ChangeChildMaxLineBoxWidth, &lbi);
+ 
+   // Now, change our max line box width.
+   // Convert to app units, since our input is in CSS pixels.
+   nscoord mlbw = nsPresContext::CSSPixelsToAppUnits(aMaxLineBoxWidth);
+-  nsIPresShell* presShell = GetPresShell();
+-  if (presShell) {
+-    presShell->SetMaxLineBoxWidth(mlbw);
++  if (mPresShell) {
++    mPresShell->SetMaxLineBoxWidth(mlbw);
+   }
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsDocumentViewer::GetContentSize(int32_t* aWidth, int32_t* aHeight)
+ {
+@@ -3264,36 +3229,34 @@ nsDocumentViewer::GetContentSize(int32_t
+    
+    nsCOMPtr<nsIDocShellTreeItem> docShellParent;
+    docShellAsItem->GetSameTypeParent(getter_AddRefs(docShellParent));
+ 
+    // It's only valid to access this from a top frame.  Doesn't work from
+    // sub-frames.
+    NS_ENSURE_TRUE(!docShellParent, NS_ERROR_FAILURE);
+ 
+-   nsCOMPtr<nsIPresShell> presShell;
+-   GetPresShell(getter_AddRefs(presShell));
+-   NS_ENSURE_TRUE(presShell, NS_ERROR_FAILURE);
+-
+-   // Flush out all content and style updates. We can't use a resize reflow
+-   // because it won't change some sizes that a style change reflow will.
+-   mDocument->FlushPendingNotifications(Flush_Layout);
+-
+-  nsIFrame *root = presShell->GetRootFrame();
++  NS_ENSURE_TRUE(mPresShell, NS_ERROR_FAILURE);
++
++  // Flush out all content and style updates. We can't use a resize reflow
++  // because it won't change some sizes that a style change reflow will.
++  mDocument->FlushPendingNotifications(Flush_Layout);
++
++  nsIFrame *root = mPresShell->GetRootFrame();
+   NS_ENSURE_TRUE(root, NS_ERROR_FAILURE);
+ 
+   nscoord prefWidth = 0;
+   {
+     nsRefPtr<nsRenderingContext> rcx =
+-      presShell->GetReferenceRenderingContext();
++      mPresShell->GetReferenceRenderingContext();
+     NS_ENSURE_TRUE(rcx, NS_ERROR_FAILURE);
+     prefWidth = root->GetPrefWidth(rcx);
+   }
+ 
+-  nsresult rv = presShell->ResizeReflow(prefWidth, NS_UNCONSTRAINEDSIZE);
++  nsresult rv = mPresShell->ResizeReflow(prefWidth, NS_UNCONSTRAINEDSIZE);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+    nsRefPtr<nsPresContext> presContext;
+    GetPresContext(getter_AddRefs(presContext));
+    NS_ENSURE_TRUE(presContext, NS_ERROR_FAILURE);
+ 
+    // so how big is it?
+    nsRect shellArea = presContext->GetVisibleArea();

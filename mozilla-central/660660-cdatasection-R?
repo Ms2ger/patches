@@ -1,0 +1,80 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 660660 - Part a: Make the XML parser create Text nodes; r=?sicking
+
+diff --git a/content/xml/document/src/nsXMLContentSink.cpp b/content/xml/document/src/nsXMLContentSink.cpp
+--- a/content/xml/document/src/nsXMLContentSink.cpp
++++ b/content/xml/document/src/nsXMLContentSink.cpp
+@@ -48,17 +48,16 @@
+ #include "nsIDOMNSDocument.h"
+ #include "nsIContent.h"
+ #include "nsIURI.h"
+ #include "nsNetUtil.h"
+ #include "nsIDocShell.h"
+ #include "nsIDocShellTreeItem.h"
+ #include "nsIStyleSheetLinkingElement.h"
+ #include "nsIDOMComment.h"
+-#include "nsIDOMCDATASection.h"
+ #include "nsDOMDocumentType.h"
+ #include "nsHTMLParts.h"
+ #include "nsCRT.h"
+ #include "nsCSSStyleSheet.h"
+ #include "mozilla/css/Loader.h"
+ #include "nsGkAtoms.h"
+ #include "nsContentUtils.h"
+ #include "nsIScriptContext.h"
+@@ -1188,33 +1187,17 @@ nsXMLContentSink::HandleComment(const PR
+ 
+   return NS_SUCCEEDED(rv) ? DidProcessATokenImpl() : rv;
+ }
+ 
+ NS_IMETHODIMP 
+ nsXMLContentSink::HandleCDataSection(const PRUnichar *aData, 
+                                      uint32_t aLength)
+ {
+-  // XSLT doesn't differentiate between text and cdata and wants adjacent
+-  // textnodes merged, so add as text.
+-  if (mXSLTProcessor) {
+-    return AddText(aData, aLength);
+-  }
+-
+-  FlushText();
+-  
+-  nsCOMPtr<nsIContent> cdata;
+-  nsresult rv = NS_NewXMLCDATASection(getter_AddRefs(cdata), mNodeInfoManager);
+-  if (cdata) {
+-    cdata->SetText(aData, aLength, false);
+-    rv = AddContentAsLeaf(cdata);
+-    DidAddContent();
+-  }
+-
+-  return NS_SUCCEEDED(rv) ? DidProcessATokenImpl() : rv;
++  return AddText(aData, aLength);
+ }
+ 
+ NS_IMETHODIMP
+ nsXMLContentSink::HandleDoctypeDecl(const nsAString & aSubset, 
+                                     const nsAString & aName, 
+                                     const nsAString & aSystemId, 
+                                     const nsAString & aPublicId,
+                                     nsISupports* aCatalogData)
+diff --git a/content/xul/document/src/nsXULContentSink.cpp b/content/xul/document/src/nsXULContentSink.cpp
+--- a/content/xul/document/src/nsXULContentSink.cpp
++++ b/content/xul/document/src/nsXULContentSink.cpp
+@@ -646,17 +646,16 @@ XULContentSinkImpl::HandleComment(const 
+ {
+    FlushText();
+    return NS_OK;
+ }
+ 
+ NS_IMETHODIMP 
+ XULContentSinkImpl::HandleCDataSection(const PRUnichar *aData, uint32_t aLength)
+ {
+-    FlushText();
+     return AddText(aData, aLength);
+ }
+ 
+ NS_IMETHODIMP 
+ XULContentSinkImpl::HandleDoctypeDecl(const nsAString & aSubset, 
+                                       const nsAString & aName, 
+                                       const nsAString & aSystemId, 
+                                       const nsAString & aPublicId,

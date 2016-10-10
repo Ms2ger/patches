@@ -1,0 +1,215 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -6443,22 +6443,20 @@ nsGlobalWindow::OpenDialog(const nsAStri
+   if (!ncc)
+     return NS_ERROR_NOT_AVAILABLE;
+ 
+   JSContext *cx = nullptr;
+ 
+   rv = ncc->GetJSContext(&cx);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
++  // XXX - need to get this as nsISupports?
+   uint32_t argc;
+-  JS::Value *argv = nullptr;
+-
+-  // XXX - need to get this as nsISupports?
+-  ncc->GetArgc(&argc);
+-  ncc->GetArgvPtr(&argv);
++  JS::Value* argv;
++  ncc->GetArguments(&argc, &argv);
+ 
+   // Strip the url, name and options from the args seen by scripts.
+   uint32_t argOffset = argc < 3 ? argc : 3;
+   nsCOMPtr<nsIJSArgArray> argvArray;
+   rv = NS_CreateJSArgv(cx, argc - argOffset, argv + argOffset,
+                        getter_AddRefs(argvArray));
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+diff --git a/dom/base/nsJSTimeoutHandler.cpp b/dom/base/nsJSTimeoutHandler.cpp
+--- a/dom/base/nsJSTimeoutHandler.cpp
++++ b/dom/base/nsJSTimeoutHandler.cpp
+@@ -176,20 +176,18 @@ nsJSScriptTimeoutHandler::Init(nsGlobalW
+     return NS_ERROR_NOT_AVAILABLE;
+ 
+   JSContext *cx = nullptr;
+ 
+   rv = ncc->GetJSContext(&cx);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   uint32_t argc;
+-  JS::Value *argv = nullptr;
+-
+-  ncc->GetArgc(&argc);
+-  ncc->GetArgvPtr(&argv);
++  JS::Value *argv;
++  ncc->GetArguments(&argc, &argv);
+ 
+   JS::Rooted<JSFlatString*> expr(cx);
+   JS::Rooted<JSObject*> funobj(cx);
+ 
+   if (argc < 1) {
+     ::JS_ReportError(cx, "Function %s requires at least 2 parameter",
+                      *aIsInterval ? kSetIntervalStr : kSetTimeoutStr);
+     return NS_ERROR_DOM_TYPE_ERR;
+diff --git a/js/xpconnect/public/nsAXPCNativeCallContext.h b/js/xpconnect/public/nsAXPCNativeCallContext.h
+--- a/js/xpconnect/public/nsAXPCNativeCallContext.h
++++ b/js/xpconnect/public/nsAXPCNativeCallContext.h
+@@ -16,18 +16,17 @@ class nsIXPConnectWrappedNative;
+ */
+ class nsAXPCNativeCallContext
+ {
+ public:
+     NS_IMETHOD GetCallee(nsISupports **aResult) = 0;
+     NS_IMETHOD GetCalleeMethodIndex(uint16_t *aResult) = 0;
+     NS_IMETHOD GetCalleeWrapper(nsIXPConnectWrappedNative **aResult) = 0;
+     NS_IMETHOD GetJSContext(JSContext **aResult) = 0;
+-    NS_IMETHOD GetArgc(uint32_t *aResult) = 0;
+-    NS_IMETHOD GetArgvPtr(jsval **aResult) = 0;
++    virtual void GetArguments(uint32_t *aArgc, JS::Value **aArgv);
+ 
+     // Methods added since mozilla 0.6....
+ 
+     NS_IMETHOD GetCalleeInterface(nsIInterfaceInfo **aResult) = 0;
+     NS_IMETHOD GetCalleeClassInfo(nsIClassInfo **aResult) = 0;
+ 
+     NS_IMETHOD GetPreviousCallContext(nsAXPCNativeCallContext **aResult) = 0;
+ 
+diff --git a/js/xpconnect/src/XPCCallContext.cpp b/js/xpconnect/src/XPCCallContext.cpp
+--- a/js/xpconnect/src/XPCCallContext.cpp
++++ b/js/xpconnect/src/XPCCallContext.cpp
+@@ -331,30 +331,22 @@ XPCCallContext::GetCalleeClassInfo(nsICl
+ NS_IMETHODIMP
+ XPCCallContext::GetJSContext(JSContext * *aJSContext)
+ {
+     JS_AbortIfWrongThread(JS_GetRuntime(mJSContext));
+     *aJSContext = mJSContext;
+     return NS_OK;
+ }
+ 
+-/* readonly attribute uint32_t Argc; */
+-NS_IMETHODIMP
+-XPCCallContext::GetArgc(uint32_t *aArgc)
++// virtual
++void
++XPCCallContext::GetArguments(uint32_t *aArgc, JS::Value **aArgv)
+ {
+     *aArgc = (uint32_t) mArgc;
+-    return NS_OK;
+-}
+-
+-/* readonly attribute JSValPtr ArgvPtr; */
+-NS_IMETHODIMP
+-XPCCallContext::GetArgvPtr(jsval * *aArgvPtr)
+-{
+-    *aArgvPtr = mArgv;
+-    return NS_OK;
++    *aArgv = mArgv;
+ }
+ 
+ NS_IMETHODIMP
+ XPCCallContext::GetPreviousCallContext(nsAXPCNativeCallContext **aResult)
+ {
+   NS_ENSURE_ARG_POINTER(aResult);
+   *aResult = GetPrevCallContext();
+   return NS_OK;
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -1036,18 +1036,17 @@ class AutoJSContextDestroyer
+ 
+ class MOZ_STACK_CLASS XPCCallContext : public nsAXPCNativeCallContext
+ {
+ public:
+     NS_IMETHOD GetCallee(nsISupports **aResult);
+     NS_IMETHOD GetCalleeMethodIndex(uint16_t *aResult);
+     NS_IMETHOD GetCalleeWrapper(nsIXPConnectWrappedNative **aResult);
+     NS_IMETHOD GetJSContext(JSContext **aResult);
+-    NS_IMETHOD GetArgc(uint32_t *aResult);
+-    NS_IMETHOD GetArgvPtr(jsval **aResult);
++    virtual void GetArguments(uint32_t *aArgc, JS::Value **aArgv);
+     NS_IMETHOD GetCalleeInterface(nsIInterfaceInfo **aResult);
+     NS_IMETHOD GetCalleeClassInfo(nsIClassInfo **aResult);
+     NS_IMETHOD GetPreviousCallContext(nsAXPCNativeCallContext **aResult);
+     NS_IMETHOD GetLanguage(uint16_t *aResult);
+ 
+     enum {NO_ARGS = (unsigned) -1};
+ 
+     static JSContext* GetDefaultJSContext();
+diff --git a/security/manager/ssl/src/nsCrypto.cpp b/security/manager/ssl/src/nsCrypto.cpp
+--- a/security/manager/ssl/src/nsCrypto.cpp
++++ b/security/manager/ssl/src/nsCrypto.cpp
+@@ -1839,23 +1839,18 @@ nsCrypto::GenerateCRMFRequest(nsIDOMCRMF
+ 
+   nrv = xpc->GetCurrentNativeCallContext(&ncc);
+   NS_ENSURE_SUCCESS(nrv, nrv);
+ 
+   if (!ncc)
+     return NS_ERROR_NOT_AVAILABLE;
+ 
+   uint32_t argc;
+-
+-  ncc->GetArgc(&argc);
+-
+-  JS::Value *argv = nullptr;
+-
+-  nrv = ncc->GetArgvPtr(&argv);
+-  NS_ENSURE_SUCCESS(nrv, nrv);
++  JS::Value *argv;
++  ncc->GetArguments(&argc, &argv);
+ 
+   JSContext *cx;
+ 
+   nrv = ncc->GetJSContext(&cx);
+   NS_ENSURE_SUCCESS(nrv, nrv);
+ 
+   nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
+ 
+@@ -2484,19 +2479,16 @@ nsCrypto::SignText(const nsAString& aStr
+   }
+ 
+   if (!ncc) {
+     aResult.Append(internalError);
+ 
+     return NS_OK;
+   }
+ 
+-  uint32_t argc;
+-  ncc->GetArgc(&argc);
+-
+   JSContext *cx;
+   ncc->GetJSContext(&cx);
+   if (!cx) {
+     aResult.Append(internalError);
+ 
+     return NS_OK;
+   }
+ 
+@@ -2520,21 +2512,21 @@ nsCrypto::SignText(const nsAString& aStr
+   }
+ 
+   bool bestOnly = true;
+   bool validOnly = true;
+   CERTCertList* certList =
+     CERT_FindUserCertsByUsage(CERT_GetDefaultCertDB(), certUsageEmailSigner,
+                               bestOnly, validOnly, uiContext);
+ 
++  uint32_t argc;
++  JS::Value *argv;
++  ncc->GetArguments(&argc, &argv);
+   uint32_t numCAs = argc - 2;
+   if (numCAs > 0) {
+-    JS::Value *argv = nullptr;
+-    ncc->GetArgvPtr(&argv);
+-
+     nsAutoArrayPtr<JSAutoByteString> caNameBytes(new JSAutoByteString[numCAs]);
+     if (!caNameBytes) {
+       aResult.Append(internalError);
+       return NS_OK;
+     }
+ 
+     JSAutoRequest ar(cx);
+ 

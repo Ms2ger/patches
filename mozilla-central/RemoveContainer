@@ -1,0 +1,104 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/base/nsEditor.cpp b/editor/libeditor/base/nsEditor.cpp
+--- a/editor/libeditor/base/nsEditor.cpp
++++ b/editor/libeditor/base/nsEditor.cpp
+@@ -1611,50 +1611,41 @@ nsEditor::ReplaceContainer(nsIDOMNode *i
+   return DeleteNode(inNode);
+ }
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // RemoveContainer: remove inNode, reparenting its children into their
+ //                  the parent of inNode
+ //
+ nsresult
+-nsEditor::RemoveContainer(nsIDOMNode *inNode)
+-{
+-  NS_ENSURE_TRUE(inNode, NS_ERROR_NULL_POINTER);
+-  nsCOMPtr<nsIDOMNode> parent;
++nsEditor::RemoveContainer(nsINode* aNode)
++{
++  NS_ENSURE_TRUE(aNode, NS_ERROR_NULL_POINTER);
++  nsCOMPtr<nsINode> parent;
+   int32_t offset;
+-  
+-  nsresult res = GetNodeLocation(inNode, address_of(parent), &offset);
+-  NS_ENSURE_SUCCESS(res, res);
+-  
+-  // loop through the child nodes of inNode and promote them
++  GetNodeLocation(aNode, getter_AddRefs(parent), &offset);
++
++  // Loop through the child nodes of inNode and promote them
+   // into inNode's parent.
+-  bool bHasMoreChildren;
+-  inNode->HasChildNodes(&bHasMoreChildren);
+-  nsCOMPtr<nsIDOMNodeList> nodeList;
+-  res = inNode->GetChildNodes(getter_AddRefs(nodeList));
+-  NS_ENSURE_SUCCESS(res, res);
+-  NS_ENSURE_TRUE(nodeList, NS_ERROR_NULL_POINTER);
+-  uint32_t nodeOrigLen;
+-  nodeList->GetLength(&nodeOrigLen);
+-
+-  // notify our internal selection state listener
+-  nsAutoRemoveContainerSelNotify selNotify(mRangeUpdater, inNode, parent, offset, nodeOrigLen);
++  uint32_t nodeOrigLen = aNode->GetChildCount();
++
++  // Notify our internal selection state listener
++  nsCOMPtr<nsIDOMNode> domNode = do_QueryInterface(aNode);
++  nsCOMPtr<nsIDOMNode> domParent = do_QueryInterface(parent);
++  nsAutoRemoveContainerSelNotify selNotify(mRangeUpdater, domNode, domParent, offset, nodeOrigLen);
+                                    
+-  nsCOMPtr<nsIDOMNode> child;
+-  while (bHasMoreChildren)
+-  {
+-    inNode->GetLastChild(getter_AddRefs(child));
+-    res = DeleteNode(child);
++  while (nsIContent* child = aNode->GetLastChild()) {
++    nsCOMPtr<nsIDOMNode> domChild = do_QueryInterface(child);
++    nsresult res = DeleteNode(domChild);
+     NS_ENSURE_SUCCESS(res, res);
+-    res = InsertNode(child, parent, offset);
++    res = InsertNode(domChild, domParent, offset);
+     NS_ENSURE_SUCCESS(res, res);
+-    inNode->HasChildNodes(&bHasMoreChildren);
+   }
+-  return DeleteNode(inNode);
++
++  return DeleteNode(domNode);
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // InsertContainerAbove:  insert a new parent for inNode, returned in outNode,
+ //                   which is contructed to be of type aNodeType.  outNode becomes
+ //                   a child of inNode's earlier parent.
+ //                   Callers responsibility to make sure inNode's can be child
+diff --git a/editor/libeditor/base/nsEditor.h b/editor/libeditor/base/nsEditor.h
+--- a/editor/libeditor/base/nsEditor.h
++++ b/editor/libeditor/base/nsEditor.h
+@@ -180,22 +180,22 @@ public:
+   /* helper routines for node/parent manipulations */
+   nsresult ReplaceContainer(nsIDOMNode *inNode, 
+                             nsCOMPtr<nsIDOMNode> *outNode, 
+                             const nsAString &aNodeType,
+                             const nsAString *aAttribute = nullptr,
+                             const nsAString *aValue = nullptr,
+                             bool aCloneAttributes = false);
+ 
+-  nsresult RemoveContainer(nsINode* aNode)
++  nsresult RemoveContainer(nsIDOMNode* aNode)
+   {
+-    nsCOMPtr<nsIDOMNode> node = do_QueryInterface(aNode);
++    nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
+     return RemoveContainer(node);
+   };
+-  nsresult RemoveContainer(nsIDOMNode *inNode);
++  nsresult RemoveContainer(nsINode* aNode);
+   nsresult InsertContainerAbove(nsIDOMNode *inNode, 
+                                 nsCOMPtr<nsIDOMNode> *outNode, 
+                                 const nsAString &aNodeType,
+                                 const nsAString *aAttribute = nullptr,
+                                 const nsAString *aValue = nullptr);
+   nsresult MoveNode(nsIDOMNode *aNode, nsIDOMNode *aParent, int32_t aOffset);
+ 
+   /* Method to replace certain CreateElementNS() calls. 

@@ -1,0 +1,1487 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/layout/base/FrameLayerBuilder.cpp b/layout/base/FrameLayerBuilder.cpp
+--- a/layout/base/FrameLayerBuilder.cpp
++++ b/layout/base/FrameLayerBuilder.cpp
+@@ -3049,17 +3049,17 @@ PredictScaleForContent(nsIFrame* aFrame,
+      return transform2d.ScaleFactors(true);
+   }
+   return gfxSize(1.0, 1.0);
+ }
+ 
+ gfxSize
+ FrameLayerBuilder::GetThebesLayerScaleForFrame(nsIFrame* aFrame)
+ {
+-  nsIFrame* last;
++  nsIFrame* last = nullptr;
+   for (nsIFrame* f = aFrame; f; f = nsLayoutUtils::GetCrossDocParentFrame(f)) {
+     last = f;
+ 
+     if (nsLayoutUtils::IsPopup(f)) {
+       // Don't examine ancestors of a popup. It won't make sense to check
+       // the transform from some content inside the popup to some content
+       // which is an ancestor of the popup.
+       break;
+diff --git a/layout/base/RestyleTracker.cpp b/layout/base/RestyleTracker.cpp
+--- a/layout/base/RestyleTracker.cpp
++++ b/layout/base/RestyleTracker.cpp
+@@ -163,17 +163,17 @@ RestyleTracker::DoProcessRestyles()
+           }
+         }
+       }
+ 
+       // Now remove all those eRestyle_LaterSiblings bits
+       for (uint32_t i = 0; i < laterSiblingArr.Length(); ++i) {
+         Element* element = laterSiblingArr[i];
+         NS_ASSERTION(element->HasFlag(RestyleBit()), "How did that happen?");
+-        RestyleData data;
++        RestyleData data = { nsRestyleHint(0), nsChangeHint(0) };
+ #ifdef DEBUG
+         bool found =
+ #endif
+           mPendingRestyles.Get(element, &data);
+         NS_ASSERTION(found, "Where did our entry go?");
+         data.mRestyleHint =
+           nsRestyleHint(data.mRestyleHint & ~eRestyle_LaterSiblings);
+ 
+diff --git a/layout/base/nsCSSFrameConstructor.cpp b/layout/base/nsCSSFrameConstructor.cpp
+--- a/layout/base/nsCSSFrameConstructor.cpp
++++ b/layout/base/nsCSSFrameConstructor.cpp
+@@ -2334,22 +2334,20 @@ nsCSSFrameConstructor::ConstructDocEleme
+       styleContext = mPresShell->StyleSet()->ResolveStyleFor(aDocElement,
+                                                              nullptr);
+       display = styleContext->StyleDisplay();
+     }
+   }
+ 
+   // --------- IF SCROLLABLE WRAP IN SCROLLFRAME --------
+ 
+-#ifdef DEBUG
+   NS_ASSERTION(!display->IsScrollableOverflow() || 
+                state.mPresContext->IsPaginated() ||
+                propagatedScrollFrom == aDocElement,
+                "Scrollbars should have been propagated to the viewport");
+-#endif
+ 
+   if (MOZ_UNLIKELY(display->mDisplay == NS_STYLE_DISPLAY_NONE)) {
+     SetUndisplayedContent(aDocElement, styleContext);
+     return nullptr;
+   }
+ 
+   TreeMatchContext::AutoAncestorPusher
+     ancestorPusher(true, state.mTreeMatchContext, aDocElement);
+@@ -9933,17 +9931,17 @@ nsCSSFrameConstructor::ProcessChildren(n
+   }
+ 
+   if (!aPossiblyLeafFrame->IsLeaf()) {
+     // :before/:after content should have the same style context parent
+     // as normal kids.
+     // Note that we don't use this style context for looking up things like
+     // special block styles because in some cases involving table pseudo-frames
+     // it has nothing to do with the parent frame's desired behavior.
+-    nsStyleContext* styleContext;
++    nsStyleContext* styleContext = nullptr;
+ 
+     if (aCanHaveGeneratedContent) {
+       aFrame->AddStateBits(NS_FRAME_MAY_HAVE_GENERATED_CONTENT);
+       styleContext =
+         nsFrame::CorrectStyleParentFrame(aFrame, nullptr)->StyleContext();
+       // Probe for generated content before
+       CreateGeneratedContentItem(aState, aFrame, aContent, styleContext,
+                                  nsCSSPseudoElements::ePseudo_before,
+diff --git a/layout/base/nsCSSRendering.cpp b/layout/base/nsCSSRendering.cpp
+--- a/layout/base/nsCSSRendering.cpp
++++ b/layout/base/nsCSSRendering.cpp
+@@ -772,22 +772,22 @@ GetOutlineInnerRect(nsIFrame* aFrame)
+ void
+ nsCSSRendering::PaintOutline(nsPresContext* aPresContext,
+                              nsRenderingContext& aRenderingContext,
+                              nsIFrame* aForFrame,
+                              const nsRect& aDirtyRect,
+                              const nsRect& aBorderArea,
+                              nsStyleContext* aStyleContext)
+ {
+-  nscoord             twipsRadii[8];
++  nscoord twipsRadii[8];
+ 
+   // Get our style context's color struct.
+   const nsStyleOutline* ourOutline = aStyleContext->StyleOutline();
+ 
+-  nscoord width;
++  nscoord width = 0;
+   ourOutline->GetOutlineWidth(width);
+ 
+   if (width == 0) {
+     // Empty outline
+     return;
+   }
+ 
+   nsIFrame* bgFrame = nsCSSRendering::FindNonTransparentBackgroundFrame
+@@ -1627,17 +1627,17 @@ IsOpaqueBorderEdge(const nsStyleBorder& 
+ 
+   // If we're using a border image, assume it's not fully opaque,
+   // because we may not even have the image loaded at this point, and
+   // even if we did, checking whether the relevant tile is fully
+   // opaque would be too much work.
+   if (aBorder.GetBorderImage())
+     return false;
+ 
+-  nscolor color;
++  nscolor color = NS_RGBA(0, 0, 0, 0);
+   bool isForeground;
+   aBorder.GetBorderColor(aSide, color, isForeground);
+ 
+   // We don't know the foreground color here, so if it's being used
+   // we must assume it might be transparent.
+   if (isForeground)
+     return false;
+ 
+@@ -2165,17 +2165,17 @@ nsCSSRendering::PaintGradient(nsPresCont
+     case eStyleUnit_Calc:
+       nsStyleCoord::Calc *calc;
+       calc = stop.mLocation.GetCalcValue();
+       position = calc->mPercent +
+           ((lineLength < 1e-6) ? 0.0 :
+           (NSAppUnitsToFloatPixels(calc->mLength, appUnitsPerPixel) / lineLength));
+       break;
+     default:
+-      NS_ABORT_IF_FALSE(false, "Unknown stop position type");
++      MOZ_ASSUME_UNREACHABLE("Unknown stop position type");
+     }
+ 
+     if (i > 0) {
+       // Prevent decreasing stop positions by advancing this position
+       // to the previous stop position, if necessary
+       position = std::max(position, stops[i - 1].mPosition);
+     }
+     stops.AppendElement(ColorStop(position, stop.mColor));
+@@ -2551,18 +2551,18 @@ nsCSSRendering::PaintBackgroundWithSC(ns
+ 
+   // The 'bgClipArea' (used only by the image tiling logic, far below)
+   // is the caller-provided aBGClipRect if any, or else the area
+   // determined by the value of 'background-clip' in
+   // SetupCurrentBackgroundClip.  (Arguably it should be the
+   // intersection, but that breaks the table painter -- in particular,
+   // taking the intersection breaks reftests/bugs/403249-1[ab].)
+   BackgroundClipState clipState;
+-  uint8_t currentBackgroundClip;
+-  bool isSolidBorder;
++  uint8_t currentBackgroundClip = 0;
++  bool isSolidBorder = false;
+   if (aBGClipRect) {
+     clipState.mBGClipArea = *aBGClipRect;
+     clipState.mCustomClip = true;
+     SetupDirtyRects(clipState.mBGClipArea, aDirtyRect, appUnitsPerPixel,
+                     &clipState.mDirtyRect, &clipState.mDirtyRectGfx);
+   } else {
+     // The background is rendered over the 'background-clip' area,
+     // which is normally equal to the border area but may be reduced
+@@ -3910,18 +3910,17 @@ nsCSSRendering::PaintDecorationLine(nsIF
+       } else {
+         // Don't use anti-aliasing here.  Because looks like lighter color wavy
+         // line at this case.  And probably, users don't think the
+         // non-anti-aliased wavy line is not pretty.
+         aGfxContext->SetAntialiasMode(gfxContext::MODE_ALIASED);
+       }
+       break;
+     default:
+-      NS_ERROR("Invalid style value!");
+-      return;
++      MOZ_ASSUME_UNREACHABLE("Invalid style value!");
+   }
+ 
+   // The y position should be set to the middle of the line.
+   rect.y += lineHeight / 2;
+ 
+   aGfxContext->SetColor(gfxRGBA(aColor));
+   aGfxContext->SetLineWidth(lineHeight);
+   switch (aStyle) {
+diff --git a/layout/base/nsCSSRenderingBorders.cpp b/layout/base/nsCSSRenderingBorders.cpp
+--- a/layout/base/nsCSSRenderingBorders.cpp
++++ b/layout/base/nsCSSRenderingBorders.cpp
+@@ -892,18 +892,18 @@ nsCSSBorderRenderer::DrawBorderSidesComp
+ void
+ nsCSSBorderRenderer::DrawBorderSides(int aSides)
+ {
+   if (aSides == 0 || (aSides & ~SIDE_BITS_ALL) != 0) {
+     NS_WARNING("DrawBorderSides: invalid sides!");
+     return;
+   }
+ 
+-  uint8_t borderRenderStyle;
+-  nscolor borderRenderColor;
++  uint8_t borderRenderStyle = 0;
++  nscolor borderRenderColor = NS_RGB(0, 0, 0);
+   const nsBorderColors *compositeColors = nullptr;
+ 
+   uint32_t borderColorStyleCount = 0;
+   BorderColorStyle borderColorStyleTopLeft[3], borderColorStyleBottomRight[3];
+   BorderColorStyle *borderColorStyle = nullptr;
+ 
+   NS_FOR_CSS_SIDES (i) {
+     if ((aSides & (1 << i)) == 0)
+diff --git a/layout/base/nsCaret.cpp b/layout/base/nsCaret.cpp
+--- a/layout/base/nsCaret.cpp
++++ b/layout/base/nsCaret.cpp
+@@ -504,17 +504,17 @@ void nsCaret::UpdateCaretPosition()
+ void nsCaret::PaintCaret(nsDisplayListBuilder *aBuilder,
+                          nsRenderingContext *aCtx,
+                          nsIFrame* aForFrame,
+                          const nsPoint &aOffset)
+ {
+   NS_ASSERTION(mDrawn, "The caret shouldn't be drawing");
+ 
+   const nsRect drawCaretRect = mCaretRect + aOffset;
+-  int32_t contentOffset;
++  int32_t contentOffset = 0;
+ 
+ #ifdef DEBUG
+   nsIFrame* frame =
+ #endif
+     GetCaretFrame(&contentOffset);
+   NS_ASSERTION(frame == aForFrame, "We're referring different frame");
+   // If the offset falls outside of the frame, then don't paint the caret.
+   int32_t startOffset, endOffset;
+@@ -976,24 +976,25 @@ void nsCaret::DrawCaret(bool aInvalidate
+       // PresShell::UnsuppressAndInvalidate() will call CheckCaretDrawingState()
+       // to get us drawn.
+       return;
+     }
+   }
+ 
+   nsCOMPtr<nsIDOMNode> node;
+   int32_t offset;
+-  nsFrameSelection::HINT hint;
+-  uint8_t bidiLevel;
++  nsFrameSelection::HINT hint = nsFrameSelection::HINTLEFT;
++  uint8_t bidiLevel = 0;
+ 
+   if (!mDrawn)
+   {
+     nsCOMPtr<nsISelection> domSelection = do_QueryReferent(mDomSelectionWeak);
+     nsCOMPtr<nsISelectionPrivate> privateSelection(do_QueryInterface(domSelection));
+-    if (!privateSelection) return;
++    if (!privateSelection)
++      return;
+     
+     bool isCollapsed = false;
+     domSelection->GetIsCollapsed(&isCollapsed);
+     if (!mShowDuringSelection && !isCollapsed)
+       return;
+ 
+     bool hintRight;
+     privateSelection->GetInterlinePosition(&hintRight);//translate hint.
+diff --git a/layout/base/nsCounterManager.cpp b/layout/base/nsCounterManager.cpp
+--- a/layout/base/nsCounterManager.cpp
++++ b/layout/base/nsCounterManager.cpp
+@@ -73,17 +73,17 @@ nsCounterUseNode::GetText(nsString& aRes
+     stack.AppendElement(static_cast<nsCounterNode*>(this));
+ 
+     if (mAllCounters && mScopeStart)
+         for (nsCounterNode *n = mScopeStart; n->mScopePrev; n = n->mScopeStart)
+             stack.AppendElement(n->mScopePrev);
+ 
+     const nsCSSValue& styleItem = mCounterStyle->Item(mAllCounters ? 2 : 1);
+     int32_t style = styleItem.GetIntValue();
+-    const PRUnichar* separator;
++    const PRUnichar* separator = nullptr;
+     if (mAllCounters)
+         separator = mCounterStyle->Item(1).GetStringBufferValue();
+ 
+     for (uint32_t i = stack.Length() - 1;; --i) {
+         nsCounterNode *n = stack[i];
+         nsBulletFrame::AppendCounterText(style, n->mValueAfter, aResult);
+         if (i == 0)
+             break;
+diff --git a/layout/base/nsDocumentViewer.cpp b/layout/base/nsDocumentViewer.cpp
+--- a/layout/base/nsDocumentViewer.cpp
++++ b/layout/base/nsDocumentViewer.cpp
+@@ -3275,17 +3275,17 @@ nsDocumentViewer::GetContentSize(int32_t
+ 
+    // Flush out all content and style updates. We can't use a resize reflow
+    // because it won't change some sizes that a style change reflow will.
+    mDocument->FlushPendingNotifications(Flush_Layout);
+ 
+   nsIFrame *root = presShell->GetRootFrame();
+   NS_ENSURE_TRUE(root, NS_ERROR_FAILURE);
+ 
+-  nscoord prefWidth;
++  nscoord prefWidth = 0;
+   {
+     nsRefPtr<nsRenderingContext> rcx =
+       presShell->GetReferenceRenderingContext();
+     NS_ENSURE_TRUE(rcx, NS_ERROR_FAILURE);
+     prefWidth = root->GetPrefWidth(rcx);
+   }
+ 
+   nsresult rv = presShell->ResizeReflow(prefWidth, NS_UNCONSTRAINEDSIZE);
+diff --git a/layout/base/nsFrameManager.cpp b/layout/base/nsFrameManager.cpp
+--- a/layout/base/nsFrameManager.cpp
++++ b/layout/base/nsFrameManager.cpp
+@@ -819,17 +819,17 @@ nsFrameManager::ReparentStyleContext(nsI
+                        nextContinuationContext->GetParent(),
+                      "continuations should have the same style context");
+       }
+     }
+ #endif
+ 
+     nsIFrame *prevContinuation =
+       GetPrevContinuationWithPossiblySameStyle(aFrame);
+-    nsStyleContext *prevContinuationContext;
++    nsStyleContext* prevContinuationContext = nullptr;
+     bool copyFromContinuation =
+       prevContinuation &&
+       (prevContinuationContext = prevContinuation->StyleContext())
+         ->GetPseudo() == oldContext->GetPseudo() &&
+        prevContinuationContext->GetParent() == newParentContext;
+     if (copyFromContinuation) {
+       // Just use the style context from the frame's previous
+       // continuation (see assertion about aFrame->GetNextContinuation()
+diff --git a/layout/base/nsLayoutUtils.cpp b/layout/base/nsLayoutUtils.cpp
+--- a/layout/base/nsLayoutUtils.cpp
++++ b/layout/base/nsLayoutUtils.cpp
+@@ -2708,19 +2708,19 @@ nsLayoutUtils::IntrinsicForContainer(nsR
+   // minimum, overriding 'min-width'.  This ensures two things:
+   //   * that we don't let a value of 'box-sizing' specifying a width
+   //     smaller than the padding/border inside the box-sizing box give
+   //     a content width less than zero
+   //   * that we prevent tables from becoming smaller than their
+   //     intrinsic minimum width
+   nscoord result = 0, min = 0;
+ 
+-  nscoord maxw;
++  nscoord maxw = 0;
+   bool haveFixedMaxWidth = GetAbsoluteCoord(styleMaxWidth, maxw);
+-  nscoord minw;
++  nscoord minw = 0;
+   bool haveFixedMinWidth = GetAbsoluteCoord(styleMinWidth, minw);
+ 
+   // If we have a specified width (or a specified 'min-width' greater
+   // than the specified 'max-width', which works out to the same thing),
+   // don't even bother getting the frame's intrinsic width, because in
+   // this case GetAbsoluteCoord(styleWidth, w) will always succeed, so
+   // we'll never need the intrinsic dimensions.
+   if (styleWidth.GetUnit() == eStyleUnit_Enumerated &&
+@@ -2965,17 +2965,17 @@ nsLayoutUtils::ComputeWidthValue(
+   NS_PRECONDITION(aRenderingContext, "non-null rendering context expected");
+   NS_WARN_IF_FALSE(aContainingBlockWidth != NS_UNCONSTRAINEDSIZE,
+                    "have unconstrained width; this should only result from "
+                    "very large sizes, not attempts at intrinsic width "
+                    "calculation");
+   NS_PRECONDITION(aContainingBlockWidth >= 0,
+                   "width less than zero");
+ 
+-  nscoord result;
++  nscoord result = 0;
+   if (aCoord.IsCoordPercentCalcUnit()) {
+     result = nsRuleNode::ComputeCoordPercentCalc(aCoord, 
+                                                  aContainingBlockWidth);
+     // The result of a calc() expression might be less than 0; we
+     // should clamp at runtime (below).  (Percentages and coords that
+     // are less than 0 have already been dropped by the parser.)
+     result -= aContentEdgeToBoxSizing;
+   } else {
+@@ -3002,16 +3002,17 @@ nsLayoutUtils::ComputeWidthValue(
+                          (aBoxSizingToMarginEdge + aContentEdgeToBoxSizing);
+           result = std::max(min, std::min(pref, fill));
+           NS_ASSERTION(result >= 0, "width less than zero");
+         }
+         break;
+       case NS_STYLE_WIDTH_AVAILABLE:
+         result = aContainingBlockWidth -
+                  (aBoxSizingToMarginEdge + aContentEdgeToBoxSizing);
++        break;
+     }
+   }
+ 
+   return std::max(0, result);
+ }
+ 
+ /* static */ nscoord
+ nsLayoutUtils::ComputeHeightDependentValue(
+@@ -3106,17 +3107,17 @@ nsLayoutUtils::ComputeSizeWithIntrinsicD
+       boxSizingAdjust += aBorder;
+       // fall through
+     case NS_STYLE_BOX_SIZING_PADDING:
+       boxSizingAdjust += aPadding;
+   }
+   nscoord boxSizingToMarginEdgeWidth =
+     aMargin.width + aBorder.width + aPadding.width - boxSizingAdjust.width;
+ 
+-  nscoord width, minWidth, maxWidth, height, minHeight, maxHeight;
++  nscoord width = 0, minWidth, maxWidth, height = 0, minHeight, maxHeight;
+ 
+   if (!isAutoWidth) {
+     width = nsLayoutUtils::ComputeWidthValue(aRenderingContext,
+               aFrame, aCBSize.width, boxSizingAdjust.width,
+               boxSizingToMarginEdgeWidth, *widthStyleCoord);
+   }
+ 
+   if (stylePos->mMaxWidth.GetUnit() != eStyleUnit_None &&
+diff --git a/layout/forms/nsSelectsAreaFrame.cpp b/layout/forms/nsSelectsAreaFrame.cpp
+--- a/layout/forms/nsSelectsAreaFrame.cpp
++++ b/layout/forms/nsSelectsAreaFrame.cpp
+@@ -165,29 +165,29 @@ nsSelectsAreaFrame::Reflow(nsPresContext
+   NS_ASSERTION(list,
+                "Must have an nsListControlFrame!  Frame constructor is "
+                "broken");
+   
+   bool isInDropdownMode = list->IsInDropDownMode();
+   
+   // See similar logic in nsListControlFrame::Reflow and
+   // nsListControlFrame::ReflowAsDropdown.  We need to match it here.
+-  nscoord oldHeight;
++  nscoord oldHeight = 0;
+   if (isInDropdownMode) {
+     // Store the height now in case it changes during
+     // nsBlockFrame::Reflow for some odd reason.
+     if (!(GetStateBits() & NS_FRAME_FIRST_REFLOW)) {
+       oldHeight = GetSize().height;
+     } else {
+       oldHeight = NS_UNCONSTRAINEDSIZE;
+     }
+   }
+   
+   nsresult rv = nsBlockFrame::Reflow(aPresContext, aDesiredSize,
+-                                    aReflowState, aStatus);
++                                     aReflowState, aStatus);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   // Check whether we need to suppress scrollbar updates.  We want to do that if
+   // we're in a possible first pass and our height of a row has changed.
+   if (list->MightNeedSecondPass()) {
+     nscoord newHeightOfARow = list->CalcHeightOfARow();
+     // We'll need a second pass if our height of a row changed.  For
+     // comboboxes, we'll also need it if our height changed.  If we're going
+diff --git a/layout/generic/nsBlockFrame.cpp b/layout/generic/nsBlockFrame.cpp
+--- a/layout/generic/nsBlockFrame.cpp
++++ b/layout/generic/nsBlockFrame.cpp
+@@ -4786,17 +4786,17 @@ nsBlockFrame::AddFrames(nsFrameList& aFr
+ 
+   // If we're inserting at the beginning of our list and we have an
+   // inside bullet, insert after that bullet.
+   if (!aPrevSibling && HasInsideBullet()) {
+     aPrevSibling = GetInsideBullet();
+   }
+   
+   // Attempt to find the line that contains the previous sibling
+-  FrameLines* overflowLines;
++  FrameLines* overflowLines = nullptr;
+   nsLineList* lineList = &mLines;
+   nsLineList::iterator prevSibLine = lineList->end();
+   int32_t prevSiblingIndex = -1;
+   if (aPrevSibling) {
+     // XXX_perf This is technically O(N^2) in some cases, but by using
+     // RFind instead of Find, we make it O(N) in the most common case,
+     // which is appending content.
+ 
+diff --git a/layout/generic/nsContainerFrame.cpp b/layout/generic/nsContainerFrame.cpp
+--- a/layout/generic/nsContainerFrame.cpp
++++ b/layout/generic/nsContainerFrame.cpp
+@@ -868,17 +868,17 @@ nsContainerFrame::DoInlineIntrinsicWidth
+       std::max(GetCoord(stylePadding->mPadding.Get(startSide), 0), 0) +
+       styleBorder->GetComputedBorderWidth(startSide) +
+       GetCoord(styleMargin->mMargin.Get(startSide), 0);
+   }
+ 
+   const nsLineList_iterator* savedLine = aData->line;
+   nsIFrame* const savedLineContainer = aData->lineContainer;
+ 
+-  nsContainerFrame *lastInFlow;
++  nsContainerFrame* lastInFlow = nullptr;
+   for (nsContainerFrame *nif = this; nif;
+        nif = static_cast<nsContainerFrame*>(nif->GetNextInFlow())) {
+     for (nsIFrame *kid = nif->mFrames.FirstChild(); kid;
+          kid = kid->GetNextSibling()) {
+       if (aType == nsLayoutUtils::MIN_WIDTH)
+         kid->AddInlineMinWidth(aRenderingContext,
+                                static_cast<InlineMinWidthData*>(aData));
+       else
+diff --git a/layout/generic/nsFrame.cpp b/layout/generic/nsFrame.cpp
+--- a/layout/generic/nsFrame.cpp
++++ b/layout/generic/nsFrame.cpp
+@@ -4956,17 +4956,17 @@ ComputeOutlineAndEffectsRect(nsIFrame* a
+   }
+ 
+   // box-shadow
+   r.UnionRect(r, nsLayoutUtils::GetBoxShadowRectForFrame(aFrame, aNewSize));
+ 
+   const nsStyleOutline* outline = aFrame->StyleOutline();
+   uint8_t outlineStyle = outline->GetOutlineStyle();
+   if (outlineStyle != NS_STYLE_BORDER_STYLE_NONE) {
+-    nscoord width;
++    nscoord width = 0;
+ #ifdef DEBUG
+     bool result = 
+ #endif
+       outline->GetOutlineWidth(width);
+     NS_ASSERTION(result, "GetOutlineWidth had no cached outline width");
+     if (width > 0) {
+       if (aStoreRectProperties) {
+         aFrame->Properties().
+@@ -5967,16 +5967,17 @@ FindBlockFrameOrBR(nsIFrame* aFrame, nsD
+ }
+ 
+ nsresult
+ nsIFrame::PeekOffsetParagraph(nsPeekOffsetStruct *aPos)
+ {
+   nsIFrame* frame = this;
+   nsContentAndOffset blockFrameOrBR;
+   blockFrameOrBR.mContent = nullptr;
++  blockFrameOrBR.mOffset = 0;
+   bool reachedBlockAncestor = false;
+ 
+   // Go through containing frames until reaching a block frame.
+   // In each step, search the previous (or next) siblings for the closest
+   // "stop frame" (a block frame or a BRFrame).
+   // If found, set it to be the selection boundray and abort.
+   
+   if (aPos->mDirection == eDirPrevious) {
+@@ -6472,17 +6473,17 @@ nsFrame::CheckVisibility(nsPresContext* 
+ 
+ 
+ int32_t
+ nsFrame::GetLineNumber(nsIFrame *aFrame, bool aLockScroll, nsIFrame** aContainingBlock)
+ {
+   NS_ASSERTION(aFrame, "null aFrame");
+   nsFrameManager* frameManager = aFrame->PresContext()->FrameManager();
+   nsIFrame *blockFrame = aFrame;
+-  nsIFrame *thisBlock;
++  nsIFrame* thisBlock = nullptr;
+   nsAutoLineIterator it;
+   nsresult result = NS_ERROR_FAILURE;
+   while (NS_FAILED(result) && blockFrame)
+   {
+     thisBlock = blockFrame;
+     if (thisBlock->GetStateBits() & NS_FRAME_OUT_OF_FLOW) {
+       //if we are searching for a frame that is not in flow we will not find it. 
+       //we must instead look for its placeholder
+diff --git a/layout/generic/nsFrameSetFrame.cpp b/layout/generic/nsFrameSetFrame.cpp
+--- a/layout/generic/nsFrameSetFrame.cpp
++++ b/layout/generic/nsFrameSetFrame.cpp
+@@ -945,18 +945,19 @@ nsHTMLFramesetFrame::Reflow(nsPresContex
+     }
+   }
+ 
+   // reflow the children
+   int32_t lastRow = 0;
+   int32_t lastCol = 0;
+   int32_t borderChildX = mNonBorderChildCount; // index of border children
+   nsHTMLFramesetBorderFrame* borderFrame = nullptr;
+-  nsPoint offset(0,0);
+-  nsSize size, lastSize;
++  nsPoint offset(0, 0);
++  nsSize size(0, 0);
++  nsSize lastSize(0, 0);
+   nsIFrame* child = mFrames.FirstChild();
+ 
+   for (int32_t childX = 0; childX < mNonBorderChildCount; childX++) {
+     nsIntPoint cellIndex;
+     GetSizeOfChildAt(childX, size, cellIndex);
+ 
+     if (lastRow != cellIndex.y) {  // changed to next row
+       offset.x = 0;
+diff --git a/layout/generic/nsHTMLReflowState.cpp b/layout/generic/nsHTMLReflowState.cpp
+--- a/layout/generic/nsHTMLReflowState.cpp
++++ b/layout/generic/nsHTMLReflowState.cpp
+@@ -1031,17 +1031,17 @@ nsHTMLReflowState::CalculateHypothetical
+   bool        knowIntrinsicSize = false;
+   if (NS_FRAME_IS_REPLACED(mFrameType) && isAutoWidth) {
+     // See if we can get the intrinsic size of the element
+     knowIntrinsicSize = GetIntrinsicSizeFor(frame, intrinsicSize, aFrameType);
+   }
+ 
+   // See if we can calculate what the box width would have been if the
+   // element had been in the flow
+-  nscoord boxWidth;
++  nscoord boxWidth = 0;
+   bool    knowBoxWidth = false;
+   if ((NS_STYLE_DISPLAY_INLINE == mStyleDisplay->mOriginalDisplay) &&
+       !NS_FRAME_IS_REPLACED(mFrameType)) {
+     // For non-replaced inline-level elements the 'width' property doesn't apply,
+     // so we don't know what the width would have been without reflowing it
+ 
+   } else {
+     // It's either a replaced inline-level element or a block-level element
+@@ -1859,17 +1859,17 @@ nsHTMLReflowState::InitConstraints(nsPre
+     // compute one
+     if (aContainingBlockWidth == -1) {
+       ComputeContainingBlockRectangle(aPresContext, cbrs, aContainingBlockWidth, 
+                                       aContainingBlockHeight);
+     }
+ 
+     // See if the containing block height is based on the size of its
+     // content
+-    nsIAtom* fType;
++    nsIAtom* fType = nullptr;
+     if (NS_AUTOHEIGHT == aContainingBlockHeight) {
+       // See if the containing block is a cell frame which needs
+       // to use the mComputedHeight of the cell instead of what the cell block passed in.
+       // XXX It seems like this could lead to bugs with min-height and friends
+       if (cbrs->parentReflowState) {
+         fType = cbrs->frame->GetType();
+         if (IS_TABLE_CELL(fType)) {
+           // use the cell's computed height 
+diff --git a/layout/generic/nsImageMap.cpp b/layout/generic/nsImageMap.cpp
+--- a/layout/generic/nsImageMap.cpp
++++ b/layout/generic/nsImageMap.cpp
+@@ -823,21 +823,18 @@ nsImageMap::AddArea(nsIContent* aArea)
+   case 4:
+     area = new DefaultArea(aArea);
+     break;
+   case 5:
+   case 6:
+     area = new PolyArea(aArea);
+     break;
+   default:
+-    NS_NOTREACHED("FindAttrValueIn returned an unexpected value.");
+-    break;
++    MOZ_ASSUME_UNREACHABLE("FindAttrValueIn returned an unexpected value.");
+   }
+-  if (!area)
+-    return NS_ERROR_OUT_OF_MEMORY;
+ 
+   //Add focus listener to track area focus changes
+   aArea->AddSystemEventListener(NS_LITERAL_STRING("focus"), this, false,
+                                 false);
+   aArea->AddSystemEventListener(NS_LITERAL_STRING("blur"), this, false,
+                                 false);
+ 
+   // This is a nasty hack.  It needs to go away: see bug 135040.  Once this is
+diff --git a/layout/generic/nsLineBox.h b/layout/generic/nsLineBox.h
+--- a/layout/generic/nsLineBox.h
++++ b/layout/generic/nsLineBox.h
+@@ -629,17 +629,19 @@ class nsLineList_iterator {
+     typedef uint32_t                    size_type;
+     typedef int32_t                     difference_type;
+ 
+     typedef nsLineLink                  link_type;
+ 
+ #ifdef DEBUG
+     nsLineList_iterator() { memset(&mCurrent, 0xcd, sizeof(mCurrent)); }
+ #else
+-    // Auto generated default constructor OK.
++    nsLineList_iterator()
++      : mCurrent(nullptr)
++    {}
+ #endif
+     // Auto generated copy-constructor OK.
+ 
+     inline iterator_self_type&
+         operator=(const iterator_self_type& aOther);
+     inline iterator_self_type&
+         operator=(const iterator_reverse_type& aOther);
+ 
+diff --git a/layout/generic/nsTextFrameThebes.cpp b/layout/generic/nsTextFrameThebes.cpp
+--- a/layout/generic/nsTextFrameThebes.cpp
++++ b/layout/generic/nsTextFrameThebes.cpp
+@@ -3390,18 +3390,22 @@ nsTextPaintStyle::GetSelectionUnderlineF
+ {
+   NS_ASSERTION(aLineColor, "aLineColor is null");
+   NS_ASSERTION(aRelativeSize, "aRelativeSize is null");
+   NS_ASSERTION(aIndex >= 0 && aIndex < 5, "Index out of range");
+ 
+   nsSelectionStyle* selectionStyle = GetSelectionStyle(aIndex);
+   if (selectionStyle->mUnderlineStyle == NS_STYLE_BORDER_STYLE_NONE ||
+       selectionStyle->mUnderlineColor == NS_TRANSPARENT ||
+-      selectionStyle->mUnderlineRelativeSize <= 0.0f)
++      selectionStyle->mUnderlineRelativeSize <= 0.0f) {
++    *aLineColor = 0;
++    *aRelativeSize = 0;
++    *aStyle = 0;
+     return false;
++  }
+ 
+   *aLineColor = selectionStyle->mUnderlineColor;
+   *aRelativeSize = selectionStyle->mUnderlineRelativeSize;
+   *aStyle = selectionStyle->mUnderlineStyle;
+   return true;
+ }
+ 
+ void
+diff --git a/layout/generic/nsTextRunTransformations.cpp b/layout/generic/nsTextRunTransformations.cpp
+--- a/layout/generic/nsTextRunTransformations.cpp
++++ b/layout/generic/nsTextRunTransformations.cpp
+@@ -634,16 +634,18 @@ nsFontVariantTextRunFactory::RebuildText
+         break;
+       case kSpecialUpper:
+         transformedChild =
+           uppercaseFactory.MakeTextRun(str + runStart, i - runStart,
+                                        &innerParams, fontGroup, flags,
+                                        styleArray.Elements(), false);
+         child = transformedChild;
+         break;
++      default:
++        MOZ_ASSUME_UNREACHABLE("Invalid runCase value.");
+       }
+       if (!child)
+         return;
+       // Copy potential linebreaks into child so they're preserved
+       // (and also child will be shaped appropriately)
+       NS_ASSERTION(canBreakBeforeArray.Length() == i - runStart,
+                    "lost some break-before values?");
+       child->SetPotentialLineBreaks(0, canBreakBeforeArray.Length(),
+diff --git a/layout/inspector/src/inDOMView.cpp b/layout/inspector/src/inDOMView.cpp
+--- a/layout/inspector/src/inDOMView.cpp
++++ b/layout/inspector/src/inDOMView.cpp
+@@ -843,19 +843,19 @@ inDOMView::ContentInserted(nsIDocument *
+     row = parentRow+1;
+   }
+ 
+   inDOMViewNode* newNode = CreateNode(childDOMNode, parentNode);
+ 
+   if (previous) {
+     InsertLinkAfter(newNode, previousNode);
+   } else {
+-    int32_t firstChildRow;
++    int32_t firstChildRow = 0;
+     if (NS_SUCCEEDED(GetFirstDescendantOf(parentNode, parentRow, &firstChildRow))) {
+-      inDOMViewNode* firstChild;
++      inDOMViewNode* firstChild = nullptr;
+       RowToNode(firstChildRow, &firstChild);
+       InsertLinkBefore(newNode, firstChild);
+     }
+   }
+ 
+   // insert new node
+   InsertNode(newNode, row);
+ 
+@@ -872,17 +872,17 @@ inDOMView::ContentRemoved(nsIDocument *a
+ 
+   nsresult rv;
+ 
+   // find the inDOMViewNode for the old child
+   nsCOMPtr<nsIDOMNode> oldDOMNode(do_QueryInterface(aChild));
+   int32_t row = 0;
+   if (NS_FAILED(rv = NodeToRow(oldDOMNode, &row)))
+     return;
+-  inDOMViewNode* oldNode;
++  inDOMViewNode* oldNode = nullptr;
+   if (NS_FAILED(rv = RowToNode(row, &oldNode)))
+     return;
+ 
+   nsCOMPtr<nsIMutationObserver> kungFuDeathGrip(this);
+   
+   // The parent may no longer be a container.  Note that we don't want
+   // to access oldNode after calling RemoveNode, so do this now.
+   inDOMViewNode* parentNode = oldNode->parent;
+diff --git a/layout/ipc/RenderFrameParent.cpp b/layout/ipc/RenderFrameParent.cpp
+--- a/layout/ipc/RenderFrameParent.cpp
++++ b/layout/ipc/RenderFrameParent.cpp
+@@ -332,17 +332,17 @@ ClearContainer(ContainerLayer* aContaine
+     aContainer->RemoveChild(layer);
+   }
+ }
+ 
+ // Return true iff |aManager| is a "temporary layer manager".  They're
+ // used for small software rendering tasks, like drawWindow.  That's
+ // currently implemented by a BasicLayerManager without a backing
+ // widget, and hence in non-retained mode.
+-inline static bool
++static bool
+ IsTempLayerManager(LayerManager* aManager)
+ {
+   return (mozilla::layers::LAYERS_BASIC == aManager->GetBackendType() &&
+           !static_cast<BasicLayerManager*>(aManager)->IsRetained());
+ }
+ 
+ // Recursively create a new array of scrollables, preserving any scrollables
+ // that are still in the layer tree.
+diff --git a/layout/mathml/nsMathMLChar.cpp b/layout/mathml/nsMathMLChar.cpp
+--- a/layout/mathml/nsMathMLChar.cpp
++++ b/layout/mathml/nsMathMLChar.cpp
+@@ -1945,17 +1945,18 @@ nsMathMLChar::PaintVertically(nsPresCont
+   // Get the device pixel size in the vertical direction.
+   // (This makes no effort to optimize for non-translation transformations.)
+   nscoord oneDevPixel = aPresContext->AppUnitsPerDevPixel();
+ 
+   // get metrics data to be re-used later
+   int32_t i = 0;
+   nsGlyphCode ch, chdata[4];
+   nsBoundingMetrics bmdata[4];
+-  int32_t glue, bottom;
++  int32_t glue = 0;
++  int32_t bottom = 0;
+   nsGlyphCode chGlue = aGlyphTable->GlueOf(aPresContext, this);
+   for (int32_t j = 0; j < 4; ++j) {
+     switch (j) {
+       case 0:
+         ch = aGlyphTable->TopOf(aPresContext, this);
+         break;
+       case 1:
+         ch = aGlyphTable->MiddleOf(aPresContext, this);
+@@ -2154,17 +2155,18 @@ nsMathMLChar::PaintHorizontally(nsPresCo
+   // Get the device pixel size in the horizontal direction.
+   // (This makes no effort to optimize for non-translation transformations.)
+   nscoord oneDevPixel = aPresContext->AppUnitsPerDevPixel();
+ 
+   // get metrics data to be re-used later
+   int32_t i = 0;
+   nsGlyphCode ch, chdata[4];
+   nsBoundingMetrics bmdata[4];
+-  int32_t glue, right;
++  int32_t glue = 0;
++  int32_t right = 0;
+   nsGlyphCode chGlue = aGlyphTable->GlueOf(aPresContext, this);
+   for (int32_t j = 0; j < 4; ++j) {
+     switch (j) {
+       case 0:
+         ch = aGlyphTable->LeftOf(aPresContext, this);
+         break;
+       case 1:
+         ch = aGlyphTable->MiddleOf(aPresContext, this);
+diff --git a/layout/mathml/nsMathMLContainerFrame.cpp b/layout/mathml/nsMathMLContainerFrame.cpp
+--- a/layout/mathml/nsMathMLContainerFrame.cpp
++++ b/layout/mathml/nsMathMLContainerFrame.cpp
+@@ -1462,17 +1462,17 @@ nsMathMLContainerFrame::TransmitAutomati
+   //    this non-space-like child is an embellished operator.
+   //
+   //   The REC defines the following elements to be embellished operators:
+   //   * one of the elements mstyle, mphantom, or mpadded, such that an mrow
+   //     containing the same arguments would be an embellished operator;
+   //   * an mrow whose arguments consist (in any order) of one embellished
+   //     operator and zero or more space-like elements.
+   //
+-  nsIFrame *childFrame, *baseFrame;
++  nsIFrame *childFrame, *baseFrame = nullptr;
+   bool embellishedOpFound = false;
+   nsEmbellishData embellishData;
+   
+   for (childFrame = GetFirstPrincipalChild();
+        childFrame;
+        childFrame = childFrame->GetNextSibling()) {
+     nsIMathMLFrame* mathMLFrame = do_QueryFrame(childFrame);
+     if (!mathMLFrame) break;
+diff --git a/layout/printing/nsPagePrintTimer.cpp b/layout/printing/nsPagePrintTimer.cpp
+--- a/layout/printing/nsPagePrintTimer.cpp
++++ b/layout/printing/nsPagePrintTimer.cpp
+@@ -2,16 +2,17 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "nsPagePrintTimer.h"
+ #include "nsIContentViewer.h"
+ #include "nsIServiceManager.h"
+ #include "nsPrintEngine.h"
++#include "nsIFrame.h"
+ 
+ NS_IMPL_ISUPPORTS_INHERITED1(nsPagePrintTimer, nsRunnable, nsITimerCallback)
+ 
+ nsPagePrintTimer::~nsPagePrintTimer()
+ {
+   // "Destroy" the document viewer; this normally doesn't actually
+   // destroy it because of the IncrementDestroyRefCount call below
+   // XXX This is messy; the document viewer should use a single approach
+diff --git a/layout/style/nsCSSParser.cpp b/layout/style/nsCSSParser.cpp
+--- a/layout/style/nsCSSParser.cpp
++++ b/layout/style/nsCSSParser.cpp
+@@ -1952,17 +1952,17 @@ CSSParserImpl::ParseMediaQueryExpression
+ 
+   if (!mToken.IsSymbol(':')) {
+     REPORT_UNEXPECTED_TOKEN(PEMQExpectedFeatureNameEnd);
+     UngetToken();
+     SkipUntil(')');
+     return false;
+   }
+ 
+-  bool rv;
++  bool rv = false;
+   switch (feature->mValueType) {
+     case nsMediaFeature::eLength:
+       rv = ParseNonNegativeVariant(expr->mValue, VARIANT_LENGTH, nullptr);
+       break;
+     case nsMediaFeature::eInteger:
+     case nsMediaFeature::eBoolInteger:
+       rv = ParseNonNegativeVariant(expr->mValue, VARIANT_INTEGER, nullptr);
+       // Enforce extra restrictions for eBoolInteger
+@@ -8118,17 +8118,17 @@ CSSParserImpl::ParseCalc(nsCSSValue &aVa
+ // data structure.
+ bool
+ CSSParserImpl::ParseCalcAdditiveExpression(nsCSSValue& aValue,
+                                            int32_t& aVariantMask)
+ {
+   NS_ABORT_IF_FALSE(aVariantMask != 0, "unexpected variant mask");
+   nsCSSValue *storage = &aValue;
+   for (;;) {
+-    bool haveWS;
++    bool haveWS = true;
+     if (!ParseCalcMultiplicativeExpression(*storage, aVariantMask, &haveWS))
+       return false;
+ 
+     if (!haveWS || !GetToken(false))
+       return true;
+     nsCSSUnit unit;
+     if (mToken.IsSymbol('+')) {
+       unit = eCSSUnit_Calc_Plus;
+@@ -8362,17 +8362,17 @@ CSSParserImpl::ParseRect(nsCSSProperty a
+         break;
+       default:
+         UngetToken();
+         return false;
+     }
+   } else if (mToken.mType == eCSSToken_Function &&
+              mToken.mIdent.LowerCaseEqualsLiteral("rect")) {
+     nsCSSRect& rect = val.SetRectValue();
+-    bool useCommas;
++    bool useCommas = false;
+     NS_FOR_CSS_SIDES(side) {
+       if (! ParseVariant(rect.*(nsCSSRect::sides[side]),
+                          VARIANT_AL, nullptr)) {
+         return false;
+       }
+       if (side == 0) {
+         useCommas = ExpectSymbol(',', true);
+       } else if (useCommas && side < 3) {
+diff --git a/layout/style/nsCSSStyleSheet.cpp b/layout/style/nsCSSStyleSheet.cpp
+--- a/layout/style/nsCSSStyleSheet.cpp
++++ b/layout/style/nsCSSStyleSheet.cpp
+@@ -296,27 +296,28 @@ nsMediaExpression::Matches(nsPresContext
+                      "bad actual value");
+         NS_ASSERTION(required.GetUnit() == eCSSUnit_Ident,
+                      "bad required value");
+         NS_ASSERTION(mFeature->mRangeType == nsMediaFeature::eMinMaxNotAllowed,
+                      "bad range"); 
+         cmp = !(actual == required); // string comparison
+       }
+       break;
++    default:
++      MOZ_ASSUME_UNREACHABLE("Unhandled enum value");
+   }
+   switch (mRange) {
+     case nsMediaExpression::eMin:
+       return cmp != -1;
+     case nsMediaExpression::eMax:
+       return cmp != 1;
+     case nsMediaExpression::eEqual:
+       return cmp == 0;
+   }
+-  NS_NOTREACHED("unexpected mRange");
+-  return false;
++  MOZ_ASSUME_UNREACHABLE("unexpected mRange");
+ }
+ 
+ void
+ nsMediaQueryResultCacheKey::AddExpression(const nsMediaExpression* aExpression,
+                                           bool aExpressionMatches)
+ {
+   const nsMediaFeature *feature = aExpression->mFeature;
+   FeatureEntry *entry = nullptr;
+diff --git a/layout/style/nsComputedDOMStyle.cpp b/layout/style/nsComputedDOMStyle.cpp
+--- a/layout/style/nsComputedDOMStyle.cpp
++++ b/layout/style/nsComputedDOMStyle.cpp
+@@ -2305,17 +2305,17 @@ nsComputedDOMStyle::DoGetOrient()
+ 
+ CSSValue*
+ nsComputedDOMStyle::DoGetOutlineWidth()
+ {
+   nsROCSSPrimitiveValue* val = new nsROCSSPrimitiveValue;
+ 
+   const nsStyleOutline* outline = StyleOutline();
+ 
+-  nscoord width;
++  nscoord width = 0;
+   if (outline->GetOutlineStyle() == NS_STYLE_BORDER_STYLE_NONE) {
+     NS_ASSERTION(outline->GetOutlineWidth(width) && width == 0,
+                  "unexpected width");
+     width = 0;
+   } else {
+ #ifdef DEBUG
+     bool res =
+ #endif
+@@ -3876,17 +3876,17 @@ nsComputedDOMStyle::GetBorderWidthFor(mo
+   return val;
+ }
+ 
+ CSSValue*
+ nsComputedDOMStyle::GetBorderColorFor(mozilla::css::Side aSide)
+ {
+   nsROCSSPrimitiveValue* val = new nsROCSSPrimitiveValue;
+ 
+-  nscolor color;
++  nscolor color = NS_RGBA(0, 0, 0, 0);
+   bool foreground;
+   StyleBorder()->GetBorderColor(aSide, color, foreground);
+   if (foreground) {
+     color = StyleColor()->mColor;
+   }
+ 
+   SetToRGBAColor(val, color);
+   return val;
+diff --git a/layout/style/nsRuleNode.cpp b/layout/style/nsRuleNode.cpp
+--- a/layout/style/nsRuleNode.cpp
++++ b/layout/style/nsRuleNode.cpp
+@@ -346,17 +346,17 @@ static nscoord CalcLengthWith(const nsCS
+     // caching any data that uses them in the rule tree, it's valuable
+     // to store them in the rule tree (for faster dynamic changes of
+     // other things).  And since the font size of the root element
+     // changes rarely, we instead handle dynamic changes to the root
+     // element's font size by rebuilding all style data in
+     // nsCSSFrameConstructor::RestyleElement.
+     case eCSSUnit_RootEM: {
+       aPresContext->SetUsesRootEMUnits(true);
+-      nscoord rootFontSize;
++      nscoord rootFontSize = 0;
+ 
+       // NOTE: Be very careful with |styleFont|, since we haven't set
+       // aCanStoreInRuleTree to false yet, so we don't want to introduce
+       // any dependencies on aStyleContext's data here.
+       const nsStyleFont *styleFont =
+         aStyleFont ? aStyleFont : aStyleContext->StyleFont();
+ 
+       if (aUseProvidedRootEmSize) {
+@@ -2674,18 +2674,24 @@ nsRuleNode::CalcFontPointSize(int32_t aH
+   if (aHTMLSize < 0)
+     aHTMLSize = 0;
+   else if (aHTMLSize > 6)
+     aHTMLSize = 6;
+ 
+   int32_t* column;
+   switch (aFontSizeType)
+   {
+-    case eFontSize_HTML: column = sHTMLColumns; break;
+-    case eFontSize_CSS:  column = sCSSColumns;  break;
++    case eFontSize_HTML:
++      column = sHTMLColumns;
++      break;
++    case eFontSize_CSS:
++      column = sCSSColumns;
++      break;
++    default:
++      MOZ_ASSUME_UNREACHABLE("Unexpected value for aFontSizeType.");
+   }
+ 
+   // Make special call specifically for fonts (needed PrintPreview)
+   int32_t fontSize = nsPresContext::AppUnitsToIntCSSPixels(aBasePointSize);
+ 
+   if ((fontSize >= sFontSizeTableMin) && (fontSize <= sFontSizeTableMax))
+   {
+     int32_t row = fontSize - sFontSizeTableMin;
+@@ -6899,17 +6905,16 @@ nsRuleNode::ComputeContentData(void* aSt
+   case eCSSUnit_ListDep: {
+     const nsCSSValueList* contentValueList = contentValue->GetListValue();
+       count = 0;
+       while (contentValueList) {
+         count++;
+         contentValueList = contentValueList->mNext;
+       }
+       if (NS_SUCCEEDED(content->AllocateContents(count))) {
+-        const nsAutoString  nullStr;
+         count = 0;
+         contentValueList = contentValue->GetListValue();
+         while (contentValueList) {
+           const nsCSSValue& value = contentValueList->mValue;
+           nsCSSUnit unit = value.GetUnit();
+           nsStyleContentType type;
+           nsStyleContentData &data = content->ContentAt(count++);
+           switch (unit) {
+@@ -6924,21 +6929,21 @@ nsRuleNode::ComputeContentData(void* aSt
+               type = eStyleContentType_OpenQuote;     break;
+             case NS_STYLE_CONTENT_CLOSE_QUOTE:
+               type = eStyleContentType_CloseQuote;    break;
+             case NS_STYLE_CONTENT_NO_OPEN_QUOTE:
+               type = eStyleContentType_NoOpenQuote;   break;
+             case NS_STYLE_CONTENT_NO_CLOSE_QUOTE:
+               type = eStyleContentType_NoCloseQuote;  break;
+             default:
+-              NS_ERROR("bad content value");
++              MOZ_ASSUME_UNREACHABLE("bad content value");
+             }
+             break;
+           default:
+-            NS_ERROR("bad content type");
++            MOZ_ASSUME_UNREACHABLE("bad content type");
+           }
+           data.mType = type;
+           if (type == eStyleContentType_Image) {
+             NS_SET_IMAGE_REQUEST_WITH_DOC(data.SetImage,
+                                           aContext,
+                                           value.GetImageValue);
+           }
+           else if (type <= eStyleContentType_Attr) {
+@@ -7952,17 +7957,20 @@ nsRuleNode::HasAuthorSpecifiedRules(nsSt
+   if (ruleTypeMask & NS_AUTHOR_SPECIFIED_PADDING)
+     inheritBits |= NS_STYLE_INHERIT_BIT(Padding);
+ 
+   if (ruleTypeMask & NS_AUTHOR_SPECIFIED_TEXT_SHADOW)
+     inheritBits |= NS_STYLE_INHERIT_BIT(Text);
+ 
+   // properties in the SIDS, whether or not we care about them
+   size_t nprops = 0,
+-         backgroundOffset, borderOffset, paddingOffset, textShadowOffset;
++         backgroundOffset = 0,
++         borderOffset = 0,
++         paddingOffset = 0,
++         textShadowOffset = 0;
+ 
+   if (ruleTypeMask & NS_AUTHOR_SPECIFIED_BACKGROUND) {
+     backgroundOffset = nprops;
+     nprops += nsCSSProps::PropertyCountInStruct(eStyleStruct_Background);
+   }
+ 
+   if (ruleTypeMask & NS_AUTHOR_SPECIFIED_BORDER) {
+     borderOffset = nprops;
+diff --git a/layout/style/nsStyleAnimation.cpp b/layout/style/nsStyleAnimation.cpp
+--- a/layout/style/nsStyleAnimation.cpp
++++ b/layout/style/nsStyleAnimation.cpp
+@@ -561,29 +561,29 @@ nsStyleAnimation::ComputeDistance(nsCSSP
+       }
+ 
+       double squareDistance = 0.0;
+       static nsCSSValue nsCSSValueTriplet::* const pairValues[3] = {
+         &nsCSSValueTriplet::mXValue, &nsCSSValueTriplet::mYValue, &nsCSSValueTriplet::mZValue
+       };
+       for (uint32_t i = 0; i < 3; ++i) {
+         nsCSSValue nsCSSValueTriplet::*member = pairValues[i];
+-        double diffsquared;
++        double diffsquared = 0;
+         switch (unit[i]) {
+           case eCSSUnit_Pixel: {
+             float diff = (triplet1->*member).GetFloatValue() -
+                          (triplet2->*member).GetFloatValue();
+             diffsquared = diff * diff;
+             break;
+           }
+           case eCSSUnit_Percent: {
+             float diff = (triplet1->*member).GetPercentValue() -
+                          (triplet2->*member).GetPercentValue();
+-             diffsquared = diff * diff;
+-             break;
++            diffsquared = diff * diff;
++            break;
+           }
+           case eCSSUnit_Calc: {
+             CalcValue v1 = ExtractCalcValue(triplet1->*member);
+             CalcValue v2 = ExtractCalcValue(triplet2->*member);
+             float difflen = v2.mLength - v1.mLength;
+             float diffpct = v2.mPercent - v1.mPercent;
+             diffsquared = difflen * difflen + diffpct * diffpct;
+             break;
+@@ -2478,17 +2478,17 @@ StyleDataAtOffset(void* aStyleStruct, pt
+ {
+   return reinterpret_cast<char*>(aStyleStruct) + aOffset;
+ }
+ 
+ static void
+ ExtractBorderColor(nsStyleContext* aStyleContext, const void* aStyleBorder,
+                    mozilla::css::Side aSide, nsStyleAnimation::Value& aComputedValue)
+ {
+-  nscolor color;
++  nscolor color = NS_RGBA(0, 0, 0, 0);
+   bool foreground;
+   static_cast<const nsStyleBorder*>(aStyleBorder)->
+     GetBorderColor(aSide, color, foreground);
+   if (foreground) {
+     // FIXME: should add test for this
+     color = aStyleContext->StyleColor()->mColor;
+   }
+   aComputedValue.SetColorValue(color);
+diff --git a/layout/style/nsStyleContext.cpp b/layout/style/nsStyleContext.cpp
+--- a/layout/style/nsStyleContext.cpp
++++ b/layout/style/nsStyleContext.cpp
+@@ -543,32 +543,33 @@ nsStyleContext::CalcStyleDifference(nsSt
+     }
+ 
+     // NB: Calling Peek on |this|, not |thisVis| (see above).
+     if (!change && PeekStyleBorder()) {
+       const nsStyleBorder *thisVisBorder = thisVis->StyleBorder();
+       const nsStyleBorder *otherVisBorder = otherVis->StyleBorder();
+       NS_FOR_CSS_SIDES(side) {
+         bool thisFG, otherFG;
+-        nscolor thisColor, otherColor;
++        nscolor thisColor = NS_RGBA(0, 0, 0, 0),
++          otherColor = NS_RGBA(0, 0, 0, 0);
+         thisVisBorder->GetBorderColor(side, thisColor, thisFG);
+         otherVisBorder->GetBorderColor(side, otherColor, otherFG);
+         if (thisFG != otherFG || (!thisFG && thisColor != otherColor)) {
+           change = true;
+           break;
+         }
+       }
+     }
+ 
+     // NB: Calling Peek on |this|, not |thisVis| (see above).
+     if (!change && PeekStyleOutline()) {
+       const nsStyleOutline *thisVisOutline = thisVis->StyleOutline();
+       const nsStyleOutline *otherVisOutline = otherVis->StyleOutline();
+       bool haveColor;
+-      nscolor thisColor, otherColor;
++      nscolor thisColor = NS_RGBA(0, 0, 0, 0), otherColor = NS_RGBA(0, 0, 0, 0);
+       if (thisVisOutline->GetOutlineInitialColor() != 
+             otherVisOutline->GetOutlineInitialColor() ||
+           (haveColor = thisVisOutline->GetOutlineColor(thisColor)) != 
+             otherVisOutline->GetOutlineColor(otherColor) ||
+           (haveColor && thisColor != otherColor)) {
+         change = true;
+       }
+     }
+diff --git a/layout/style/nsStyleStruct.h b/layout/style/nsStyleStruct.h
+--- a/layout/style/nsStyleStruct.h
++++ b/layout/style/nsStyleStruct.h
+@@ -1229,16 +1229,17 @@ struct nsStyleTextReset {
+                       "style doesn't fit");
+     mTextDecorationStyle &= ~BORDER_STYLE_MASK;
+     mTextDecorationStyle |= (aStyle & BORDER_STYLE_MASK);
+   }
+ 
+   void GetDecorationColor(nscolor& aColor, bool& aForeground) const
+   {
+     aForeground = false;
++    aColor = NS_RGBA(0, 0, 0, 0);
+     if ((mTextDecorationStyle & BORDER_COLOR_SPECIAL) == 0) {
+       aColor = mTextDecorationColor;
+     } else if (mTextDecorationStyle & BORDER_COLOR_FOREGROUND) {
+       aForeground = true;
+     } else {
+       NS_NOTREACHED("OUTLINE_COLOR_INITIAL should not be set here");
+     }
+   }
+diff --git a/layout/svg/nsSVGClipPathFrame.cpp b/layout/svg/nsSVGClipPathFrame.cpp
+--- a/layout/svg/nsSVGClipPathFrame.cpp
++++ b/layout/svg/nsSVGClipPathFrame.cpp
+@@ -73,17 +73,17 @@ nsSVGClipPathFrame::ClipPaint(nsRenderin
+   // Seems like this is a non-trivial clipPath, so we need to use a clip mask.
+ 
+   // Notify our children that they're painting into a clip mask:
+   SVGAutoRenderState mode(aContext, SVGAutoRenderState::CLIP_MASK);
+ 
+   // Check if this clipPath is itself clipped by another clipPath:
+   nsSVGClipPathFrame *clipPathFrame =
+     nsSVGEffects::GetEffectProperties(this).GetClipPathFrame(nullptr);
+-  bool referencedClipIsTrivial;
++  bool referencedClipIsTrivial = false;
+   if (clipPathFrame) {
+     referencedClipIsTrivial = clipPathFrame->IsTrivial();
+     gfx->Save();
+     if (referencedClipIsTrivial) {
+       clipPathFrame->ClipPaint(aContext, aParent, aMatrix);
+     } else {
+       gfx->PushGroup(gfxASurface::CONTENT_ALPHA);
+     }
+@@ -98,17 +98,17 @@ nsSVGClipPathFrame::ClipPaint(nsRenderin
+ 
+       bool isOK = true;
+       nsSVGClipPathFrame *clipPathFrame =
+         nsSVGEffects::GetEffectProperties(kid).GetClipPathFrame(&isOK);
+       if (!isOK) {
+         continue;
+       }
+ 
+-      bool isTrivial;
++      bool isTrivial = false;
+ 
+       if (clipPathFrame) {
+         isTrivial = clipPathFrame->IsTrivial();
+         gfx->Save();
+         if (isTrivial) {
+           clipPathFrame->ClipPaint(aContext, aParent, aMatrix);
+         } else {
+           gfx->PushGroup(gfxASurface::CONTENT_ALPHA);
+diff --git a/layout/svg/nsSVGGlyphFrame.cpp b/layout/svg/nsSVGGlyphFrame.cpp
+--- a/layout/svg/nsSVGGlyphFrame.cpp
++++ b/layout/svg/nsSVGGlyphFrame.cpp
+@@ -884,17 +884,17 @@ nsSVGGlyphFrame::GetSubStringAdvance(uin
+ 
+ gfxFloat
+ nsSVGGlyphFrame::GetBaselineOffset(float aMetricsScale)
+ {
+   gfxTextRun::Metrics metrics =
+     mTextRun->MeasureText(0, mTextRun->GetLength(),
+                           gfxFont::LOOSE_INK_EXTENTS, nullptr, nullptr);
+ 
+-  uint16_t dominantBaseline;
++  uint8_t dominantBaseline = NS_STYLE_DOMINANT_BASELINE_AUTO;
+ 
+   for (nsIFrame *frame = GetParent(); frame; frame = frame->GetParent()) {
+     dominantBaseline = frame->StyleSVGReset()->mDominantBaseline;
+     if (dominantBaseline != NS_STYLE_DOMINANT_BASELINE_AUTO ||
+         frame->GetType() == nsGkAtoms::svgTextFrame) {
+       break;
+     }
+   }
+diff --git a/layout/tables/nsTableFrame.cpp b/layout/tables/nsTableFrame.cpp
+--- a/layout/tables/nsTableFrame.cpp
++++ b/layout/tables/nsTableFrame.cpp
+@@ -2201,29 +2201,29 @@ nsTableFrame::HomogenousInsertFrames(Chi
+     // Make sure they belong on the same frame list
+     if ((display->mDisplay == NS_STYLE_DISPLAY_TABLE_COLUMN_GROUP) !=
+         (prevDisplay->mDisplay == NS_STYLE_DISPLAY_TABLE_COLUMN_GROUP)) {
+       // the previous frame is not valid, see comment at ::AppendFrames
+       // XXXbz Using content indices here means XBL will get screwed
+       // over...  Oh, well.
+       nsIFrame* pseudoFrame = aFrameList.FirstChild();
+       nsIContent* parentContent = GetContent();
+-      nsIContent* content;
++      nsIContent* content = nullptr;
+       aPrevFrame = nullptr;
+-      while (pseudoFrame  && (parentContent ==
+-                              (content = pseudoFrame->GetContent()))) {
++      while (pseudoFrame && (parentContent ==
++                             (content = pseudoFrame->GetContent()))) {
+         pseudoFrame = pseudoFrame->GetFirstPrincipalChild();
+       }
+       nsCOMPtr<nsIContent> container = content->GetParent();
+       if (MOZ_LIKELY(container)) { // XXX need this null-check, see bug 411823.
+         int32_t newIndex = container->IndexOf(content);
+         nsIFrame* kidFrame;
+         bool isColGroup = (NS_STYLE_DISPLAY_TABLE_COLUMN_GROUP ==
+                              display->mDisplay);
+-        nsTableColGroupFrame* lastColGroup;
++        nsTableColGroupFrame* lastColGroup = nullptr;
+         if (isColGroup) {
+           kidFrame = mColGroups.FirstChild();
+           lastColGroup = nsTableColGroupFrame::GetLastRealColGroup(this);
+         }
+         else {
+           kidFrame = mFrames.FirstChild();
+         }
+         // Important: need to start at a value smaller than all valid indices
+diff --git a/layout/tables/nsTableFrame.h b/layout/tables/nsTableFrame.h
+--- a/layout/tables/nsTableFrame.h
++++ b/layout/tables/nsTableFrame.h
+@@ -62,17 +62,24 @@ public:
+ 
+ private:
+   bool mPartHasFixedBackground;
+ };
+ 
+ class nsAutoPushCurrentTableItem
+ {
+ public:
+-  nsAutoPushCurrentTableItem() : mBuilder(nullptr) {}
++  nsAutoPushCurrentTableItem()
++    : mBuilder(nullptr)
++    , mOldCurrentItem(nullptr)
++#ifdef DEBUG
++    , mPushedItem(nullptr)
++#endif
++  {
++  }
+   
+   void Push(nsDisplayListBuilder* aBuilder, nsDisplayTableItem* aPushItem)
+   {
+     mBuilder = aBuilder;
+     mOldCurrentItem = aBuilder->GetCurrentTableItem();
+     aBuilder->SetCurrentTableItem(aPushItem);
+ #ifdef DEBUG
+     mPushedItem = aPushItem;
+diff --git a/layout/tables/nsTableOuterFrame.cpp b/layout/tables/nsTableOuterFrame.cpp
+--- a/layout/tables/nsTableOuterFrame.cpp
++++ b/layout/tables/nsTableOuterFrame.cpp
+@@ -914,17 +914,17 @@ NS_METHOD nsTableOuterFrame::Reflow(nsPr
+     static_cast<nsHTMLReflowState*>((void*) innerRSSpace);
+ 
+   nsRect origInnerRect = InnerTableFrame()->GetRect();
+   nsRect origInnerVisualOverflow = InnerTableFrame()->GetVisualOverflowRect();
+   bool innerFirstReflow =
+     (InnerTableFrame()->GetStateBits() & NS_FRAME_FIRST_REFLOW) != 0;
+   nsRect origCaptionRect;
+   nsRect origCaptionVisualOverflow;
+-  bool captionFirstReflow;
++  bool captionFirstReflow = false;
+   if (mCaptionFrames.NotEmpty()) {
+     origCaptionRect = mCaptionFrames.FirstChild()->GetRect();
+     origCaptionVisualOverflow =
+       mCaptionFrames.FirstChild()->GetVisualOverflowRect();
+     captionFirstReflow =
+       (mCaptionFrames.FirstChild()->GetStateBits() & NS_FRAME_FIRST_REFLOW) != 0;
+   }
+   
+diff --git a/layout/xul/base/src/nsSprocketLayout.cpp b/layout/xul/base/src/nsSprocketLayout.cpp
+--- a/layout/xul/base/src/nsSprocketLayout.cpp
++++ b/layout/xul/base/src/nsSprocketLayout.cpp
+@@ -972,17 +972,17 @@ nsSprocketLayout::AlignChildren(nsIFrame
+ 
+       childRect.y = y;
+ 
+     } else { // vertical box
+       const nscoord leftAlign = clientRect.x + margin.left;
+       const nscoord rightAlign =
+         clientRect.XMost() - margin.right - childRect.width;
+ 
+-      nscoord x;
++      nscoord x = 0;
+       switch (halign) {
+         case nsBoxFrame::hAlign_Left: // start
+           x = isLTR ? leftAlign : rightAlign;
+           break;
+         case nsBoxFrame::hAlign_Center:
+           x = (leftAlign + rightAlign) / 2;
+           break;
+         case nsBoxFrame::hAlign_Right: // end
+diff --git a/layout/xul/base/src/nsTextBoxFrame.cpp b/layout/xul/base/src/nsTextBoxFrame.cpp
+--- a/layout/xul/base/src/nsTextBoxFrame.cpp
++++ b/layout/xul/base/src/nsTextBoxFrame.cpp
+@@ -389,22 +389,22 @@ void
+ nsTextBoxFrame::DrawText(nsRenderingContext& aRenderingContext,
+                          const nsRect&       aDirtyRect,
+                          const nsRect&       aTextRect,
+                          const nscolor*      aOverrideColor)
+ {
+     nsPresContext* presContext = PresContext();
+ 
+     // paint the title
+-    nscolor overColor;
+-    nscolor underColor;
+-    nscolor strikeColor;
+-    uint8_t overStyle;
+-    uint8_t underStyle;
+-    uint8_t strikeStyle;
++    nscolor overColor = NS_RGB(0, 0, 0);
++    nscolor underColor = NS_RGB(0, 0, 0);
++    nscolor strikeColor = NS_RGB(0, 0, 0);
++    uint8_t overStyle = 0;
++    uint8_t underStyle = 0;
++    uint8_t strikeStyle = 0;
+ 
+     // Begin with no decorations
+     uint8_t decorations = NS_STYLE_TEXT_DECORATION_LINE_NONE;
+     // A mask of all possible decorations.
+     uint8_t decorMask = NS_STYLE_TEXT_DECORATION_LINE_LINES_MASK;
+ 
+     nsIFrame* f = this;
+     do {  // find decoration colors
+diff --git a/layout/xul/tree/nsTreeBodyFrame.cpp b/layout/xul/tree/nsTreeBodyFrame.cpp
+--- a/layout/xul/tree/nsTreeBodyFrame.cpp
++++ b/layout/xul/tree/nsTreeBodyFrame.cpp
+@@ -3166,17 +3166,17 @@ nsTreeBodyFrame::PaintCell(int32_t      
+ 
+       nsMargin twistyMargin;
+       twistyContext->StyleMargin()->GetMargin(twistyMargin);
+       twistyRect.Inflate(twistyMargin);
+ 
+       aRenderingContext.PushState();
+ 
+       const nsStyleBorder* borderStyle = lineContext->StyleBorder();
+-      nscolor color;
++      nscolor color = NS_RGBA(0, 0, 0, 0);
+       bool foreground;
+       borderStyle->GetBorderColor(NS_SIDE_LEFT, color, foreground);
+       if (foreground) {
+         // GetBorderColor didn't touch color, thus grab it from the treeline context
+         color = lineContext->StyleColor()->mColor;
+       }
+       aRenderingContext.SetColor(color);
+       uint8_t style;
+diff --git a/layout/xul/tree/nsTreeBoxObject.cpp b/layout/xul/tree/nsTreeBoxObject.cpp
+--- a/layout/xul/tree/nsTreeBoxObject.cpp
++++ b/layout/xul/tree/nsTreeBoxObject.cpp
+@@ -78,17 +78,17 @@ nsTreeBodyFrame*
+ nsTreeBoxObject::GetTreeBody(bool aFlushLayout)
+ {
+   // Make sure our frames are up to date, and layout as needed.  We
+   // have to do this before checking for our cached mTreeBody, since
+   // it might go away on style flush, and in any case if aFlushLayout
+   // is true we need to make sure to flush no matter what.
+   // XXXbz except that flushing style when we were not asked to flush
+   // layout here breaks things.  See bug 585123.
+-  nsIFrame* frame;
++  nsIFrame* frame = nullptr;
+   if (aFlushLayout) {
+     frame = GetFrame(aFlushLayout);
+     if (!frame)
+       return nullptr;
+   }
+ 
+   if (mTreeBody) {
+     // Have one cached already.

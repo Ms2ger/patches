@@ -1,0 +1,1030 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 665345 - Move tests whose result depends on Skia settings out of test_canvas.html
+
+Keeping those tests in test_canvas.html would increase the complexity
+of the code to generate it.
+
+diff --git a/content/canvas/test/Makefile.in b/content/canvas/test/Makefile.in
+--- a/content/canvas/test/Makefile.in
++++ b/content/canvas/test/Makefile.in
+@@ -118,16 +118,28 @@ MOCHITEST_FILES = \
+ # Tests that depend on D2D.
+ MOCHITEST_FILES += \
+   test_2d.gradient.interpolate.overlap.html \
+   test_2d.path.rect.zero.3.html \
+   test_2d.path.stroke.scale2.html \
+   test_2d.strokeRect.zero.1.html \
+   $(NULL)
+ 
++# Tests that depend on Skia.
++MOCHITEST_FILES += \
++  test_2d.path.arcTo.shape.curve1.html \
++  test_2d.path.arcTo.shape.curve2.html \
++  test_2d.path.stroke.prune.closed.html \
++  test_2d.path.stroke.prune.curve.html \
++  test_2d.path.stroke.prune.line.html \
++  test_2d.path.stroke.prune.rect.html \
++  test_2d.transformation.setTransform.skewed.html \
++  test_2d.transformation.transform.skewed.html \
++  $(NULL)
++
+ ifneq (1_Linux,$(MOZ_SUITE)_$(OS_ARCH))
+ # This test fails in Suite on Linux for some reason, disable it there
+ MOCHITEST_FILES += test_2d.composite.uncovered.image.destination-atop.html
+ endif
+ 
+ # xor and lighter aren't well handled by cairo; they mostly work, but we don't want
+ # to test that
+ #	test_2d.composite.solid.xor.html \
+diff --git a/content/canvas/test/standalone.dat b/content/canvas/test/standalone.dat
+--- a/content/canvas/test/standalone.dat
++++ b/content/canvas/test/standalone.dat
+@@ -1,5 +1,14 @@
+ # D2D
+ test_2d.gradient.interpolate.overlap.html
+ test_2d.path.rect.zero.3.html
+ test_2d.path.stroke.scale2.html
+ test_2d.strokeRect.zero.1.html
++# Skia
++test_2d.path.arcTo.shape.curve1.html
++test_2d.path.arcTo.shape.curve2.html
++test_2d.path.stroke.prune.closed.html
++test_2d.path.stroke.prune.curve.html
++test_2d.path.stroke.prune.line.html
++test_2d.path.stroke.prune.rect.html
++test_2d.transformation.setTransform.skewed.html
++test_2d.transformation.transform.skewed.html
+diff --git a/content/canvas/test/test_2d.path.arcTo.shape.curve1.html b/content/canvas/test/test_2d.path.arcTo.shape.curve1.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_2d.path.arcTo.shape.curve1.html
+@@ -0,0 +1,56 @@
++<!DOCTYPE HTML>
++<title>Canvas test: 2d.path.arcTo.shape.curve1</title>
++<!-- Testing: arcTo() curves in the right kind of shape -->
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++var tol = 1.5; // tolerance to avoid antialiasing artifacts
++
++ctx.fillStyle = '#0f0';
++ctx.fillRect(0, 0, 100, 50);
++
++ctx.strokeStyle = '#f00';
++ctx.lineWidth = 10;
++ctx.beginPath();
++ctx.moveTo(10, 25);
++ctx.arcTo(75, 25, 75, 60, 20);
++ctx.stroke();
++
++ctx.fillStyle = '#0f0';
++ctx.beginPath();
++ctx.rect(10, 20, 45, 10);
++ctx.moveTo(80, 45);
++ctx.arc(55, 45, 25+tol, 0, -Math.PI/2, true);
++ctx.arc(55, 45, 15-tol, -Math.PI/2, 0, false);
++ctx.fill();
++
++isPixel(ctx, 50,25, 0,255,0,255, "50,25", "0,255,0,255", 0);
++isPixel(ctx, 55,19, 0,255,0,255, "55,19", "0,255,0,255", 0);
++isPixel(ctx, 55,20, 0,255,0,255, "55,20", "0,255,0,255", 0);
++isPixel(ctx, 55,21, 0,255,0,255, "55,21", "0,255,0,255", 0);
++isPixel(ctx, 64,22, 0,255,0,255, "64,22", "0,255,0,255", 0);
++isPixel(ctx, 65,21, 0,255,0,255, "65,21", "0,255,0,255", 0);
++isPixel(ctx, 72,28, 0,255,0,255, "72,28", "0,255,0,255", 0);
++isPixel(ctx, 73,27, 0,255,0,255, "73,27", "0,255,0,255", 0);
++isPixel(ctx, 78,36, 0,255,0,255, "78,36", "0,255,0,255", 0);
++isPixel(ctx, 79,35, 0,255,0,255, "79,35", "0,255,0,255", SpecialPowers.isAzureSkia ? 1 : 0);
++isPixel(ctx, 80,44, 0,255,0,255, "80,44", "0,255,0,255", 0);
++isPixel(ctx, 80,45, 0,255,0,255, "80,45", "0,255,0,255", 0);
++isPixel(ctx, 80,46, 0,255,0,255, "80,46", "0,255,0,255", 0);
++isPixel(ctx, 65,45, 0,255,0,255, "65,45", "0,255,0,255", 0);
++
++SimpleTest.finish();
++
++});
++</script>
++
+diff --git a/content/canvas/test/test_2d.path.arcTo.shape.curve2.html b/content/canvas/test/test_2d.path.arcTo.shape.curve2.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_2d.path.arcTo.shape.curve2.html
+@@ -0,0 +1,55 @@
++<!DOCTYPE HTML>
++<title>Canvas test: 2d.path.arcTo.shape.curve2</title>
++<!-- Testing: arcTo() curves in the right kind of shape -->
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++var tol = 1.5; // tolerance to avoid antialiasing artifacts
++
++ctx.fillStyle = '#0f0';
++ctx.fillRect(0, 0, 100, 50);
++
++ctx.fillStyle = '#f00';
++ctx.beginPath();
++ctx.rect(10, 20, 45, 10);
++ctx.moveTo(80, 45);
++ctx.arc(55, 45, 25-tol, 0, -Math.PI/2, true);
++ctx.arc(55, 45, 15+tol, -Math.PI/2, 0, false);
++ctx.fill();
++
++ctx.strokeStyle = '#0f0';
++ctx.lineWidth = 10;
++ctx.beginPath();
++ctx.moveTo(10, 25);
++ctx.arcTo(75, 25, 75, 60, 20);
++ctx.stroke();
++
++isPixel(ctx, 50,25, 0,255,0,255, "50,25", "0,255,0,255", 0);
++isPixel(ctx, 55,19, 0,255,0,255, "55,19", "0,255,0,255", 0);
++isPixel(ctx, 55,20, 0,255,0,255, "55,20", "0,255,0,255", 0);
++isPixel(ctx, 55,21, 0,255,0,255, "55,21", "0,255,0,255", 0);
++isPixel(ctx, 64,22, 0,255,0,255, "64,22", "0,255,0,255", SpecialPowers.isAzureSkia ? 1 : 0);
++isPixel(ctx, 65,21, 0,255,0,255, "65,21", "0,255,0,255", 0);
++isPixel(ctx, 72,28, 0,255,0,255, "72,28", "0,255,0,255", 0);
++isPixel(ctx, 73,27, 0,255,0,255, "73,27", "0,255,0,255", SpecialPowers.isAzureSkia ? 1 : 0);
++isPixel(ctx, 78,36, 0,255,0,255, "78,36", "0,255,0,255", SpecialPowers.isAzureSkia ? 1 : 0);
++isPixel(ctx, 79,35, 0,255,0,255, "79,35", "0,255,0,255", 0);
++isPixel(ctx, 80,44, 0,255,0,255, "80,44", "0,255,0,255", 0);
++isPixel(ctx, 80,45, 0,255,0,255, "80,45", "0,255,0,255", 0);
++isPixel(ctx, 80,46, 0,255,0,255, "80,46", "0,255,0,255", 0);
++
++SimpleTest.finish();
++
++});
++</script>
++
+diff --git a/content/canvas/test/test_2d.path.stroke.prune.closed.html b/content/canvas/test/test_2d.path.stroke.prune.closed.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_2d.path.stroke.prune.closed.html
+@@ -0,0 +1,41 @@
++<!DOCTYPE HTML>
++<title>Canvas test: 2d.path.stroke.prune.closed</title>
++<!-- Testing: Zero-length line segments from closed paths are removed before stroking -->
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++ctx.fillStyle = '#0f0';
++ctx.fillRect(0, 0, 100, 50);
++
++ctx.strokeStyle = '#f00';
++ctx.lineWidth = 100;
++ctx.lineCap = 'round';
++ctx.lineJoin = 'round';
++
++ctx.beginPath();
++ctx.moveTo(50, 25);
++ctx.lineTo(50, 25);
++ctx.closePath();
++ctx.stroke();
++
++if (SpecialPowers.isAzureSkia) {
++  isPixel(ctx, 50,25, 0,255,0,255, "50,25", "0,255,0,255", 0);
++} else {
++  todo_isPixel(ctx, 50,25, 0,255,0,255, "50,25", "0,255,0,255", 0);
++}
++
++SimpleTest.finish();
++
++});
++</script>
++
+diff --git a/content/canvas/test/test_2d.path.stroke.prune.curve.html b/content/canvas/test/test_2d.path.stroke.prune.curve.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_2d.path.stroke.prune.curve.html
+@@ -0,0 +1,45 @@
++<!DOCTYPE HTML>
++<title>Canvas test: 2d.path.stroke.prune.curve</title>
++<!-- Testing: Zero-length line segments from quadraticCurveTo and bezierCurveTo are removed before stroking -->
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++ctx.fillStyle = '#0f0';
++ctx.fillRect(0, 0, 100, 50);
++
++ctx.strokeStyle = '#f00';
++ctx.lineWidth = 100;
++ctx.lineCap = 'round';
++ctx.lineJoin = 'round';
++
++ctx.beginPath();
++ctx.moveTo(50, 25);
++ctx.quadraticCurveTo(50, 25, 50, 25);
++ctx.stroke();
++
++ctx.beginPath();
++ctx.moveTo(50, 25);
++ctx.bezierCurveTo(50, 25, 50, 25, 50, 25);
++ctx.stroke();
++
++if (SpecialPowers.isAzureSkia) {
++  isPixel(ctx, 50,25, 0,255,0,255, "50,25", "0,255,0,255", 0);
++} else {
++  todo_isPixel(ctx, 50,25, 0,255,0,255, "50,25", "0,255,0,255", 0);
++}
++
++SimpleTest.finish();
++
++});
++</script>
++
+diff --git a/content/canvas/test/test_2d.path.stroke.prune.line.html b/content/canvas/test/test_2d.path.stroke.prune.line.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_2d.path.stroke.prune.line.html
+@@ -0,0 +1,40 @@
++<!DOCTYPE HTML>
++<title>Canvas test: 2d.path.stroke.prune.line</title>
++<!-- Testing: Zero-length line segments from lineTo are removed before stroking -->
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++ctx.fillStyle = '#0f0';
++ctx.fillRect(0, 0, 100, 50);
++
++ctx.strokeStyle = '#f00';
++ctx.lineWidth = 100;
++ctx.lineCap = 'round';
++ctx.lineJoin = 'round';
++
++ctx.beginPath();
++ctx.moveTo(50, 25);
++ctx.lineTo(50, 25);
++ctx.stroke();
++
++if (SpecialPowers.isAzureSkia) {
++  isPixel(ctx, 50,25, 0,255,0,255, "50,25", "0,255,0,255", 0);
++} else {
++  todo_isPixel(ctx, 50,25, 0,255,0,255, "50,25", "0,255,0,255", 0);
++}
++
++SimpleTest.finish();
++
++});
++</script>
++
+diff --git a/content/canvas/test/test_2d.path.stroke.prune.rect.html b/content/canvas/test/test_2d.path.stroke.prune.rect.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_2d.path.stroke.prune.rect.html
+@@ -0,0 +1,41 @@
++<!DOCTYPE HTML>
++<title>Canvas test: 2d.path.stroke.prune.rect</title>
++<!-- Testing: Zero-length line segments from rect and strokeRect are removed before stroking -->
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++ctx.fillStyle = '#0f0';
++ctx.fillRect(0, 0, 100, 50);
++
++ctx.strokeStyle = '#f00';
++ctx.lineWidth = 100;
++ctx.lineCap = 'round';
++ctx.lineJoin = 'round';
++
++ctx.beginPath();
++ctx.rect(50, 25, 0, 0);
++ctx.stroke();
++
++ctx.strokeRect(50, 25, 0, 0);
++
++if (SpecialPowers.isAzureSkia) {
++  isPixel(ctx, 50,25, 0,255,0,255, "50,25", "0,255,0,255", 0);
++} else {
++  todo_isPixel(ctx, 50,25, 0,255,0,255, "50,25", "0,255,0,255", 0);
++}
++
++SimpleTest.finish();
++
++});
++</script>
++
+diff --git a/content/canvas/test/test_2d.transformation.setTransform.skewed.html b/content/canvas/test/test_2d.transformation.setTransform.skewed.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_2d.transformation.setTransform.skewed.html
+@@ -0,0 +1,50 @@
++<!DOCTYPE HTML>
++<title>Canvas test: 2d.transformation.setTransform.skewed</title>
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++// Create green with a red square ring inside it
++ctx.fillStyle = '#0f0';
++ctx.fillRect(0, 0, 100, 50);
++ctx.fillStyle = '#f00';
++ctx.fillRect(20, 10, 60, 30);
++ctx.fillStyle = '#0f0';
++ctx.fillRect(40, 20, 20, 10);
++
++// Draw a skewed shape to fill that gap, to make sure it is aligned correctly
++ctx.setTransform(1,4, 2,3, 5,6);
++// Post-transform coordinates:
++//   [[20,10],[80,10],[80,40],[20,40],[20,10],[40,20],[40,30],[60,30],[60,20],[40,20],[20,10]];
++// Hence pre-transform coordinates:
++var pts=[[-7.4,11.2],[-43.4,59.2],[-31.4,53.2],[4.6,5.2],[-7.4,11.2],
++         [-15.4,25.2],[-11.4,23.2],[-23.4,39.2],[-27.4,41.2],[-15.4,25.2],
++         [-7.4,11.2]];
++ctx.beginPath();
++ctx.moveTo(pts[0][0], pts[0][1]);
++for (var i = 0; i < pts.length; ++i)
++    ctx.lineTo(pts[i][0], pts[i][1]);
++ctx.fill();
++isPixel(ctx, 21,11, 0,255,0,255, "21,11", "0,255,0,255", 0);
++isPixel(ctx, 79,11, 0,255,0,255, "79,11", "0,255,0,255", 0);
++isPixel(ctx, 21,39, 0,255,0,255, "21,39", "0,255,0,255", 0);
++isPixel(ctx, 79,39, 0,255,0,255, "79,39", "0,255,0,255", 0);
++isPixel(ctx, 39,19, 0,255,0,255, "39,19", "0,255,0,255", SpecialPowers.isAzureSkia ? 1 : 0);
++isPixel(ctx, 61,19, 0,255,0,255, "61,19", "0,255,0,255", 0);
++isPixel(ctx, 39,31, 0,255,0,255, "39,31", "0,255,0,255", 0);
++isPixel(ctx, 61,31, 0,255,0,255, "61,31", "0,255,0,255", 0);
++
++SimpleTest.finish();
++
++});
++</script>
++
+diff --git a/content/canvas/test/test_2d.transformation.transform.skewed.html b/content/canvas/test/test_2d.transformation.transform.skewed.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_2d.transformation.transform.skewed.html
+@@ -0,0 +1,51 @@
++<!DOCTYPE HTML>
++<title>Canvas test: 2d.transformation.transform.skewed</title>
++<!-- Testing: transform() with skewy matrix transforms correctly -->
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++// Create green with a red square ring inside it
++ctx.fillStyle = '#0f0';
++ctx.fillRect(0, 0, 100, 50);
++ctx.fillStyle = '#f00';
++ctx.fillRect(20, 10, 60, 30);
++ctx.fillStyle = '#0f0';
++ctx.fillRect(40, 20, 20, 10);
++
++// Draw a skewed shape to fill that gap, to make sure it is aligned correctly
++ctx.transform(1,4, 2,3, 5,6);
++// Post-transform coordinates:
++//   [[20,10],[80,10],[80,40],[20,40],[20,10],[40,20],[40,30],[60,30],[60,20],[40,20],[20,10]];
++// Hence pre-transform coordinates:
++var pts=[[-7.4,11.2],[-43.4,59.2],[-31.4,53.2],[4.6,5.2],[-7.4,11.2],
++         [-15.4,25.2],[-11.4,23.2],[-23.4,39.2],[-27.4,41.2],[-15.4,25.2],
++         [-7.4,11.2]];
++ctx.beginPath();
++ctx.moveTo(pts[0][0], pts[0][1]);
++for (var i = 0; i < pts.length; ++i)
++    ctx.lineTo(pts[i][0], pts[i][1]);
++ctx.fill();
++isPixel(ctx, 21,11, 0,255,0,255, "21,11", "0,255,0,255", 0);
++isPixel(ctx, 79,11, 0,255,0,255, "79,11", "0,255,0,255", 0);
++isPixel(ctx, 21,39, 0,255,0,255, "21,39", "0,255,0,255", 0);
++isPixel(ctx, 79,39, 0,255,0,255, "79,39", "0,255,0,255", 0);
++isPixel(ctx, 39,19, 0,255,0,255, "39,19", "0,255,0,255", SpecialPowers.isAzureSkia ? 1 : 0);
++isPixel(ctx, 61,19, 0,255,0,255, "61,19", "0,255,0,255", 0);
++isPixel(ctx, 39,31, 0,255,0,255, "39,31", "0,255,0,255", 0);
++isPixel(ctx, 61,31, 0,255,0,255, "61,31", "0,255,0,255", 0);
++
++SimpleTest.finish();
++
++});
++</script>
++
+diff --git a/content/canvas/test/test_canvas.html b/content/canvas/test/test_canvas.html
+--- a/content/canvas/test/test_canvas.html
++++ b/content/canvas/test/test_canvas.html
+@@ -7,20 +7,16 @@
+ 
+ SimpleTest.waitForExplicitFinish();
+ 
+ function IsLinux() {
+     return navigator.platform.indexOf("Linux") == 0 &&
+            navigator.appVersion.indexOf("Android") == -1;
+ }
+ 
+-function IsAzureSkia() {
+-  return SpecialPowers.isAzureSkia;
+-}
+-
+ function IsAzureCairo() {
+   return SpecialPowers.isAzureCairo;
+ }
+ 
+ </script>
+ <!-- Includes all the tests in the content/canvas/tests except for test_bug397524.html -->
+ 
+ <!-- [[[ test_2d.canvas.readonly.html ]]] -->
+@@ -11322,116 +11318,16 @@ isPixel(ctx, 99,25, 0,255,0,255, 0);
+ isPixel(ctx, 0,49, 0,255,0,255, 0);
+ isPixel(ctx, 50,49, 0,255,0,255, 0);
+ isPixel(ctx, 99,49, 0,255,0,255, 0);
+ 
+ 
+ }
+ </script>
+ 
+-<!-- [[[ test_2d.path.arcTo.shape.curve1.html ]]] -->
+-
+-<p>Canvas test: 2d.path.arcTo.shape.curve1</p>
+-<!-- Testing: arcTo() curves in the right kind of shape -->
+-<canvas height="50" id="c368" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-function test_2d_path_arcTo_shape_curve1() {
+-
+-var canvas = document.getElementById('c368');
+-var ctx = canvas.getContext('2d');
+-
+-var tol = 1.5; // tolerance to avoid antialiasing artifacts
+-
+-ctx.fillStyle = '#0f0';
+-ctx.fillRect(0, 0, 100, 50);
+-
+-ctx.strokeStyle = '#f00';
+-ctx.lineWidth = 10;
+-ctx.beginPath();
+-ctx.moveTo(10, 25);
+-ctx.arcTo(75, 25, 75, 60, 20);
+-ctx.stroke();
+-
+-ctx.fillStyle = '#0f0';
+-ctx.beginPath();
+-ctx.rect(10, 20, 45, 10);
+-ctx.moveTo(80, 45);
+-ctx.arc(55, 45, 25+tol, 0, -Math.PI/2, true);
+-ctx.arc(55, 45, 15-tol, -Math.PI/2, 0, false);
+-ctx.fill();
+-
+-isPixel(ctx, 50,25, 0,255,0,255, 0);
+-isPixel(ctx, 55,19, 0,255,0,255, 0);
+-isPixel(ctx, 55,20, 0,255,0,255, 0);
+-isPixel(ctx, 55,21, 0,255,0,255, 0);
+-isPixel(ctx, 64,22, 0,255,0,255, 0);
+-isPixel(ctx, 65,21, 0,255,0,255, 0);
+-isPixel(ctx, 72,28, 0,255,0,255, 0);
+-isPixel(ctx, 73,27, 0,255,0,255, 0);
+-isPixel(ctx, 78,36, 0,255,0,255, 0);
+-isPixel(ctx, 79,35, 0,255,0,255, IsAzureSkia() ? 1 : 0);
+-isPixel(ctx, 80,44, 0,255,0,255, 0);
+-isPixel(ctx, 80,45, 0,255,0,255, 0);
+-isPixel(ctx, 80,46, 0,255,0,255, 0);
+-
+-
+-}
+-</script>
+-
+-<!-- [[[ test_2d.path.arcTo.shape.curve2.html ]]] -->
+-
+-<p>Canvas test: 2d.path.arcTo.shape.curve2</p>
+-<!-- Testing: arcTo() curves in the right kind of shape -->
+-<canvas height="50" id="c369" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-function test_2d_path_arcTo_shape_curve2() {
+-
+-var canvas = document.getElementById('c369');
+-var ctx = canvas.getContext('2d');
+-
+-var tol = 1.5; // tolerance to avoid antialiasing artifacts
+-
+-ctx.fillStyle = '#0f0';
+-ctx.fillRect(0, 0, 100, 50);
+-
+-ctx.fillStyle = '#f00';
+-ctx.beginPath();
+-ctx.rect(10, 20, 45, 10);
+-ctx.moveTo(80, 45);
+-ctx.arc(55, 45, 25-tol, 0, -Math.PI/2, true);
+-ctx.arc(55, 45, 15+tol, -Math.PI/2, 0, false);
+-ctx.fill();
+-
+-ctx.strokeStyle = '#0f0';
+-ctx.lineWidth = 10;
+-ctx.beginPath();
+-ctx.moveTo(10, 25);
+-ctx.arcTo(75, 25, 75, 60, 20);
+-ctx.stroke();
+-
+-isPixel(ctx, 50,25, 0,255,0,255, 0);
+-isPixel(ctx, 55,19, 0,255,0,255, 0);
+-isPixel(ctx, 55,20, 0,255,0,255, 0);
+-isPixel(ctx, 55,21, 0,255,0,255, 0);
+-isPixel(ctx, 64,22, 0,255,0,255, IsAzureSkia() ? 1 : 0);
+-isPixel(ctx, 65,21, 0,255,0,255, 0);
+-isPixel(ctx, 72,28, 0,255,0,255, 0);
+-isPixel(ctx, 73,27, 0,255,0,255, IsAzureSkia() ? 1 : 0);
+-isPixel(ctx, 78,36, 0,255,0,255, IsAzureSkia() ? 1 : 0);
+-isPixel(ctx, 79,35, 0,255,0,255, 0);
+-isPixel(ctx, 80,44, 0,255,0,255, 0);
+-isPixel(ctx, 80,45, 0,255,0,255, 0);
+-isPixel(ctx, 80,46, 0,255,0,255, 0);
+-
+-
+-}
+-</script>
+-
+ <!-- [[[ test_2d.path.arcTo.shape.end.html ]]] -->
+ 
+ <p>Canvas test: 2d.path.arcTo.shape.end</p>
+ <!-- Testing: arcTo() does not draw anything from P1 to P2 -->
+ <canvas height="50" id="c370" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+ <script>
+ 
+ function test_2d_path_arcTo_shape_end() {
+@@ -13530,51 +13426,16 @@ ctx.arc(50, 25, 10, 0, 0, false);
+ ctx.stroke();
+ 
+ todo_isPixel(ctx, 50,25, 0,255,0,255, 0);
+ 
+ 
+ }
+ </script>
+ 
+-<!-- [[[ test_2d.path.stroke.prune.closed.html ]]] -->
+-
+-<p>Canvas test: 2d.path.stroke.prune.closed</p>
+-<!-- Testing: Zero-length line segments from closed paths are removed before stroking -->
+-<canvas height="50" id="c445" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-function test_2d_path_stroke_prune_closed() {
+-
+-var canvas = document.getElementById('c445');
+-var ctx = canvas.getContext('2d');
+-
+-ctx.fillStyle = '#0f0';
+-ctx.fillRect(0, 0, 100, 50);
+-
+-ctx.strokeStyle = '#f00';
+-ctx.lineWidth = 100;
+-ctx.lineCap = 'round';
+-ctx.lineJoin = 'round';
+-
+-ctx.beginPath();
+-ctx.moveTo(50, 25);
+-ctx.lineTo(50, 25);
+-ctx.closePath();
+-ctx.stroke();
+-
+-if (IsAzureSkia()) {
+-  isPixel(ctx, 50,25, 0,255,0,255, 0);
+-} else {
+-  todo_isPixel(ctx, 50,25, 0,255,0,255, 0);
+-}
+-
+-}
+-</script>
+-
+ <!-- [[[ test_2d.path.stroke.prune.corner.html ]]] -->
+ 
+ <p>Canvas test: 2d.path.stroke.prune.corner</p>
+ <!-- Testing: Zero-length line segments are removed before stroking with miters -->
+ <canvas height="50" id="c446" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+ <script>
+ 
+ function test_2d_path_stroke_prune_corner() {
+@@ -13599,125 +13460,16 @@ ctx.lineTo(-100, 1000);
+ ctx.stroke();
+ 
+ isPixel(ctx, 50,25, 0,255,0,255, 0);
+ 
+ 
+ }
+ </script>
+ 
+-<!-- [[[ test_2d.path.stroke.prune.curve.html ]]] -->
+-
+-<p>Canvas test: 2d.path.stroke.prune.curve</p>
+-<!-- Testing: Zero-length line segments from quadraticCurveTo and bezierCurveTo are removed before stroking -->
+-<canvas height="50" id="c447" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-function test_2d_path_stroke_prune_curve() {
+-
+-var canvas = document.getElementById('c447');
+-var ctx = canvas.getContext('2d');
+-
+-ctx.fillStyle = '#0f0';
+-ctx.fillRect(0, 0, 100, 50);
+-
+-ctx.strokeStyle = '#f00';
+-ctx.lineWidth = 100;
+-ctx.lineCap = 'round';
+-ctx.lineJoin = 'round';
+-
+-ctx.beginPath();
+-ctx.moveTo(50, 25);
+-ctx.quadraticCurveTo(50, 25, 50, 25);
+-ctx.stroke();
+-
+-ctx.beginPath();
+-ctx.moveTo(50, 25);
+-ctx.bezierCurveTo(50, 25, 50, 25, 50, 25);
+-ctx.stroke();
+-
+-if (IsAzureSkia()) {
+-  isPixel(ctx, 50,25, 0,255,0,255, 0);
+-} else {
+-  todo_isPixel(ctx, 50,25, 0,255,0,255, 0);
+-}
+-
+-
+-}
+-</script>
+-
+-<!-- [[[ test_2d.path.stroke.prune.line.html ]]] -->
+-
+-<p>Canvas test: 2d.path.stroke.prune.line</p>
+-<!-- Testing: Zero-length line segments from lineTo are removed before stroking -->
+-<canvas height="50" id="c448" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-function test_2d_path_stroke_prune_line() {
+-
+-var canvas = document.getElementById('c448');
+-var ctx = canvas.getContext('2d');
+-
+-ctx.fillStyle = '#0f0';
+-ctx.fillRect(0, 0, 100, 50);
+-
+-ctx.strokeStyle = '#f00';
+-ctx.lineWidth = 100;
+-ctx.lineCap = 'round';
+-ctx.lineJoin = 'round';
+-
+-ctx.beginPath();
+-ctx.moveTo(50, 25);
+-ctx.lineTo(50, 25);
+-ctx.stroke();
+-
+-if (IsAzureSkia()) {
+-  isPixel(ctx, 50,25, 0,255,0,255, 0);
+-} else {
+-  todo_isPixel(ctx, 50,25, 0,255,0,255, 0);
+-}
+-
+-}
+-</script>
+-
+-<!-- [[[ test_2d.path.stroke.prune.rect.html ]]] -->
+-
+-<p>Canvas test: 2d.path.stroke.prune.rect</p>
+-<!-- Testing: Zero-length line segments from rect and strokeRect are removed before stroking -->
+-<canvas height="50" id="c449" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-function test_2d_path_stroke_prune_rect() {
+-
+-var canvas = document.getElementById('c449');
+-var ctx = canvas.getContext('2d');
+-
+-ctx.fillStyle = '#0f0';
+-ctx.fillRect(0, 0, 100, 50);
+-
+-ctx.strokeStyle = '#f00';
+-ctx.lineWidth = 100;
+-ctx.lineCap = 'round';
+-ctx.lineJoin = 'round';
+-
+-ctx.beginPath();
+-ctx.rect(50, 25, 0, 0);
+-ctx.stroke();
+-
+-ctx.strokeRect(50, 25, 0, 0);
+-
+-if (IsAzureSkia()) {
+-  isPixel(ctx, 50,25, 0,255,0,255, 0);
+-} else {
+-  todo_isPixel(ctx, 50,25, 0,255,0,255, 0);
+-}
+-
+-}
+-</script>
+-
+ <!-- [[[ test_2d.path.stroke.scale1.html ]]] -->
+ 
+ <p>Canvas test: 2d.path.stroke.scale1</p>
+ <!-- Testing: Stroke line widths are scaled by the current transformation matrix -->
+ <canvas height="50" id="c450" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+ <script>
+ 
+ function test_2d_path_stroke_scale1() {
+@@ -18086,61 +17838,16 @@ ctx.fillStyle = '#0f0';
+ ctx.fillRect(-100, -10, 100, 50);
+ 
+ isPixel(ctx, 50,25, 0,255,0,255, 0);
+ 
+ 
+ }
+ </script>
+ 
+-<!-- [[[ test_2d.transformation.setTransform.skewed.html ]]] -->
+-
+-<p>Canvas test: 2d.transformation.setTransform.skewed</p>
+-<canvas height="50" id="c601" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-function test_2d_transformation_setTransform_skewed() {
+-
+-var canvas = document.getElementById('c601');
+-var ctx = canvas.getContext('2d');
+-
+-// Create green with a red square ring inside it
+-ctx.fillStyle = '#0f0';
+-ctx.fillRect(0, 0, 100, 50);
+-ctx.fillStyle = '#f00';
+-ctx.fillRect(20, 10, 60, 30);
+-ctx.fillStyle = '#0f0';
+-ctx.fillRect(40, 20, 20, 10);
+-
+-// Draw a skewed shape to fill that gap, to make sure it is aligned correctly
+-ctx.setTransform(1,4, 2,3, 5,6);
+-// Post-transform coordinates:
+-//   [[20,10],[80,10],[80,40],[20,40],[20,10],[40,20],[40,30],[60,30],[60,20],[40,20],[20,10]];
+-// Hence pre-transform coordinates:
+-var pts=[[-7.4,11.2],[-43.4,59.2],[-31.4,53.2],[4.6,5.2],[-7.4,11.2],
+-         [-15.4,25.2],[-11.4,23.2],[-23.4,39.2],[-27.4,41.2],[-15.4,25.2],
+-         [-7.4,11.2]];
+-ctx.beginPath();
+-ctx.moveTo(pts[0][0], pts[0][1]);
+-for (var i = 0; i < pts.length; ++i)
+-    ctx.lineTo(pts[i][0], pts[i][1]);
+-ctx.fill();
+-isPixel(ctx, 21,11, 0,255,0,255, 0);
+-isPixel(ctx, 79,11, 0,255,0,255, 0);
+-isPixel(ctx, 21,39, 0,255,0,255, 0);
+-isPixel(ctx, 79,39, 0,255,0,255, 0);
+-isPixel(ctx, 39,19, 0,255,0,255, IsAzureSkia() ? 1 : 0);
+-isPixel(ctx, 61,19, 0,255,0,255, 0);
+-isPixel(ctx, 39,31, 0,255,0,255, 0);
+-isPixel(ctx, 61,31, 0,255,0,255, 0);
+-
+-
+-}
+-</script>
+-
+ <!-- [[[ test_2d.transformation.transform.identity.html ]]] -->
+ 
+ <p>Canvas test: 2d.transformation.transform.identity</p>
+ <!-- Testing: transform() with the identity matrix does nothing -->
+ <canvas height="50" id="c602" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+ <script>
+ 
+ function test_2d_transformation_transform_identity() {
+@@ -18281,62 +17988,16 @@ ctx.fillStyle = '#0f0';
+ ctx.fillRect(-100, -10, 100, 50);
+ 
+ isPixel(ctx, 50,25, 0,255,0,255, 0);
+ 
+ 
+ }
+ </script>
+ 
+-<!-- [[[ test_2d.transformation.transform.skewed.html ]]] -->
+-
+-<p>Canvas test: 2d.transformation.transform.skewed</p>
+-<!-- Testing: transform() with skewy matrix transforms correctly -->
+-<canvas height="50" id="c605" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-function test_2d_transformation_transform_skewed() {
+-
+-var canvas = document.getElementById('c605');
+-var ctx = canvas.getContext('2d');
+-
+-// Create green with a red square ring inside it
+-ctx.fillStyle = '#0f0';
+-ctx.fillRect(0, 0, 100, 50);
+-ctx.fillStyle = '#f00';
+-ctx.fillRect(20, 10, 60, 30);
+-ctx.fillStyle = '#0f0';
+-ctx.fillRect(40, 20, 20, 10);
+-
+-// Draw a skewed shape to fill that gap, to make sure it is aligned correctly
+-ctx.transform(1,4, 2,3, 5,6);
+-// Post-transform coordinates:
+-//   [[20,10],[80,10],[80,40],[20,40],[20,10],[40,20],[40,30],[60,30],[60,20],[40,20],[20,10]];
+-// Hence pre-transform coordinates:
+-var pts=[[-7.4,11.2],[-43.4,59.2],[-31.4,53.2],[4.6,5.2],[-7.4,11.2],
+-         [-15.4,25.2],[-11.4,23.2],[-23.4,39.2],[-27.4,41.2],[-15.4,25.2],
+-         [-7.4,11.2]];
+-ctx.beginPath();
+-ctx.moveTo(pts[0][0], pts[0][1]);
+-for (var i = 0; i < pts.length; ++i)
+-    ctx.lineTo(pts[i][0], pts[i][1]);
+-ctx.fill();
+-isPixel(ctx, 21,11, 0,255,0,255, 0);
+-isPixel(ctx, 79,11, 0,255,0,255, 0);
+-isPixel(ctx, 21,39, 0,255,0,255, 0);
+-isPixel(ctx, 79,39, 0,255,0,255, 0);
+-isPixel(ctx, 39,19, 0,255,0,255, IsAzureSkia() ? 1 : 0);
+-isPixel(ctx, 61,19, 0,255,0,255, 0);
+-isPixel(ctx, 39,31, 0,255,0,255, 0);
+-isPixel(ctx, 61,31, 0,255,0,255, 0);
+-
+-
+-}
+-</script>
+-
+ <!-- [[[ test_2d.transformation.translate.basic.html ]]] -->
+ 
+ <p>Canvas test: 2d.transformation.translate.basic</p>
+ <!-- Testing: translate() works -->
+ <canvas height="50" id="c606" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+ <script>
+ 
+ function test_2d_transformation_translate_basic() {
+@@ -22019,26 +21680,16 @@ function runTests() {
+   ok(false, "unexpected exception thrown in: test_2d_path_arcTo_nonfinite");
+  }
+  try {
+   test_2d_path_arcTo_scale();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_path_arcTo_scale");
+  }
+  try {
+-  test_2d_path_arcTo_shape_curve1();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_2d_path_arcTo_shape_curve1");
+- }
+- try {
+-  test_2d_path_arcTo_shape_curve2();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_2d_path_arcTo_shape_curve2");
+- }
+- try {
+   test_2d_path_arcTo_shape_end();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_path_arcTo_shape_end");
+  }
+  try {
+   test_2d_path_arcTo_shape_start();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_path_arcTo_shape_start");
+@@ -22389,41 +22040,21 @@ function runTests() {
+   ok(false, "unexpected exception thrown in: test_2d_path_stroke_overlap");
+  }
+  try {
+   test_2d_path_stroke_prune_arc();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_path_stroke_prune_arc");
+  }
+  try {
+-  test_2d_path_stroke_prune_closed();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_2d_path_stroke_prune_closed");
+- }
+- try {
+   test_2d_path_stroke_prune_corner();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_path_stroke_prune_corner");
+  }
+  try {
+-  test_2d_path_stroke_prune_curve();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_2d_path_stroke_prune_curve");
+- }
+- try {
+-  test_2d_path_stroke_prune_line();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_2d_path_stroke_prune_line");
+- }
+- try {
+-  test_2d_path_stroke_prune_rect();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_2d_path_stroke_prune_rect");
+- }
+- try {
+   test_2d_path_stroke_scale1();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_path_stroke_scale1");
+  }
+  try {
+   test_2d_path_stroke_skew();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_path_stroke_skew");
+@@ -23164,41 +22795,31 @@ function runTests() {
+   ok(false, "unexpected exception thrown in: test_2d_transformation_setTransform_multiple");
+  }
+  try {
+   test_2d_transformation_setTransform_nonfinite();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_transformation_setTransform_nonfinite");
+  }
+  try {
+-  test_2d_transformation_setTransform_skewed();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_2d_transformation_setTransform_skewed");
+- }
+- try {
+   test_2d_transformation_transform_identity();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_transformation_transform_identity");
+  }
+  try {
+   test_2d_transformation_transform_multiply();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_transformation_transform_multiply");
+  }
+  try {
+   test_2d_transformation_transform_nonfinite();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_transformation_transform_nonfinite");
+  }
+  try {
+-  test_2d_transformation_transform_skewed();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_2d_transformation_transform_skewed");
+- }
+- try {
+   test_2d_transformation_translate_basic();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_transformation_translate_basic");
+  }
+  try {
+   test_2d_transformation_translate_nonfinite();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_transformation_translate_nonfinite");

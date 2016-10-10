@@ -1,0 +1,190 @@
+* * *
+
+diff --git a/toolkit/components/places/History.cpp b/toolkit/components/places/History.cpp
+--- a/toolkit/components/places/History.cpp
++++ b/toolkit/components/places/History.cpp
+@@ -921,19 +921,16 @@ private:
+   , mCallback(aCallback)
+   , mHistory(History::GetService())
+   {
+     MOZ_ASSERT(NS_IsMainThread(), "This should be called on the main thread");
+ 
+     (void)mPlaces.SwapElements(aPlaces);
+     (void)mReferrers.SetLength(mPlaces.Length());
+ 
+-    nsNavHistory* navHistory = nsNavHistory::GetHistoryService();
+-    NS_ABORT_IF_FALSE(navHistory, "Could not get nsNavHistory?!");
+-
+     for (nsTArray<VisitData>::size_type i = 0; i < mPlaces.Length(); i++) {
+       mReferrers[i].spec = mPlaces[i].referrerSpec;
+ 
+ #ifdef DEBUG
+       nsCOMPtr<nsIURI> uri;
+       (void)NS_NewURI(getter_AddRefs(uri), mPlaces[i].spec);
+       NS_ASSERTION(CanAddURI(uri),
+                    "Passed a VisitData with a URI we cannot add to history!");
+@@ -1543,17 +1540,17 @@ static PLDHashOperator TransferHashEntri
+  */
+ static PLDHashOperator NotifyVisitRemoval(PlaceHashKey* aEntry,
+                                           void* aHistory)
+ {
+   nsNavHistory* history = static_cast<nsNavHistory *>(aHistory);
+   const nsTArray<VisitData>& visits = aEntry->visits;
+   nsCOMPtr<nsIURI> uri;
+   (void)NS_NewURI(getter_AddRefs(uri), visits[0].spec);
+-  bool removingPage = visits.Length() == aEntry->visitCount &&
++  bool removingPage = static_cast<int32_t>(visits.Length()) == aEntry->visitCount &&
+                       !aEntry->bookmarked;
+   // FindRemovableVisits only sets the transition type on the VisitData objects
+   // it collects if the visits were filtered by transition type.
+   // RemoveVisitsFilter currently only supports filtering by transition type, so
+   // FindRemovableVisits will either find all visits, or all visits of a given
+   // type. Therefore, if transitionType is set on this visit, we pass the
+   // transition type to NotifyOnPageExpired which in turns passes it to
+   // OnDeleteVisits to indicate that all visits of a given type were removed.
+@@ -1621,17 +1618,17 @@ private:
+ /**
+  * Enumerator used by RemoveVisits to populate list of removed place ids.
+  */
+ static PLDHashOperator ListToBeRemovedPlaceIds(PlaceHashKey* aEntry,
+                                                void* aIdsList)
+ {
+   const nsTArray<VisitData>& visits = aEntry->visits;
+   // Only orphan ids should be listed.
+-  if (visits.Length() == aEntry->visitCount && !aEntry->bookmarked) {
++  if (static_cast<int32_t>(visits.Length()) == aEntry->visitCount && !aEntry->bookmarked) {
+     nsCString* list = static_cast<nsCString*>(aIdsList);
+     if (!list->IsEmpty())
+       list->AppendLiteral(",");
+     list->AppendInt(visits[0].placeId);
+   }
+   return PL_DHASH_NEXT;
+ }
+ 
+@@ -2676,19 +2673,16 @@ History::RemoveAllDownloads()
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ //// mozIAsyncHistory
+ 
+ NS_IMETHODIMP
+ History::GetPlacesInfo(const JS::Value& aPlaceIdentifiers,
+                        mozIVisitInfoCallback* aCallback,
+                        JSContext* aCtx) {
+-  nsNavHistory* navHistory = nsNavHistory::GetHistoryService();
+-  NS_ABORT_IF_FALSE(navHistory, "Could not get nsNavHistory?!");
+-
+   uint32_t placesIndentifiersLength;
+   JS::Rooted<JSObject*> placesIndentifiers(aCtx);
+   nsresult rv = GetJSArrayFromJSValue(aPlaceIdentifiers, aCtx,
+                                       placesIndentifiers.address(),
+                                       &placesIndentifiersLength);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   nsTArray<VisitData> placesInfo;
+diff --git a/toolkit/components/places/Makefile.in b/toolkit/components/places/Makefile.in
+--- a/toolkit/components/places/Makefile.in
++++ b/toolkit/components/places/Makefile.in
+@@ -4,16 +4,18 @@
+ 
+ DEPTH = @DEPTH@
+ topsrcdir = @top_srcdir@
+ srcdir = @srcdir@
+ VPATH = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
++FAIL_ON_WARNINGS := 1
++
+ ifdef MOZ_PLACES
+ LIBRARY_NAME  = places
+ MSVC_ENABLE_PGO := 1
+ LIBXUL_LIBRARY = 1
+ EXPORT_LIBRARY = 1
+ MODULE_NAME = nsPlacesModule
+ IS_COMPONENT = 1
+ 
+diff --git a/toolkit/components/places/nsNavHistory.cpp b/toolkit/components/places/nsNavHistory.cpp
+--- a/toolkit/components/places/nsNavHistory.cpp
++++ b/toolkit/components/places/nsNavHistory.cpp
+@@ -1,9 +1,9 @@
+-//* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include <stdio.h>
+ 
+ #include "mozilla/DebugOnly.h"
+ 
+@@ -855,17 +855,17 @@ nsNavHistory::EvaluateQueryForNode(const
+           continue; // prefixes don't match
+       }
+     }
+ 
+     // Transitions matching.
+     const nsTArray<uint32_t>& transitions = query->Transitions();
+     if (aNode->mTransitionType > 0 &&
+         transitions.Length() &&
+-        !transitions.Contains(aNode->mTransitionType)) {
++        !transitions.Contains(static_cast<uint32_t>(aNode->mTransitionType))) {
+       continue; // transition doesn't match.
+     }
+ 
+     // If we ever make it to the bottom of this loop, that means it passed all
+     // tests for the given query. Since queries are ORed together, that means
+     // it passed everything and we are done.
+     return true;
+   }
+diff --git a/toolkit/components/typeaheadfind/Makefile.in b/toolkit/components/typeaheadfind/Makefile.in
+--- a/toolkit/components/typeaheadfind/Makefile.in
++++ b/toolkit/components/typeaheadfind/Makefile.in
+@@ -4,12 +4,13 @@
+ 
+ DEPTH = @DEPTH@
+ topsrcdir = @top_srcdir@
+ srcdir = @srcdir@
+ VPATH = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
++FAIL_ON_WARNINGS := 1
+ FORCE_STATIC_LIB = 1
+ LIBXUL_LIBRARY = 1
+ 
+ include $(topsrcdir)/config/rules.mk
+diff --git a/toolkit/mozapps/update/updater/bspatch.h b/toolkit/mozapps/update/updater/bspatch.h
+--- a/toolkit/mozapps/update/updater/bspatch.h
++++ b/toolkit/mozapps/update/updater/bspatch.h
+@@ -24,18 +24,18 @@
+  * POSSIBILITY OF SUCH DAMAGE.
+  *
+  * Changelog:
+  * 2005-04-26 - Define the header as a C structure, add a CRC32 checksum to
+  *              the header, and make all the types 32-bit.
+  *                --Benjamin Smedberg <benjamin@smedbergs.us>
+  */
+ 
+-#ifndef bspatch_h__
+-#define bspatch_h__
++#ifndef bspatch_h
++#define bspatch_h
+ 
+ #include "mozilla/StandardInteger.h"
+ #include <stdio.h>
+ 
+ typedef struct MBSPatchHeader_ {
+   /* "MBDIFF10" */
+   char tag[8];
+   
+@@ -85,9 +85,9 @@ int MBS_ApplyPatch(const MBSPatchHeader 
+                    unsigned char *fbuffer, FILE* file);
+ 
+ typedef struct MBSPatchTriple_ {
+   uint32_t x; /* add x bytes from oldfile to x bytes from the diff block */
+   uint32_t y; /* copy y bytes from the extra block */
+   int32_t  z; /* seek forwards in oldfile by z bytes */
+ } MBSPatchTriple;
+ 
+-#endif  // bspatch_h__
++#endif  /* bspatch_h */

@@ -1,0 +1,800 @@
+From: Ms2ger <ms2ger@gmail.com>
+Make nsIWidget::GetBounds() return ScreenIntPoint.
+
+Blocked on removing the nsDeviceContext.h include from Units.h.
+
+diff --git a/layout/base/nsDisplayList.cpp b/layout/base/nsDisplayList.cpp
+--- a/layout/base/nsDisplayList.cpp
++++ b/layout/base/nsDisplayList.cpp
+@@ -672,20 +672,17 @@ static void RecordFrameMetrics(nsIFrame*
+   metrics.mResolution = resolution;
+ 
+   metrics.mDevPixelsPerCSSPixel = CSSToLayoutDeviceScale(
+     (float)nsPresContext::AppUnitsPerCSSPixel() / auPerDevPixel);
+ 
+   metrics.mMayHaveTouchListeners = aMayHaveTouchListeners;
+ 
+   if (nsIWidget* widget = aForFrame->GetNearestWidget()) {
+-    nsIntRect bounds;
+-    widget->GetBounds(bounds);
+-    metrics.mCompositionBounds = ScreenIntRect::FromUnknownRect(
+-      mozilla::gfx::IntRect(bounds.x, bounds.y, bounds.width, bounds.height));
++    metrics.mCompositionBounds = widget->GetBounds();
+   }
+ 
+   metrics.mPresShellId = presShell->GetPresShellId();
+ 
+   aRoot->SetFrameMetrics(metrics);
+ }
+ 
+ nsDisplayListBuilder::~nsDisplayListBuilder() {
+diff --git a/widget/cocoa/nsChildView.h b/widget/cocoa/nsChildView.h
+--- a/widget/cocoa/nsChildView.h
++++ b/widget/cocoa/nsChildView.h
+@@ -18,17 +18,17 @@
+ #include "nsBaseWidget.h"
+ #include "nsIPluginInstanceOwner.h"
+ #include "nsIPluginWidget.h"
+ #include "nsWeakPtr.h"
+ #include "TextInputHandler.h"
+ #include "nsCocoaUtils.h"
+ #include "gfxQuartzSurface.h"
+ #include "GLContext.h"
+-
++#include "Units.h"
+ #include "nsString.h"
+ #include "nsIDragService.h"
+ 
+ #include "npapi.h"
+ 
+ #import <Carbon/Carbon.h>
+ #import <Cocoa/Cocoa.h>
+ #import <AppKit/NSOpenGL.h>
+@@ -425,17 +425,17 @@ public:
+   NS_IMETHOD              Move(double aX, double aY);
+   NS_IMETHOD              Resize(double aWidth, double aHeight, bool aRepaint);
+   NS_IMETHOD              Resize(double aX, double aY,
+                                  double aWidth, double aHeight, bool aRepaint);
+ 
+   NS_IMETHOD              Enable(bool aState);
+   virtual bool            IsEnabled() const;
+   NS_IMETHOD              SetFocus(bool aRaise);
+-  NS_IMETHOD              GetBounds(nsIntRect &aRect);
++  virtual mozilla::ScreenIntRect GetBounds() MOZ_OVERRIDE;
+   NS_IMETHOD              GetClientBounds(nsIntRect &aRect);
+   NS_IMETHOD              GetScreenBounds(nsIntRect &aRect);
+ 
+   // Returns the "backing scale factor" of the view's window, which is the
+   // ratio of pixels in the window's backing store to Cocoa points. Prior to
+   // HiDPI support in OS X 10.7, this was always 1.0, but in HiDPI mode it
+   // will be 2.0 (and might potentially other values as screen resolutions
+   // evolve). This gives the relationship between what Gecko calls "device
+@@ -560,16 +560,21 @@ public:
+     return nsCocoaUtils::CocoaPointsToDevPixels(aPts, BackingScaleFactor());
+   }
+   nsIntPoint        CocoaPointsToDevPixels(const NSPoint& aPt) {
+     return nsCocoaUtils::CocoaPointsToDevPixels(aPt, BackingScaleFactor());
+   }
+   nsIntRect         CocoaPointsToDevPixels(const NSRect& aRect) {
+     return nsCocoaUtils::CocoaPointsToDevPixels(aRect, BackingScaleFactor());
+   }
++  mozilla::ScreenIntRect CocoaPointsToDevPixelsTyped(const NSRect& aRect)
++  {
++    return nsCocoaUtils::CocoaPointsToDevPixelsTyped(aRect,
++                                                     BackingScaleFactor());
++  }
+   CGFloat           DevPixelsToCocoaPoints(int32_t aPixels) {
+     return nsCocoaUtils::DevPixelsToCocoaPoints(aPixels, BackingScaleFactor());
+   }
+   NSRect            DevPixelsToCocoaPoints(const nsIntRect& aRect) {
+     return nsCocoaUtils::DevPixelsToCocoaPoints(aRect, BackingScaleFactor());
+   }
+ 
+ protected:
+diff --git a/widget/cocoa/nsChildView.mm b/widget/cocoa/nsChildView.mm
+--- a/widget/cocoa/nsChildView.mm
++++ b/widget/cocoa/nsChildView.mm
+@@ -776,24 +776,24 @@ NS_IMETHODIMP nsChildView::SetCursor(img
+   return [[nsCursorManager sharedInstance] setCursorWithImage:aCursor hotSpotX:aHotspotX hotSpotY:aHotspotY];
+ 
+   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
+ }
+ 
+ #pragma mark -
+ 
+ // Get this component dimension
+-NS_IMETHODIMP nsChildView::GetBounds(nsIntRect &aRect)
++/* virtual */ ScreenIntRect
++nsChildView::GetBounds()
+ {
+   if (!mView) {
+-    aRect = mBounds;
+-  } else {
+-    aRect = CocoaPointsToDevPixels([mView frame]);
+-  }
+-  return NS_OK;
++    return mBounds;
++  }
++
++  return CocoaPointsToDevPixels([mView frame]);
+ }
+ 
+ NS_IMETHODIMP nsChildView::GetClientBounds(nsIntRect &aRect)
+ {
+   GetBounds(aRect);
+   if (!mParentWidget) {
+     // For top level widgets we want the position on screen, not the position
+     // of this view inside the window.
+diff --git a/widget/cocoa/nsCocoaUtils.h b/widget/cocoa/nsCocoaUtils.h
+--- a/widget/cocoa/nsCocoaUtils.h
++++ b/widget/cocoa/nsCocoaUtils.h
+@@ -1,22 +1,24 @@
+-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef nsCocoaUtils_h_
+ #define nsCocoaUtils_h_
+ 
+ #import <Cocoa/Cocoa.h>
+ 
+ #include "nsRect.h"
+ #include "imgIContainer.h"
+ #include "nsEvent.h"
+ #include "npapi.h"
++#include "Units.h"
+ 
+ // This must be the last include:
+ #include "nsObjCExceptions.h"
+ 
+ // Declare the backingScaleFactor method that we want to call
+ // on NSView/Window/Screen objects, if they recognize it.
+ @interface NSObject (BackingScaleFactorCategory)
+ - (CGFloat)backingScaleFactor;
+@@ -75,17 +77,18 @@ private:
+ // This declaration needed to avoid compiler warnings when compiling on 10.5
+ // and below (or using the 10.5 SDK and below).
+ - (void)setHelpMenu:(NSMenu *)helpMenu;
+ 
+ @end
+ 
+ class nsCocoaUtils
+ {
+-  public:
++  typedef mozilla::ScreenIntRect ScreenIntRect;
++public:
+ 
+   // Get the backing scale factor from an object that supports this selector
+   // (NSView/Window/Screen, on 10.7 or later), returning 1.0 if not supported
+   static CGFloat
+   GetBackingScaleFactor(id aObject)
+   {
+     if (HiDPIEnabled() &&
+         [aObject respondsToSelector:@selector(backingScaleFactor)]) {
+@@ -113,16 +116,25 @@ class nsCocoaUtils
+   CocoaPointsToDevPixels(const NSRect& aRect, CGFloat aBackingScale)
+   {
+     return nsIntRect(NSToIntRound(aRect.origin.x * aBackingScale),
+                      NSToIntRound(aRect.origin.y * aBackingScale),
+                      NSToIntRound(aRect.size.width * aBackingScale),
+                      NSToIntRound(aRect.size.height * aBackingScale));
+   }
+ 
++  static ScreenIntRect
++  CocoaPointsToDevPixelsTyped(const NSRect& aRect, CGFloat aBackingScale)
++  {
++    return ScreenIntRect(NSToIntRound(aRect.origin.x * aBackingScale),
++                         NSToIntRound(aRect.origin.y * aBackingScale),
++                         NSToIntRound(aRect.size.width * aBackingScale),
++                         NSToIntRound(aRect.size.height * aBackingScale));
++  }
++
+   static CGFloat
+   DevPixelsToCocoaPoints(int32_t aPixels, CGFloat aBackingScale)
+   {
+     return (CGFloat)aPixels / aBackingScale;
+   }
+ 
+   static NSPoint
+   DevPixelsToCocoaPoints(const nsIntPoint& aPt, CGFloat aBackingScale)
+diff --git a/widget/nsIWidget.h b/widget/nsIWidget.h
+--- a/widget/nsIWidget.h
++++ b/widget/nsIWidget.h
+@@ -17,16 +17,17 @@
+ #include "nsEvent.h"
+ #include "nsCOMPtr.h"
+ #include "nsITheme.h"
+ #include "nsNativeWidget.h"
+ #include "nsWidgetInitData.h"
+ #include "nsTArray.h"
+ #include "nsXULAppAPI.h"
+ #include "mozilla/layers/LayersTypes.h"
++#include "Units.h"
+ 
+ // forward declarations
+ class   nsFontMetrics;
+ class   nsRenderingContext;
+ class   nsDeviceContext;
+ struct  nsFont;
+ class   nsIRollupListener;
+ class   nsGUIEvent;
+@@ -878,21 +879,18 @@ class nsIWidget : public nsISupports {
+      *               window) is already active.
+      */
+     NS_IMETHOD SetFocus(bool aRaise = false) = 0;
+ 
+     /**
+      * Get this widget's outside dimensions relative to its parent widget. For
+      * popup widgets the returned rect is in screen coordinates and not
+      * relative to its parent widget.
+-     *
+-     * @param aRect   On return it holds the  x, y, width and height of
+-     *                this widget.
+      */
+-    NS_IMETHOD GetBounds(nsIntRect &aRect) = 0;
++    virtual mozilla::ScreenIntRect GetBounds() = 0;
+ 
+     /**
+      * Get this widget's outside dimensions in global coordinates. This
+      * includes any title bar on the window.
+      *
+      * @param aRect   On return it holds the  x, y, width and height of
+      *                this widget.
+      */
+diff --git a/widget/windows/nsWindow.cpp b/widget/windows/nsWindow.cpp
+--- a/widget/windows/nsWindow.cpp
++++ b/widget/windows/nsWindow.cpp
+@@ -1779,93 +1779,88 @@ NS_METHOD nsWindow::SetFocus(bool aRaise
+  *
+  * Bound calculations.
+  *
+  **************************************************************/
+ 
+ // Return the window's full dimensions in screen coordinates.
+ // If the window has a parent, converts the origin to an offset
+ // of the parent's screen origin.
+-NS_METHOD nsWindow::GetBounds(nsIntRect &aRect)
+-{
+-  if (mWnd) {
+-    RECT r;
+-    VERIFY(::GetWindowRect(mWnd, &r));
+-
+-    // assign size
+-    aRect.width  = r.right - r.left;
+-    aRect.height = r.bottom - r.top;
+-
+-    // popup window bounds' are in screen coordinates, not relative to parent
+-    // window
+-    if (mWindowType == eWindowType_popup) {
+-      aRect.x = r.left;
+-      aRect.y = r.top;
+-      return NS_OK;
+-    }
+-
+-    // chrome on parent:
+-    //  ___      5,5   (chrome start)
+-    // |  ____   10,10 (client start)
+-    // | |  ____ 20,20 (child start)
+-    // | | |
+-    // 20,20 - 5,5 = 15,15 (??)
+-    // minus GetClientOffset:
+-    // 15,15 - 5,5 = 10,10
+-    //
+-    // no chrome on parent:
+-    //  ______   10,10 (win start)
+-    // |  ____   20,20 (child start)
+-    // | |
+-    // 20,20 - 10,10 = 10,10
+-    //
+-    // walking the chain:
+-    //  ___      5,5   (chrome start)
+-    // |  ___    10,10 (client start)
+-    // | |  ___  20,20 (child start)
+-    // | | |  __ 30,30 (child start)
+-    // | | | |
+-    // 30,30 - 20,20 = 10,10 (offset from second child to first)
+-    // 20,20 - 5,5 = 15,15 + 10,10 = 25,25 (??)
+-    // minus GetClientOffset:
+-    // 25,25 - 5,5 = 20,20 (offset from second child to parent client)
+-
+-    // convert coordinates if parent exists
+-    HWND parent = ::GetParent(mWnd);
+-    if (parent) {
+-      RECT pr;
+-      VERIFY(::GetWindowRect(parent, &pr));
+-      r.left -= pr.left;
+-      r.top  -= pr.top;
+-      // adjust for chrome
+-      nsWindow* pWidget = static_cast<nsWindow*>(GetParent());
+-      if (pWidget && pWidget->IsTopLevelWidget()) {
+-        nsIntPoint clientOffset = pWidget->GetClientOffset();
+-        r.left -= clientOffset.x;
+-        r.top  -= clientOffset.y;
+-      }
+-    }
+-    aRect.x = r.left;
+-    aRect.y = r.top;
+-  } else {
+-    aRect = mBounds;
+-  }
+-  return NS_OK;
++/* virtual */ ScreenIntRect
++nsWindow::GetBounds()
++{
++  if (!mWnd) {
++    return mBounds;
++  }
++
++  RECT r;
++  VERIFY(::GetWindowRect(mWnd, &r));
++
++  ScreenIntSize size(r.right - r.left, r.bottom - r.top);
++
++  // popup window bounds' are in screen coordinates, not relative to parent
++  // window
++  if (mWindowType == eWindowType_popup) {
++    return ScreenIntRect(ScreenIntPoint(r.left, r.top), size);
++  }
++
++  // chrome on parent:
++  //  ___      5,5   (chrome start)
++  // |  ____   10,10 (client start)
++  // | |  ____ 20,20 (child start)
++  // | | |
++  // 20,20 - 5,5 = 15,15 (??)
++  // minus GetClientOffset:
++  // 15,15 - 5,5 = 10,10
++  //
++  // no chrome on parent:
++  //  ______   10,10 (win start)
++  // |  ____   20,20 (child start)
++  // | |
++  // 20,20 - 10,10 = 10,10
++  //
++  // walking the chain:
++  //  ___      5,5   (chrome start)
++  // |  ___    10,10 (client start)
++  // | |  ___  20,20 (child start)
++  // | | |  __ 30,30 (child start)
++  // | | | |
++  // 30,30 - 20,20 = 10,10 (offset from second child to first)
++  // 20,20 - 5,5 = 15,15 + 10,10 = 25,25 (??)
++  // minus GetClientOffset:
++  // 25,25 - 5,5 = 20,20 (offset from second child to parent client)
++
++  // convert coordinates if parent exists
++  HWND parent = ::GetParent(mWnd);
++  if (parent) {
++    RECT pr;
++    VERIFY(::GetWindowRect(parent, &pr));
++    r.left -= pr.left;
++    r.top  -= pr.top;
++    // adjust for chrome
++    nsWindow* pWidget = static_cast<nsWindow*>(GetParent());
++    if (pWidget && pWidget->IsTopLevelWidget()) {
++      nsIntPoint clientOffset = pWidget->GetClientOffset();
++      r.left -= clientOffset.x;
++      r.top  -= clientOffset.y;
++    }
++  }
++  return ScreenIntRect(ScreenIntPoint(r.left, r.top), size);
+ }
+ 
+ // Get this component dimension
+ NS_METHOD nsWindow::GetClientBounds(nsIntRect &aRect)
+ {
+   if (mWnd) {
+     RECT r;
+     VERIFY(::GetClientRect(mWnd, &r));
+ 
+-    nsIntRect bounds;
+-    GetBounds(bounds);
+-    aRect.MoveTo(bounds.TopLeft() + GetClientOffset());
++    ScreenIntRect bounds = GetBounds();
++    nsIntPoint corner(bounds.x, bounds.y);
++    aRect.MoveTo(corner + GetClientOffset());
+     aRect.width  = r.right - r.left;
+     aRect.height = r.bottom - r.top;
+ 
+   } else {
+     aRect.SetRect(0,0,0,0);
+   }
+   return NS_OK;
+ }
+@@ -2555,34 +2550,35 @@ void nsWindow::UpdateOpaqueRegion(const 
+   if (!HasGlass() || GetParent())
+     return;
+ 
+   // If there is no opaque region or hidechrome=true, set margins
+   // to support a full sheet of glass. Comments in MSDN indicate
+   // all values must be set to -1 to get a full sheet of glass.
+   MARGINS margins = { -1, -1, -1, -1 };
+   if (!aOpaqueRegion.IsEmpty()) {
+-    nsIntRect pluginBounds;
++    ScreenIntRect pluginBounds;
+     for (nsIWidget* child = GetFirstChild(); child; child = child->GetNextSibling()) {
+       nsWindowType type;
+       child->GetWindowType(type);
+       if (type == eWindowType_plugin) {
+         // Collect the bounds of all plugins for GetLargestRectangle.
+-        nsIntRect childBounds;
+-        child->GetBounds(childBounds);
++        ScreenIntRect childBounds = child->GetBounds();
+         pluginBounds.UnionRect(pluginBounds, childBounds);
+       }
+     }
+ 
+     nsIntRect clientBounds;
+     GetClientBounds(clientBounds);
+ 
+     // Find the largest rectangle and use that to calculate the inset. Our top
+     // priority is to include the bounds of all plugins.
+-    nsIntRect largest = aOpaqueRegion.GetLargestRectangle(pluginBounds);
++    nsIntRect largest = aOpaqueRegion.GetLargestRectangle(
++      nsIntRect(pluginBounds.x, pluginBounds.y, pluginBounds.width,
++                pluginBounds.height));
+     margins.cxLeftWidth = largest.x;
+     margins.cxRightWidth = clientBounds.width - largest.XMost();
+     margins.cyBottomHeight = clientBounds.height - largest.YMost();
+     if (mCustomNonClient) {
+       // The minimum glass height must be the caption buttons height,
+       // otherwise the buttons are drawn incorrectly.
+       largest.y = std::max<uint32_t>(largest.y,
+                          nsUXThemeData::sCommandButtons[CMDBUTTONIDX_BUTTONBOX].cy);
+diff --git a/widget/windows/winrt/FrameworkView.cpp b/widget/windows/winrt/FrameworkView.cpp
+--- a/widget/windows/winrt/FrameworkView.cpp
++++ b/widget/windows/winrt/FrameworkView.cpp
+@@ -242,24 +242,24 @@ FrameworkView::UpdateLogicalDPI()
+   HRESULT hr = GetActivationFactory(HStringReference(RuntimeClass_Windows_Graphics_Display_DisplayProperties).Get(),
+                                     dispProps.GetAddressOf());
+   AssertHRESULT(hr);
+   FLOAT value;
+   AssertHRESULT(dispProps->get_LogicalDpi(&value));
+   SetDpi(value);
+ }
+ 
+-void
+-FrameworkView::GetBounds(nsIntRect &aRect)
++ScreenIntRect
++FrameworkView::GetBounds()
+ {
+   // May be called by compositor thread
+   if (mShuttingDown) {
+-    return;
++    return ScreenIntRect();
+   }
+-  aRect = mWindowBounds;
++  return mWindowBounds;
+ }
+ 
+ void
+ FrameworkView::UpdateWidgetSizeAndPosition()
+ {
+   if (mShuttingDown)
+     return;
+ 
+diff --git a/widget/windows/winrt/FrameworkView.h b/widget/windows/winrt/FrameworkView.h
+--- a/widget/windows/winrt/FrameworkView.h
++++ b/widget/windows/winrt/FrameworkView.h
+@@ -1,22 +1,24 @@
+ /* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+-#pragma once
++#ifndef FrameworkView_h
++#define FrameworkView_h
+ 
+ #include "nsGUIEvent.h"
+ #include "MetroInput.h"
+ #include "mozilla/TimeStamp.h"
+ #include "MetroWidget.h"
+ #include "gfxWindowsPlatform.h"
+ #include "gfxD2DSurface.h"
+ #include "nsDataHashtable.h"
++#include "Units.h"
+ 
+ #include "mozwrlbase.h"
+ 
+ #include <windows.system.h>
+ #include <Windows.ApplicationModel.core.h>
+ #include <Windows.ApplicationModel.h>
+ #include <Windows.Applicationmodel.Activation.h>
+ #include <Windows.ApplicationModel.search.h>
+@@ -174,17 +176,17 @@ private:
+   EventRegistrationToken mDataTransferRequested;
+   EventRegistrationToken mSearchQuerySubmitted;
+   EventRegistrationToken mPlayToRequested;
+   EventRegistrationToken mSettingsPane;
+   EventRegistrationToken mPrintManager;
+ 
+ private:
+   nsRefPtr<gfxD2DSurface> mD2DWindowSurface;
+-  nsIntRect mWindowBounds; // in device-pixel coordinates
++  ScreenIntRect mWindowBounds;
+   float mDPI;
+   bool mShuttingDown;
+   bool mPainting;
+   nsAutoString mActivationURI;
+   nsAutoString mActivationCommandLine;
+   Microsoft::WRL::ComPtr<IInspectable> mAutomationProvider;
+   //Microsoft::WRL::ComPtr<ID2D1PrintControl> mD2DPrintControl;
+   // Private critical section protects D2D device context for on-screen
+@@ -198,8 +200,10 @@ private:
+   static bool sKeyboardIsVisible;
+   static Rect sKeyboardRect;
+   bool mWinVisible;
+   bool mWinActiveState;
+   ApplicationViewState mViewState;
+ };
+ 
+ } } }
++
++#endif // FrameworkView_h
+diff --git a/widget/windows/winrt/MetroUtils.cpp b/widget/windows/winrt/MetroUtils.cpp
+--- a/widget/windows/winrt/MetroUtils.cpp
++++ b/widget/windows/winrt/MetroUtils.cpp
+@@ -145,24 +145,24 @@ MetroUtils::LogToPhys(FLOAT aValue)
+ 
+ nsIntPoint
+ MetroUtils::LogToPhys(const Point& aPt)
+ {
+   FLOAT factor = LogToPhysFactor();
+   return nsIntPoint(int32_t(NS_round(aPt.X * factor)), int32_t(NS_round(aPt.Y * factor)));
+ }
+ 
+-nsIntRect
++ScreenIntRect
+ MetroUtils::LogToPhys(const Rect& aRect)
+ {
+   FLOAT factor = LogToPhysFactor();
+-  return nsIntRect(int32_t(NS_round(aRect.X * factor)),
+-                   int32_t(NS_round(aRect.Y * factor)),
+-                   int32_t(NS_round(aRect.Width * factor)),
+-                   int32_t(NS_round(aRect.Height * factor)));
++  return ScreenIntRect(int32_t(NS_round(aRect.X * factor)),
++                       int32_t(NS_round(aRect.Y * factor)),
++                       int32_t(NS_round(aRect.Width * factor)),
++                       int32_t(NS_round(aRect.Height * factor)));
+ }
+ 
+ FLOAT
+ MetroUtils::PhysToLog(int32_t aValue)
+ {
+   return FLOAT(aValue) * PhysToLogFactor();
+ }
+ 
+diff --git a/widget/windows/winrt/MetroUtils.h b/widget/windows/winrt/MetroUtils.h
+--- a/widget/windows/winrt/MetroUtils.h
++++ b/widget/windows/winrt/MetroUtils.h
+@@ -1,20 +1,22 @@
+ /* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+-#pragma once
++#ifndef MetroUtils_h
++#define MetroUtils_h
+ 
+ #include "nsDebug.h"
+ #include "nsThreadUtils.h"
+ #include "nsString.h"
+ #include "nsPoint.h"
+ #include "nsRect.h"
++#include "Units.h"
+ 
+ #include "mozwrlbase.h"
+ 
+ #include <stdio.h>
+ #include <windows.foundation.h>
+ #include <windows.ui.viewmanagement.h>
+ 
+ void Log(const char *fmt, ...);
+@@ -79,24 +81,26 @@ class MetroUtils
+   typedef ABI::Windows::Foundation::Rect Rect;
+ 
+ public:
+   // Functions to convert between logical pixels as used by most Windows APIs
+   // and physical (device) pixels.
+   // See MSDN documentation about DIPs (device independent pixels) for details.
+   static int32_t LogToPhys(FLOAT aValue);
+   static nsIntPoint LogToPhys(const Point& aPt);
+-  static nsIntRect LogToPhys(const Rect& aRect);
++  static mozilla::ScreenIntRect LogToPhys(const Rect& aRect);
+   static FLOAT PhysToLog(int32_t aValue);
+   static Point PhysToLog(const nsIntPoint& aPt);
+ 
+   static nsresult FireObserver(const char* aMessage, const PRUnichar* aData = nullptr);
+ 
+   static HRESULT CreateUri(HSTRING aUriStr, Microsoft::WRL::ComPtr<IUriRuntimeClass>& aUriOut);
+   static HRESULT CreateUri(HString& aHString, Microsoft::WRL::ComPtr<IUriRuntimeClass>& aUriOut);
+   static HRESULT GetViewState(ApplicationViewState& aState);
+   static HRESULT TryUnsnap(bool* aResult = nullptr);
+   static HRESULT ShowSettingsFlyout();
+ 
+ private:
+   static nsresult GetBrowserDOMWindow(nsCOMPtr<nsIBrowserDOMWindow> &aBWin);
+   static nsresult GetMostRecentWindow(const PRUnichar* aType, nsIDOMWindow** aWindow);
+ };
++
++#endif // MetroUtils_h
+diff --git a/widget/windows/winrt/MetroWidget.cpp b/widget/windows/winrt/MetroWidget.cpp
+--- a/widget/windows/winrt/MetroWidget.cpp
++++ b/widget/windows/winrt/MetroWidget.cpp
+@@ -1,9 +1,10 @@
+-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "LayerManagerD3D10.h"
+ #include "MetroWidget.h"
+ #include "MetroApp.h"
+ #include "mozilla/Preferences.h"
+@@ -293,49 +294,39 @@ MetroWidget::IsEnabled() const
+ }
+ 
+ NS_IMETHODIMP
+ MetroWidget::Enable(bool bState)
+ {
+   return NS_OK;
+ }
+ 
+-NS_IMETHODIMP
+-MetroWidget::GetBounds(nsIntRect &aRect)
++/* virtual */ ScreenIntRect
++MetroWidget::GetBounds()
+ {
+-  if (mView) {
+-    mView->GetBounds(aRect);
+-  } else {
+-    nsIntRect rect(0,0,0,0);
+-    aRect = rect;
++  if (!mView) {
++    return ScreenIntRect();
+   }
+-  return NS_OK;
++
++  return mView->GetBounds();
+ }
+ 
+ NS_IMETHODIMP
+ MetroWidget::GetScreenBounds(nsIntRect &aRect)
+ {
+-  if (mView) {
+-    mView->GetBounds(aRect);
+-  } else {
+-    nsIntRect rect(0,0,0,0);
+-    aRect = rect;
+-  }
++  ScreenIntRect rect = GetBounds();
++  aRect.SetRect(rect.x, rect.y, rect.width, rect.height);
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ MetroWidget::GetClientBounds(nsIntRect &aRect)
+ {
+-  if (mView) {
+-    mView->GetBounds(aRect);
+-  } else {
+-    nsIntRect rect(0,0,0,0);
+-    aRect = rect;
+-  }
++  ScreenIntRect rect = GetBounds();
++  aRect.SetRect(rect.x, rect.y, rect.width, rect.height);
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ MetroWidget::SetCursor(nsCursor aCursor)
+ {
+   if (!mView)
+     return NS_ERROR_FAILURE;
+diff --git a/widget/windows/winrt/MetroWidget.h b/widget/windows/winrt/MetroWidget.h
+--- a/widget/windows/winrt/MetroWidget.h
++++ b/widget/windows/winrt/MetroWidget.h
+@@ -70,17 +70,17 @@ public:
+                        const nsIntRect &aRect,
+                        nsDeviceContext *aContext,
+                        nsWidgetInitData *aInitData = nullptr);
+   NS_IMETHOD    Destroy();
+   NS_IMETHOD    SetParent(nsIWidget *aNewParent);
+   NS_IMETHOD    Show(bool bState);
+   NS_IMETHOD    IsVisible(bool & aState);
+   NS_IMETHOD    IsEnabled(bool *aState);
+-  NS_IMETHOD    GetBounds(nsIntRect &aRect);
++  virtual mozilla::ScreenIntRect GetBounds() MOZ_OVERRIDE;
+   NS_IMETHOD    GetScreenBounds(nsIntRect &aRect);
+   NS_IMETHOD    GetClientBounds(nsIntRect &aRect);
+   NS_IMETHOD    Invalidate(bool aEraseBackground = false,
+                 bool aUpdateNCArea = false,
+                 bool aIncludeChildren = false);
+   NS_IMETHOD    Invalidate(const nsIntRect & aRect);
+   NS_IMETHOD    DispatchEvent(nsGUIEvent* event, nsEventStatus & aStatus);
+   NS_IMETHOD    ConstrainPosition(bool aAllowSlop, int32_t *aX, int32_t *aY);
+diff --git a/widget/xpwidgets/nsBaseWidget.cpp b/widget/xpwidgets/nsBaseWidget.cpp
+--- a/widget/xpwidgets/nsBaseWidget.cpp
++++ b/widget/xpwidgets/nsBaseWidget.cpp
+@@ -1136,27 +1136,29 @@ NS_METHOD nsBaseWidget::ResizeClient(dou
+ //-------------------------------------------------------------------------
+ 
+ /**
+ * If the implementation of nsWindow supports borders this method MUST be overridden
+ *
+ **/
+ NS_METHOD nsBaseWidget::GetClientBounds(nsIntRect &aRect)
+ {
+-  return GetBounds(aRect);
++  ScreenIntRect rect = GetBounds();
++  aRect.SetRect(rect.x, rect.y, rect.width, rect.height);
++  return NS_OK;
+ }
+ 
+ /**
+ * If the implementation of nsWindow supports borders this method MUST be overridden
+ *
+ **/
+-NS_METHOD nsBaseWidget::GetBounds(nsIntRect &aRect)
++/* virtual */ ScreenIntRect
++nsBaseWidget::GetBounds()
+ {
+-  aRect = mBounds;
+-  return NS_OK;
++  return mBounds;
+ }
+ 
+ /**
+ * If the implementation of nsWindow uses a local coordinate system within the window,
+ * this method must be overridden
+ *
+ **/
+ NS_METHOD nsBaseWidget::GetScreenBounds(nsIntRect &aRect)
+diff --git a/widget/xpwidgets/nsBaseWidget.h b/widget/xpwidgets/nsBaseWidget.h
+--- a/widget/xpwidgets/nsBaseWidget.h
++++ b/widget/xpwidgets/nsBaseWidget.h
+@@ -149,17 +149,17 @@ public:
+   // -setting- them (i.e. moving or resizing the widget) will always return
+   // values in the widget's device pixels.
+   bool                    BoundsUseDisplayPixels() const {
+     return mWindowType <= eWindowType_popup;
+   }
+   NS_IMETHOD              MoveClient(double aX, double aY);
+   NS_IMETHOD              ResizeClient(double aWidth, double aHeight, bool aRepaint);
+   NS_IMETHOD              ResizeClient(double aX, double aY, double aWidth, double aHeight, bool aRepaint);
+-  NS_IMETHOD              GetBounds(nsIntRect &aRect);
++  virtual mozilla::ScreenIntRect GetBounds() MOZ_OVERRIDE;
+   NS_IMETHOD              GetClientBounds(nsIntRect &aRect);
+   NS_IMETHOD              GetScreenBounds(nsIntRect &aRect);
+   NS_IMETHOD              GetNonClientMargins(nsIntMargin &margins);
+   NS_IMETHOD              SetNonClientMargins(nsIntMargin &margins);
+   virtual nsIntPoint      GetClientOffset();
+   NS_IMETHOD              EnableDragDrop(bool aEnable);
+   NS_IMETHOD              GetAttention(int32_t aCycleCount);
+   virtual bool            HasPendingInputEvent();
+@@ -380,17 +380,17 @@ protected:
+   nsCursor          mCursor;
+   nsWindowType      mWindowType;
+   nsBorderStyle     mBorderStyle;
+   bool              mUseLayersAcceleration;
+   bool              mForceLayersAcceleration;
+   bool              mTemporarilyUseBasicLayerManager;
+   bool              mUseAttachedEvents;
+   bool              mContextInitialized;
+-  nsIntRect         mBounds;
++  mozilla::ScreenIntRect mBounds;
+   nsIntRect*        mOriginalBounds;
+   // When this pointer is null, the widget is not clipped
+   nsAutoArrayPtr<nsIntRect> mClipRects;
+   uint32_t          mClipRectCount;
+   int32_t           mZIndex;
+   nsSizeMode        mSizeMode;
+   nsPopupLevel      mPopupLevel;
+   nsPopupType       mPopupType;

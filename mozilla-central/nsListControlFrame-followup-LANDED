@@ -1,0 +1,199 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/layout/forms/nsIListControlFrame.h b/layout/forms/nsIListControlFrame.h
+--- a/layout/forms/nsIListControlFrame.h
++++ b/layout/forms/nsIListControlFrame.h
+@@ -7,16 +7,22 @@
+ #define nsIListControlFrame_h___
+ 
+ #include "nsQueryFrame.h"
+ #include "nsFont.h"
+ 
+ class nsAString;
+ class nsIContent;
+ 
++namespace mozilla {
++namespace dom {
++class HTMLOptionElement;
++} // namespace dom
++} // namespace mozilla
++
+ /** 
+   * nsIListControlFrame is the interface for frame-based listboxes.
+   */
+ class nsIListControlFrame : public nsQueryFrame
+ {
+ public:
+   NS_DECL_QUERYFRAME_TARGET(nsIListControlFrame)
+ 
+@@ -36,17 +42,17 @@ public:
+    *
+    */
+   virtual int32_t GetSelectedIndex() = 0;
+ 
+   /**
+    * Return current option. The current option is the option displaying
+    * the focus ring when the listbox is focused.
+    */
+-  virtual already_AddRefed<nsIContent> GetCurrentOption() = 0;
++  virtual mozilla::dom::HTMLOptionElement* GetCurrentOption() = 0;
+ 
+   /**
+    * Initiates mouse capture for the listbox
+    *
+    */
+   virtual void CaptureMouseEvents(bool aGrabMouseEvents) = 0;
+ 
+   /**
+diff --git a/layout/forms/nsListControlFrame.cpp b/layout/forms/nsListControlFrame.cpp
+--- a/layout/forms/nsListControlFrame.cpp
++++ b/layout/forms/nsListControlFrame.cpp
+@@ -996,29 +996,29 @@ nsListControlFrame::Init(nsIContent*    
+   if (IsInDropDownMode()) {
+     AddStateBits(NS_FRAME_IN_POPUP);
+   }
+ }
+ 
+ dom::HTMLOptionsCollection*
+ nsListControlFrame::GetOptions() const
+ {
+-  if (!mContent || !mContent->IsHTML(nsGkAtoms::select)) {
+-    return nullptr;
+-  }
+-  return static_cast<dom::HTMLSelectElement*>(mContent)->Options();
++  dom::HTMLSelectElement* select =
++    dom::HTMLSelectElement::FromContentOrNull(mContent);
++  NS_ENSURE_TRUE(select, nullptr);
++
++  return select->Options();
+ }
+ 
+ dom::HTMLOptionElement*
+ nsListControlFrame::GetOption(uint32_t aIndex) const
+ {
+   dom::HTMLOptionsCollection* options = GetOptions();
+-  if (!options) {
+-    return nullptr;
+-  }
++  NS_ENSURE_TRUE(options, nullptr);
++
+   return options->ItemAsOption(aIndex);
+ }
+ 
+ bool
+ nsListControlFrame::IsContentSelectedByIndex(int32_t aIndex) const 
+ {
+   dom::HTMLOptionElement* option = GetOption(aIndex);
+   NS_ENSURE_TRUE(option, false);
+@@ -1106,70 +1106,58 @@ nsListControlFrame::GetOptionText(int32_
+   if (optionElement) {
+     optionElement->GetText(aStr);
+   }
+ }
+ 
+ int32_t
+ nsListControlFrame::GetSelectedIndex()
+ {
+-  int32_t aIndex;
+-  
+-  nsCOMPtr<nsIDOMHTMLSelectElement> selectElement(do_QueryInterface(mContent));
+-  selectElement->GetSelectedIndex(&aIndex);
+-  
+-  return aIndex;
++  dom::HTMLSelectElement* select =
++    dom::HTMLSelectElement::FromContentOrNull(mContent);
++  return select->SelectedIndex();
+ }
+ 
+-already_AddRefed<nsIContent>
++dom::HTMLOptionElement*
+ nsListControlFrame::GetCurrentOption()
+ {
+   // The mEndSelectionIndex is what is currently being selected. Use
+   // the selected index if this is kNothingSelected.
+   int32_t focusedIndex = (mEndSelectionIndex == kNothingSelected) ?
+     GetSelectedIndex() : mEndSelectionIndex;
+ 
+   if (focusedIndex != kNothingSelected) {
+-    nsCOMPtr<nsIContent> content = GetOption(focusedIndex);
+-    return content.forget();
++    return GetOption(focusedIndex);
+   }
+ 
+   nsRefPtr<dom::HTMLSelectElement> selectElement =
+     dom::HTMLSelectElement::FromContent(mContent);
+   NS_ASSERTION(selectElement, "Can't be null");
+ 
+   // There is no a selected item return the first non-disabled item and skip all
+   // the option group elements.
+-  nsCOMPtr<nsIDOMNode> node;
+ 
+-  uint32_t length;
+-  selectElement->GetLength(&length);
+-  if (length) {
+-    bool isDisabled = true;
+-    for (uint32_t i = 0; i < length && isDisabled; i++) {
+-      if (NS_FAILED(selectElement->Item(i, getter_AddRefs(node))) || !node) {
+-        break;
+-      }
+-      if (NS_FAILED(selectElement->IsOptionDisabled(i, &isDisabled))) {
+-        break;
+-      }
+-      if (isDisabled) {
+-        node = nullptr;
+-      } else {
+-        break;
+-      }
+-    }
++  uint32_t length = selectElement->Length();
++  if (!length) {
++    return nullptr;
++  }
++
++  for (uint32_t i = 0; i < length; i++) {
++    dom::HTMLOptionElement* node = selectElement->Item(i);
+     if (!node) {
+       return nullptr;
+     }
+-  }
+ 
+-  if (node) {
+-    nsCOMPtr<nsIContent> focusedOption = do_QueryInterface(node);
+-    return focusedOption.forget();
++    bool isDisabled = true;
++    if (NS_FAILED(selectElement->IsOptionDisabled(i, &isDisabled))) {
++      return node;
++    }
++    if (!isDisabled) {
++      return node;
++    }
+   }
+   return nullptr;
+ }
+ 
+ bool 
+ nsListControlFrame::IsInDropDownMode() const
+ {
+   return (mComboboxFrame != nullptr);
+diff --git a/layout/forms/nsListControlFrame.h b/layout/forms/nsListControlFrame.h
+--- a/layout/forms/nsListControlFrame.h
++++ b/layout/forms/nsListControlFrame.h
+@@ -110,17 +110,17 @@ public:
+     // for accessibility purposes
+ #ifdef ACCESSIBILITY
+   virtual mozilla::a11y::AccType AccessibleType() MOZ_OVERRIDE;
+ #endif
+ 
+     // nsIListControlFrame
+   virtual void SetComboboxFrame(nsIFrame* aComboboxFrame) MOZ_OVERRIDE;
+   virtual int32_t GetSelectedIndex() MOZ_OVERRIDE;
+-  virtual already_AddRefed<nsIContent> GetCurrentOption() MOZ_OVERRIDE;
++  virtual mozilla::dom::HTMLOptionElement* GetCurrentOption() MOZ_OVERRIDE;
+ 
+   /**
+    * Gets the text of the currently selected item.
+    * If the there are zero items then an empty string is returned
+    * If there is nothing selected, then the 0th item's text is returned.
+    */
+   virtual void GetOptionText(int32_t aIndex, nsAString & aStr) MOZ_OVERRIDE;
+ 

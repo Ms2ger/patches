@@ -1,0 +1,333 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 890833 - Cleanup nsEditor::MoveNode; r=ehsan
+
+diff --git a/editor/libeditor/base/nsEditor.cpp b/editor/libeditor/base/nsEditor.cpp
+--- a/editor/libeditor/base/nsEditor.cpp
++++ b/editor/libeditor/base/nsEditor.cpp
+@@ -1729,62 +1729,67 @@ nsEditor::InsertContainerAbove(nsIConten
+   res = InsertNode(newContent->AsDOMNode(), parent->AsDOMNode(), offset);
+   newContent.forget(aOutNode);
+   return res;  
+ }
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // MoveNode:  move aNode to {aParent,aOffset}
+ nsresult
+-nsEditor::MoveNode(nsIContent* aNode, nsINode* aParent, int32_t aOffset)
+-{
+-  MOZ_ASSERT(aNode && aParent);
+-  MOZ_ASSERT(aOffset == -1 || (0 <= aOffset &&
+-                               aOffset <= (int32_t)aParent->Length()));
+-  nsresult res = MoveNode(aNode->AsDOMNode(), aParent->AsDOMNode(), aOffset);
+-  NS_ASSERTION(NS_SUCCEEDED(res), "MoveNode failed");
+-  NS_ENSURE_SUCCESS(res, res);
+-  return NS_OK;
++nsEditor::MoveNode(nsIDOMNode* aNode, nsIDOMNode* aParent, int32_t aOffset)
++{
++  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
++  NS_ENSURE_STATE(node);
++
++  nsCOMPtr<nsINode> parent = do_QueryInterface(aParent);
++  NS_ENSURE_STATE(parent);
++
++  return MoveNode(node, parent, aOffset);
+ }
+ 
+ nsresult
+-nsEditor::MoveNode(nsIDOMNode *aNode, nsIDOMNode *aParent, int32_t aOffset)
+-{
+-  NS_ENSURE_TRUE(aNode && aParent, NS_ERROR_NULL_POINTER);
+-  nsresult res;
++nsEditor::MoveNode(nsINode* aNode, nsINode* aParent, int32_t aOffset)
++{
++  MOZ_ASSERT(aNode);
++  MOZ_ASSERT(aParent);
++  MOZ_ASSERT(aOffset == -1 ||
++             (0 <= aOffset && SafeCast<uint32_t>(aOffset) <= aParent->Length()));
+ 
+   int32_t oldOffset;
+-  nsCOMPtr<nsIDOMNode> oldParent = GetNodeLocation(aNode, &oldOffset);
++  nsCOMPtr<nsINode> oldParent = GetNodeLocation(aNode, &oldOffset);
+   
+-  if (aOffset == -1)
+-  {
+-    uint32_t unsignedOffset;
+-    // magic value meaning "move to end of aParent"
+-    res = GetLengthOfDOMNode(aParent, unsignedOffset);
+-    NS_ENSURE_SUCCESS(res, res);
+-    aOffset = (int32_t)unsignedOffset;
++  if (aOffset == -1) {
++    // Magic value meaning "move to end of aParent".
++    aOffset = SafeCast<int32_t>(aParent->Length());
+   }
+   
+-  // don't do anything if it's already in right place
+-  if ((aParent == oldParent.get()) && (oldOffset == aOffset)) return NS_OK;
++  // Don't do anything if it's already in right place.
++  if (aParent == oldParent && aOffset == oldOffset) {
++    return NS_OK;
++  }
+   
+-  // notify our internal selection state listener
+-  nsAutoMoveNodeSelNotify selNotify(mRangeUpdater, oldParent, oldOffset, aParent, aOffset);
++  // Notify our internal selection state listener.
++  nsAutoMoveNodeSelNotify selNotify(mRangeUpdater, oldParent, oldOffset,
++                                    aParent, aOffset);
+   
+-  // need to adjust aOffset if we are moving aNode further along in its current parent
+-  if ((aParent == oldParent.get()) && (oldOffset < aOffset)) 
+-  {
+-    aOffset--;  // this is because when we delete aNode, it will make the offsets after it off by one
++  // Need to adjust aOffset if we are moving aNode further along in its current
++  // parent.
++  if (aParent == oldParent && oldOffset < aOffset) {
++    // This is because when we delete aNode, it will make the offsets after it
++    // off by one.
++    aOffset--;
+   }
+ 
+-  // Hold a reference so aNode doesn't go away when we remove it (bug 772282)
+-  nsCOMPtr<nsIDOMNode> node = aNode;
+-  res = DeleteNode(node);
+-  NS_ENSURE_SUCCESS(res, res);
+-  return InsertNode(node, aParent, aOffset);
++  // Hold a reference so aNode doesn't go away when we remove it (bug 772282).
++  nsCOMPtr<nsINode> kungFuDeathGrip = aNode;
++
++  nsresult rv = DeleteNode(aNode);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  return InsertNode(aNode->AsDOMNode(), aParent->AsDOMNode(), aOffset);
+ }
+ 
+ 
+ NS_IMETHODIMP
+ nsEditor::AddEditorObserver(nsIEditorObserver *aObserver)
+ {
+   // we don't keep ownership of the observers.  They must
+   // remove themselves as observers before they are destroyed.
+@@ -3068,16 +3073,32 @@ nsEditor::GetNodeLocation(nsIDOMNode* aC
+     aChild->GetParentNode(getter_AddRefs(parent))));
+   if (parent) {
+     *outOffset = GetChildOffset(aChild, parent);
+   }
+ 
+   return parent.forget();
+ }
+ 
++nsINode*
++nsEditor::GetNodeLocation(nsINode* aChild, int32_t* aOffset)
++{
++  MOZ_ASSERT(aChild);
++  MOZ_ASSERT(aOffset);
++
++  nsINode* parent = aChild->GetParentNode();
++  if (parent) {
++    *aOffset = parent->IndexOf(aChild);
++    MOZ_ASSERT(*aOffset != -1);
++  } else {
++    *aOffset = -1;
++  }
++  return parent;
++}
++
+ // returns the number of things inside aNode.  
+ // If aNode is text, returns number of characters. If not, returns number of children nodes.
+ nsresult
+ nsEditor::GetLengthOfDOMNode(nsIDOMNode *aNode, uint32_t &aCount) 
+ {
+   aCount = 0;
+   nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
+   NS_ENSURE_TRUE(node, NS_ERROR_NULL_POINTER);
+diff --git a/editor/libeditor/base/nsEditor.h b/editor/libeditor/base/nsEditor.h
+--- a/editor/libeditor/base/nsEditor.h
++++ b/editor/libeditor/base/nsEditor.h
+@@ -225,17 +225,17 @@ public:
+                                 const nsAString* aAttribute = nullptr,
+                                 const nsAString* aValue = nullptr);
+   nsresult InsertContainerAbove(nsIDOMNode *inNode, 
+                                 nsCOMPtr<nsIDOMNode> *outNode, 
+                                 const nsAString &aNodeType,
+                                 const nsAString *aAttribute = nullptr,
+                                 const nsAString *aValue = nullptr);
+   nsresult JoinNodes(nsINode* aNodeToKeep, nsIContent* aNodeToMove);
+-  nsresult MoveNode(nsIContent* aNode, nsINode* aParent, int32_t aOffset);
++  nsresult MoveNode(nsINode* aNode, nsINode* aParent, int32_t aOffset);
+   nsresult MoveNode(nsIDOMNode *aNode, nsIDOMNode *aParent, int32_t aOffset);
+ 
+   /* Method to replace certain CreateElementNS() calls. 
+      Arguments:
+       nsString& aTag          - tag you want
+       nsIContent** aContent   - returned Content that was created with above namespace.
+   */
+   nsresult CreateHTMLContent(const nsAString& aTag,
+@@ -466,16 +466,17 @@ public:
+                                 nsIDOMNode *aParent);
+ 
+   /**
+    *  Set outOffset to the offset of aChild in the parent.
+    *  Returns the parent of aChild.
+    */
+   static already_AddRefed<nsIDOMNode> GetNodeLocation(nsIDOMNode* aChild,
+                                                       int32_t* outOffset);
++  static nsINode* GetNodeLocation(nsINode* aChild, int32_t* aOffset);
+ 
+   /** returns the number of things inside aNode in the out-param aCount.  
+     * @param  aNode is the node to get the length of.  
+     *         If aNode is text, returns number of characters. 
+     *         If not, returns number of children nodes.
+     * @param  aCount [OUT] the result of the above calculation.
+     */
+   static nsresult GetLengthOfDOMNode(nsIDOMNode *aNode, uint32_t &aCount);
+diff --git a/editor/libeditor/base/nsSelectionState.cpp b/editor/libeditor/base/nsSelectionState.cpp
+--- a/editor/libeditor/base/nsSelectionState.cpp
++++ b/editor/libeditor/base/nsSelectionState.cpp
+@@ -587,57 +587,55 @@ nsresult
+ nsRangeUpdater::DidInsertContainer()
+ {
+   NS_ENSURE_TRUE(mLock, NS_ERROR_UNEXPECTED);  
+   mLock = false;
+   return NS_OK;
+ }
+ 
+ 
+-nsresult
++void
+ nsRangeUpdater::WillMoveNode()
+ {
+-  if (mLock) return NS_ERROR_UNEXPECTED;  
+   mLock = true;
+-  return NS_OK;
+ }
+ 
+ 
+-nsresult
+-nsRangeUpdater::DidMoveNode(nsIDOMNode *aOldParent, int32_t aOldOffset, nsIDOMNode *aNewParent, int32_t aNewOffset)
++void
++nsRangeUpdater::DidMoveNode(nsINode* aOldParent, int32_t aOldOffset,
++                            nsINode* aNewParent, int32_t aNewOffset)
+ {
+-  NS_ENSURE_TRUE(mLock, NS_ERROR_UNEXPECTED);  
++  MOZ_ASSERT(aOldParent);
++  MOZ_ASSERT(aNewParent);
++  NS_ENSURE_TRUE_VOID(mLock);
+   mLock = false;
+ 
+-  NS_ENSURE_TRUE(aOldParent && aNewParent, NS_ERROR_NULL_POINTER);
+-  uint32_t i, count = mArray.Length();
+-  if (!count) {
+-    return NS_OK;
+-  }
++  nsIDOMNode* oldParent = aOldParent->AsDOMNode();
++  nsIDOMNode* newParent = aNewParent->AsDOMNode();
+ 
+-  nsRangeStore *item;
+-  
+-  for (i=0; i<count; i++)
+-  {
+-    item = mArray[i];
+-    NS_ENSURE_TRUE(item, NS_ERROR_NULL_POINTER);
++  for (uint32_t i = 0, count = mArray.Length(); i < count; ++i) {
++    nsRangeStore* item = mArray[i];
++    NS_ENSURE_TRUE_VOID(item);
+     
+     // like a delete in aOldParent
+-    if ((item->startNode.get() == aOldParent) && (item->startOffset > aOldOffset))
++    if (item->startNode == oldParent && item->startOffset > aOldOffset) {
+       item->startOffset--;
+-    if ((item->endNode.get() == aOldParent) && (item->endOffset > aOldOffset))
++    }
++    if (item->endNode == oldParent && item->endOffset > aOldOffset) {
+       item->endOffset--;
++    }
+       
+     // and like an insert in aNewParent
+-    if ((item->startNode.get() == aNewParent) && (item->startOffset > aNewOffset))
++    if (item->startNode == newParent && item->startOffset > aNewOffset) {
+       item->startOffset++;
+-    if ((item->endNode.get() == aNewParent) && (item->endOffset > aNewOffset))
++    }
++    if (item->endNode == newParent && item->endOffset > aNewOffset) {
+       item->endOffset++;
++    }
+   }
+-  return NS_OK;
+ }
+ 
+ 
+ 
+ /***************************************************************************
+  * helper class for nsSelectionState.  nsRangeStore stores range endpoints.
+  */
+ 
+diff --git a/editor/libeditor/base/nsSelectionState.h b/editor/libeditor/base/nsSelectionState.h
+--- a/editor/libeditor/base/nsSelectionState.h
++++ b/editor/libeditor/base/nsSelectionState.h
+@@ -97,18 +97,19 @@ class nsRangeUpdater
+     // the following gravity routines need will/did sandwiches, because the other gravity
+     // routines will be called inside of these sandwiches, but should be ignored.
+     nsresult WillReplaceContainer();
+     nsresult DidReplaceContainer(nsIDOMNode *aOriginalNode, nsIDOMNode *aNewNode);
+     nsresult WillRemoveContainer();
+     nsresult DidRemoveContainer(nsIDOMNode *aNode, nsIDOMNode *aParent, int32_t aOffset, uint32_t aNodeOrigLen);
+     nsresult WillInsertContainer();
+     nsresult DidInsertContainer();
+-    nsresult WillMoveNode();
+-    nsresult DidMoveNode(nsIDOMNode *aOldParent, int32_t aOldOffset, nsIDOMNode *aNewParent, int32_t aNewOffset);
++    void WillMoveNode();
++    void DidMoveNode(nsINode* aOldParent, int32_t aOldOffset,
++                     nsINode* aNewParent, int32_t aNewOffset);
+   protected:    
+     nsTArray<nsRefPtr<nsRangeStore> > mArray;
+     bool mLock;
+ };
+ 
+ 
+ /***************************************************************************
+  * helper class for using nsSelectionState.  stack based class for doing
+@@ -237,33 +238,35 @@ class MOZ_STACK_CLASS nsAutoInsertContai
+  * another helper class for nsSelectionState.  stack based class for doing
+  * Will/DidMoveNode()
+  */
+ 
+ class MOZ_STACK_CLASS nsAutoMoveNodeSelNotify
+ {
+   private:
+     nsRangeUpdater &mRU;
+-    nsIDOMNode *mOldParent;
+-    nsIDOMNode *mNewParent;
++    nsINode* mOldParent;
++    nsINode* mNewParent;
+     int32_t    mOldOffset;
+     int32_t    mNewOffset;
+ 
+   public:
+     nsAutoMoveNodeSelNotify(nsRangeUpdater &aRangeUpdater, 
+-                            nsIDOMNode *aOldParent, 
++                            nsINode* aOldParent,
+                             int32_t aOldOffset, 
+-                            nsIDOMNode *aNewParent, 
+-                            int32_t aNewOffset) :
+-    mRU(aRangeUpdater)
+-    ,mOldParent(aOldParent)
+-    ,mNewParent(aNewParent)
+-    ,mOldOffset(aOldOffset)
+-    ,mNewOffset(aNewOffset)
++                            nsINode* aNewParent,
++                            int32_t aNewOffset)
++      : mRU(aRangeUpdater)
++      , mOldParent(aOldParent)
++      , mNewParent(aNewParent)
++      , mOldOffset(aOldOffset)
++      , mNewOffset(aNewOffset)
+     {
++      MOZ_ASSERT(aOldParent);
++      MOZ_ASSERT(aNewParent);
+       mRU.WillMoveNode();
+     }
+     
+     ~nsAutoMoveNodeSelNotify()
+     {
+       mRU.DidMoveNode(mOldParent, mOldOffset, mNewParent, mNewOffset);
+     }
+ };

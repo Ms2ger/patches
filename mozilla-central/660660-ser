@@ -1,0 +1,41 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 660660, part d - Pay attention to Text.mozSerializeAsCDATA when serializing; r=?sicking
+
+diff --git a/content/base/src/nsDocumentEncoder.cpp b/content/base/src/nsDocumentEncoder.cpp
+--- a/content/base/src/nsDocumentEncoder.cpp
++++ b/content/base/src/nsDocumentEncoder.cpp
+@@ -375,24 +375,26 @@ nsDocumentEncoder::SerializeNodeStart(ns
+     mSerializer->AppendElementStart(node->AsElement(),
+                                     originalElement, aStr);
+     return NS_OK;
+   }
+ 
+   switch (node->NodeType()) {
+     case nsIDOMNode::TEXT_NODE:
+     {
+-      mSerializer->AppendText(static_cast<nsIContent*>(node),
+-                              aStartOffset, aEndOffset, aStr);
+-      break;
+-    }
+-    case nsIDOMNode::CDATA_SECTION_NODE:
+-    {
+-      mSerializer->AppendCDATASection(static_cast<nsIContent*>(node),
+-                                      aStartOffset, aEndOffset, aStr);
++      nsCOMPtr<nsIDOMText> text = do_QueryInterface(node);
++      bool isCDATA;
++      text->GetMozSerializeAsCDATA(&isCDATA);
++      if (isCDATA) {
++        mSerializer->AppendCDATASection(static_cast<nsIContent*>(node),
++                                        aStartOffset, aEndOffset, aStr);
++      } else {
++        mSerializer->AppendText(static_cast<nsIContent*>(node),
++                                aStartOffset, aEndOffset, aStr);
++      }
+       break;
+     }
+     case nsIDOMNode::PROCESSING_INSTRUCTION_NODE:
+     {
+       mSerializer->AppendProcessingInstruction(static_cast<nsIContent*>(node),
+                                                aStartOffset, aEndOffset, aStr);
+       break;
+     }

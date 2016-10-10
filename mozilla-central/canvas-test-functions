@@ -1,0 +1,180 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 665345 - Move test functions into a separate JS file
+
+This will allow us to reuse the code in standalone tests.
+
+diff --git a/content/canvas/test/Makefile.in b/content/canvas/test/Makefile.in
+--- a/content/canvas/test/Makefile.in
++++ b/content/canvas/test/Makefile.in
+@@ -6,16 +6,17 @@
+ DEPTH		= @DEPTH@
+ topsrcdir	= @top_srcdir@
+ srcdir		= @srcdir@
+ VPATH		= @srcdir@
+ relativesrcdir  = @relativesrcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ MOCHITEST_FILES = \
++	canvas-tests.js \
+ 	test_canvas.html \
+ 	test_isPointInStroke.html \
+ 	image_transparent50.png \
+ 	image_redtransparent.png \
+ 	image_yellow.png \
+ 	image_anim-poster-gr.png \
+ 	image_green-16x16.png \
+ 	image_red-16x16.png \
+diff --git a/content/canvas/test/canvas-tests.js b/content/canvas/test/canvas-tests.js
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/canvas-tests.js
+@@ -0,0 +1,60 @@
++function isPixel(ctx, x,y, r,g,b,a, posOrDArg, colourArg, dArg) {
++    var pos, colour, d;
++    if (arguments.length === 10) {
++        pos = posOrDArg;
++        colour = colourArg;
++        d = dArg;
++    } else if (arguments.length === 8) {
++        pos = String([x, y]);
++        colour = String([r, g, b, a]);
++        d = posOrDArg;
++    } else {
++        throw new Error("Unexpected number of arguments to isPixel!");
++    }
++    var pixel = ctx.getImageData(x, y, 1, 1);
++    var pr = pixel.data[0],
++        pg = pixel.data[1],
++        pb = pixel.data[2],
++        pa = pixel.data[3];
++    ok(r-d <= pr && pr <= r+d &&
++       g-d <= pg && pg <= g+d &&
++       b-d <= pb && pb <= b+d &&
++       a-d <= pa && pa <= a+d,
++       "pixel "+pos+" of "+ctx.canvas.id+" is "+pr+","+pg+","+pb+","+pa+"; expected "+colour+" +/- "+d);
++}
++
++function todo_isPixel(ctx, x,y, r,g,b,a, posOrDArg, colourArg, dArg) {
++    var pos, colour, d;
++    if (arguments.length === 10) {
++        pos = posOrDArg;
++        colour = colourArg;
++        d = dArg;
++    } else if (arguments.length === 8) {
++        pos = String([x, y]);
++        colour = String([r, g, b, a]);
++        d = posOrDArg;
++    } else {
++        throw new Error("Unexpected number of arguments to todo_isPixel!");
++    }
++    var pixel = ctx.getImageData(x, y, 1, 1);
++    var pr = pixel.data[0],
++        pg = pixel.data[1],
++        pb = pixel.data[2],
++        pa = pixel.data[3];
++    todo(r-d <= pr && pr <= r+d &&
++         g-d <= pg && pg <= g+d &&
++         b-d <= pb && pb <= b+d &&
++         a-d <= pa && pa <= a+d,
++         "pixel "+pos+" is "+pr+","+pg+","+pb+","+pa+"; expected "+colour+" +/- "+d);
++}
++
++function deferTest() {
++    _deferred = true;
++}
++
++function wrapFunction(f) {
++    return function () {
++        f.apply(null, arguments);
++        SimpleTest.finish();
++    }
++}
+diff --git a/content/canvas/test/test_canvas.html b/content/canvas/test/test_canvas.html
+--- a/content/canvas/test/test_canvas.html
++++ b/content/canvas/test/test_canvas.html
+@@ -1,10 +1,11 @@
+ <!DOCTYPE html><title>Canvas Tests</title>
+ <script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
+ <link href="/tests/SimpleTest/test.css" rel="stylesheet">
+ <body>
+ <script>
+ 
+ SimpleTest.waitForExplicitFinish();
+ 
+ function IsD2DEnabled() {
+   return SpecialPowers.isD2DEnabled;
+@@ -18,46 +19,16 @@ function IsLinux() {
+ function IsAzureSkia() {
+   return SpecialPowers.isAzureSkia;
+ }
+ 
+ function IsAzureCairo() {
+   return SpecialPowers.isAzureCairo;
+ }
+ 
+-function isPixel(ctx, x,y, r,g,b,a, d) {
+-  var pos = x + "," + y;
+-  var colour = r + "," + g + "," + b + "," + a;
+-  var pixel = ctx.getImageData(x, y, 1, 1);
+-  var pr = pixel.data[0],
+-      pg = pixel.data[1],
+-      pb = pixel.data[2],
+-      pa = pixel.data[3];
+-  ok(r-d <= pr && pr <= r+d &&
+-     g-d <= pg && pg <= g+d &&
+-     b-d <= pb && pb <= b+d &&
+-     a-d <= pa && pa <= a+d,
+-     "pixel "+pos+" of "+ctx.canvas.id+" is "+pr+","+pg+","+pb+","+pa+"; expected "+colour+" +/- "+d);
+-}
+-
+-function todo_isPixel(ctx, x,y, r,g,b,a, d) {
+-  var pos = x + "," + y;
+-  var colour = r + "," + g + "," + b + "," + a;
+-  var pixel = ctx.getImageData(x, y, 1, 1);
+-  var pr = pixel.data[0],
+-      pg = pixel.data[1],
+-      pb = pixel.data[2],
+-      pa = pixel.data[3];
+-  todo(r-d <= pr && pr <= r+d &&
+-     g-d <= pg && pg <= g+d &&
+-     b-d <= pb && pb <= b+d &&
+-     a-d <= pa && pa <= a+d,
+-     "pixel "+pos+" is "+pr+","+pg+","+pb+","+pa+"; expected "+colour+" +/- "+d);
+-}
+-
+ </script>
+ <!-- Includes all the tests in the content/canvas/tests except for test_bug397524.html -->
+ 
+ <!-- [[[ test_2d.canvas.readonly.html ]]] -->
+ 
+ <p>Canvas test: 2d.canvas.readonly</p>
+ <!-- Testing: CanvasRenderingContext2D.canvas is readonly -->
+ <canvas height="50" id="c1" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+@@ -2670,26 +2641,16 @@ isPixel(ctx, 50,25, 0,255,0,255, 2);
+ 
+ <!-- [[[ test_2d.drawImage.animated.apng.html ]]] -->
+ 
+ <p>Canvas test: 2d.drawImage.animated.apng</p>
+ <!-- Testing: drawImage() of an APNG with no poster frame draws the first frame -->
+ <canvas height="50" id="c108" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+ <script>
+ 
+-
+-function deferTest() {
+-    _deferred = true;
+-}
+-function wrapFunction(f) {
+-    return function () {
+-        f.apply(null, arguments);
+-    };
+-}
+-
+ var canvas108 = document.getElementById('c108');
+ var ctx108 = canvas108.getContext('2d');
+ var isDone_test_2d_drawImage_animated_apng = false;
+ 
+ function test_2d_drawImage_animated_apng() {
+ 
+ deferTest();
+ setTimeout(wrapFunction(function () {

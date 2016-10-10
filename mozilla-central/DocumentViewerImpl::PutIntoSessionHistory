@@ -1,0 +1,182 @@
+diff --git a/layout/base/nsDocumentViewer.cpp b/layout/base/nsDocumentViewer.cpp
+--- a/layout/base/nsDocumentViewer.cpp
++++ b/layout/base/nsDocumentViewer.cpp
+@@ -409,6 +409,11 @@
+                                    bool                 aStartAtTop);
+ #endif // NS_PRINTING
+ 
++  /**
++   * Helper method for Destroy(). Puts ourselves into session history.
++   */
++  void PutIntoSessionHistory();
++
+ protected:
+   // These return the current shell/prescontext etc.
+   nsIPresShell* GetPresShell();
+@@ -1475,6 +1480,84 @@
+   }
+ }
+ 
++void
++DocumentViewerImpl::PutIntoSessionHistory()
++{
++  if (mPresShell)
++    mPresShell->Freeze();
++
++  // Make sure the presentation isn't torn down by Hide().
++  mSHEntry->SetSticky(mIsSticky);
++  mIsSticky = true;
++
++  bool savePresentation = true;
++
++  // Remove our root view from the view hierarchy.
++  if (mPresShell) {
++    nsIViewManager *vm = mPresShell->GetViewManager();
++    if (vm) {
++      nsIView *rootView = nullptr;
++      vm->GetRootView(rootView);
++
++      if (rootView) {
++        nsIView *rootViewParent = rootView->GetParent();
++        if (rootViewParent) {
++          nsIViewManager *parentVM = rootViewParent->GetViewManager();
++          if (parentVM) {
++            parentVM->RemoveChild(rootView);
++          }
++        }
++      }
++    }
++  }
++
++  Hide();
++
++  // This is after Hide() so that the user doesn't see the inputs clear.
++  if (mDocument) {
++    nsresult rv = mDocument->Sanitize();
++    if (NS_FAILED(rv)) {
++      // If we failed to sanitize, don't save presentation.
++      savePresentation = false;
++    }
++  }
++
++
++  // Reverse ownership. Do this *after* calling sanitize so that sanitize
++  // doesn't cause mutations that make the SHEntry drop the presentation
++  if (savePresentation) {
++    mSHEntry->SetContentViewer(this);
++  }
++  else {
++    mSHEntry->SyncPresentationState();
++  }
++  nsCOMPtr<nsISHEntry> shEntry = mSHEntry; // we'll need this below
++  mSHEntry = nullptr;
++
++  // Break the link from the document/presentation to the docshell, so that
++  // link traversals cannot affect the currently-loaded document.
++  // When the presentation is restored, Open() and InitInternal() will reset
++  // these pointers to their original values.
++
++  if (mDocument)
++    mDocument->SetContainer(nullptr);
++  if (mPresContext) {
++    mPresContext->SetLinkHandler(nullptr);
++    mPresContext->SetContainer(nullptr);
++  }
++  if (mPresShell)
++    mPresShell->SetForwardingContainer(mContainer);
++
++  // Do the same for our children.  Note that we need to get the child
++  // docshells from the SHEntry now; the docshell will have cleared them.
++  nsCOMPtr<nsIDocShellTreeItem> item;
++  int32_t itemIndex = 0;
++  while (NS_SUCCEEDED(shEntry->ChildShellAt(itemIndex++,
++                                            getter_AddRefs(item))) && item) {
++    DetachContainerRecurse(nsCOMPtr<nsIDocShell>(do_QueryInterface(item)));
++  }
++}
++
+ NS_IMETHODIMP
+ DocumentViewerImpl::Destroy()
+ {
+@@ -1507,80 +1590,7 @@
+   // If we were told to put ourselves into session history instead of destroy
+   // the presentation, do that now.
+   if (mSHEntry) {
+-    if (mPresShell)
+-      mPresShell->Freeze();
+-
+-    // Make sure the presentation isn't torn down by Hide().
+-    mSHEntry->SetSticky(mIsSticky);
+-    mIsSticky = true;
+-
+-    bool savePresentation = true;
+-
+-    // Remove our root view from the view hierarchy.
+-    if (mPresShell) {
+-      nsIViewManager *vm = mPresShell->GetViewManager();
+-      if (vm) {
+-        nsIView *rootView = nullptr;
+-        vm->GetRootView(rootView);
+-
+-        if (rootView) {
+-          nsIView *rootViewParent = rootView->GetParent();
+-          if (rootViewParent) {
+-            nsIViewManager *parentVM = rootViewParent->GetViewManager();
+-            if (parentVM) {
+-              parentVM->RemoveChild(rootView);
+-            }
+-          }
+-        }
+-      }
+-    }
+-
+-    Hide();
+-
+-    // This is after Hide() so that the user doesn't see the inputs clear.
+-    if (mDocument) {
+-      nsresult rv = mDocument->Sanitize();
+-      if (NS_FAILED(rv)) {
+-        // If we failed to sanitize, don't save presentation.
+-        savePresentation = false;
+-      }
+-    }
+-
+-
+-    // Reverse ownership. Do this *after* calling sanitize so that sanitize
+-    // doesn't cause mutations that make the SHEntry drop the presentation
+-    if (savePresentation) {
+-      mSHEntry->SetContentViewer(this);
+-    }
+-    else {
+-      mSHEntry->SyncPresentationState();
+-    }
+-    nsCOMPtr<nsISHEntry> shEntry = mSHEntry; // we'll need this below
+-    mSHEntry = nullptr;
+-
+-    // Break the link from the document/presentation to the docshell, so that
+-    // link traversals cannot affect the currently-loaded document.
+-    // When the presentation is restored, Open() and InitInternal() will reset
+-    // these pointers to their original values.
+-
+-    if (mDocument)
+-      mDocument->SetContainer(nullptr);
+-    if (mPresContext) {
+-      mPresContext->SetLinkHandler(nullptr);
+-      mPresContext->SetContainer(nullptr);
+-    }
+-    if (mPresShell)
+-      mPresShell->SetForwardingContainer(mContainer);
+-
+-    // Do the same for our children.  Note that we need to get the child
+-    // docshells from the SHEntry now; the docshell will have cleared them.
+-    nsCOMPtr<nsIDocShellTreeItem> item;
+-    int32_t itemIndex = 0;
+-    while (NS_SUCCEEDED(shEntry->ChildShellAt(itemIndex++,
+-                                              getter_AddRefs(item))) && item) {
+-      DetachContainerRecurse(nsCOMPtr<nsIDocShell>(do_QueryInterface(item)));
+-    }
+-
++    PutIntoSessionHistory();
+     return NS_OK;
+   }
+ 

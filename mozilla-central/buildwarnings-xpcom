@@ -1,0 +1,204 @@
+* * *
+
+diff --git a/xpcom/components/nsComponentManager.cpp b/xpcom/components/nsComponentManager.cpp
+--- a/xpcom/components/nsComponentManager.cpp
++++ b/xpcom/components/nsComponentManager.cpp
+@@ -659,19 +659,17 @@ nsComponentManagerImpl::ManifestComponen
+ 
+         LogMessageWithContext(cx.mFile, lineno,
+                               "Trying to re-register CID '%s' already registered by %s.",
+                               idstr,
+                               existing.get());
+         return;
+     }
+ 
+-    KnownModule* km;
+-
+-    km = mKnownModules.Get(hash);
++    KnownModule* km = mKnownModules.Get(hash);
+     if (!km) {
+         km = new KnownModule(fl);
+         mKnownModules.Put(hash, km);
+     }
+ 
+     void* place;
+ 
+     PL_ARENA_ALLOCATE(place, &mArena, sizeof(nsCID));
+diff --git a/xpcom/ds/Makefile.in b/xpcom/ds/Makefile.in
+--- a/xpcom/ds/Makefile.in
++++ b/xpcom/ds/Makefile.in
+@@ -5,16 +5,17 @@
+ 
+ DEPTH		= @DEPTH@
+ topsrcdir	= @top_srcdir@
+ srcdir		= @srcdir@
+ VPATH		= @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
++FAIL_ON_WARNINGS := 1
+ MSVC_ENABLE_PGO := 1
+ LIBXUL_LIBRARY	= 1
+ MOZILLA_INTERNAL_API = 1
+ 
+ EXTRA_COMPONENTS = \
+   nsINIProcessor.js \
+   nsINIProcessor.manifest \
+   $(NULL)
+diff --git a/xpcom/ds/nsArray.cpp b/xpcom/ds/nsArray.cpp
+--- a/xpcom/ds/nsArray.cpp
++++ b/xpcom/ds/nsArray.cpp
+@@ -98,17 +98,17 @@ nsArray::Enumerate(nsISimpleEnumerator *
+     return NS_NewArrayEnumerator(aResult, static_cast<nsIArray*>(this));
+ }
+ 
+ // nsIMutableArray implementation
+ 
+ NS_IMETHODIMP
+ nsArray::AppendElement(nsISupports* aElement, bool aWeak)
+ {
+-    bool result;
++    bool result = false;
+     if (aWeak) {
+         nsCOMPtr<nsIWeakReference> elementRef = do_GetWeakReference(aElement);
+         NS_ASSERTION(elementRef, "AppendElement: Trying to use weak references on an object that doesn't support it");
+         if (!elementRef)
+             return NS_ERROR_FAILURE;
+         result = mArray.AppendObject(elementRef);
+     }
+ 
+diff --git a/xpcom/ds/nsPersistentProperties.cpp b/xpcom/ds/nsPersistentProperties.cpp
+--- a/xpcom/ds/nsPersistentProperties.cpp
++++ b/xpcom/ds/nsPersistentProperties.cpp
+@@ -90,17 +90,17 @@ public:
+     mHaveMultiLine(false), mState(eParserState_AwaitingKey),
+     mProps(aProps) {}
+ 
+   void FinishValueState(nsAString& aOldValue) {
+     static const char trimThese[] = " \t";
+     mKey.Trim(trimThese, false, true);
+ 
+     // This is really ugly hack but it should be fast
+-    PRUnichar backup_char;
++    PRUnichar backup_char = PRUnichar(0);
+     uint32_t minLength = mMinLength;
+     if (minLength)
+     {
+       backup_char = mValue[minLength-1];
+       mValue.SetCharAt('x', minLength-1);
+     }
+     mValue.Trim(trimThese, false, true);
+     if (minLength)
+diff --git a/xpcom/reflect/xptinfo/src/xptiInterfaceInfo.cpp b/xpcom/reflect/xptinfo/src/xptiInterfaceInfo.cpp
+--- a/xpcom/reflect/xptinfo/src/xptiInterfaceInfo.cpp
++++ b/xpcom/reflect/xptinfo/src/xptiInterfaceInfo.cpp
+@@ -383,17 +383,17 @@ xptiInterfaceEntry::GetTypeForParam(uint
+ 
+     if(methodIndex >= mMethodBaseIndex + 
+                       mDescriptor->num_methods)
+     {
+         NS_ERROR("bad index");
+         return NS_ERROR_INVALID_ARG;
+     }
+ 
+-    const XPTTypeDescriptor *td;
++    const XPTTypeDescriptor *td = nullptr;
+ 
+     if(dimension) {
+         nsresult rv = GetTypeInArray(param, dimension, &td);
+         if(NS_FAILED(rv))
+             return rv;
+     }
+     else
+         td = &param->type;
+@@ -417,17 +417,17 @@ xptiInterfaceEntry::GetSizeIsArgNumberFo
+ 
+     if(methodIndex >= mMethodBaseIndex + 
+                       mDescriptor->num_methods)
+     {
+         NS_ERROR("bad index");
+         return NS_ERROR_INVALID_ARG;
+     }
+ 
+-    const XPTTypeDescriptor *td;
++    const XPTTypeDescriptor *td = nullptr;
+ 
+     if(dimension) {
+         nsresult rv = GetTypeInArray(param, dimension, &td);
+         if(NS_FAILED(rv))
+             return rv;
+     }
+     else
+         td = &param->type;
+diff --git a/xpcom/tests/TestCOMArray.cpp b/xpcom/tests/TestCOMArray.cpp
+--- a/xpcom/tests/TestCOMArray.cpp
++++ b/xpcom/tests/TestCOMArray.cpp
+@@ -175,20 +175,20 @@ int main(int argc, char **argv)
+ 	  break;
+     }
+   }
+ 
+   int32_t base;
+   {
+     Array2 arr2;
+ 
+-    IBar *thirdObject,
+-         *fourthObject,
+-         *fifthObject,
+-         *ninthObject;
++    IBar *thirdObject = NULL,
++         *fourthObject = NULL,
++         *fifthObject = NULL,
++         *ninthObject = NULL;
+     for (int32_t i = 0; i < 20; ++i) {
+       nsCOMPtr<IBar> bar = new Bar(arr2);
+       switch (i) {
+       case 2:
+         thirdObject = bar; break;
+       case 3:
+         fourthObject = bar; break;
+       case 4:
+diff --git a/xpcom/threads/nsThreadPool.cpp b/xpcom/threads/nsThreadPool.cpp
+--- a/xpcom/threads/nsThreadPool.cpp
++++ b/xpcom/threads/nsThreadPool.cpp
+@@ -138,17 +138,17 @@ nsThreadPool::Run()
+   mThreadNaming.SetThreadPoolName(mName);
+ 
+   nsCOMPtr<nsIThread> current;
+   nsThreadManager::get()->GetCurrentThread(getter_AddRefs(current));
+ 
+   bool shutdownThreadOnExit = false;
+   bool exitThread = false;
+   bool wasIdle = false;
+-  PRIntervalTime idleSince;
++  PRIntervalTime idleSince = 0;
+ 
+   nsCOMPtr<nsIThreadPoolListener> listener;
+   {
+     ReentrantMonitorAutoEnter mon(mEvents.GetReentrantMonitor());
+     listener = mListener;
+   }
+ 
+   if (listener) {
+diff --git a/xpcom/typelib/xpt/public/xpt_xdr.h b/xpcom/typelib/xpt/public/xpt_xdr.h
+--- a/xpcom/typelib/xpt/public/xpt_xdr.h
++++ b/xpcom/typelib/xpt/public/xpt_xdr.h
+@@ -152,17 +152,17 @@ XPT_GetAddrForOffset(XPTCursor *cursor, 
+  * appropriate.  In the encode case, it will also set the addr->offset
+  * mapping.
+  */
+ 
+ #define XPT_PREAMBLE_(cursor, addrp, pool, size, new_curs, already)           \
+     XPTMode mode = cursor->state->mode;                                       \
+     if (!(mode == XPT_ENCODE || XPT_Do32(cursor, &new_curs.offset)) ||        \
+         !CheckForRepeat(cursor, (void **)addrp, pool,                         \
+-                        mode == XPT_ENCODE ? size : 0u, &new_curs,            \
++                        mode == XPT_ENCODE ? size : 0, &new_curs,             \
+                         &already) ||                                          \
+         !(mode == XPT_DECODE || XPT_Do32(cursor, &new_curs.offset)))          \
+         return PR_FALSE;                                                      \
+     if (already)                                                              \
+         return PR_TRUE;                                                       \
+ 
+ #define XPT_PREAMBLE_NO_ALLOC(cursor, addrp, pool, size, new_curs, already)   \
+   {                                                                           \

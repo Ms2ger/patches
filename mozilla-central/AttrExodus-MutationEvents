@@ -1,0 +1,147 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsGenericElement.cpp b/content/base/src/nsGenericElement.cpp
+--- a/content/base/src/nsGenericElement.cpp
++++ b/content/base/src/nsGenericElement.cpp
+@@ -4681,24 +4681,16 @@ nsGenericElement::SetAttrAndNotify(PRInt
+     rv = AfterSetAttr(aNamespaceID, aName, aValueForAfterSetAttr, aNotify);
+     NS_ENSURE_SUCCESS(rv, rv);
+   }
+ 
+   if (aFireMutation) {
+     mozAutoRemovableBlockerRemover blockerRemover(GetOwnerDoc());
+     
+     nsMutationEvent mutation(true, NS_MUTATION_ATTRMODIFIED);
+-
+-    nsCOMPtr<nsIDOMAttr> attrNode;
+-    nsAutoString ns;
+-    nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNamespaceID, ns);
+-    GetAttributeNodeNS(ns, nsDependentAtomString(aName),
+-                       getter_AddRefs(attrNode));
+-    mutation.mRelatedNode = attrNode;
+-
+     mutation.mAttrName = aName;
+     nsAutoString newValue;
+     GetAttr(aNamespaceID, aName, newValue);
+     if (!newValue.IsEmpty()) {
+       mutation.mNewAttrValue = do_GetAtom(newValue);
+     }
+     if (!aOldValue.IsEmpty()) {
+       mutation.mPrevAttrValue = do_GetAtom(aOldValue);
+@@ -4867,30 +4859,16 @@ nsGenericElement::UnsetAttr(int32_t aNam
+ 
+   // When notifying, make sure to keep track of states whose value
+   // depends solely on the value of an attribute.
+   nsEventStates stateMask;
+   if (aNotify) {
+     stateMask = IntrinsicState();
+   }
+ 
+-  bool hasMutationListeners = aNotify &&
+-    nsContentUtils::HasMutationListeners(this,
+-                                         NS_EVENT_BITS_MUTATION_ATTRMODIFIED,
+-                                         this);
+-
+-  // Grab the attr node if needed before we remove it from the attr map
+-  nsCOMPtr<nsIDOMAttr> attrNode;
+-  if (hasMutationListeners) {
+-    nsAutoString ns;
+-    nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNameSpaceID, ns);
+-    GetAttributeNodeNS(ns, nsDependentAtomString(aName),
+-                       getter_AddRefs(attrNode));
+-  }
+-
+   // Clear binding to nsIDOMNamedNodeMap
+   nsDOMSlots *slots = GetExistingDOMSlots();
+   if (slots && slots->mAttributeMap) {
+     slots->mAttributeMap->DropAttribute(aNameSpaceID, aName);
+   }
+ 
+   // The id-handling code, and in the future possibly other code, need to
+   // react to unexpected attribute changes.
+@@ -4919,24 +4897,23 @@ nsGenericElement::UnsetAttr(int32_t aNam
+     }
+     nsNodeUtils::AttributeChanged(this, aNameSpaceID, aName,
+                                   nsIDOMMutationEvent::REMOVAL);
+   }
+ 
+   rv = AfterSetAttr(aNameSpaceID, aName, nullptr, aNotify);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+-  if (hasMutationListeners) {
++  if (aNotify &&
++      nsContentUtils::HasMutationListeners(this,
++                                           NS_EVENT_BITS_MUTATION_ATTRMODIFIED,
++                                           this)) {
+     mozAutoRemovableBlockerRemover blockerRemover(GetOwnerDoc());
+ 
+-    nsCOMPtr<nsIDOMEventTarget> node =
+-      do_QueryInterface(static_cast<nsIContent *>(this));
+     nsMutationEvent mutation(true, NS_MUTATION_ATTRMODIFIED);
+-
+-    mutation.mRelatedNode = attrNode;
+     mutation.mAttrName = aName;
+ 
+     nsAutoString value;
+     oldValue.ToString(value);
+     if (!value.IsEmpty())
+       mutation.mPrevAttrValue = do_GetAtom(value);
+     mutation.mAttrChange = nsIDOMMutationEvent::REMOVAL;
+ 
+diff --git a/content/xul/content/src/nsXULElement.cpp b/content/xul/content/src/nsXULElement.cpp
+--- a/content/xul/content/src/nsXULElement.cpp
++++ b/content/xul/content/src/nsXULElement.cpp
+@@ -1356,27 +1356,16 @@ nsXULElement::UnsetAttr(int32_t aNameSpa
+     nsEventStates stateMask;
+     if (aNotify) {
+         stateMask = IntrinsicState();
+  
+         nsNodeUtils::AttributeWillChange(this, aNameSpaceID, aName,
+                                          nsIDOMMutationEvent::REMOVAL);
+     }
+ 
+-    bool hasMutationListeners = aNotify &&
+-        nsContentUtils::HasMutationListeners(this,
+-            NS_EVENT_BITS_MUTATION_ATTRMODIFIED, this);
+-
+-    nsCOMPtr<nsIDOMAttr> attrNode;
+-    if (hasMutationListeners) {
+-        nsAutoString ns;
+-        nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNameSpaceID, ns);
+-        GetAttributeNodeNS(ns, nsDependentAtomString(aName), getter_AddRefs(attrNode));
+-    }
+-
+     nsDOMSlots *slots = GetExistingDOMSlots();
+     if (slots && slots->mAttributeMap) {
+       slots->mAttributeMap->DropAttribute(aNameSpaceID, aName);
+     }
+ 
+     // The id-handling code, and in the future possibly other code, need to
+     // react to unexpected attribute changes.
+     nsMutationGuard::DidMutate();
+@@ -1461,22 +1450,23 @@ nsXULElement::UnsetAttr(int32_t aNameSpa
+         if (doc && !stateMask.IsEmpty()) {
+             MOZ_AUTO_DOC_UPDATE(doc, UPDATE_CONTENT_STATE, aNotify);
+             doc->ContentStatesChanged(this, nullptr, stateMask);
+         }
+         nsNodeUtils::AttributeChanged(this, aNameSpaceID, aName,
+                                       nsIDOMMutationEvent::REMOVAL);
+     }
+ 
+-    if (hasMutationListeners) {
++    if (aNotify &&
++        nsContentUtils::HasMutationListeners(this,
++            NS_EVENT_BITS_MUTATION_ATTRMODIFIED, this)) {
+         mozAutoRemovableBlockerRemover blockerRemover(GetOwnerDoc());
+ 
+         nsMutationEvent mutation(true, NS_MUTATION_ATTRMODIFIED);
+ 
+-        mutation.mRelatedNode = attrNode;
+         mutation.mAttrName = aName;
+ 
+         if (!oldValue.IsEmpty())
+           mutation.mPrevAttrValue = do_GetAtom(oldValue);
+         mutation.mAttrChange = nsIDOMMutationEvent::REMOVAL;
+ 
+         mozAutoSubtreeModified subtree(GetOwnerDoc(), this);
+         nsEventDispatcher::Dispatch(static_cast<nsIContent*>(this),

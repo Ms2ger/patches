@@ -1,0 +1,209 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 890817 - Remove nsIDOMPaintRequestList; r=smaug
+
+diff --git a/content/events/src/nsDOMNotifyPaintEvent.cpp b/content/events/src/nsDOMNotifyPaintEvent.cpp
+--- a/content/events/src/nsDOMNotifyPaintEvent.cpp
++++ b/content/events/src/nsDOMNotifyPaintEvent.cpp
+@@ -87,17 +87,17 @@ nsDOMNotifyPaintEvent::ClientRects()
+     rect->SetLayoutRect(*rgnRect);
+     rectList->Append(rect);
+   }
+ 
+   return rectList.forget();
+ }
+ 
+ NS_IMETHODIMP
+-nsDOMNotifyPaintEvent::GetPaintRequests(nsIDOMPaintRequestList** aResult)
++nsDOMNotifyPaintEvent::GetPaintRequests(nsISupports** aResult)
+ {
+   nsRefPtr<nsPaintRequestList> requests = PaintRequests();
+   requests.forget(aResult);
+   return NS_OK;
+ }
+ 
+ already_AddRefed<nsPaintRequestList>
+ nsDOMNotifyPaintEvent::PaintRequests()
+diff --git a/content/events/src/nsPaintRequest.cpp b/content/events/src/nsPaintRequest.cpp
+--- a/content/events/src/nsPaintRequest.cpp
++++ b/content/events/src/nsPaintRequest.cpp
+@@ -50,36 +50,21 @@ NS_IMETHODIMP
+ nsPaintRequest::GetXPCOMReason(nsAString& aResult)
+ {
+   GetReason(aResult);
+   return NS_OK;
+ }
+ 
+ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(nsPaintRequestList, mParent)
+ 
+-NS_INTERFACE_TABLE_HEAD(nsPaintRequestList)
++NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsPaintRequestList)
+   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
+-  NS_INTERFACE_TABLE1(nsPaintRequestList, nsIDOMPaintRequestList)
+-  NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsPaintRequestList)
++  NS_INTERFACE_MAP_ENTRY(nsISupports)
+ NS_INTERFACE_MAP_END
+ 
+ NS_IMPL_CYCLE_COLLECTING_ADDREF(nsPaintRequestList)
+ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsPaintRequestList)
+ 
+ JSObject*
+-nsPaintRequestList::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
++nsPaintRequestList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+ {
+-  return mozilla::dom::PaintRequestListBinding::Wrap(cx, scope, this);
++  return PaintRequestListBinding::Wrap(aCx, aScope, this);
+ }
+-
+-NS_IMETHODIMP    
+-nsPaintRequestList::GetLength(uint32_t* aLength)
+-{
+-  *aLength = Length();
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP    
+-nsPaintRequestList::Item(uint32_t aIndex, nsIDOMPaintRequest** aReturn)
+-{
+-  NS_IF_ADDREF(*aReturn = Item(aIndex));
+-  return NS_OK;
+-}
+diff --git a/content/events/src/nsPaintRequest.h b/content/events/src/nsPaintRequest.h
+--- a/content/events/src/nsPaintRequest.h
++++ b/content/events/src/nsPaintRequest.h
+@@ -2,17 +2,16 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef NSPAINTREQUEST_H_
+ #define NSPAINTREQUEST_H_
+ 
+ #include "nsIDOMPaintRequest.h"
+-#include "nsIDOMPaintRequestList.h"
+ #include "nsPresContext.h"
+ #include "nsIDOMEvent.h"
+ #include "mozilla/Attributes.h"
+ #include "nsClientRect.h"
+ #include "nsWrapperCache.h"
+ 
+ class nsPaintRequest MOZ_FINAL : public nsIDOMPaintRequest
+                                , public nsWrapperCache
+@@ -48,58 +47,40 @@ public:
+ 
+ private:
+   ~nsPaintRequest() {}
+ 
+   nsCOMPtr<nsIDOMEvent> mParent;
+   nsInvalidateRequestList::Request mRequest;
+ };
+ 
+-class nsPaintRequestList MOZ_FINAL : public nsIDOMPaintRequestList,
++class nsPaintRequestList MOZ_FINAL : public nsISupports,
+                                      public nsWrapperCache
+ {
+ public:
+   nsPaintRequestList(nsIDOMEvent *aParent) : mParent(aParent)
+   {
+     SetIsDOMBinding();
+   }
+ 
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsPaintRequestList)
+-  NS_DECL_NSIDOMPAINTREQUESTLIST
+   
+-  virtual JSObject* WrapObject(JSContext *cx,
+-                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
++  virtual JSObject* WrapObject(JSContext* aCx,
++                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+   nsISupports* GetParentObject()
+   {
+     return mParent;
+   }
+ 
+   void Append(nsPaintRequest* aElement)
+   {
+     mArray.AppendElement(aElement);
+   }
+ 
+-  static nsPaintRequestList* FromSupports(nsISupports* aSupports)
+-  {
+-#ifdef DEBUG
+-    {
+-      nsCOMPtr<nsIDOMPaintRequestList> list_qi = do_QueryInterface(aSupports);
+-
+-      // If this assertion fires the QI implementation for the object in
+-      // question doesn't use the nsIDOMClientRectList pointer as the nsISupports
+-      // pointer. That must be fixed, or we'll crash...
+-      NS_ASSERTION(list_qi == static_cast<nsIDOMPaintRequestList*>(aSupports),
+-                   "Uh, fix QI!");
+-    }
+-#endif
+-
+-    return static_cast<nsPaintRequestList*>(aSupports);
+-  }
+-
+   uint32_t Length()
+   {
+     return mArray.Length();
+   }
+ 
+   nsPaintRequest* Item(uint32_t aIndex)
+   {
+     return mArray.SafeElementAt(aIndex);
+diff --git a/dom/interfaces/events/moz.build b/dom/interfaces/events/moz.build
+--- a/dom/interfaces/events/moz.build
++++ b/dom/interfaces/events/moz.build
+@@ -35,17 +35,16 @@ XPIDL_SOURCES += [
+     'nsIDOMMouseEvent.idl',
+     'nsIDOMMouseScrollEvent.idl',
+     'nsIDOMMutationEvent.idl',
+     'nsIDOMNSEvent.idl',
+     'nsIDOMNotifyAudioAvailableEvent.idl',
+     'nsIDOMNotifyPaintEvent.idl',
+     'nsIDOMPageTransitionEvent.idl',
+     'nsIDOMPaintRequest.idl',
+-    'nsIDOMPaintRequestList.idl',
+     'nsIDOMPopStateEvent.idl',
+     'nsIDOMPopupBlockedEvent.idl',
+     'nsIDOMProgressEvent.idl',
+     'nsIDOMScrollAreaEvent.idl',
+     'nsIDOMSimpleGestureEvent.idl',
+     'nsIDOMSmartCardEvent.idl',
+     'nsIDOMStyleRuleChangeEvent.idl',
+     'nsIDOMStyleSheetApplicableStateChangeEvent.idl',
+diff --git a/dom/interfaces/events/nsIDOMNotifyPaintEvent.idl b/dom/interfaces/events/nsIDOMNotifyPaintEvent.idl
+--- a/dom/interfaces/events/nsIDOMNotifyPaintEvent.idl
++++ b/dom/interfaces/events/nsIDOMNotifyPaintEvent.idl
+@@ -27,11 +27,11 @@ interface nsIDOMNotifyPaintEvent : nsIDO
+    * Get the bounding box of the rectangles which are affected. The rectangle
+    * is in CSS pixels relative to the viewport origin.
+    * If the caller is not trusted (e.g., regular Web content) then only painting
+    * caused by the current document is reported; in particular, painting in subdocuments
+    * is not reported.
+    */
+   readonly attribute nsIDOMClientRect boundingClientRect;
+ 
+-  readonly attribute nsIDOMPaintRequestList paintRequests;
++  readonly attribute nsISupports /* PaintRequestList */ paintRequests;
+ };
+ 
+diff --git a/dom/interfaces/events/nsIDOMPaintRequestList.idl b/dom/interfaces/events/nsIDOMPaintRequestList.idl
+deleted file mode 100644
+--- a/dom/interfaces/events/nsIDOMPaintRequestList.idl
++++ /dev/null
+@@ -1,15 +0,0 @@
+-/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+-/* This Source Code Form is subject to the terms of the Mozilla Public
+- * License, v. 2.0. If a copy of the MPL was not distributed with this
+- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+-
+-#include "domstubs.idl"
+-
+-interface nsIDOMPaintRequest;
+-
+-[scriptable, uuid(1d6a6e10-e9f0-468b-b8e5-da39c945690e)]
+-interface nsIDOMPaintRequestList : nsISupports
+-{
+-  readonly attribute unsigned long length;
+-  nsIDOMPaintRequest        item(in unsigned long index);
+-};

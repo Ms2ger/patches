@@ -1,0 +1,225 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 660660 - Part c: Remove nsIContentSerializer::AppendCDATASection; r=?sicking
+
+diff --git a/content/base/public/nsIContentSerializer.h b/content/base/public/nsIContentSerializer.h
+--- a/content/base/public/nsIContentSerializer.h
++++ b/content/base/public/nsIContentSerializer.h
+@@ -46,35 +46,31 @@ class nsAString;
+ 
+ namespace mozilla {
+ namespace dom {
+ class Element;
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #define NS_ICONTENTSERIALIZER_IID \
+-{ 0xb1ee32f2, 0xb8c4, 0x49b9, \
+-  { 0x93, 0xdf, 0xb6, 0xfa, 0xb5, 0xd5, 0x46, 0x88 } }
++{ 0xd3837266, 0x1fc5, 0x4e70, \
++  { 0xbd, 0xe8, 0x9b, 0x0b, 0x09, 0xc8, 0x96, 0x06 } }
+ 
+ class nsIContentSerializer : public nsISupports {
+  public: 
+ 
+   NS_DECLARE_STATIC_IID_ACCESSOR(NS_ICONTENTSERIALIZER_IID)
+ 
+   NS_IMETHOD Init(uint32_t flags, uint32_t aWrapColumn,
+                   const char* aCharSet, bool aIsCopying,
+                   bool aIsWholeDocument) = 0;
+ 
+   NS_IMETHOD AppendText(nsIContent* aText, int32_t aStartOffset,
+                         int32_t aEndOffset, nsAString& aStr) = 0;
+ 
+-  NS_IMETHOD AppendCDATASection(nsIContent* aCDATASection,
+-                                int32_t aStartOffset, int32_t aEndOffset,
+-                                nsAString& aStr) = 0;
+-
+   NS_IMETHOD AppendProcessingInstruction(nsIContent* aPI,
+                                          int32_t aStartOffset,
+                                          int32_t aEndOffset,
+                                          nsAString& aStr) = 0;
+ 
+   NS_IMETHOD AppendComment(nsIContent* aComment, int32_t aStartOffset,
+                            int32_t aEndOffset, nsAString& aStr) = 0;
+ 
+diff --git a/content/base/src/mozSanitizingSerializer.h b/content/base/src/mozSanitizingSerializer.h
+--- a/content/base/src/mozSanitizingSerializer.h
++++ b/content/base/src/mozSanitizingSerializer.h
+@@ -70,20 +70,16 @@ public:
+   NS_DECL_ISUPPORTS
+ 
+   // nsIContentSerializer
+   NS_IMETHOD Init(uint32_t flags, uint32_t dummy, const char* aCharSet, 
+                   bool aIsCopying, bool aIsWholeDocument);
+ 
+   NS_IMETHOD AppendText(nsIContent* aText, int32_t aStartOffset,
+                         int32_t aEndOffset, nsAString& aStr);
+-  NS_IMETHOD AppendCDATASection(nsIContent* aCDATASection,
+-                                int32_t aStartOffset, int32_t aEndOffset,
+-                                nsAString& aStr)
+-                      { return NS_OK; }
+   NS_IMETHOD AppendProcessingInstruction(nsIContent* aPI,
+                                          int32_t aStartOffset,
+                                          int32_t aEndOffset,
+                                          nsAString& aStr)
+                       { return NS_OK; }
+   NS_IMETHOD AppendComment(nsIContent* aComment, int32_t aStartOffset,
+                            int32_t aEndOffset, nsAString& aStr)
+                       { return NS_OK; }
+diff --git a/content/base/src/nsDocumentEncoder.cpp b/content/base/src/nsDocumentEncoder.cpp
+--- a/content/base/src/nsDocumentEncoder.cpp
++++ b/content/base/src/nsDocumentEncoder.cpp
+@@ -381,22 +381,16 @@ nsDocumentEncoder::SerializeNodeStart(ns
+   node->GetNodeType(&type);
+   switch (type) {
+     case nsIDOMNode::TEXT_NODE:
+     {
+       mSerializer->AppendText(static_cast<nsIContent*>(node),
+                               aStartOffset, aEndOffset, aStr);
+       break;
+     }
+-    case nsIDOMNode::CDATA_SECTION_NODE:
+-    {
+-      mSerializer->AppendCDATASection(static_cast<nsIContent*>(node),
+-                                      aStartOffset, aEndOffset, aStr);
+-      break;
+-    }
+     case nsIDOMNode::PROCESSING_INSTRUCTION_NODE:
+     {
+       mSerializer->AppendProcessingInstruction(static_cast<nsIContent*>(node),
+                                                aStartOffset, aEndOffset, aStr);
+       break;
+     }
+     case nsIDOMNode::COMMENT_NODE:
+     {
+diff --git a/content/base/src/nsPlainTextSerializer.cpp b/content/base/src/nsPlainTextSerializer.cpp
+--- a/content/base/src/nsPlainTextSerializer.cpp
++++ b/content/base/src/nsPlainTextSerializer.cpp
+@@ -370,25 +370,16 @@ nsPlainTextSerializer::AppendText(nsICon
+   }
+   
+   mOutputString = nullptr;
+ 
+   return rv;
+ }
+ 
+ NS_IMETHODIMP
+-nsPlainTextSerializer::AppendCDATASection(nsIContent* aCDATASection,
+-                                          int32_t aStartOffset,
+-                                          int32_t aEndOffset,
+-                                          nsAString& aStr)
+-{
+-  return AppendText(aCDATASection, aStartOffset, aEndOffset, aStr);
+-}
+-
+-NS_IMETHODIMP
+ nsPlainTextSerializer::AppendElementStart(Element* aElement,
+                                           Element* aOriginalElement,
+                                           nsAString& aStr)
+ {
+   NS_ENSURE_ARG(aElement);
+ 
+   mContent = aElement;
+ 
+diff --git a/content/base/src/nsPlainTextSerializer.h b/content/base/src/nsPlainTextSerializer.h
+--- a/content/base/src/nsPlainTextSerializer.h
++++ b/content/base/src/nsPlainTextSerializer.h
+@@ -74,19 +74,16 @@ public:
+ 
+   // nsIContentSerializer
+   NS_IMETHOD Init(uint32_t flags, uint32_t aWrapColumn,
+                   const char* aCharSet, bool aIsCopying,
+                   bool aIsWholeDocument);
+ 
+   NS_IMETHOD AppendText(nsIContent* aText, int32_t aStartOffset,
+                         int32_t aEndOffset, nsAString& aStr);
+-  NS_IMETHOD AppendCDATASection(nsIContent* aCDATASection,
+-                                int32_t aStartOffset, int32_t aEndOffset,
+-                                nsAString& aStr);
+   NS_IMETHOD AppendProcessingInstruction(nsIContent* aPI,
+                                          int32_t aStartOffset,
+                                          int32_t aEndOffset,
+                                          nsAString& aStr)  { return NS_OK; }
+   NS_IMETHOD AppendComment(nsIContent* aComment, int32_t aStartOffset,
+                            int32_t aEndOffset, nsAString& aStr)  { return NS_OK; }
+   NS_IMETHOD AppendDoctype(nsIContent *aDoctype,
+                            nsAString& aStr)  { return NS_OK; }
+diff --git a/content/base/src/nsXMLContentSerializer.cpp b/content/base/src/nsXMLContentSerializer.cpp
+--- a/content/base/src/nsXMLContentSerializer.cpp
++++ b/content/base/src/nsXMLContentSerializer.cpp
+@@ -236,51 +236,16 @@ nsXMLContentSerializer::AppendText(nsICo
+   else {
+     AppendToStringConvertLF(data, aStr);
+   }
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP 
+-nsXMLContentSerializer::AppendCDATASection(nsIContent* aCDATASection,
+-                                           int32_t aStartOffset,
+-                                           int32_t aEndOffset,
+-                                           nsAString& aStr)
+-{
+-  NS_ENSURE_ARG(aCDATASection);
+-  nsresult rv;
+-
+-  NS_NAMED_LITERAL_STRING(cdata , "<![CDATA[");
+-
+-  if (mPreLevel > 0 || mDoRaw) {
+-    AppendToString(cdata, aStr);
+-  }
+-  else if (mDoFormat) {
+-    AppendToStringFormatedWrapped(cdata, aStr);
+-  }
+-  else if (mDoWrap) {
+-    AppendToStringWrapped(cdata, aStr);
+-  }
+-  else {
+-    AppendToString(cdata, aStr);
+-  }
+-
+-  nsAutoString data;
+-  rv = AppendTextData(aCDATASection, aStartOffset, aEndOffset, data, false);
+-  if (NS_FAILED(rv)) return NS_ERROR_FAILURE;
+-
+-  AppendToStringConvertLF(data, aStr);
+-
+-  AppendToString(NS_LITERAL_STRING("]]>"), aStr);
+-
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP 
+ nsXMLContentSerializer::AppendProcessingInstruction(nsIContent* aPI,
+                                                     int32_t aStartOffset,
+                                                     int32_t aEndOffset,
+                                                     nsAString& aStr)
+ {
+   nsCOMPtr<nsIDOMProcessingInstruction> pi = do_QueryInterface(aPI);
+   NS_ENSURE_ARG(pi);
+   nsresult rv;
+diff --git a/content/base/src/nsXMLContentSerializer.h b/content/base/src/nsXMLContentSerializer.h
+--- a/content/base/src/nsXMLContentSerializer.h
++++ b/content/base/src/nsXMLContentSerializer.h
+@@ -68,20 +68,16 @@ class nsXMLContentSerializer : public ns
+ 
+   NS_IMETHOD Init(uint32_t flags, uint32_t aWrapColumn,
+                   const char* aCharSet, bool aIsCopying,
+                   bool aRewriteEncodingDeclaration);
+ 
+   NS_IMETHOD AppendText(nsIContent* aText, int32_t aStartOffset,
+                         int32_t aEndOffset, nsAString& aStr);
+ 
+-  NS_IMETHOD AppendCDATASection(nsIContent* aCDATASection,
+-                                int32_t aStartOffset, int32_t aEndOffset,
+-                                nsAString& aStr);
+-
+   NS_IMETHOD AppendProcessingInstruction(nsIContent* aPI,
+                                          int32_t aStartOffset,
+                                          int32_t aEndOffset,
+                                          nsAString& aStr);
+ 
+   NS_IMETHOD AppendComment(nsIContent* aComment, int32_t aStartOffset,
+                            int32_t aEndOffset, nsAString& aStr);
+   

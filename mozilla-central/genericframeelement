@@ -1,0 +1,842 @@
+diff --git a/content/base/src/nsContentUtils.cpp b/content/base/src/nsContentUtils.cpp
+--- a/content/base/src/nsContentUtils.cpp
++++ b/content/base/src/nsContentUtils.cpp
+@@ -182,6 +182,7 @@
+ #include "nsTextEditorState.h"
+ #include "nsIPluginHost.h"
+ #include "nsICategoryManager.h"
++#include "nsFrameLoader.h"
+ 
+ #ifdef IBMBIDI
+ #include "nsIBidiKeyboard.h"
+diff --git a/content/html/content/src/Makefile.in b/content/html/content/src/Makefile.in
+--- a/content/html/content/src/Makefile.in
++++ b/content/html/content/src/Makefile.in
+@@ -56,6 +56,7 @@
+ 		nsClientRect.cpp \
+ 		nsHTMLDNSPrefetch.cpp \
+ 		nsGenericHTMLElement.cpp \
++		nsGenericHTMLFrameElement.cpp \
+ 		nsFormSubmission.cpp \
+ 		nsImageMapUtils.cpp \
+ 		nsTextEditorState.cpp \
+diff --git a/content/html/content/src/nsGenericHTMLElement.cpp b/content/html/content/src/nsGenericHTMLElement.cpp
+--- a/content/html/content/src/nsGenericHTMLElement.cpp
++++ b/content/html/content/src/nsGenericHTMLElement.cpp
+@@ -2303,8 +2303,6 @@
+ 
+ //----------------------------------------------------------------------
+ 
+-NS_IMPL_INT_ATTR_DEFAULT_VALUE(nsGenericHTMLFrameElement, TabIndex, tabindex, 0)
+-
+ nsGenericHTMLFormElement::nsGenericHTMLFormElement(nsINodeInfo *aNodeInfo)
+   : nsGenericHTMLElement(aNodeInfo),
+     mForm(nullptr)
+@@ -2400,51 +2398,6 @@
+   if (NS_FAILED(rv))
+     return nsGenericHTMLElement::GetDesiredIMEState();
+   return state;
+-}
+-
+-bool
+-nsGenericHTMLFrameElement::IsHTMLFocusable(bool aWithMouse,
+-                                           bool *aIsFocusable,
+-                                           int32_t *aTabIndex)
+-{
+-  if (nsGenericHTMLElement::IsHTMLFocusable(aWithMouse, aIsFocusable, aTabIndex)) {
+-    return true;
+-  }
+-
+-  // If there is no subdocument, docshell or content viewer, it's not tabbable
+-  bool isFocusable = false;
+-  nsIDocument *doc = GetCurrentDoc();
+-  if (doc) {
+-    // XXXbz should this use GetOwnerDoc() for GetSubDocumentFor?
+-    // sXBL/XBL2 issue!
+-    nsIDocument *subDoc = doc->GetSubDocumentFor(this);
+-    if (subDoc) {
+-      nsCOMPtr<nsISupports> container = subDoc->GetContainer();
+-      nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(container));
+-      if (docShell) {
+-        nsCOMPtr<nsIContentViewer> contentViewer;
+-        docShell->GetContentViewer(getter_AddRefs(contentViewer));
+-        if (contentViewer) {
+-          isFocusable = true;
+-          nsCOMPtr<nsIContentViewer> zombieViewer;
+-          contentViewer->GetPreviousViewer(getter_AddRefs(zombieViewer));
+-          if (zombieViewer) {
+-            // If there are 2 viewers for the current docshell, that 
+-            // means the current document is a zombie document.
+-            // Only navigate into the frame/iframe if it's not a zombie.
+-            isFocusable = false;
+-          }
+-        }
+-      }
+-    }
+-  }
+-
+-  *aIsFocusable = isFocusable;
+-  if (!isFocusable && aTabIndex) {
+-    *aTabIndex = -1;
+-  }
+-
+-  return false;
+ }
+ 
+ nsresult
+@@ -2784,220 +2737,6 @@
+ 
+ //----------------------------------------------------------------------
+ 
+-nsGenericHTMLFrameElement::~nsGenericHTMLFrameElement()
+-{
+-  if (mFrameLoader) {
+-    mFrameLoader->Destroy();
+-  }
+-}
+-
+-NS_IMPL_CYCLE_COLLECTION_CLASS(nsGenericHTMLFrameElement)
+-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsGenericHTMLFrameElement,
+-                                                  nsGenericHTMLElement)
+-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mFrameLoader)
+-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+-
+-NS_INTERFACE_TABLE_HEAD(nsGenericHTMLFrameElement)
+-  NS_INTERFACE_TABLE_INHERITED2(nsGenericHTMLFrameElement,
+-                                nsIDOMNSHTMLFrameElement,
+-                                nsIFrameLoaderOwner)
+-  NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsGenericHTMLFrameElement)
+-NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElement)
+-
+-nsresult
+-nsGenericHTMLFrameElement::GetContentDocument(nsIDOMDocument** aContentDocument)
+-{
+-  NS_PRECONDITION(aContentDocument, "Null out param");
+-  *aContentDocument = nullptr;
+-
+-  nsCOMPtr<nsIDOMWindow> win;
+-  GetContentWindow(getter_AddRefs(win));
+-
+-  if (!win) {
+-    return NS_OK;
+-  }
+-
+-  return win->GetDocument(aContentDocument);
+-}
+-
+-NS_IMETHODIMP
+-nsGenericHTMLFrameElement::GetContentWindow(nsIDOMWindow** aContentWindow)
+-{
+-  NS_PRECONDITION(aContentWindow, "Null out param");
+-  *aContentWindow = nullptr;
+-
+-  nsresult rv = EnsureFrameLoader();
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  if (!mFrameLoader) {
+-    return NS_OK;
+-  }
+-
+-  bool depthTooGreat = false;
+-  mFrameLoader->GetDepthTooGreat(&depthTooGreat);
+-  if (depthTooGreat) {
+-    // Claim to have no contentWindow
+-    return NS_OK;
+-  }
+-  
+-  nsCOMPtr<nsIDocShell> doc_shell;
+-  mFrameLoader->GetDocShell(getter_AddRefs(doc_shell));
+-
+-  nsCOMPtr<nsPIDOMWindow> win(do_GetInterface(doc_shell));
+-
+-  if (!win) {
+-    return NS_OK;
+-  }
+-
+-  NS_ASSERTION(win->IsOuterWindow(),
+-               "Uh, this window should always be an outer window!");
+-
+-  return CallQueryInterface(win, aContentWindow);
+-}
+-
+-nsresult
+-nsGenericHTMLFrameElement::EnsureFrameLoader()
+-{
+-  if (!GetParent() || !IsInDoc() || mFrameLoader) {
+-    // If frame loader is there, we just keep it around, cached
+-    return NS_OK;
+-  }
+-
+-  mFrameLoader = nsFrameLoader::Create(this);
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+-nsGenericHTMLFrameElement::GetFrameLoader(nsIFrameLoader **aFrameLoader)
+-{
+-  NS_IF_ADDREF(*aFrameLoader = mFrameLoader);
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP_(already_AddRefed<nsFrameLoader>)
+-nsGenericHTMLFrameElement::GetFrameLoader()
+-{
+-  nsFrameLoader* loader = mFrameLoader;
+-  NS_IF_ADDREF(loader);
+-  return loader;
+-}
+-
+-NS_IMETHODIMP
+-nsGenericHTMLFrameElement::SwapFrameLoaders(nsIFrameLoaderOwner* aOtherOwner)
+-{
+-  // We don't support this yet
+-  return NS_ERROR_NOT_IMPLEMENTED;
+-}
+-
+-nsresult
+-nsGenericHTMLFrameElement::LoadSrc()
+-{
+-  nsresult rv = EnsureFrameLoader();
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  if (!mFrameLoader) {
+-    return NS_OK;
+-  }
+-
+-  rv = mFrameLoader->LoadFrame();
+-#ifdef DEBUG
+-  if (NS_FAILED(rv)) {
+-    NS_WARNING("failed to load URL");
+-  }
+-#endif
+-
+-  return rv;
+-}
+-
+-nsresult
+-nsGenericHTMLFrameElement::BindToTree(nsIDocument* aDocument,
+-                                      nsIContent* aParent,
+-                                      nsIContent* aBindingParent,
+-                                      bool aCompileEventHandlers)
+-{
+-  nsresult rv = nsGenericHTMLElement::BindToTree(aDocument, aParent,
+-                                                 aBindingParent,
+-                                                 aCompileEventHandlers);
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  if (aDocument) {
+-    NS_ASSERTION(!nsContentUtils::IsSafeToRunScript(),
+-                 "Missing a script blocker!");
+-    // We're in a document now.  Kick off the frame load.
+-    LoadSrc();
+-  }
+-  
+-  return rv;
+-}
+-
+-void
+-nsGenericHTMLFrameElement::UnbindFromTree(bool aDeep, bool aNullParent)
+-{
+-  if (mFrameLoader) {
+-    // This iframe is being taken out of the document, destroy the
+-    // iframe's frame loader (doing that will tear down the window in
+-    // this iframe).
+-    // XXXbz we really want to only partially destroy the frame
+-    // loader... we don't want to tear down the docshell.  Food for
+-    // later bug.
+-    mFrameLoader->Destroy();
+-    mFrameLoader = nullptr;
+-  }
+-
+-  nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
+-}
+-
+-nsresult
+-nsGenericHTMLFrameElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+-                                   nsIAtom* aPrefix, const nsAString& aValue,
+-                                   bool aNotify)
+-{
+-  nsresult rv = nsGenericHTMLElement::SetAttr(aNameSpaceID, aName, aPrefix,
+-                                              aValue, aNotify);
+-  NS_ENSURE_SUCCESS(rv, rv);
+-  
+-  if (aNameSpaceID == kNameSpaceID_None &&
+-      aName == nsGkAtoms::src) {
+-    // Don't propagate error here. The attribute was successfully set, that's
+-    // what we should reflect.
+-    LoadSrc();
+-  }
+-
+-  return NS_OK;
+-}
+-
+-void
+-nsGenericHTMLFrameElement::DestroyContent()
+-{
+-  if (mFrameLoader) {
+-    mFrameLoader->Destroy();
+-    mFrameLoader = nullptr;
+-  }
+-
+-  nsGenericHTMLElement::DestroyContent();
+-}
+-
+-nsresult
+-nsGenericHTMLFrameElement::CopyInnerTo(nsGenericElement* aDest) const
+-{
+-  nsresult rv = nsGenericHTMLElement::CopyInnerTo(aDest);
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  nsIDocument* doc = aDest->GetOwnerDoc();
+-  if (doc->IsStaticDocument() && mFrameLoader) {
+-    nsGenericHTMLFrameElement* dest =
+-      static_cast<nsGenericHTMLFrameElement*>(aDest);
+-    nsFrameLoader* fl = nsFrameLoader::Create(dest);
+-    NS_ENSURE_STATE(fl);
+-    dest->mFrameLoader = fl;
+-    static_cast<nsFrameLoader*>(mFrameLoader.get())->CreateStaticClone(fl);
+-  }
+-
+-  return rv;
+-}
+-
+-//----------------------------------------------------------------------
+-
+ nsresult
+ nsGenericHTMLElement::Blur()
+ {
+diff --git a/content/html/content/src/nsGenericHTMLElement.h b/content/html/content/src/nsGenericHTMLElement.h
+--- a/content/html/content/src/nsGenericHTMLElement.h
++++ b/content/html/content/src/nsGenericHTMLElement.h
+@@ -42,8 +42,6 @@
+ #include "nsIDOMHTMLElement.h"
+ #include "nsINameSpaceManager.h"  // for kNameSpaceID_None
+ #include "nsIFormControl.h"
+-#include "nsIDOMNSHTMLFrameElement.h"
+-#include "nsFrameLoader.h"
+ #include "nsGkAtoms.h"
+ 
+ class nsIDOMAttr;
+@@ -901,67 +899,6 @@
+ 
+ //----------------------------------------------------------------------
+ 
+-/**
+- * A helper class for frame elements
+- */
+-
+-class nsGenericHTMLFrameElement : public nsGenericHTMLElement,
+-                                  public nsIDOMNSHTMLFrameElement,
+-                                  public nsIFrameLoaderOwner
+-{
+-public:
+-  nsGenericHTMLFrameElement(nsINodeInfo *aNodeInfo)
+-    : nsGenericHTMLElement(aNodeInfo)
+-  {
+-  }
+-  virtual ~nsGenericHTMLFrameElement();
+-
+-  // nsISupports
+-  NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr);
+-
+-  // nsIDOMNSHTMLFrameElement
+-  NS_DECL_NSIDOMNSHTMLFRAMEELEMENT
+-
+-  // nsIFrameLoaderOwner
+-  NS_DECL_NSIFRAMELOADEROWNER
+-
+-  // nsIContent
+-  virtual bool IsHTMLFocusable(bool aWithMouse, bool *aIsFocusable, int32_t *aTabIndex);
+-  virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
+-                              nsIContent* aBindingParent,
+-                              bool aCompileEventHandlers);
+-  virtual void UnbindFromTree(bool aDeep = true,
+-                              bool aNullParent = true);
+-  nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+-                   const nsAString& aValue, bool aNotify)
+-  {
+-    return SetAttr(aNameSpaceID, aName, nullptr, aValue, aNotify);
+-  }
+-  virtual nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+-                           nsIAtom* aPrefix, const nsAString& aValue,
+-                           bool aNotify);
+-  virtual void DestroyContent();
+-
+-  nsresult CopyInnerTo(nsGenericElement* aDest) const;
+-
+-  // nsIDOMNSHTMLElement 
+-  NS_IMETHOD GetTabIndex(int32_t *aTabIndex);
+-  NS_IMETHOD SetTabIndex(int32_t aTabIndex);
+-
+-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED_NO_UNLINK(nsGenericHTMLFrameElement,
+-                                                     nsGenericHTMLElement)
+-
+-protected:
+-  // This doesn't really ensure a frame loade in all cases, only when
+-  // it makes sense.
+-  nsresult EnsureFrameLoader();
+-  nsresult LoadSrc();
+-  nsresult GetContentDocument(nsIDOMDocument** aContentDocument);
+-
+-  nsRefPtr<nsFrameLoader> mFrameLoader;
+-};
+-
+-//----------------------------------------------------------------------
+ 
+ /**
+  * A macro to implement the NS_NewHTMLXXXElement() functions.
+diff --git a/content/html/content/src/nsGenericHTMLFrameElement.cpp b/content/html/content/src/nsGenericHTMLFrameElement.cpp
+new file mode 100644
+--- /dev/null
++++ b/content/html/content/src/nsGenericHTMLFrameElement.cpp
+@@ -0,0 +1,305 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim:set tw=80 expandtab softtabstop=2 ts=2 sw=2: */
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is Mozilla Communicator client code.
++ *
++ * The Initial Developer of the Original Code is
++ * Netscape Communications Corporation.
++ * Portions created by the Initial Developer are Copyright (C) 1998
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#include "nsGenericHTMLFrameElement.h"
++#include "nscore.h"
++#include "nsCOMPtr.h"
++#include "nsIContentViewer.h"
++#include "nsIDOMWindow.h"
++#include "nsPIDOMWindow.h"
++#include "nsIDocShell.h"
++#include "nsNetUtil.h"
++
++NS_IMPL_INT_ATTR_DEFAULT_VALUE(nsGenericHTMLFrameElement, TabIndex, tabindex, 0)
++
++nsGenericHTMLFrameElement::~nsGenericHTMLFrameElement()
++{
++  if (mFrameLoader) {
++    mFrameLoader->Destroy();
++  }
++}
++
++NS_IMPL_CYCLE_COLLECTION_CLASS(nsGenericHTMLFrameElement)
++NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsGenericHTMLFrameElement,
++                                                  nsGenericHTMLElement)
++  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mFrameLoader)
++NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
++
++NS_INTERFACE_TABLE_HEAD(nsGenericHTMLFrameElement)
++  NS_INTERFACE_TABLE_INHERITED2(nsGenericHTMLFrameElement,
++                                nsIDOMNSHTMLFrameElement,
++                                nsIFrameLoaderOwner)
++  NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsGenericHTMLFrameElement)
++NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElement)
++
++nsresult
++nsGenericHTMLFrameElement::GetContentDocument(nsIDOMDocument** aContentDocument)
++{
++  NS_PRECONDITION(aContentDocument, "Null out param");
++  *aContentDocument = nullptr;
++
++  nsCOMPtr<nsIDOMWindow> win;
++  GetContentWindow(getter_AddRefs(win));
++
++  if (!win) {
++    return NS_OK;
++  }
++
++  return win->GetDocument(aContentDocument);
++}
++
++NS_IMETHODIMP
++nsGenericHTMLFrameElement::GetContentWindow(nsIDOMWindow** aContentWindow)
++{
++  NS_PRECONDITION(aContentWindow, "Null out param");
++  *aContentWindow = nullptr;
++
++  nsresult rv = EnsureFrameLoader();
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  if (!mFrameLoader) {
++    return NS_OK;
++  }
++
++  bool depthTooGreat = false;
++  mFrameLoader->GetDepthTooGreat(&depthTooGreat);
++  if (depthTooGreat) {
++    // Claim to have no contentWindow
++    return NS_OK;
++  }
++  
++  nsCOMPtr<nsIDocShell> doc_shell;
++  mFrameLoader->GetDocShell(getter_AddRefs(doc_shell));
++
++  nsCOMPtr<nsPIDOMWindow> win(do_GetInterface(doc_shell));
++
++  if (!win) {
++    return NS_OK;
++  }
++
++  NS_ASSERTION(win->IsOuterWindow(),
++               "Uh, this window should always be an outer window!");
++
++  return CallQueryInterface(win, aContentWindow);
++}
++
++nsresult
++nsGenericHTMLFrameElement::EnsureFrameLoader()
++{
++  if (!GetParent() || !IsInDoc() || mFrameLoader) {
++    // If frame loader is there, we just keep it around, cached
++    return NS_OK;
++  }
++
++  mFrameLoader = nsFrameLoader::Create(this);
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++nsGenericHTMLFrameElement::GetFrameLoader(nsIFrameLoader **aFrameLoader)
++{
++  NS_IF_ADDREF(*aFrameLoader = mFrameLoader);
++  return NS_OK;
++}
++
++NS_IMETHODIMP_(already_AddRefed<nsFrameLoader>)
++nsGenericHTMLFrameElement::GetFrameLoader()
++{
++  nsFrameLoader* loader = mFrameLoader;
++  NS_IF_ADDREF(loader);
++  return loader;
++}
++
++NS_IMETHODIMP
++nsGenericHTMLFrameElement::SwapFrameLoaders(nsIFrameLoaderOwner* aOtherOwner)
++{
++  // We don't support this yet
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++nsresult
++nsGenericHTMLFrameElement::LoadSrc()
++{
++  nsresult rv = EnsureFrameLoader();
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  if (!mFrameLoader) {
++    return NS_OK;
++  }
++
++  rv = mFrameLoader->LoadFrame();
++#ifdef DEBUG
++  if (NS_FAILED(rv)) {
++    NS_WARNING("failed to load URL");
++  }
++#endif
++
++  return rv;
++}
++
++nsresult
++nsGenericHTMLFrameElement::BindToTree(nsIDocument* aDocument,
++                                      nsIContent* aParent,
++                                      nsIContent* aBindingParent,
++                                      bool aCompileEventHandlers)
++{
++  nsresult rv = nsGenericHTMLElement::BindToTree(aDocument, aParent,
++                                                 aBindingParent,
++                                                 aCompileEventHandlers);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  if (aDocument) {
++    NS_ASSERTION(!nsContentUtils::IsSafeToRunScript(),
++                 "Missing a script blocker!");
++    // We're in a document now.  Kick off the frame load.
++    LoadSrc();
++  }
++  
++  return rv;
++}
++
++void
++nsGenericHTMLFrameElement::UnbindFromTree(bool aDeep, bool aNullParent)
++{
++  if (mFrameLoader) {
++    // This iframe is being taken out of the document, destroy the
++    // iframe's frame loader (doing that will tear down the window in
++    // this iframe).
++    // XXXbz we really want to only partially destroy the frame
++    // loader... we don't want to tear down the docshell.  Food for
++    // later bug.
++    mFrameLoader->Destroy();
++    mFrameLoader = nullptr;
++  }
++
++  nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
++}
++
++nsresult
++nsGenericHTMLFrameElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
++                                   nsIAtom* aPrefix, const nsAString& aValue,
++                                   bool aNotify)
++{
++  nsresult rv = nsGenericHTMLElement::SetAttr(aNameSpaceID, aName, aPrefix,
++                                              aValue, aNotify);
++  NS_ENSURE_SUCCESS(rv, rv);
++  
++  if (aNameSpaceID == kNameSpaceID_None &&
++      aName == nsGkAtoms::src) {
++    // Don't propagate error here. The attribute was successfully set, that's
++    // what we should reflect.
++    LoadSrc();
++  }
++
++  return NS_OK;
++}
++
++void
++nsGenericHTMLFrameElement::DestroyContent()
++{
++  if (mFrameLoader) {
++    mFrameLoader->Destroy();
++    mFrameLoader = nullptr;
++  }
++
++  nsGenericHTMLElement::DestroyContent();
++}
++
++nsresult
++nsGenericHTMLFrameElement::CopyInnerTo(nsGenericElement* aDest) const
++{
++  nsresult rv = nsGenericHTMLElement::CopyInnerTo(aDest);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  nsIDocument* doc = aDest->GetOwnerDoc();
++  if (doc->IsStaticDocument() && mFrameLoader) {
++    nsGenericHTMLFrameElement* dest =
++      static_cast<nsGenericHTMLFrameElement*>(aDest);
++    nsFrameLoader* fl = nsFrameLoader::Create(dest);
++    NS_ENSURE_STATE(fl);
++    dest->mFrameLoader = fl;
++    static_cast<nsFrameLoader*>(mFrameLoader.get())->CreateStaticClone(fl);
++  }
++
++  return rv;
++}
++
++bool
++nsGenericHTMLFrameElement::IsHTMLFocusable(bool aWithMouse,
++                                           bool *aIsFocusable,
++                                           int32_t *aTabIndex)
++{
++  if (nsGenericHTMLElement::IsHTMLFocusable(aWithMouse, aIsFocusable, aTabIndex)) {
++    return true;
++  }
++
++  // If there is no subdocument, docshell or content viewer, it's not tabbable
++  bool isFocusable = false;
++  nsIDocument *doc = GetCurrentDoc();
++  if (doc) {
++    // XXXbz should this use GetOwnerDoc() for GetSubDocumentFor?
++    // sXBL/XBL2 issue!
++    nsIDocument *subDoc = doc->GetSubDocumentFor(this);
++    if (subDoc) {
++      nsCOMPtr<nsISupports> container = subDoc->GetContainer();
++      nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(container));
++      if (docShell) {
++        nsCOMPtr<nsIContentViewer> contentViewer;
++        docShell->GetContentViewer(getter_AddRefs(contentViewer));
++        if (contentViewer) {
++          isFocusable = true;
++          nsCOMPtr<nsIContentViewer> zombieViewer;
++          contentViewer->GetPreviousViewer(getter_AddRefs(zombieViewer));
++          if (zombieViewer) {
++            // If there are 2 viewers for the current docshell, that 
++            // means the current document is a zombie document.
++            // Only navigate into the frame/iframe if it's not a zombie.
++            isFocusable = false;
++          }
++        }
++      }
++    }
++  }
++
++  *aIsFocusable = isFocusable;
++  if (!isFocusable && aTabIndex) {
++    *aTabIndex = -1;
++  }
++
++  return false;
++}
+diff --git a/content/html/content/src/nsGenericHTMLFrameElement.h b/content/html/content/src/nsGenericHTMLFrameElement.h
+new file mode 100644
+--- /dev/null
++++ b/content/html/content/src/nsGenericHTMLFrameElement.h
+@@ -0,0 +1,105 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim:set tw=80 expandtab softtabstop=2 ts=2 sw=2: */
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is Mozilla Communicator client code.
++ *
++ * The Initial Developer of the Original Code is
++ * Netscape Communications Corporation.
++ * Portions created by the Initial Developer are Copyright (C) 1998
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#ifndef nsGenericHTMLFrameElement_h
++#define nsGenericHTMLFrameElement_h
++
++#include "nsGenericHTMLElement.h"
++#include "nsIDOMNSHTMLFrameElement.h"
++#include "nsFrameLoader.h"
++
++/**
++ * A helper class for frame elements
++ */
++class nsGenericHTMLFrameElement : public nsGenericHTMLElement,
++                                  public nsIDOMNSHTMLFrameElement,
++                                  public nsIFrameLoaderOwner
++{
++public:
++  nsGenericHTMLFrameElement(nsINodeInfo *aNodeInfo)
++    : nsGenericHTMLElement(aNodeInfo)
++  {
++  }
++  virtual ~nsGenericHTMLFrameElement();
++
++  // nsISupports
++  NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr);
++
++  // nsIDOMNSHTMLFrameElement
++  NS_DECL_NSIDOMNSHTMLFRAMEELEMENT
++
++  // nsIFrameLoaderOwner
++  NS_DECL_NSIFRAMELOADEROWNER
++
++  // nsIContent
++  virtual bool IsHTMLFocusable(bool aWithMouse, bool *aIsFocusable, int32_t *aTabIndex);
++  virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
++                              nsIContent* aBindingParent,
++                              bool aCompileEventHandlers);
++  virtual void UnbindFromTree(bool aDeep = true,
++                              bool aNullParent = true);
++  nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
++                   const nsAString& aValue, bool aNotify)
++  {
++    return SetAttr(aNameSpaceID, aName, nullptr, aValue, aNotify);
++  }
++  virtual nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
++                           nsIAtom* aPrefix, const nsAString& aValue,
++                           bool aNotify);
++  virtual void DestroyContent();
++
++  nsresult CopyInnerTo(nsGenericElement* aDest) const;
++
++  // nsIDOMNSHTMLElement 
++  NS_IMETHOD GetTabIndex(int32_t *aTabIndex);
++  NS_IMETHOD SetTabIndex(int32_t aTabIndex);
++
++  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED_NO_UNLINK(nsGenericHTMLFrameElement,
++                                                     nsGenericHTMLElement)
++
++protected:
++  // This doesn't really ensure a frame loade in all cases, only when
++  // it makes sense.
++  nsresult EnsureFrameLoader();
++  nsresult LoadSrc();
++  nsresult GetContentDocument(nsIDOMDocument** aContentDocument);
++
++  nsRefPtr<nsFrameLoader> mFrameLoader;
++};
++
++#endif /* nsGenericHTMLFrameElement_h */
+diff --git a/content/html/content/src/nsHTMLFrameElement.cpp b/content/html/content/src/nsHTMLFrameElement.cpp
+--- a/content/html/content/src/nsHTMLFrameElement.cpp
++++ b/content/html/content/src/nsHTMLFrameElement.cpp
+@@ -35,7 +35,7 @@
+  *
+  * ***** END LICENSE BLOCK ***** */
+ #include "nsIDOMHTMLFrameElement.h"
+-#include "nsGenericHTMLElement.h"
++#include "nsGenericHTMLFrameElement.h"
+ #include "nsGkAtoms.h"
+ #include "nsIDocument.h"
+ #include "nsIDOMDocument.h"
+diff --git a/content/html/content/src/nsHTMLIFrameElement.cpp b/content/html/content/src/nsHTMLIFrameElement.cpp
+--- a/content/html/content/src/nsHTMLIFrameElement.cpp
++++ b/content/html/content/src/nsHTMLIFrameElement.cpp
+@@ -35,7 +35,7 @@
+  *
+  * ***** END LICENSE BLOCK ***** */
+ #include "nsIDOMHTMLIFrameElement.h"
+-#include "nsGenericHTMLElement.h"
++#include "nsGenericHTMLFrameElement.h"
+ #include "nsIDOMDocument.h"
+ #ifdef MOZ_SVG
+ #include "nsIDOMGetSVGDocument.h"
+diff --git a/content/html/content/src/nsHTMLMediaElement.cpp b/content/html/content/src/nsHTMLMediaElement.cpp
+--- a/content/html/content/src/nsHTMLMediaElement.cpp
++++ b/content/html/content/src/nsHTMLMediaElement.cpp
+@@ -85,6 +85,7 @@
+ #include "nsVideoFrame.h"
+ #include "BasicLayers.h"
+ #include <limits>
++#include "nsIDocShell.h"
+ #include "nsIDocShellTreeItem.h"
+ 
+ #ifdef MOZ_OGG

@@ -1,0 +1,225 @@
+diff --git a/parser/html/Makefile.in b/parser/html/Makefile.in
+--- a/parser/html/Makefile.in
++++ b/parser/html/Makefile.in
+@@ -73,7 +73,7 @@
+ 		nsHtml5StateSnapshot.cpp \
+ 		nsHtml5TreeOpExecutor.cpp \
+ 		nsHtml5StreamParser.cpp \
+-		nsHtml5Speculation.cpp \
++		Speculation.cpp \
+ 		nsHtml5SpeculativeLoad.cpp \
+ 		$(NULL)
+ 
+diff --git a/parser/html/nsHtml5Speculation.cpp b/parser/html/Speculation.cpp
+rename from parser/html/nsHtml5Speculation.cpp
+rename to parser/html/Speculation.cpp
+--- a/parser/html/nsHtml5Speculation.cpp
++++ b/parser/html/Speculation.cpp
+@@ -35,27 +35,30 @@
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+-#include "nsHtml5Speculation.h"
++#include "Speculation.h"
+ 
+-nsHtml5Speculation::nsHtml5Speculation(nsHtml5UTF16Buffer* aBuffer, 
+-                                       int32_t aStart, 
+-                                       int32_t aStartLineNumber, 
+-                                       nsAHtml5TreeBuilderState* aSnapshot)
++namespace mozilla {
++namespace htmlparser {
++
++Speculation::Speculation(nsHtml5UTF16Buffer* aBuffer, 
++                         int32_t aStart, 
++                         int32_t aStartLineNumber, 
++                         nsAHtml5TreeBuilderState* aSnapshot)
+   : mBuffer(aBuffer)
+   , mStart(aStart)
+   , mStartLineNumber(aStartLineNumber)
+   , mSnapshot(aSnapshot)
+ {
+-  MOZ_COUNT_CTOR(nsHtml5Speculation);
++  MOZ_COUNT_CTOR(Speculation);
+ }
+ 
+-nsHtml5Speculation::~nsHtml5Speculation()
++Speculation::~Speculation()
+ {
+-  MOZ_COUNT_DTOR(nsHtml5Speculation);
++  MOZ_COUNT_DTOR(Speculation);
+ }
+ 
+ void
+-nsHtml5Speculation::MoveOpsFrom(nsTArray<nsHtml5TreeOperation>& aOpQueue)
++Speculation::MoveOpsFrom(nsTArray<nsHtml5TreeOperation>& aOpQueue)
+ {
+   if (mOpQueue.IsEmpty()) {
+     mOpQueue.SwapElements(aOpQueue);
+@@ -65,7 +68,10 @@
+ }
+ 
+ void
+-nsHtml5Speculation::FlushToSink(nsAHtml5TreeOpSink* aSink)
++Speculation::FlushToSink(nsAHtml5TreeOpSink* aSink)
+ {
+   aSink->MoveOpsFrom(mOpQueue);
+ }
++
++} // namespace htmlparser
++} // namespace mozilla
+diff --git a/parser/html/nsHtml5Speculation.h b/parser/html/Speculation.h
+rename from parser/html/nsHtml5Speculation.h
+rename to parser/html/Speculation.h
+--- a/parser/html/nsHtml5Speculation.h
++++ b/parser/html/Speculation.h
+@@ -35,8 +35,8 @@
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+-#ifndef nsHtml5Speculation_h__
+-#define nsHtml5Speculation_h__
++#ifndef mozilla_htmlparser_Speculation_h
++#define mozilla_htmlparser_Speculation_h
+ 
+ #include "nsHtml5UTF16Buffer.h"
+ #include "nsAHtml5TreeBuilderState.h"
+@@ -45,20 +45,23 @@
+ #include "nsTArray.h"
+ #include "nsAutoPtr.h"
+ 
+-class nsHtml5Speculation : public nsAHtml5TreeOpSink
++namespace mozilla {
++namespace htmlparser {
++
++class Speculation : public nsAHtml5TreeOpSink
+ {
+   public:
+-    nsHtml5Speculation(nsHtml5UTF16Buffer* aBuffer, 
+-                       int32_t aStart, 
+-                       int32_t aStartLineNumber, 
+-                       nsAHtml5TreeBuilderState* aSnapshot);
+-    
+-    ~nsHtml5Speculation();
++    Speculation(nsHtml5UTF16Buffer* aBuffer,
++                int32_t aStart,
++                int32_t aStartLineNumber,
++                nsAHtml5TreeBuilderState* aSnapshot);
++
++    ~Speculation();
+ 
+     nsHtml5UTF16Buffer* GetBuffer() {
+       return mBuffer;
+     }
+-    
++
+     int32_t GetStart() {
+       return mStart;
+     }
+@@ -66,7 +69,7 @@
+     int32_t GetStartLineNumber() {
+       return mStartLineNumber;
+     }
+-    
++
+     nsAHtml5TreeBuilderState* GetSnapshot() {
+       return mSnapshot;
+     }
+@@ -76,7 +79,7 @@
+      * queue unconditionally.
+      */
+     virtual void MoveOpsFrom(nsTArray<nsHtml5TreeOperation>& aOpQueue);
+-    
++
+     void FlushToSink(nsAHtml5TreeOpSink* aSink);
+ 
+   private:
+@@ -84,7 +87,7 @@
+      * The first buffer in the pending UTF-16 buffer queue
+      */
+     nsRefPtr<nsHtml5UTF16Buffer>        mBuffer;
+-    
++
+     /**
+      * The start index of this speculation in the first buffer
+      */
+@@ -94,10 +97,13 @@
+      * The current line number at the start of the speculation
+      */
+     int32_t                             mStartLineNumber;
+-    
++
+     nsAutoPtr<nsAHtml5TreeBuilderState> mSnapshot;
+ 
+     nsTArray<nsHtml5TreeOperation>      mOpQueue;
+ };
+ 
+-#endif // nsHtml5Speculation_h__
++} // namespace htmlparser
++} // namespace mozilla
++
++#endif // mozilla_htmlparser_Speculation_h
+diff --git a/parser/html/nsHtml5StreamParser.cpp b/parser/html/nsHtml5StreamParser.cpp
+--- a/parser/html/nsHtml5StreamParser.cpp
++++ b/parser/html/nsHtml5StreamParser.cpp
+@@ -52,6 +52,8 @@
+ #include "nsHtml5Module.h"
+ #include "nsHtml5RefPtr.h"
+ #include "nsIScriptError.h"
++
++using namespace mozilla::htmlparser;
+ 
+ static NS_DEFINE_CID(kCharsetAliasCID, NS_CHARSETALIAS_CID);
+ 
+@@ -855,8 +857,8 @@
+       // thread has called Terminate() while this thread was parsing.
+       if (mTreeBuilder->HasScript()) {
+         mozilla::MutexAutoLock speculationAutoLock(mSpeculationMutex);
+-        nsHtml5Speculation* speculation = 
+-          new nsHtml5Speculation(mFirstBuffer,
++        Speculation* speculation = 
++          new Speculation(mFirstBuffer,
+                                  mFirstBuffer->getStart(),
+                                  mTokenizer->getLineNumber(),
+                                  mTreeBuilder->newSnapshot());
+@@ -908,7 +910,7 @@
+       NS_NOTREACHED("ContinueAfterScripts called without speculations.");
+       return;
+     }
+-    nsHtml5Speculation* speculation = mSpeculations.ElementAt(0);
++    Speculation* speculation = mSpeculations.ElementAt(0);
+     if (aLastWasCR || 
+         !aTokenizer->isInDataState() || 
+         !aTreeBuilder->snapshotMatches(speculation->GetSnapshot())) {
+@@ -956,7 +958,7 @@
+     if (speculationFailed) {
+       // Rewind the stream
+       mAtEOF = false;
+-      nsHtml5Speculation* speculation = mSpeculations.ElementAt(0);
++      Speculation* speculation = mSpeculations.ElementAt(0);
+       mFirstBuffer = speculation->GetBuffer();
+       mFirstBuffer->setStart(speculation->GetStart());
+       mTokenizer->setLineNumber(speculation->GetStartLineNumber());
+diff --git a/parser/html/nsHtml5StreamParser.h b/parser/html/nsHtml5StreamParser.h
+--- a/parser/html/nsHtml5StreamParser.h
++++ b/parser/html/nsHtml5StreamParser.h
+@@ -51,7 +51,7 @@
+ #include "nsICharsetAlias.h"
+ #include "mozilla/Mutex.h"
+ #include "nsHtml5AtomTable.h"
+-#include "nsHtml5Speculation.h"
++#include "Speculation.h"
+ #include "nsITimer.h"
+ #include "nsICharsetDetector.h"
+ 
+@@ -442,8 +442,9 @@
+      * obtained.
+      * The current speculation is the last element
+      */
+-    nsTArray<nsAutoPtr<nsHtml5Speculation> >  mSpeculations;
+-    mozilla::Mutex                            mSpeculationMutex;
++    nsTArray<nsAutoPtr<mozilla::htmlparser::Speculation> >
++                                  mSpeculations;
++    mozilla::Mutex                mSpeculationMutex;
+ 
+     /**
+      * True to terminate early; protected by mTerminatedMutex

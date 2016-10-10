@@ -1,0 +1,85 @@
+From: Ms2ger <ms2ger@gmail.com>
+* * *
+Bug 620354 - Fix uninitialized variable warnings in TextRunWordCache::FinishTextRun; r-
+
+diff --git a/gfx/thebes/gfxFont.cpp b/gfx/thebes/gfxFont.cpp
+--- a/gfx/thebes/gfxFont.cpp
++++ b/gfx/thebes/gfxFont.cpp
+@@ -5700,16 +5700,17 @@ HasNonOpaqueColor(gfxContext *aContext, 
+         
+     return false;
+ }
+ 
+ // helper class for double-buffering drawing with non-opaque color
+ struct BufferAlphaColor {
+     BufferAlphaColor(gfxContext *aContext)
+         : mContext(aContext)
++        , mAlpha(1.0)
+     {
+ 
+     }
+ 
+     ~BufferAlphaColor() {}
+ 
+     void PushSolidColor(const gfxRect& aBounds, const gfxRGBA& aAlphaColor, uint32_t appsPerDevUnit)
+     {
+diff --git a/gfx/thebes/gfxGraphiteShaper.cpp b/gfx/thebes/gfxGraphiteShaper.cpp
+--- a/gfx/thebes/gfxGraphiteShaper.cpp
++++ b/gfx/thebes/gfxGraphiteShaper.cpp
+@@ -308,17 +308,17 @@ gfxGraphiteShaper::SetGlyphsFromSegment(
+             gfxShapedText::CompressedGlyph::IsSimpleAdvance(appAdvance) &&
+             charGlyphs[offs].IsClusterStart() &&
+             yLocs[c.baseGlyph] == 0)
+         {
+             charGlyphs[offs].SetSimpleGlyph(appAdvance, gids[c.baseGlyph]);
+         } else {
+             // not a one-to-one mapping with simple metrics: use DetailedGlyph
+             nsAutoTArray<gfxShapedText::DetailedGlyph,8> details;
+-            float clusterLoc;
++            float clusterLoc = 0.f;
+             for (uint32_t j = c.baseGlyph; j < c.baseGlyph + c.nGlyphs; ++j) {
+                 gfxShapedText::DetailedGlyph* d = details.AppendElement();
+                 d->mGlyphID = gids[j];
+                 d->mYOffset = roundY ? NSToIntRound(-yLocs[j]) * dev2appUnits :
+                               -yLocs[j] * dev2appUnits;
+                 if (j == c.baseGlyph) {
+                     d->mXOffset = 0;
+                     d->mAdvance = appAdvance;
+diff --git a/gfx/thebes/gfxPangoFonts.cpp b/gfx/thebes/gfxPangoFonts.cpp
+--- a/gfx/thebes/gfxPangoFonts.cpp
++++ b/gfx/thebes/gfxPangoFonts.cpp
+@@ -521,17 +521,17 @@ typedef FcPattern* (*QueryFaceFunction)(
+                                         FcBlanks *blanks);
+ 
+ void
+ gfxDownloadedFcFontEntry::InitPattern()
+ {
+     static QueryFaceFunction sQueryFacePtr =
+         reinterpret_cast<QueryFaceFunction>
+         (FindFunctionSymbol("FcFreeTypeQueryFace"));
+-    FcPattern *pattern;
++    FcPattern* pattern = nullptr;
+ 
+     // FcFreeTypeQueryFace is the same function used to construct patterns for
+     // system fonts and so is the preferred function to use for this purpose.
+     // This will set up the langset property, which helps with sorting, and
+     // the foundry, fullname, and fontversion properties, which properly
+     // identify the font to fontconfig rules.  However, FcFreeTypeQueryFace is
+     // available only from fontconfig-2.4.2 (December 2006).  (CentOS 5.0 has
+     // fontconfig-2.4.1.)
+diff --git a/gfx/thebes/gfxUserFontSet.cpp b/gfx/thebes/gfxUserFontSet.cpp
+--- a/gfx/thebes/gfxUserFontSet.cpp
++++ b/gfx/thebes/gfxUserFontSet.cpp
+@@ -1,10 +1,10 @@
+-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+- * This Source Code Form is subject to the terms of the Mozilla Public
++/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifdef MOZ_LOGGING
+ #define FORCE_PR_LOG /* Allow logging in the release build */
+ #endif /* MOZ_LOGGING */
+ #include "prlog.h"
+ 

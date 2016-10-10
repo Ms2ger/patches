@@ -1,0 +1,198 @@
+diff --git a/content/base/src/nsXMLContentSerializer.cpp b/content/base/src/nsXMLContentSerializer.cpp
+--- a/content/base/src/nsXMLContentSerializer.cpp
++++ b/content/base/src/nsXMLContentSerializer.cpp
+@@ -1396,19 +1396,19 @@ nsXMLContentSerializer::AppendToStringCo
+         start = eol + 1;
+       }
+     }
+   }
+ }
+ 
+ void
+ nsXMLContentSerializer::AppendFormatedWrapped_WhitespaceSequence(
+-                        nsASingleFragmentString::const_char_iterator &aPos,
+-                        const nsASingleFragmentString::const_char_iterator aEnd,
+-                        const nsASingleFragmentString::const_char_iterator aSequenceStart,
++                        nsSubstring::const_char_iterator &aPos,
++                        const nsSubstring::const_char_iterator aEnd,
++                        const nsSubstring::const_char_iterator aSequenceStart,
+                         bool &aMayIgnoreStartOfLineWhitespaceSequence,
+                         nsAString &aOutputStr)
+ {
+   // Handle the complete sequence of whitespace.
+   // Continue to iterate until we find the first non-whitespace char.
+   // Updates "aPos" to point to the first unhandled char.
+   // Also updates the aMayIgnoreStartOfLineWhitespaceSequence flag,
+   // as well as the other "global" state flags.
+@@ -1471,19 +1471,19 @@ nsXMLContentSerializer::AppendFormatedWr
+       // let's write a linebreak now.
+       AppendNewLineToString(aOutputStr);
+     }
+   }
+ }
+ 
+ void
+ nsXMLContentSerializer::AppendWrapped_NonWhitespaceSequence(
+-                        nsASingleFragmentString::const_char_iterator &aPos,
+-                        const nsASingleFragmentString::const_char_iterator aEnd,
+-                        const nsASingleFragmentString::const_char_iterator aSequenceStart,
++                        nsSubstring::const_char_iterator &aPos,
++                        const nsSubstring::const_char_iterator aEnd,
++                        const nsSubstring::const_char_iterator aSequenceStart,
+                         bool &aMayIgnoreStartOfLineWhitespaceSequence,
+                         bool &aSequenceStartAfterAWhiteSpace,
+                         nsAString& aOutputStr)
+ {
+   mMayIgnoreLineBreakSequence = false;
+   aMayIgnoreStartOfLineWhitespaceSequence = false;
+ 
+   // Handle the complete sequence of non-whitespace in this block
+@@ -1629,24 +1629,24 @@ nsXMLContentSerializer::AppendWrapped_No
+         }
+       }
+       aSequenceStartAfterAWhiteSpace = false;
+     }
+   } while (onceAgainBecauseWeAddedBreakInFront);
+ }
+ 
+ void 
+-nsXMLContentSerializer::AppendToStringFormatedWrapped(const nsASingleFragmentString& aStr,
++nsXMLContentSerializer::AppendToStringFormatedWrapped(const nsSubstring& aStr,
+                                                       nsAString& aOutputStr)
+ {
+   if (mBodyOnly && !mInBody) {
+     return;
+   }
+ 
+-  nsASingleFragmentString::const_char_iterator pos, end, sequenceStart;
++  nsSubstring::const_char_iterator pos, end, sequenceStart;
+ 
+   aStr.BeginReading(pos);
+   aStr.EndReading(end);
+ 
+   bool sequenceStartAfterAWhitespace = false;
+   if (pos < end) {
+     nsAString::const_char_iterator end2;
+     aOutputStr.EndReading(end2);
+@@ -1675,29 +1675,29 @@ nsXMLContentSerializer::AppendToStringFo
+       AppendWrapped_NonWhitespaceSequence(pos, end, sequenceStart,
+         mayIgnoreStartOfLineWhitespaceSequence, sequenceStartAfterAWhitespace, aOutputStr);
+     }
+   }
+ }
+ 
+ void
+ nsXMLContentSerializer::AppendWrapped_WhitespaceSequence(
+-                        nsASingleFragmentString::const_char_iterator &aPos,
+-                        const nsASingleFragmentString::const_char_iterator aEnd,
+-                        const nsASingleFragmentString::const_char_iterator aSequenceStart,
++                        nsSubstring::const_char_iterator &aPos,
++                        const nsSubstring::const_char_iterator aEnd,
++                        const nsSubstring::const_char_iterator aSequenceStart,
+                         nsAString &aOutputStr)
+ {
+   // Handle the complete sequence of whitespace.
+   // Continue to iterate until we find the first non-whitespace char.
+   // Updates "aPos" to point to the first unhandled char.
+   mAddSpace = false;
+   mIsIndentationAddedOnCurrentLine = false;
+ 
+   bool leaveLoop = false;
+-  nsASingleFragmentString::const_char_iterator lastPos = aPos;
++  nsSubstring::const_char_iterator lastPos = aPos;
+ 
+   do {
+     switch (*aPos) {
+       case ' ':
+       case '\t':
+         // if there are too many spaces on a line, we wrap
+         if (mColPos >= mMaxColumn) {
+           if (lastPos != aPos) {
+@@ -1727,24 +1727,24 @@ nsXMLContentSerializer::AppendWrapped_Wh
+   } while (!leaveLoop && aPos < aEnd);
+ 
+   if (lastPos != aPos) {
+     aOutputStr.Append(lastPos, aPos - lastPos);
+   }
+ }
+ 
+ void 
+-nsXMLContentSerializer::AppendToStringWrapped(const nsASingleFragmentString& aStr,
++nsXMLContentSerializer::AppendToStringWrapped(const nsSubstring& aStr,
+                                               nsAString& aOutputStr)
+ {
+   if (mBodyOnly && !mInBody) {
+     return;
+   }
+ 
+-  nsASingleFragmentString::const_char_iterator pos, end, sequenceStart;
++  nsSubstring::const_char_iterator pos, end, sequenceStart;
+ 
+   aStr.BeginReading(pos);
+   aStr.EndReading(end);
+ 
+   // not used in this case, but needed by AppendWrapped_NonWhitespaceSequence
+   bool mayIgnoreStartOfLineWhitespaceSequence = false;
+   mMayIgnoreLineBreakSequence = false;
+ 
+diff --git a/content/base/src/nsXMLContentSerializer.h b/content/base/src/nsXMLContentSerializer.h
+--- a/content/base/src/nsXMLContentSerializer.h
++++ b/content/base/src/nsXMLContentSerializer.h
+@@ -128,46 +128,46 @@ class nsXMLContentSerializer : public ns
+    */
+   void AppendToStringConvertLF(const nsAString& aStr,
+                                nsAString& aOutputStr);
+ 
+   /**
+    * Appends a string by wrapping it when necessary.
+    * It updates the column position.
+    */
+-  void AppendToStringWrapped(const nsASingleFragmentString& aStr,
++  void AppendToStringWrapped(const nsSubstring& aStr,
+                              nsAString& aOutputStr);
+ 
+   /**
+    * Appends a string by formating and wrapping it when necessary
+    * It updates the column position.
+    */
+-  void AppendToStringFormatedWrapped(const nsASingleFragmentString& aStr,
++  void AppendToStringFormatedWrapped(const nsSubstring& aStr,
+                                      nsAString& aOutputStr);
+ 
+   // used by AppendToStringWrapped
+   void AppendWrapped_WhitespaceSequence(
+-          nsASingleFragmentString::const_char_iterator &aPos,
+-          const nsASingleFragmentString::const_char_iterator aEnd,
+-          const nsASingleFragmentString::const_char_iterator aSequenceStart,
++          nsSubstring::const_char_iterator &aPos,
++          const nsSubstring::const_char_iterator aEnd,
++          const nsSubstring::const_char_iterator aSequenceStart,
+           nsAString &aOutputStr);
+ 
+   // used by AppendToStringFormatedWrapped
+   void AppendFormatedWrapped_WhitespaceSequence(
+-          nsASingleFragmentString::const_char_iterator &aPos,
+-          const nsASingleFragmentString::const_char_iterator aEnd,
+-          const nsASingleFragmentString::const_char_iterator aSequenceStart,
++          nsSubstring::const_char_iterator &aPos,
++          const nsSubstring::const_char_iterator aEnd,
++          const nsSubstring::const_char_iterator aSequenceStart,
+           bool &aMayIgnoreStartOfLineWhitespaceSequence,
+           nsAString &aOutputStr);
+ 
+   // used by AppendToStringWrapped and AppendToStringFormatedWrapped
+   void AppendWrapped_NonWhitespaceSequence(
+-          nsASingleFragmentString::const_char_iterator &aPos,
+-          const nsASingleFragmentString::const_char_iterator aEnd,
+-          const nsASingleFragmentString::const_char_iterator aSequenceStart,
++          nsSubstring::const_char_iterator &aPos,
++          const nsSubstring::const_char_iterator aEnd,
++          const nsSubstring::const_char_iterator aSequenceStart,
+           bool &aMayIgnoreStartOfLineWhitespaceSequence,
+           bool &aSequenceStartAfterAWhiteSpace,
+           nsAString &aOutputStr);
+ 
+   /**
+    * add mLineBreak to the string
+    * It updates the column position and other flags.
+    */

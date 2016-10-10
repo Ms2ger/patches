@@ -1,0 +1,61 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -4257,37 +4257,39 @@ nsHTMLEditor::GetFirstEditableLeaf( nsID
+ {
+   // check parms
+   NS_ENSURE_TRUE(aOutFirstLeaf && aNode, NS_ERROR_NULL_POINTER);
+   
+   // init out parms
+   *aOutFirstLeaf = aNode;
+   
+   // find leftmost leaf
+-  nsCOMPtr<nsIDOMNode> child;
+-  nsresult res = NS_OK;
+-  child = GetLeftmostChild(aNode);  
+-  while (child && (!IsEditable(child) || !nsEditorUtils::IsLeafNode(child)))
+-  {
+-    nsCOMPtr<nsIDOMNode> tmp;
+-    res = GetNextHTMLNode(child, address_of(tmp));
+-    NS_ENSURE_SUCCESS(res, res);
++  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
++  if (!node) {
++    *aOutFirstLeaf = nullptr;
++    return NS_OK;
++  }
++
++  nsIContent* child = GetLeftmostChild(node);
++
++  while (child && (!IsEditable(child) || !child->HasChildNodes())) {
++    nsIContent* tmp = GetNextHTMLNode(child);
+     NS_ENSURE_TRUE(tmp, NS_ERROR_FAILURE);
+-    
++
+     // only accept nodes that are descendants of aNode
+-    if (nsEditorUtils::IsDescendantOf(tmp, aNode))
+-      child = tmp;
+-    else
+-    {
+-      child = nullptr;  // this will abort the loop
++    if (!nsContentUtils::ContentIsDescendantOf(tmp, node)) {
++      *aOutFirstLeaf = nullptr;
++      return NS_OK;
+     }
++
++    child = tmp;
+   }
+   
+-  *aOutFirstLeaf = child;
+-  return res;
++  *aOutFirstLeaf = do_QueryInterface(child);
++  return NS_OK;
+ }
+ 
+ 
+ nsresult 
+ nsHTMLEditor::GetLastEditableLeaf(nsIDOMNode *aNode, nsCOMPtr<nsIDOMNode> *aOutLastLeaf)
+ {
+   // check parms
+   NS_ENSURE_TRUE(aOutLastLeaf && aNode, NS_ERROR_NULL_POINTER);

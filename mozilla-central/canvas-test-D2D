@@ -1,0 +1,567 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 665345 - Move tests whose result depends on D2D settings out of test_canvas.html
+
+Keeping those tests in test_canvas.html would increase the complexity
+of the code to generate it.
+
+diff --git a/content/canvas/test/Makefile.in b/content/canvas/test/Makefile.in
+--- a/content/canvas/test/Makefile.in
++++ b/content/canvas/test/Makefile.in
+@@ -110,16 +110,24 @@ MOCHITEST_FILES = \
+ 	test_bug866575.html \
+ 	test_drawImage_edge_cases.html \
+ 	test_drawImage_document_domain.html \
+   test_mozDashOffset.html \
+ 	file_drawImage_document_domain.html \
+ 	test_windingRuleUndefined.html \
+ 	$(NULL)
+ 
++# Tests that depend on D2D.
++MOCHITEST_FILES += \
++  test_2d.gradient.interpolate.overlap.html \
++  test_2d.path.rect.zero.3.html \
++  test_2d.path.stroke.scale2.html \
++  test_2d.strokeRect.zero.1.html \
++  $(NULL)
++
+ ifneq (1_Linux,$(MOZ_SUITE)_$(OS_ARCH))
+ # This test fails in Suite on Linux for some reason, disable it there
+ MOCHITEST_FILES += test_2d.composite.uncovered.image.destination-atop.html
+ endif
+ 
+ # xor and lighter aren't well handled by cairo; they mostly work, but we don't want
+ # to test that
+ #	test_2d.composite.solid.xor.html \
+diff --git a/content/canvas/test/standalone.dat b/content/canvas/test/standalone.dat
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/standalone.dat
+@@ -0,0 +1,5 @@
++# D2D
++test_2d.gradient.interpolate.overlap.html
++test_2d.path.rect.zero.3.html
++test_2d.path.stroke.scale2.html
++test_2d.strokeRect.zero.1.html
+diff --git a/content/canvas/test/test_2d.gradient.interpolate.overlap.html b/content/canvas/test/test_2d.gradient.interpolate.overlap.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_2d.gradient.interpolate.overlap.html
+@@ -0,0 +1,56 @@
++<!DOCTYPE HTML>
++<title>Canvas test: 2d.gradient.interpolate.overlap</title>
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++if (SpecialPowers.isD2DEnabled) {
++  // On D2D the different nature of how gradients
++  // are drawn makes it so we cannot guarantee these stops are completely
++  // hard.
++  todo(false, "Disabled for D2D because of the different nature of drawing gradients.");
++  SimpleTest.finish();
++  return;
++}
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++canvas.width = 200;
++var g = ctx.createLinearGradient(0, 0, 200, 0);
++g.addColorStop(0, '#f00');
++g.addColorStop(0, '#ff0');
++g.addColorStop(0.25, '#00f');
++g.addColorStop(0.25, '#0f0');
++g.addColorStop(0.25, '#0f0');
++g.addColorStop(0.25, '#0f0');
++g.addColorStop(0.25, '#ff0');
++g.addColorStop(0.5, '#00f');
++g.addColorStop(0.5, '#0f0');
++g.addColorStop(0.75, '#00f');
++g.addColorStop(0.75, '#f00');
++g.addColorStop(0.75, '#ff0');
++g.addColorStop(0.5, '#0f0');
++g.addColorStop(0.5, '#0f0');
++g.addColorStop(0.5, '#ff0');
++g.addColorStop(1, '#00f');
++ctx.fillStyle = g;
++ctx.fillRect(0, 0, 200, 50);
++isPixel(ctx, 49,25, 0,0,255,255, "49,25", "0,0,255,255", 16);
++isPixel(ctx, 51,25, 255,255,0,255, "51,25", "255,255,0,255", 16);
++isPixel(ctx, 99,25, 0,0,255,255, "99,25", "0,0,255,255", 16);
++isPixel(ctx, 101,25, 255,255,0,255, "101,25", "255,255,0,255", 16);
++isPixel(ctx, 149,25, 0,0,255,255, "149,25", "0,0,255,255", 16);
++isPixel(ctx, 151,25, 255,255,0,255, "151,25", "255,255,0,255", 16);
++
++SimpleTest.finish();
++
++});
++</script>
++
+diff --git a/content/canvas/test/test_2d.path.rect.zero.3.html b/content/canvas/test/test_2d.path.rect.zero.3.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_2d.path.rect.zero.3.html
+@@ -0,0 +1,35 @@
++<!DOCTYPE HTML>
++<title>Canvas test: 2d.path.rect.zero.3</title>
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++if (SpecialPowers.isD2DEnabled) {
++  todo(false, "Disabled for D2D until we can figure out Bug 587554.");
++  SimpleTest.finish();
++  return;
++}
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++ctx.fillStyle = '#0f0';
++ctx.fillRect(0, 0, 100, 50);
++ctx.strokeStyle = '#f00';
++ctx.lineWidth = 100;
++ctx.beginPath();
++ctx.rect(50, 25, 0, 0);
++ctx.stroke();
++isPixel(ctx, 50,25, 0,255,0,255, "50,25", "0,255,0,255", 0);
++
++SimpleTest.finish();
++
++});
++</script>
++
+diff --git a/content/canvas/test/test_2d.path.stroke.scale2.html b/content/canvas/test/test_2d.path.stroke.scale2.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_2d.path.stroke.scale2.html
+@@ -0,0 +1,58 @@
++<!DOCTYPE HTML>
++<title>Canvas test: 2d.path.stroke.scale2</title>
++<!-- Testing: Stroke line widths are scaled by the current transformation matrix -->
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++if (SpecialPowers.isD2DEnabled) {
++  todo(false, "Disabled on D2D because a rasterization bug causes a small discrepancy there. See bug 587316.");
++  SimpleTest.finish();
++  return;
++}
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++ctx.fillStyle = '#f00';
++ctx.fillRect(0, 0, 100, 50);
++
++ctx.beginPath();
++ctx.rect(25, 12.5, 50, 25);
++ctx.save();
++ctx.rotate(Math.PI/2);
++ctx.scale(25, 50);
++ctx.strokeStyle = '#0f0';
++ctx.stroke();
++ctx.restore();
++
++ctx.beginPath();
++ctx.rect(-25, -12.5, 150, 75);
++ctx.save();
++ctx.rotate(Math.PI/2);
++ctx.scale(25, 50);
++ctx.strokeStyle = '#f00';
++ctx.stroke();
++ctx.restore();
++
++isPixel(ctx, 0,0, 0,255,0,255, "0,0", "0,255,0,255", 0);
++isPixel(ctx, 50,0, 0,255,0,255, "50,0", "0,255,0,255", 0);
++isPixel(ctx, 99,0, 0,255,0,255, "99,0", "0,255,0,255", 0);
++isPixel(ctx, 0,25, 0,255,0,255, "0,25", "0,255,0,255", 0);
++isPixel(ctx, 50,25, 0,255,0,255, "50,25", "0,255,0,255", 0);
++isPixel(ctx, 99,25, 0,255,0,255, "99,25", "0,255,0,255", 0);
++isPixel(ctx, 0,49, 0,255,0,255, "0,49", "0,255,0,255", 0);
++isPixel(ctx, 50,49, 0,255,0,255, "50,49", "0,255,0,255", 0);
++isPixel(ctx, 99,49, 0,255,0,255, "99,49", "0,255,0,255", 0);
++
++SimpleTest.finish();
++
++});
++</script>
++
+diff --git a/content/canvas/test/test_2d.strokeRect.zero.1.html b/content/canvas/test/test_2d.strokeRect.zero.1.html
+new file mode 100644
+--- /dev/null
++++ b/content/canvas/test/test_2d.strokeRect.zero.1.html
+@@ -0,0 +1,32 @@
++<!DOCTYPE HTML>
++<title>Canvas test: 2d.strokeRect.zero.1</title>
++<!-- Testing: strokeRect of 0x0 pixels draws nothing -->
++<script src="/tests/SimpleTest/SimpleTest.js"></script>
++<script src="canvas-tests.js"></script>
++<link rel="stylesheet" href="/tests/SimpleTest/test.css">
++<body>
++<canvas id="c" width="100" height="50"><p class="fallback">FAIL (fallback content)</p></canvas>
++<script>
++
++SimpleTest.waitForExplicitFinish();
++addLoadEvent(function () {
++
++if (SpecialPowers.isD2DEnabled) {
++  todo(false, "Disabled for D2D until we can figure out Bug 587554.");
++  SimpleTest.finish();
++  return;
++}
++
++var canvas = document.getElementById('c');
++var ctx = canvas.getContext('2d');
++
++ctx.strokeStyle = '#f00';
++ctx.lineWidth = 250;
++ctx.strokeRect(50, 25, 0, 0);
++isPixel(ctx, 50,25, 0,0,0,0, "50,25", "0,0,0,0", 0);
++
++SimpleTest.finish();
++
++});
++</script>
++
+diff --git a/content/canvas/test/test_canvas.html b/content/canvas/test/test_canvas.html
+--- a/content/canvas/test/test_canvas.html
++++ b/content/canvas/test/test_canvas.html
+@@ -2,20 +2,16 @@
+ <script src="/tests/SimpleTest/SimpleTest.js"></script>
+ <script src="canvas-tests.js"></script>
+ <link href="/tests/SimpleTest/test.css" rel="stylesheet">
+ <body>
+ <script>
+ 
+ SimpleTest.waitForExplicitFinish();
+ 
+-function IsD2DEnabled() {
+-  return SpecialPowers.isD2DEnabled;
+-}
+-
+ function IsLinux() {
+     return navigator.platform.indexOf("Linux") == 0 &&
+            navigator.appVersion.indexOf("Android") == -1;
+ }
+ 
+ function IsAzureSkia() {
+   return SpecialPowers.isAzureSkia;
+ }
+@@ -5450,63 +5446,16 @@ ctx.fillRect(0, 0, 100, 50);
+ isPixel(ctx, 20,25, 0,255,0,255, 2);
+ isPixel(ctx, 50,25, 0,255,0,255, 2);
+ isPixel(ctx, 80,25, 0,255,0,255, 2);
+ 
+ 
+ }
+ </script>
+ 
+-<!-- [[[ test_2d.gradient.interpolate.overlap.html ]]] -->
+-
+-<p>Canvas test: 2d.gradient.interpolate.overlap</p>
+-<canvas height="50" id="c215" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-function test_2d_gradient_interpolate_overlap() {
+-
+-var canvas = document.getElementById('c215');
+-var ctx = canvas.getContext('2d');
+-
+-if (!IsD2DEnabled()) {
+-    // On D2D the different nature of how gradients
+-    // are drawn makes it so we cannot guarantee these stops are completely
+-    // hard.
+-
+-    // On OS X 10.5 quartz is confused by the overlapping stops: Bug #715235
+-    canvas.width = 200;
+-    var g = ctx.createLinearGradient(0, 0, 200, 0);
+-    g.addColorStop(0, '#f00');
+-    g.addColorStop(0, '#ff0');
+-    g.addColorStop(0.25, '#00f');
+-    g.addColorStop(0.25, '#0f0');
+-    g.addColorStop(0.25, '#0f0');
+-    g.addColorStop(0.25, '#0f0');
+-    g.addColorStop(0.25, '#ff0');
+-    g.addColorStop(0.5, '#00f');
+-    g.addColorStop(0.5, '#0f0');
+-    g.addColorStop(0.75, '#00f');
+-    g.addColorStop(0.75, '#f00');
+-    g.addColorStop(0.75, '#ff0');
+-    g.addColorStop(0.5, '#0f0');
+-    g.addColorStop(0.5, '#0f0');
+-    g.addColorStop(0.5, '#ff0');
+-    g.addColorStop(1, '#00f');
+-    ctx.fillStyle = g;
+-    ctx.fillRect(0, 0, 200, 50);
+-    isPixel(ctx, 49,25, 0,0,255,255, 16);
+-    isPixel(ctx, 51,25, 255,255,0,255, 16);
+-    isPixel(ctx, 99,25, 0,0,255,255, 16);
+-    isPixel(ctx, 101,25, 255,255,0,255, 16);
+-    isPixel(ctx, 149,25, 0,0,255,255, 16);
+-    isPixel(ctx, 151,25, 255,255,0,255, 16);
+-}
+-}
+-</script>
+-
+ <!-- [[[ test_2d.gradient.interpolate.overlap2.html ]]] -->
+ 
+ <p>Canvas test: 2d.gradient.interpolate.overlap2</p>
+ <canvas height="50" id="c216" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+ <script>
+ 
+ function test_2d_gradient_interpolate_overlap2() {
+ 
+@@ -13417,40 +13366,16 @@ ctx.beginPath();
+ ctx.rect(50, -100, 0, 250);
+ ctx.stroke();
+ isPixel(ctx, 50,25, 0,255,0,255, 0);
+ 
+ 
+ }
+ </script>
+ 
+-<!-- [[[ test_2d.path.rect.zero.3.html ]]] -->
+-
+-<p>Canvas test: 2d.path.rect.zero.3</p>
+-<canvas height="50" id="c438" style="background: #0f0" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-function test_2d_path_rect_zero_3() {
+-
+-var canvas = document.getElementById('c438');
+-var ctx = canvas.getContext('2d');
+-
+-if (!IsD2DEnabled()) {
+-    // Disabled for D2D until we can figure out Bug 587554.
+-    ctx.strokeStyle = '#f00';
+-    ctx.lineWidth = 100;
+-    ctx.beginPath();
+-    ctx.rect(50, 25, 0, 0);
+-    ctx.stroke();
+-    isPixel(ctx, 50,25, 0,0,0,0, 0);
+-}
+-
+-}
+-</script>
+-
+ <!-- [[[ test_2d.path.rect.zero.4.html ]]] -->
+ 
+ <p>Canvas test: 2d.path.rect.zero.4</p>
+ <canvas height="50" id="c439" style="background: #f00" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+ <script>
+ 
+ function test_2d_path_rect_zero_4() {
+ 
+@@ -13828,65 +13753,16 @@ isPixel(ctx, 99,25, 0,255,0,255, 0);
+ isPixel(ctx, 0,49, 0,255,0,255, 0);
+ isPixel(ctx, 50,49, 0,255,0,255, 0);
+ isPixel(ctx, 99,49, 0,255,0,255, 0);
+ 
+ 
+ }
+ </script>
+ 
+-<!-- [[[ test_2d.path.stroke.scale2.html ]]] -->
+-
+-<p>Canvas test: 2d.path.stroke.scale2</p>
+-<!-- Testing: Stroke line widths are scaled by the current transformation matrix -->
+-<canvas height="50" id="c451" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-function test_2d_path_stroke_scale2() {
+-
+-var canvas = document.getElementById('c451');
+-var ctx = canvas.getContext('2d');
+-
+-if (!IsD2DEnabled()) {
+-    // On D2D a rasterization bug causes a small discrepancy here. See bug 587316
+-    ctx.fillStyle = '#f00';
+-    ctx.fillRect(0, 0, 100, 50);
+-
+-    ctx.beginPath();
+-    ctx.rect(25, 12.5, 50, 25);
+-    ctx.save();
+-    ctx.rotate(Math.PI/2);
+-    ctx.scale(25, 50);
+-    ctx.strokeStyle = '#0f0';
+-    ctx.stroke();
+-    ctx.restore();
+-
+-    ctx.beginPath();
+-    ctx.rect(-25, -12.5, 150, 75);
+-    ctx.save();
+-    ctx.rotate(Math.PI/2);
+-    ctx.scale(25, 50);
+-    ctx.strokeStyle = '#f00';
+-    ctx.stroke();
+-    ctx.restore();
+-
+-    isPixel(ctx, 0,0, 0,255,0,255, 0);
+-    isPixel(ctx, 50,0, 0,255,0,255, 0);
+-    isPixel(ctx, 99,0, 0,255,0,255, 0);
+-    isPixel(ctx, 0,25, 0,255,0,255, 0);
+-    isPixel(ctx, 50,25, 0,255,0,255, 0);
+-    isPixel(ctx, 99,25, 0,255,0,255, 0);
+-    isPixel(ctx, 0,49, 0,255,0,255, 0);
+-    isPixel(ctx, 50,49, 0,255,0,255, 0);
+-    isPixel(ctx, 99,49, 0,255,0,255, 0);
+-}
+-
+-}
+-</script>
+-
+ <!-- [[[ test_2d.path.stroke.skew.html ]]] -->
+ 
+ <p>Canvas test: 2d.path.stroke.skew</p>
+ <!-- Testing: Strokes lines are skewed by the current transformation matrix -->
+ <canvas height="50" id="c452" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+ <script>
+ 
+ function test_2d_path_stroke_skew() {
+@@ -17534,38 +17410,16 @@ ctx.strokeStyle = '#0f0';
+ ctx.lineWidth = 5;
+ ctx.strokeRect(2.5, -2.6, 5, 0.2);
+ isPixel(ctx, 50,25, 0,255,0,255, 0);
+ 
+ 
+ }
+ </script>
+ 
+-<!-- [[[ test_2d.strokeRect.zero.1.html ]]] -->
+-
+-<p>Canvas test: 2d.strokeRect.zero.1</p>
+-<canvas height="50" id="c580" style="background: #0f0" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+-<script>
+-
+-function test_2d_strokeRect_zero_1() {
+-
+-var canvas = document.getElementById('c580');
+-var ctx = canvas.getContext('2d');
+-
+-if (!IsD2DEnabled()) {
+-    // Disabled for D2D until we can figure out Bug 587554.
+-    ctx.strokeStyle = '#f00';
+-    ctx.lineWidth = 250;
+-    ctx.strokeRect(50, 25, 0, 0);
+-    isPixel(ctx, 50,25, 0,0,0,0, 0);
+-}
+-
+-}
+-</script>
+-
+ <!-- [[[ test_2d.strokeRect.zero.2.html ]]] -->
+ 
+ <p>Canvas test: 2d.strokeRect.zero.2</p>
+ <canvas height="50" id="c581" style="background: #0f0" width="100"><p class="fallback">FAIL (fallback content)</p></canvas>
+ <script>
+ 
+ function test_2d_strokeRect_zero_2() {
+ 
+@@ -21470,21 +21324,16 @@ function runTests() {
+   ok(false, "unexpected exception thrown in: test_2d_gradient_interpolate_multiple");
+  }
+  try {
+   test_2d_gradient_interpolate_outside();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_gradient_interpolate_outside");
+  }
+  try {
+-  test_2d_gradient_interpolate_overlap();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_2d_gradient_interpolate_overlap");
+- }
+- try {
+   test_2d_gradient_interpolate_overlap2();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_gradient_interpolate_overlap2");
+  }
+  try {
+   test_2d_gradient_interpolate_solid();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_gradient_interpolate_solid");
+@@ -22515,21 +22364,16 @@ function runTests() {
+   ok(false, "unexpected exception thrown in: test_2d_path_rect_zero_1");
+  }
+  try {
+   test_2d_path_rect_zero_2();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_path_rect_zero_2");
+  }
+  try {
+-  test_2d_path_rect_zero_3();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_2d_path_rect_zero_3");
+- }
+- try {
+   test_2d_path_rect_zero_4();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_path_rect_zero_4");
+  }
+  try {
+   test_2d_path_rect_zero_5();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_path_rect_zero_5");
+@@ -22575,21 +22419,16 @@ function runTests() {
+   ok(false, "unexpected exception thrown in: test_2d_path_stroke_prune_rect");
+  }
+  try {
+   test_2d_path_stroke_scale1();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_path_stroke_scale1");
+  }
+  try {
+-  test_2d_path_stroke_scale2();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_2d_path_stroke_scale2");
+- }
+- try {
+   test_2d_path_stroke_skew();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_path_stroke_skew");
+  }
+  try {
+   test_2d_path_stroke_unaffected();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_path_stroke_unaffected");
+@@ -23210,21 +23049,16 @@ function runTests() {
+   ok(false, "unexpected exception thrown in: test_2d_strokeRect_shadow");
+  }
+  try {
+   test_2d_strokeRect_transform();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_strokeRect_transform");
+  }
+  try {
+-  test_2d_strokeRect_zero_1();
+- } catch (e) {
+-  ok(false, "unexpected exception thrown in: test_2d_strokeRect_zero_1");
+- }
+- try {
+   test_2d_strokeRect_zero_2();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_strokeRect_zero_2");
+  }
+  try {
+   test_2d_strokeRect_zero_3();
+  } catch (e) {
+   ok(false, "unexpected exception thrown in: test_2d_strokeRect_zero_3");

@@ -1,0 +1,801 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsDocument.cpp b/content/base/src/nsDocument.cpp
+--- a/content/base/src/nsDocument.cpp
++++ b/content/base/src/nsDocument.cpp
+@@ -8175,17 +8175,17 @@ nsDocument::AddImage(imgIRequest* aImage
+ }
+ 
+ nsresult
+ nsDocument::RemoveImage(imgIRequest* aImage)
+ {
+   NS_ENSURE_ARG_POINTER(aImage);
+ 
+   // Get the old count. It should exist and be > 0.
+-  uint32_t count;
++  uint32_t count = 0;
+ #ifdef DEBUG
+   bool found =
+ #endif
+   mImageTracker.Get(aImage, &count);
+   NS_ABORT_IF_FALSE(found, "Removing image that wasn't in the tracker!");
+   NS_ABORT_IF_FALSE(count > 0, "Entry in the cache tracker with count 0!");
+ 
+   // We're removing, so decrement the count.
+diff --git a/content/base/src/nsFileDataProtocolHandler.cpp b/content/base/src/nsFileDataProtocolHandler.cpp
+--- a/content/base/src/nsFileDataProtocolHandler.cpp
++++ b/content/base/src/nsFileDataProtocolHandler.cpp
+@@ -128,16 +128,19 @@ GetFileDataInfo(const nsACString& aUri)
+ { 0xf5475c51, 0x59a7, 0x4757, \
+   { 0xb3, 0xd9, 0xe2, 0x11, 0xa9, 0x41, 0x08, 0x72 } }
+ 
+ static NS_DEFINE_CID(kFILEDATAURICID, NS_FILEDATAURI_CID);
+ 
+ class nsFileDataURI : public nsSimpleURI,
+                       public nsIURIWithPrincipal
+ {
++  using nsSimpleURI::Read;
++  using nsSimpleURI::Write;
++
+ public:
+   nsFileDataURI(nsIPrincipal* aPrincipal) :
+       nsSimpleURI(), mPrincipal(aPrincipal)
+   {}
+   virtual ~nsFileDataURI() {}
+ 
+   // For use only from deserialization
+   nsFileDataURI() : nsSimpleURI() {}
+diff --git a/content/html/document/src/nsHTMLDocument.cpp b/content/html/document/src/nsHTMLDocument.cpp
+--- a/content/html/document/src/nsHTMLDocument.cpp
++++ b/content/html/document/src/nsHTMLDocument.cpp
+@@ -1987,47 +1987,16 @@ nsHTMLDocument::Write(const nsAString& a
+ }
+ 
+ NS_IMETHODIMP
+ nsHTMLDocument::Writeln(const nsAString& aText)
+ {
+   return WriteCommon(aText, true);
+ }
+ 
+-NS_IMETHODIMP
+-nsHTMLDocument::ImportNode(nsIDOMNode* aImportedNode,
+-                           bool aDeep,
+-                           nsIDOMNode** aReturn)
+-{
+-  return nsDocument::ImportNode(aImportedNode, aDeep, aReturn);
+-}
+-
+-NS_IMETHODIMP
+-nsHTMLDocument::CreateAttributeNS(const nsAString& aNamespaceURI,
+-                                  const nsAString& aQualifiedName,
+-                                  nsIDOMAttr** aReturn)
+-{
+-  return nsDocument::CreateAttributeNS(aNamespaceURI, aQualifiedName, aReturn);
+-}
+-
+-NS_IMETHODIMP
+-nsHTMLDocument::GetElementsByTagNameNS(const nsAString& aNamespaceURI,
+-                                       const nsAString& aLocalName,
+-                                       nsIDOMNodeList** aReturn)
+-{
+-  return nsDocument::GetElementsByTagNameNS(aNamespaceURI, aLocalName, aReturn);
+-}
+-
+-NS_IMETHODIMP
+-nsHTMLDocument::GetElementById(const nsAString& aElementId,
+-                               nsIDOMElement** aReturn)
+-{
+-  return nsDocument::GetElementById(aElementId, aReturn);
+-}
+-
+ bool
+ nsHTMLDocument::MatchNameAttribute(nsIContent* aContent, int32_t aNamespaceID,
+                                    nsIAtom* aAtom, void* aData)
+ {
+   NS_PRECONDITION(aContent, "Must have content node to work with!");
+   nsString* elementName = static_cast<nsString*>(aData);
+   return
+     aContent->GetNameSpaceID() == kNameSpaceID_XHTML &&
+diff --git a/content/svg/content/src/SVGPathData.cpp b/content/svg/content/src/SVGPathData.cpp
+--- a/content/svg/content/src/SVGPathData.cpp
++++ b/content/svg/content/src/SVGPathData.cpp
+@@ -287,17 +287,18 @@ SVGPathData::ConstructPath(gfxContext *a
+   if (!mData.Length() || !IsMoveto(SVGPathSegUtils::DecodeType(mData[0]))) {
+     return; // paths without an initial moveto are invalid
+   }
+ 
+   bool capsAreSquare = aCtx->CurrentLineCap() == gfxContext::LINE_CAP_SQUARE;
+   bool subpathHasLength = false;  // visual length
+   bool subpathContainsNonArc = false;
+ 
+-  uint32_t segType, prevSegType = nsIDOMSVGPathSeg::PATHSEG_UNKNOWN;
++  uint32_t segType = nsIDOMSVGPathSeg::PATHSEG_UNKNOWN,
++           prevSegType = nsIDOMSVGPathSeg::PATHSEG_UNKNOWN;
+   gfxPoint pathStart(0.0, 0.0); // start point of [sub]path
+   gfxPoint segStart(0.0, 0.0);
+   gfxPoint segEnd;
+   gfxPoint cp1, cp2;            // previous bezier's control points
+   gfxPoint tcp1, tcp2;          // temporaries
+ 
+   // Regarding cp1 and cp2: If the previous segment was a cubic bezier curve,
+   // then cp2 is its second control point. If the previous segment was a
+diff --git a/content/svg/document/src/nsSVGDocument.h b/content/svg/document/src/nsSVGDocument.h
+--- a/content/svg/document/src/nsSVGDocument.h
++++ b/content/svg/document/src/nsSVGDocument.h
+@@ -49,15 +49,14 @@ public:
+   using nsDocument::GetElementById;
+   using nsDocument::SetDocumentURI;
+   nsSVGDocument();
+   virtual ~nsSVGDocument();
+ 
+   NS_DECL_NSIDOMSVGDOCUMENT
+   NS_FORWARD_NSIDOMDOCUMENT(nsXMLDocument::)
+   NS_FORWARD_NSIDOMNODE(nsXMLDocument::)
+-  NS_FORWARD_NSIDOMDOCUMENTEVENT(nsXMLDocument::)
+   NS_DECL_ISUPPORTS_INHERITED
+   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
+   virtual nsXPCClassInfo* GetClassInfo();
+ };
+ 
+ #endif
+diff --git a/content/xul/document/src/nsXULContentSink.cpp b/content/xul/document/src/nsXULContentSink.cpp
+--- a/content/xul/document/src/nsXULContentSink.cpp
++++ b/content/xul/document/src/nsXULContentSink.cpp
+@@ -962,17 +962,17 @@ XULContentSinkImpl::OpenTag(const PRUnic
+     mState = eInDocumentElement;
+     return NS_OK;
+ }
+ 
+ nsresult
+ XULContentSinkImpl::OpenScript(const PRUnichar** aAttributes,
+                                const uint32_t aLineNumber)
+ {
+-  uint32_t langID;
++  uint32_t langID = 0;
+   nsresult rv = mContextStack.GetTopNodeScriptType(&langID);
+   if (NS_FAILED(rv)) return rv;
+   uint32_t version = 0;
+ 
+   // Look for SRC attribute and look for a LANGUAGE attribute
+   nsAutoString src;
+   while (*aAttributes) {
+       const nsDependentString key(aAttributes[0]);
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -7841,23 +7841,23 @@ nsEventTargetSH::PreserveWrapper(nsISupp
+ 
+ 
+ // Element helper
+ 
+ static bool
+ GetBindingURL(Element *aElement, nsIDocument *aDocument,
+               nsCSSValue::URL **aResult)
+ {
++  *aResult = nullptr;
++
+   // If we have a frame the frame has already loaded the binding.  And
+   // otherwise, don't do anything else here unless we're dealing with
+   // XUL.
+   nsIPresShell *shell = aDocument->GetShell();
+   if (!shell || aElement->GetPrimaryFrame() || !aElement->IsXUL()) {
+-    *aResult = nullptr;
+-
+     return true;
+   }
+ 
+   // Get the computed -moz-binding directly from the style context
+   nsPresContext *pctx = shell->GetPresContext();
+   NS_ENSURE_TRUE(pctx, false);
+ 
+   nsRefPtr<nsStyleContext> sc = pctx->StyleSet()->ResolveStyleFor(aElement,
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -8864,17 +8864,17 @@ nsGlobalWindow::SetTimeoutOrInterval(nsI
+   timeout->mPopupState = openAbused;
+ 
+   if (gRunningTimeoutDepth == 0 && gPopupControlState < openAbused) {
+     // This timeout is *not* set from another timeout and it's set
+     // while popups are enabled. Propagate the state to the timeout if
+     // its delay (interval) is equal to or less than what
+     // "dom.disable_open_click_delay" is set to (in ms).
+ 
+-    uint32_t delay =
++    int32_t delay =
+       nsContentUtils::GetIntPref("dom.disable_open_click_delay");
+ 
+     // This is checking |interval|, not realInterval, on purpose,
+     // because our lower bound for |realInterval| could be pretty high
+     // in some cases.
+     if (interval <= delay) {
+       timeout->mPopupState = gPopupControlState;
+     }
+diff --git a/dom/base/nsScriptNameSpaceManager.cpp b/dom/base/nsScriptNameSpaceManager.cpp
+--- a/dom/base/nsScriptNameSpaceManager.cpp
++++ b/dom/base/nsScriptNameSpaceManager.cpp
+@@ -290,17 +290,17 @@ nsScriptNameSpaceManager::RegisterExtern
+                              getter_AddRefs(enumerator));
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   nsXPIDLCString IID_string;
+   nsAutoCString category_entry;
+   const char* if_name;
+   nsCOMPtr<nsISupports> entry;
+   nsCOMPtr<nsIInterfaceInfo> if_info;
+-  bool found_old, dom_prefix;
++  bool found_old = false, dom_prefix;
+ 
+   while (NS_SUCCEEDED(enumerator->GetNext(getter_AddRefs(entry)))) {
+     nsCOMPtr<nsISupportsCString> category(do_QueryInterface(entry));
+ 
+     if (!category) {
+       NS_WARNING("Category entry not an nsISupportsCString!");
+ 
+       continue;
+diff --git a/gfx/angle/src/compiler/PoolAlloc.h b/gfx/angle/src/compiler/PoolAlloc.h
+--- a/gfx/angle/src/compiler/PoolAlloc.h
++++ b/gfx/angle/src/compiler/PoolAlloc.h
+@@ -292,9 +292,9 @@ public:
+ 
+     void setAllocator(TPoolAllocator* a) { allocator = *a; }
+     TPoolAllocator& getAllocator() const { return allocator; }
+ 
+ protected:
+     TPoolAllocator& allocator;
+ };
+ 
+-#endif // _POOLALLOC_INCLUDED_
+\ No newline at end of file
++#endif // _POOLALLOC_INCLUDED_
+diff --git a/gfx/thebes/gfxFont.cpp b/gfx/thebes/gfxFont.cpp
+--- a/gfx/thebes/gfxFont.cpp
++++ b/gfx/thebes/gfxFont.cpp
+@@ -3414,16 +3414,17 @@ HasNonOpaqueColor(gfxContext *aContext, 
+         
+     return false;
+ }
+ 
+ // helper class for double-buffering drawing with non-opaque color
+ struct BufferAlphaColor {
+     BufferAlphaColor(gfxContext *aContext)
+         : mContext(aContext)
++        , mAlpha(0)
+     {
+ 
+     }
+ 
+     ~BufferAlphaColor() {}
+ 
+     void PushSolidColor(const gfxRect& aBounds, const gfxRGBA& aAlphaColor, uint32_t appsPerDevUnit)
+     {
+diff --git a/js/src/xpconnect/src/xpcconvert.cpp b/js/src/xpconnect/src/xpcconvert.cpp
+--- a/js/src/xpconnect/src/xpcconvert.cpp
++++ b/js/src/xpconnect/src/xpcconvert.cpp
+@@ -2045,21 +2045,21 @@ XPCConvert::JSArray2Native(XPCCallContex
+ {
+     NS_PRECONDITION(d, "bad param");
+ 
+     JSContext* cx = ccx.GetJSContext();
+ 
+     // No Action, FRee memory, RElease object
+     enum CleanupMode {na, fr, re};
+ 
+-    CleanupMode cleanupMode;
++    CleanupMode cleanupMode = na;
+ 
+     JSObject* jsarray = nullptr;
+     void* array = nullptr;
+-    JSUint32 initedCount;
++    JSUint32 initedCount = 0;
+     jsval current;
+ 
+     // XXX add support for getting chars from strings
+ 
+     // XXX add support to indicate *which* array element was not convertable
+ 
+     if(JSVAL_IS_VOID(s) || JSVAL_IS_NULL(s))
+     {
+diff --git a/js/src/xpconnect/src/xpcwrappedjsclass.cpp b/js/src/xpconnect/src/xpcwrappedjsclass.cpp
+--- a/js/src/xpconnect/src/xpcwrappedjsclass.cpp
++++ b/js/src/xpconnect/src/xpcwrappedjsclass.cpp
+@@ -1479,17 +1479,17 @@ nsXPCWrappedJSClass::CallMethod(nsXPCWra
+     // about to call, and that's the global that we want here. In other words:
+     // we're trusting the JS engine to come up with a good global to use for
+     // our object (whatever it was).
+     for(i = 0; i < argc; i++)
+     {
+         const nsXPTParamInfo& param = info->params[i];
+         const nsXPTType& type = param.GetType();
+         nsXPTType datum_type;
+-        JSUint32 array_count;
++        JSUint32 array_count = 0;
+         bool isArray = type.IsArray();
+         jsval val = JSVAL_NULL;
+         AUTO_MARK_JSVAL(ccx, &val);
+         bool isSizedString = isArray ?
+                 JS_FALSE :
+                 type.TagPart() == nsXPTType::T_PSTRING_SIZE_IS ||
+                 type.TagPart() == nsXPTType::T_PWSTRING_SIZE_IS;
+ 
+@@ -1770,17 +1770,17 @@ pre_call_clean_up:
+             const nsXPTType& type = param.GetType();
+             if(!type.IsDependent())
+                 continue;
+ 
+             jsval val;
+             nsXPTCMiniVariant* pv;
+             nsXPTType datum_type;
+             JSBool useAllocator = JS_FALSE;
+-            JSUint32 array_count;
++            JSUint32 array_count = 0;
+             bool isArray = type.IsArray();
+             bool isSizedString = isArray ?
+                     JS_FALSE :
+                     type.TagPart() == nsXPTType::T_PSTRING_SIZE_IS ||
+                     type.TagPart() == nsXPTType::T_PWSTRING_SIZE_IS;
+ 
+             pv = (nsXPTCMiniVariant*) nativeParams[i].val.p;
+ 
+diff --git a/layout/base/RestyleTracker.cpp b/layout/base/RestyleTracker.cpp
+--- a/layout/base/RestyleTracker.cpp
++++ b/layout/base/RestyleTracker.cpp
+@@ -194,17 +194,17 @@ RestyleTracker::ProcessRestyles()
+           }
+         }
+       }
+ 
+       // Now remove all those eRestyle_LaterSiblings bits
+       for (uint32_t i = 0; i < laterSiblingArr.Length(); ++i) {
+         Element* element = laterSiblingArr[i];
+         NS_ASSERTION(element->HasFlag(RestyleBit()), "How did that happen?");
+-        RestyleData data;
++        RestyleData data = { nsRestyleHint(0), nsChangeHint(0) };
+ #ifdef DEBUG
+         bool found =
+ #endif
+           mPendingRestyles.Get(element, &data);
+         NS_ASSERTION(found, "Where did our entry go?");
+         data.mRestyleHint =
+           nsRestyleHint(data.mRestyleHint & ~eRestyle_LaterSiblings);
+ 
+diff --git a/layout/base/nsBidiPresUtils.cpp b/layout/base/nsBidiPresUtils.cpp
+--- a/layout/base/nsBidiPresUtils.cpp
++++ b/layout/base/nsBidiPresUtils.cpp
+@@ -641,17 +641,17 @@ bool IsBidiLeaf(nsIFrame* aFrame) {
+ 
+ void
+ nsBidiPresUtils::InitLogicalArray(nsIFrame*       aCurrentFrame)
+ {
+   if (!aCurrentFrame)
+     return;
+ 
+   nsIPresShell* shell = aCurrentFrame->PresContext()->PresShell();
+-  nsStyleContext* styleContext;
++  nsStyleContext* styleContext = NULL;
+ 
+   for (nsIFrame* childFrame = aCurrentFrame; childFrame;
+        childFrame = childFrame->GetNextSibling()) {
+ 
+     // If the real frame for a placeholder is a first letter frame, we need to
+     // drill down into it and include its contents in Bidi resolution.
+     // If not, we just use the placeholder.
+     nsIFrame* frame = childFrame;
+diff --git a/layout/base/nsCaret.cpp b/layout/base/nsCaret.cpp
+--- a/layout/base/nsCaret.cpp
++++ b/layout/base/nsCaret.cpp
+@@ -526,17 +526,17 @@ void nsCaret::UpdateCaretPosition()
+ void nsCaret::PaintCaret(nsDisplayListBuilder *aBuilder,
+                          nsRenderingContext *aCtx,
+                          nsIFrame* aForFrame,
+                          const nsPoint &aOffset)
+ {
+   NS_ASSERTION(mDrawn, "The caret shouldn't be drawing");
+ 
+   const nsRect drawCaretRect = mCaretRect + aOffset;
+-  int32_t contentOffset;
++  int32_t contentOffset = 0;
+ 
+ #ifdef DEBUG
+   nsIFrame* frame =
+ #endif
+     GetCaretFrame(&contentOffset);
+   NS_ASSERTION(frame == aForFrame, "We're referring different frame");
+   nscolor foregroundColor = aForFrame->GetCaretColorAt(contentOffset);
+ 
+diff --git a/layout/base/nsLayoutUtils.cpp b/layout/base/nsLayoutUtils.cpp
+--- a/layout/base/nsLayoutUtils.cpp
++++ b/layout/base/nsLayoutUtils.cpp
+@@ -2194,19 +2194,19 @@ nsLayoutUtils::IntrinsicForContainer(nsR
+   // minimum, overriding 'min-width'.  This ensures two things:
+   //   * that we don't let a value of 'box-sizing' specifying a width
+   //     smaller than the padding/border inside the box-sizing box give
+   //     a content width less than zero
+   //   * that we prevent tables from becoming smaller than their
+   //     intrinsic minimum width
+   nscoord result = 0, min = 0;
+ 
+-  nscoord maxw;
++  nscoord maxw = 0;
+   bool haveFixedMaxWidth = GetAbsoluteCoord(styleMaxWidth, maxw);
+-  nscoord minw;
++  nscoord minw = 0;
+   bool haveFixedMinWidth = GetAbsoluteCoord(styleMinWidth, minw);
+ 
+   // If we have a specified width (or a specified 'min-width' greater
+   // than the specified 'max-width', which works out to the same thing),
+   // don't even bother getting the frame's intrinsic width.
+   if (styleWidth.GetUnit() == eStyleUnit_Enumerated &&
+       (styleWidth.GetIntValue() == NS_STYLE_WIDTH_MAX_CONTENT ||
+        styleWidth.GetIntValue() == NS_STYLE_WIDTH_MIN_CONTENT)) {
+diff --git a/layout/base/nsPresContext.cpp b/layout/base/nsPresContext.cpp
+--- a/layout/base/nsPresContext.cpp
++++ b/layout/base/nsPresContext.cpp
+@@ -1898,17 +1898,17 @@ nsPresContext::FlushUserFontSet()
+   if (!mGetUserFontSetCalled) {
+     return; // No one cares about this font set yet, but we want to be careful
+             // to not unset our mUserFontSetDirty bit, so when someone really
+             // does we'll create it.
+   }
+ 
+   if (mUserFontSetDirty) {
+     if (gfxPlatform::GetPlatform()->DownloadableFontsEnabled()) {
+-      nsTArray<nsFontFaceRuleContainer> rules;
++      nsTArray<css::FontFaceRuleContainer> rules;
+       if (!mShell->StyleSet()->AppendFontFaceRules(this, rules)) {
+         if (mUserFontSet) {
+           mUserFontSet->Destroy();
+           NS_RELEASE(mUserFontSet);
+         }
+         return;
+       }
+ 
+diff --git a/layout/generic/nsLineLayout.cpp b/layout/generic/nsLineLayout.cpp
+--- a/layout/generic/nsLineLayout.cpp
++++ b/layout/generic/nsLineLayout.cpp
+@@ -208,17 +208,17 @@ nsLineLayout::BeginLineReflow(nscoord aX
+   SetFlag(LL_LINEENDSINBR, false);
+   mSpanDepth = 0;
+   mMaxTopBoxHeight = mMaxBottomBoxHeight = 0;
+ 
+   if (GetFlag(LL_GOTLINEBOX)) {
+     mLineBox->ClearHasBullet();
+   }
+ 
+-  PerSpanData* psd;
++  PerSpanData* psd = NULL;
+   NewPerSpanData(&psd);
+   mCurrentSpan = mRootSpan = psd;
+   psd->mReflowState = mBlockReflowState;
+   psd->mLeftEdge = aX;
+   psd->mX = aX;
+   psd->mRightEdge = aX + aWidth;
+ 
+   mTopEdge = aY;
+diff --git a/layout/generic/nsTextFrameThebes.cpp b/layout/generic/nsTextFrameThebes.cpp
+--- a/layout/generic/nsTextFrameThebes.cpp
++++ b/layout/generic/nsTextFrameThebes.cpp
+@@ -4491,19 +4491,19 @@ static void DrawSelectionDecorations(gfx
+   gfxPoint pt(aPt);
+   gfxSize size(aWidth,
+                ComputeSelectionUnderlineHeight(aTextPaintStyle.PresContext(),
+                                                aFontMetrics, aType));
+   gfxFloat descentLimit =
+     ComputeDescentLimitForSelectionUnderline(aTextPaintStyle.PresContext(),
+                                              aFrame, aFontMetrics);
+ 
+-  float relativeSize;
+-  uint8_t style;
+-  nscolor color;
++  float relativeSize = 0;
++  uint8_t style = 0;
++  nscolor color = 0;
+   int32_t index =
+     nsTextPaintStyle::GetUnderlineStyleIndexForSelectionType(aType);
+   bool weDefineSelectionUnderline =
+     aTextPaintStyle.GetSelectionUnderlineForPaint(index, &color,
+                                                   &relativeSize, &style);
+ 
+   switch (aType) {
+     case nsISelectionController::SELECTION_IME_RAWINPUT:
+@@ -6053,18 +6053,18 @@ nsTextFrame::AddInlineMinWidthForFlow(ns
+ 
+   // If we're hyphenating, the PropertyProvider needs the actual length;
+   // otherwise we can just pass PR_INT32_MAX to mean "all the text"
+   int32_t len = PR_INT32_MAX;
+   bool hyphenating = frag->GetLength() > 0 &&
+     (mTextRun->GetFlags() & gfxTextRunFactory::TEXT_ENABLE_HYPHEN_BREAKS) != 0;
+   if (hyphenating) {
+     gfxSkipCharsIterator tmp(iter);
+-    len = PR_MIN(GetContentOffset() + GetInFlowContentLength(),
+-                 tmp.ConvertSkippedToOriginal(flowEndInTextRun)) - iter.GetOriginalOffset();
++    len = NS_MIN<int32_t>(GetContentOffset() + GetInFlowContentLength(),
++                          tmp.ConvertSkippedToOriginal(flowEndInTextRun)) - iter.GetOriginalOffset();
+   }
+   PropertyProvider provider(mTextRun, textStyle, frag, this,
+                             iter, len, nullptr, 0);
+ 
+   bool collapseWhitespace = !textStyle->WhiteSpaceIsSignificant();
+   bool preformatNewlines = textStyle->NewlineIsSignificant();
+   bool preformatTabs = textStyle->WhiteSpaceIsSignificant();
+   gfxFloat tabWidth = -1;
+diff --git a/layout/style/nsCSSParser.cpp b/layout/style/nsCSSParser.cpp
+--- a/layout/style/nsCSSParser.cpp
++++ b/layout/style/nsCSSParser.cpp
+@@ -2104,71 +2104,71 @@ CSSParserImpl::ParseMediaRule(RuleAppend
+ }
+ 
+ // Parse a @-moz-document rule.  This is like an @media rule, but instead
+ // of a medium it has a nonempty list of items where each item is either
+ // url(), url-prefix(), or domain().
+ bool
+ CSSParserImpl::ParseMozDocumentRule(RuleAppendFunc aAppendFunc, void* aData)
+ {
+-  css::DocumentRule::URL *urls = nullptr;
+-  css::DocumentRule::URL **next = &urls;
++  DocumentRule::URL *urls = nullptr;
++  DocumentRule::URL **next = &urls;
+   do {
+     if (!GetToken(true) ||
+         !(eCSSToken_URL == mToken.mType ||
+           (eCSSToken_Function == mToken.mType &&
+            (mToken.mIdent.LowerCaseEqualsLiteral("url-prefix") ||
+             mToken.mIdent.LowerCaseEqualsLiteral("domain") ||
+             mToken.mIdent.LowerCaseEqualsLiteral("regexp"))))) {
+       REPORT_UNEXPECTED_TOKEN(PEMozDocRuleBadFunc);
+       delete urls;
+       return false;
+     }
+-    css::DocumentRule::URL *cur = *next = new css::DocumentRule::URL;
++    DocumentRule::URL *cur = *next = new DocumentRule::URL;
+     next = &cur->next;
+     if (mToken.mType == eCSSToken_URL) {
+-      cur->func = css::DocumentRule::eURL;
++      cur->func = DocumentRule::eURL;
+       CopyUTF16toUTF8(mToken.mIdent, cur->url);
+     } else if (mToken.mIdent.LowerCaseEqualsLiteral("regexp")) {
+       // regexp() is different from url-prefix() and domain() (but
+       // probably the way they *should* have been* in that it requires a
+       // string argument, and doesn't try to behave like url().
+-      cur->func = css::DocumentRule::eRegExp;
++      cur->func = DocumentRule::eRegExp;
+       GetToken(true);
+       // copy before we know it's valid (but before ExpectSymbol changes
+       // mToken.mIdent)
+       CopyUTF16toUTF8(mToken.mIdent, cur->url);
+       if (eCSSToken_String != mToken.mType || !ExpectSymbol(')', true)) {
+         REPORT_UNEXPECTED_TOKEN(PEMozDocRuleNotString);
+         SkipUntil(')');
+         delete urls;
+         return false;
+       }
+     } else {
+       if (mToken.mIdent.LowerCaseEqualsLiteral("url-prefix")) {
+-        cur->func = css::DocumentRule::eURLPrefix;
++        cur->func = DocumentRule::eURLPrefix;
+       } else if (mToken.mIdent.LowerCaseEqualsLiteral("domain")) {
+-        cur->func = css::DocumentRule::eDomain;
++        cur->func = DocumentRule::eDomain;
+       }
+ 
+       nsAutoString url;
+       if (!GetURLInParens(url)) {
+         REPORT_UNEXPECTED_TOKEN(PEMozDocRuleNotURI);
+         delete urls;
+         return false;
+       }
+ 
+       // We could try to make the URL (as long as it's not domain())
+       // canonical and absolute with NS_NewURI and GetSpec, but I'm
+       // inclined to think we shouldn't.
+       CopyUTF16toUTF8(url, cur->url);
+     }
+   } while (ExpectSymbol(',', true));
+ 
+-  nsRefPtr<css::DocumentRule> rule = new css::DocumentRule();
++  nsRefPtr<DocumentRule> rule = new DocumentRule();
+   rule->SetURLs(urls);
+ 
+   return ParseGroupRule(rule, aAppendFunc, aData);
+ }
+ 
+ // Parse a CSS3 namespace rule: "@namespace [prefix] STRING | URL;"
+ bool
+ CSSParserImpl::ParseNameSpaceRule(RuleAppendFunc aAppendFunc, void* aData)
+@@ -6859,17 +6859,17 @@ CSSParserImpl::ParseRect(nsCSSProperty a
+         break;
+       default:
+         UngetToken();
+         return false;
+     }
+   } else if (mToken.mType == eCSSToken_Function &&
+              mToken.mIdent.LowerCaseEqualsLiteral("rect")) {
+     nsCSSRect& rect = val.SetRectValue();
+-    bool useCommas;
++    bool useCommas = false;
+     NS_FOR_CSS_SIDES(side) {
+       if (! ParseVariant(rect.*(nsCSSRect::sides[side]),
+                          VARIANT_AL, nullptr)) {
+         return false;
+       }
+       if (side == 0) {
+         useCommas = ExpectSymbol(',', true);
+       } else if (useCommas && side < 3) {
+diff --git a/layout/style/nsCSSRuleProcessor.cpp b/layout/style/nsCSSRuleProcessor.cpp
+--- a/layout/style/nsCSSRuleProcessor.cpp
++++ b/layout/style/nsCSSRuleProcessor.cpp
+@@ -91,17 +91,17 @@
+ #include "nsIPrivateBrowsingService.h"
+ #include "nsNetCID.h"
+ #include "mozilla/Services.h"
+ #include "mozilla/dom/Element.h"
+ #include "nsGenericElement.h"
+ #include "nsNthIndexCache.h"
+ 
+ using namespace mozilla::dom;
+-namespace css = mozilla::css;
++using namespace mozilla::css;
+ 
+ #define VISITED_PSEUDO_PREF "layout.css.visited_links_enabled"
+ 
+ static bool gSupportVisitedPseudo = true;
+ 
+ static NS_DEFINE_CID(kLookAndFeelCID, NS_LOOKANDFEEL_CID);
+ static nsTArray< nsCOMPtr<nsIAtom> >* sSystemMetrics = 0;
+ 
+diff --git a/layout/style/nsCSSRuleProcessor.h b/layout/style/nsCSSRuleProcessor.h
+--- a/layout/style/nsCSSRuleProcessor.h
++++ b/layout/style/nsCSSRuleProcessor.h
+@@ -136,17 +136,17 @@ public:
+   virtual nsRestyleHint
+     HasAttributeDependentStyle(AttributeRuleProcessorData* aData);
+ 
+   virtual bool MediumFeaturesChanged(nsPresContext* aPresContext);
+ 
+   // Append all the currently-active font face rules to aArray.  Return
+   // true for success and false for failure.
+   bool AppendFontFaceRules(nsPresContext* aPresContext,
+-                             nsTArray<nsFontFaceRuleContainer>& aArray);
++                             nsTArray<mozilla::css::FontFaceRuleContainer>& aArray);
+ 
+ #ifdef MOZ_CSS_ANIMATIONS
+   bool AppendKeyframesRules(nsPresContext* aPresContext,
+                               nsTArray<nsCSSKeyframesRule*>& aArray);
+ #endif
+ 
+ #ifdef DEBUG
+   void AssertQuirksChangeOK() {
+diff --git a/layout/style/nsCSSRules.h b/layout/style/nsCSSRules.h
+--- a/layout/style/nsCSSRules.h
++++ b/layout/style/nsCSSRules.h
+@@ -173,17 +173,17 @@ public:
+   };
+ 
+   void SetURLs(URL *aURLs) { mURLs = aURLs; }
+ 
+ protected:
+   nsAutoPtr<URL> mURLs; // linked list of |struct URL| above.
+ };
+ 
+-// A FontFaceStyleDecl is always embedded in a nsCSSFontFaceRule.
++// A FontFaceStyleDecl is always embedded in a FontFaceRule.
+ class FontFaceRule;
+ class FontFaceStyleDecl : public nsIDOMCSSStyleDeclaration
+ {
+ public:
+   NS_DECL_ISUPPORTS
+   NS_DECL_NSIDOMCSSSTYLEDECLARATION
+ 
+   nsresult GetPropertyValue(nsCSSFontDesc aFontDescID,
+@@ -246,25 +246,25 @@ public:
+ protected:
+   friend class FontFaceStyleDecl;
+   FontFaceStyleDecl mDecl;
+ };
+ 
+ // FontFaceRuleContainer - used for associating sheet type with 
+ // specific @font-face rules
+ struct FontFaceRuleContainer {
+-  nsRefPtr<nsCSSFontFaceRule> mRule;
++  nsRefPtr<FontFaceRule> mRule;
+   uint8_t mSheetType;
+ };
+ 
+ inline FontFaceRule*
+ FontFaceStyleDecl::ContainingRule()
+ {
+-  return reinterpret_cast<nsCSSFontFaceRule*>
+-    (reinterpret_cast<char*>(this) - offsetof(nsCSSFontFaceRule, mDecl));
++  return reinterpret_cast<FontFaceRule*>
++    (reinterpret_cast<char*>(this) - offsetof(FontFaceRule, mDecl));
+ }
+ 
+ inline const FontFaceRule*
+ FontFaceStyleDecl::ContainingRule() const
+ {
+   return reinterpret_cast<const FontFaceRule*>
+     (reinterpret_cast<const char*>(this) - offsetof(FontFaceRule, mDecl));
+ }
+diff --git a/layout/style/nsStyleSet.cpp b/layout/style/nsStyleSet.cpp
+--- a/layout/style/nsStyleSet.cpp
++++ b/layout/style/nsStyleSet.cpp
+@@ -61,16 +61,17 @@
+ #include "nsTransitionManager.h"
+ #ifdef MOZ_CSS_ANIMATIONS
+ #include "nsAnimationManager.h"
+ #endif
+ #include "nsEventStates.h"
+ #include "mozilla/dom/Element.h"
+ 
+ using namespace mozilla::dom;
++using namespace mozilla::css;
+ 
+ NS_IMPL_ISUPPORTS1(nsEmptyStyleRule, nsIStyleRule)
+ 
+ /* virtual */ void
+ nsEmptyStyleRule::MapRuleInfoInto(nsRuleData* aRuleData)
+ {
+ }
+ 
+@@ -1178,17 +1179,17 @@ nsStyleSet::ResolveXULTreePseudoStyle(El
+                     false, false,
+                     aPseudoTag, nsCSSPseudoElements::ePseudo_XULTree,
+                     false, nullptr);
+ }
+ #endif
+ 
+ bool
+ nsStyleSet::AppendFontFaceRules(nsPresContext* aPresContext,
+-                                nsTArray<nsFontFaceRuleContainer>& aArray)
++                                nsTArray<FontFaceRuleContainer>& aArray)
+ {
+   NS_ENSURE_FALSE(mInShutdown, false);
+ 
+   for (uint32_t i = 0; i < NS_ARRAY_LENGTH(gCSSSheetTypes); ++i) {
+     nsCSSRuleProcessor *ruleProc = static_cast<nsCSSRuleProcessor*>
+                                     (mRuleProcessors[gCSSSheetTypes[i]].get());
+     if (ruleProc && !ruleProc->AppendFontFaceRules(aPresContext, aArray))
+       return false;
+diff --git a/layout/style/nsStyleSet.h b/layout/style/nsStyleSet.h
+--- a/layout/style/nsStyleSet.h
++++ b/layout/style/nsStyleSet.h
+@@ -64,16 +64,17 @@ class nsCSSKeyframesRule;
+ #endif
+ class nsRuleWalker;
+ struct RuleProcessorData;
+ struct TreeMatchContext;
+ 
+ namespace mozilla {
+ namespace css {
+ class FontFaceRule;
++class FontFaceRuleContainer;
+ } // namespace css
+ } // namespace mozilla
+ 
+ 
+ class nsEmptyStyleRule : public nsIStyleRule
+ {
+   NS_DECL_ISUPPORTS
+   virtual void MapRuleInfoInto(nsRuleData* aRuleData);
+diff --git a/xpcom/proxy/src/nsProxyEvent.cpp b/xpcom/proxy/src/nsProxyEvent.cpp
+--- a/xpcom/proxy/src/nsProxyEvent.cpp
++++ b/xpcom/proxy/src/nsProxyEvent.cpp
+@@ -424,17 +424,17 @@ nsProxyObject::QueryInterface(REFNSIID a
+ nsresult
+ nsProxyObject::LockedFind(REFNSIID aIID, void **aResult)
+ {
+     // This method is only called when the global lock is held.
+ #ifdef DEBUG
+     nsProxyObjectManager::GetInstance()->GetLock().AssertCurrentThreadOwns();
+ #endif
+ 
+-    nsProxyEventObject* newpeo = NULL;
++    nsProxyEventObject* peo = NULL;
+ 
+     for (peo = mFirst; peo; peo = peo->mNext) {
+         if (peo->GetClass()->GetProxiedIID().Equals(aIID)) {
+             *aResult = static_cast<nsISupports*>(peo->mXPTCStub);
+             peo->LockedAddRef();
+             return NS_OK;
+         }
+     }

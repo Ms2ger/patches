@@ -1,0 +1,469 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/Link.cpp b/content/base/src/Link.cpp
+--- a/content/base/src/Link.cpp
++++ b/content/base/src/Link.cpp
+@@ -17,16 +17,17 @@
+  *
+  * The Initial Developer of the Original Code is
+  * Mozilla Foundation.
+  * Portions created by the Initial Developer are Copyright (C) 2009
+  * the Initial Developer. All Rights Reserved.
+  *
+  * Contributor(s):
+  *   Shawn Wilsher <me@shawnwilsher.com> (Original Author)
++ *   Ms2ger <ms2ger@gmail.com>
+  *
+  * Alternatively, the contents of this file may be used under the terms of
+  * either of the GNU General Public License Version 2 or later (the "GPL"),
+  * or the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+  * in which case the provisions of the GPL or the LGPL are applicable instead
+  * of those above. If you wish to allow use of your version of this file only
+  * under the terms of either the GPL or the LGPL, and not to allow others to
+  * use your version of this file under the terms of the MPL, indicate your
+@@ -44,32 +45,36 @@
+ 
+ #include "nsContentUtils.h"
+ #include "nsEscape.h"
+ #include "nsGkAtoms.h"
+ #include "nsString.h"
+ #include "mozAutoDocUpdate.h"
+ #include "nsGenericElement.h"
+ #include "mozilla/Services.h"
++#include "nsDOMTokenList.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ Link::Link(nsGenericElement* aElement)
+   : mLinkState(defaultState)
+   , mRegistered(false)
+   , mElement(aElement)
+   , mHistory(services::GetHistoryService())
+ {
+   NS_ABORT_IF_FALSE(mElement, "No element provided!");
+ }
+ 
+ Link::~Link()
+ {
+   UnregisterFromHistory();
++  if (mRelList) {
++    mRelList->DropReference();
++  }
+ }
+ 
+ nsLinkState
+ Link::GetLinkState() const
+ {
+   NS_ASSERTION(mRegistered,
+                "Getting the link state of an unregistered Link!");
+   NS_ASSERTION(mLinkState != eLinkState_Unknown,
+@@ -528,10 +533,21 @@ Link::SetHrefAttribute(nsIURI *aURI)
+   NS_ASSERTION(aURI, "Null URI is illegal!");
+ 
+   nsAutoCString href;
+   (void)aURI->GetSpec(href);
+   (void)mElement->SetAttr(kNameSpaceID_None, nsGkAtoms::href,
+                           NS_ConvertUTF8toUTF16(href), true);
+ }
+ 
++already_AddRefed<nsIDOMDOMTokenList>
++Link::RelList()
++{
++  if (!mRelList) {
++    mRelList = new nsDOMTokenList(mElement, nsGkAtoms::rel);
++  }
++  nsCOMPtr<nsIDOMDOMTokenList> relList = mRelList.get();
++  return relList.forget();
++}
++
++
+ } // namespace dom
+ } // namespace mozilla
+diff --git a/content/base/src/Link.h b/content/base/src/Link.h
+--- a/content/base/src/Link.h
++++ b/content/base/src/Link.h
+@@ -17,16 +17,17 @@
+  *
+  * The Initial Developer of the Original Code is
+  * Mozilla Foundation.
+  * Portions created by the Initial Developer are Copyright (C) 2009
+  * the Initial Developer. All Rights Reserved.
+  *
+  * Contributor(s):
+  *   Shawn Wilsher <me@shawnwilsher.com> (Original Author)
++ *   Ms2ger <ms2ger@gmail.com>
+  *
+  * Alternatively, the contents of this file may be used under the terms of
+  * either of the GNU General Public License Version 2 or later (the "GPL"),
+  * or the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+  * in which case the provisions of the GPL or the LGPL are applicable instead
+  * of those above. If you wish to allow use of your version of this file only
+  * under the terms of either the GPL or the LGPL, and not to allow others to
+  * use your version of this file under the terms of the MPL, indicate your
+@@ -43,16 +44,18 @@
+ 
+ #ifndef mozilla_dom_Link_h__
+ #define mozilla_dom_Link_h__
+ 
+ #include "nsIContent.h"
+ #include "mozilla/IHistory.h"
+ 
+ class nsGenericElement;
++class nsIDOMDOMTokenList;
++class nsDOMTokenList;
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ #define MOZILLA_DOM_LINK_IMPLEMENTATION_IID \
+   { 0xa687a99c, 0x3893, 0x45c0, \
+     {0x8e, 0xab, 0xb8, 0xf7, 0xd7, 0x9e, 0x9e, 0x7b } }
+ 
+@@ -108,16 +111,18 @@ public:
+    */
+   void ResetLinkState(bool aNotify);
+ 
+ protected:
+   virtual ~Link();
+ 
+   bool HasCachedURI() const { return !!mCachedURI; }
+ 
++  already_AddRefed<nsIDOMDOMTokenList> RelList();
++
+ private:
+   /**
+    * Unregisters from History so this node no longer gets notifications about
+    * changes to visitedness.
+    */
+   void UnregisterFromHistory();
+ 
+   already_AddRefed<nsIURI> GetURIToMutate();
+@@ -133,16 +138,18 @@ private:
+    * Obtains a pointer to the nsGenericElement that classes inheriting from
+    * this should also inherit from.
+    */
+   nsGenericElement* mElement;
+ 
+   // Strong reference to History.  The link has to unregister before History
+   // can disappear.
+   nsCOMPtr<IHistory> mHistory;
++
++  nsRefPtr<nsDOMTokenList> mRelList;
+ };
+ 
+ NS_DEFINE_STATIC_IID_ACCESSOR(Link, MOZILLA_DOM_LINK_IMPLEMENTATION_IID)
+ 
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #endif // mozilla_dom_Link_h__
+diff --git a/content/html/content/src/nsHTMLAnchorElement.cpp b/content/html/content/src/nsHTMLAnchorElement.cpp
+--- a/content/html/content/src/nsHTMLAnchorElement.cpp
++++ b/content/html/content/src/nsHTMLAnchorElement.cpp
+@@ -42,17 +42,17 @@
+ #include "nsUnicharUtils.h"
+ #include "nsIDOMHTMLAnchorElement.h"
+ #include "nsGenericHTMLElement.h"
+ #include "nsILink.h"
+ #include "nsGkAtoms.h"
+ #include "nsIPresShell.h"
+ #include "nsIDocument.h"
+ #include "nsPresContext.h"
+-
++#include "nsIDOMDOMTokenList.h"
+ #include "nsHTMLDNSPrefetch.h"
+ 
+ #include "Link.h"
+ using namespace mozilla::dom;
+ 
+ class nsHTMLAnchorElement : public nsGenericHTMLElement,
+                             public nsIDOMHTMLAnchorElement,
+                             public nsILink,
+@@ -164,16 +164,24 @@ NS_IMPL_URI_ATTR(nsHTMLAnchorElement, Hr
+ NS_IMPL_STRING_ATTR(nsHTMLAnchorElement, Hreflang, hreflang)
+ NS_IMPL_STRING_ATTR(nsHTMLAnchorElement, Name, name)
+ NS_IMPL_STRING_ATTR(nsHTMLAnchorElement, Rel, rel)
+ NS_IMPL_STRING_ATTR(nsHTMLAnchorElement, Rev, rev)
+ NS_IMPL_STRING_ATTR(nsHTMLAnchorElement, Shape, shape)
+ NS_IMPL_INT_ATTR(nsHTMLAnchorElement, TabIndex, tabindex)
+ NS_IMPL_STRING_ATTR(nsHTMLAnchorElement, Type, type)
+ 
++NS_IMETHODIMP 
++nsHTMLAnchorElement::GetRelList(nsIDOMDOMTokenList** aRelList)
++{
++  nsCOMPtr<nsIDOMDOMTokenList> relList = RelList();
++  relList.forget(aRelList);
++  return NS_OK;
++}
++
+ NS_IMETHODIMP
+ nsHTMLAnchorElement::GetDraggable(bool* aDraggable)
+ {
+   // links can be dragged as long as there is an href and the
+   // draggable attribute isn't false
+   if (HasAttr(kNameSpaceID_None, nsGkAtoms::href)) {
+     *aDraggable = !AttrValueIs(kNameSpaceID_None, nsGkAtoms::draggable,
+                                nsGkAtoms::_false, eIgnoreCase);
+diff --git a/content/html/content/src/nsHTMLAreaElement.cpp b/content/html/content/src/nsHTMLAreaElement.cpp
+--- a/content/html/content/src/nsHTMLAreaElement.cpp
++++ b/content/html/content/src/nsHTMLAreaElement.cpp
+@@ -40,17 +40,17 @@
+ #include "nsGenericHTMLElement.h"
+ #include "nsILink.h"
+ #include "nsGkAtoms.h"
+ #include "nsStyleConsts.h"
+ #include "nsIURL.h"
+ #include "nsNetUtil.h"
+ #include "nsReadableUtils.h"
+ #include "nsIDocument.h"
+-
++#include "nsIDOMDOMTokenList.h"
+ #include "Link.h"
+ using namespace mozilla::dom;
+ 
+ class nsHTMLAreaElement : public nsGenericHTMLElement,
+                           public nsIDOMHTMLAreaElement,
+                           public nsILink,
+                           public Link
+ {
+@@ -143,16 +143,24 @@ NS_IMPL_ELEMENT_CLONE(nsHTMLAreaElement)
+ 
+ NS_IMPL_STRING_ATTR(nsHTMLAreaElement, Alt, alt)
+ NS_IMPL_STRING_ATTR(nsHTMLAreaElement, Coords, coords)
+ NS_IMPL_URI_ATTR(nsHTMLAreaElement, Href, href)
+ NS_IMPL_BOOL_ATTR(nsHTMLAreaElement, NoHref, nohref)
+ NS_IMPL_STRING_ATTR(nsHTMLAreaElement, Shape, shape)
+ NS_IMPL_INT_ATTR(nsHTMLAreaElement, TabIndex, tabindex)
+ 
++NS_IMETHODIMP 
++nsHTMLAreaElement::GetRelList(nsIDOMDOMTokenList** aRelList)
++{
++  nsCOMPtr<nsIDOMDOMTokenList> relList = RelList();
++  relList.forget(aRelList);
++  return NS_OK;
++}
++
+ NS_IMETHODIMP
+ nsHTMLAreaElement::GetTarget(nsAString& aValue)
+ {
+   if (!GetAttr(kNameSpaceID_None, nsGkAtoms::target, aValue)) {
+     GetBaseTarget(aValue);
+   }
+   return NS_OK;
+ }
+diff --git a/content/html/content/src/nsHTMLLinkElement.cpp b/content/html/content/src/nsHTMLLinkElement.cpp
+--- a/content/html/content/src/nsHTMLLinkElement.cpp
++++ b/content/html/content/src/nsHTMLLinkElement.cpp
+@@ -15,16 +15,17 @@
+  * The Original Code is Mozilla Communicator client code.
+  *
+  * The Initial Developer of the Original Code is
+  * Netscape Communications Corporation.
+  * Portions created by the Initial Developer are Copyright (C) 1998
+  * the Initial Developer. All Rights Reserved.
+  *
+  * Contributor(s):
++ *   Ms2ger <ms2ger@gmail.com>
+  *
+  * Alternatively, the contents of this file may be used under the terms of
+  * either of the GNU General Public License Version 2 or later (the "GPL"),
+  * or the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+  * in which case the provisions of the GPL or the LGPL are applicable instead
+  * of those above. If you wish to allow use of your version of this file only
+  * under the terms of either the GPL or the LGPL, and not to allow others to
+  * use your version of this file under the terms of the MPL, indicate your
+@@ -53,16 +54,17 @@
+ #include "nsIDOMEvent.h"
+ #include "nsIPrivateDOMEvent.h"
+ #include "nsIDOMDocumentEvent.h"
+ #include "nsIDOMEventTarget.h"
+ #include "nsParserUtils.h"
+ #include "nsContentUtils.h"
+ #include "nsPIDOMWindow.h"
+ #include "nsPLDOMEvent.h"
++#include "nsIDOMDOMTokenList.h"
+ 
+ #include "Link.h"
+ using namespace mozilla::dom;
+ 
+ class nsHTMLLinkElement : public nsGenericHTMLElement,
+                           public nsIDOMHTMLLinkElement,
+                           public nsILink,
+                           public nsStyleLinkElement,
+@@ -199,16 +201,26 @@ NS_IMPL_STRING_ATTR(nsHTMLLinkElement, C
+ NS_IMPL_URI_ATTR(nsHTMLLinkElement, Href, href)
+ NS_IMPL_STRING_ATTR(nsHTMLLinkElement, Hreflang, hreflang)
+ NS_IMPL_STRING_ATTR(nsHTMLLinkElement, Media, media)
+ NS_IMPL_STRING_ATTR(nsHTMLLinkElement, Rel, rel)
+ NS_IMPL_STRING_ATTR(nsHTMLLinkElement, Rev, rev)
+ NS_IMPL_STRING_ATTR(nsHTMLLinkElement, Target, target)
+ NS_IMPL_STRING_ATTR(nsHTMLLinkElement, Type, type)
+ 
++
++NS_IMETHODIMP 
++nsHTMLLinkElement::GetRelList(nsIDOMDOMTokenList** aRelList)
++{
++  nsCOMPtr<nsIDOMDOMTokenList> relList = RelList();
++  relList.forget(aRelList);
++  return NS_OK;
++}
++
++
+ nsresult
+ nsHTMLLinkElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
+                               nsIContent* aBindingParent,
+                               bool aCompileEventHandlers)
+ {
+   Link::ResetLinkState(false);
+ 
+   nsresult rv = nsGenericHTMLElement::BindToTree(aDocument, aParent,
+diff --git a/dom/interfaces/html/nsIDOMHTMLAnchorElement.idl b/dom/interfaces/html/nsIDOMHTMLAnchorElement.idl
+--- a/dom/interfaces/html/nsIDOMHTMLAnchorElement.idl
++++ b/dom/interfaces/html/nsIDOMHTMLAnchorElement.idl
+@@ -17,16 +17,17 @@
+  * The Initial Developer of the Original Code is
+  * Netscape Communications Corporation.
+  * Portions created by the Initial Developer are Copyright (C) 2000
+  * the Initial Developer. All Rights Reserved.
+  *
+  * Contributor(s):
+  *   Vidur Apparao <vidur@netscape.com> (original author)
+  *   Johnny Stenback <jst@netscape.com>
++ *   Ms2ger <ms2ger@gmail.com>
+  *
+  * Alternatively, the contents of this file may be used under the terms of
+  * either of the GNU General Public License Version 2 or later (the "GPL"),
+  * or the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+  * in which case the provisions of the GPL or the LGPL are applicable instead
+  * of those above. If you wish to allow use of your version of this file only
+  * under the terms of either the GPL or the LGPL, and not to allow others to
+  * use your version of this file under the terms of the MPL, indicate your
+@@ -45,17 +46,17 @@
+  *
+  * This interface is trying to follow the DOM Level 2 HTML specification:
+  * http://www.w3.org/TR/DOM-Level-2-HTML/
+  *
+  * with changes from the work-in-progress WHATWG HTML specification:
+  * http://www.whatwg.org/specs/web-apps/current-work/
+  */
+ 
+-[scriptable, uuid(768bfb39-f0ce-4f17-bad7-f0f722dc293a)]
++[scriptable, uuid(68b0a334-663d-4bcf-8ac7-4347d6a79463)]
+ interface nsIDOMHTMLAnchorElement : nsIDOMHTMLElement
+ {
+            attribute DOMString        href;
+            attribute DOMString        target;
+ 
+            attribute DOMString        ping;
+ 
+            attribute DOMString        rel;
+@@ -81,9 +82,11 @@ interface nsIDOMHTMLAnchorElement : nsID
+            attribute DOMString        charset;
+            attribute DOMString        coords;
+            attribute DOMString        name;
+            attribute DOMString        rev;
+            attribute DOMString        shape;
+            attribute long             tabIndex;
+ 
+   DOMString                 toString();
++
++  readonly attribute nsIDOMDOMTokenList relList;
+ };
+diff --git a/dom/interfaces/html/nsIDOMHTMLAreaElement.idl b/dom/interfaces/html/nsIDOMHTMLAreaElement.idl
+--- a/dom/interfaces/html/nsIDOMHTMLAreaElement.idl
++++ b/dom/interfaces/html/nsIDOMHTMLAreaElement.idl
+@@ -17,16 +17,17 @@
+  * The Initial Developer of the Original Code is
+  * Netscape Communications Corporation.
+  * Portions created by the Initial Developer are Copyright (C) 2000
+  * the Initial Developer. All Rights Reserved.
+  *
+  * Contributor(s):
+  *   Vidur Apparao <vidur@netscape.com> (original author)
+  *   Johnny Stenback <jst@netscape.com>
++ *   Ms2ger <ms2ger@gmail.com>
+  *
+  * Alternatively, the contents of this file may be used under the terms of
+  * either of the GNU General Public License Version 2 or later (the "GPL"),
+  * or the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+  * in which case the provisions of the GPL or the LGPL are applicable instead
+  * of those above. If you wish to allow use of your version of this file only
+  * under the terms of either the GPL or the LGPL, and not to allow others to
+  * use your version of this file under the terms of the MPL, indicate your
+@@ -45,17 +46,17 @@
+  *
+  * This interface is trying to follow the DOM Level 2 HTML specification:
+  * http://www.w3.org/TR/DOM-Level-2-HTML/
+  *
+  * with changes from the work-in-progress WHATWG HTML specification:
+  * http://www.whatwg.org/specs/web-apps/current-work/
+  */
+ 
+-[scriptable, uuid(eeae849e-d9f6-4e66-a838-44deb9594bc1)]
++[scriptable, uuid(aa6a90e0-deda-4710-8f58-8c8b9e172b5e)]
+ interface nsIDOMHTMLAreaElement : nsIDOMHTMLElement
+ {
+            attribute DOMString        alt;
+            attribute DOMString        coords;
+            attribute DOMString        shape;
+            attribute DOMString        href;
+            attribute DOMString        target;
+ 
+@@ -70,9 +71,10 @@ interface nsIDOMHTMLAreaElement : nsIDOM
+            attribute DOMString        search;
+            attribute DOMString        hash;
+            
+ 
+            attribute long             tabIndex;
+            attribute boolean          noHref;
+            DOMString                 toString();
+ 
++  readonly attribute nsIDOMDOMTokenList relList;
+ };
+diff --git a/dom/interfaces/html/nsIDOMHTMLLinkElement.idl b/dom/interfaces/html/nsIDOMHTMLLinkElement.idl
+--- a/dom/interfaces/html/nsIDOMHTMLLinkElement.idl
++++ b/dom/interfaces/html/nsIDOMHTMLLinkElement.idl
+@@ -17,16 +17,17 @@
+  * The Initial Developer of the Original Code is
+  * Netscape Communications Corporation.
+  * Portions created by the Initial Developer are Copyright (C) 2000
+  * the Initial Developer. All Rights Reserved.
+  *
+  * Contributor(s):
+  *   Vidur Apparao <vidur@netscape.com> (original author)
+  *   Johnny Stenback <jst@netscape.com>
++ *   Ms2ger <ms2ger@gmail.com>
+  *
+  * Alternatively, the contents of this file may be used under the terms of
+  * either of the GNU General Public License Version 2 or later (the "GPL"),
+  * or the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+  * in which case the provisions of the GPL or the LGPL are applicable instead
+  * of those above. If you wish to allow use of your version of this file only
+  * under the terms of either the GPL or the LGPL, and not to allow others to
+  * use your version of this file under the terms of the MPL, indicate your
+@@ -45,21 +46,23 @@
+  *
+  * This interface is trying to follow the DOM Level 2 HTML specification:
+  * http://www.w3.org/TR/DOM-Level-2-HTML/
+  *
+  * with changes from the work-in-progress WHATWG HTML specification:
+  * http://www.whatwg.org/specs/web-apps/current-work/
+  */
+ 
+-[scriptable, uuid(b60dc7dd-30d1-40aa-a306-02a2ebb30f12)]
++[scriptable, uuid(d43993c1-4e41-4f67-878a-0ad9ddd9cf1e)]
+ interface nsIDOMHTMLLinkElement : nsIDOMHTMLElement
+ {
+            attribute boolean          disabled;
+            attribute DOMString        charset;
+            attribute DOMString        href;
+            attribute DOMString        hreflang;
+            attribute DOMString        media;
+            attribute DOMString        rel;
+            attribute DOMString        rev;
+            attribute DOMString        target;
+            attribute DOMString        type;
++
++  readonly attribute nsIDOMDOMTokenList relList;
+ };

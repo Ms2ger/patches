@@ -1,0 +1,929 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsContentUtils.cpp b/content/base/src/nsContentUtils.cpp
+--- a/content/base/src/nsContentUtils.cpp
++++ b/content/base/src/nsContentUtils.cpp
+@@ -215,17 +215,16 @@ using namespace mozilla::dom;
+ using namespace mozilla::layers;
+ using namespace mozilla::widget;
+ using namespace mozilla;
+ 
+ const char kLoadAsData[] = "loadAsData";
+ 
+ static const char kJSStackContractID[] = "@mozilla.org/js/xpc/ContextStack;1";
+ static NS_DEFINE_CID(kParserServiceCID, NS_PARSERSERVICE_CID);
+-static NS_DEFINE_CID(kCParserCID, NS_PARSER_CID);
+ 
+ nsIDOMScriptObjectFactory *nsContentUtils::sDOMScriptObjectFactory = nullptr;
+ nsIXPConnect *nsContentUtils::sXPConnect;
+ nsIScriptSecurityManager *nsContentUtils::sSecurityManager;
+ nsIThreadJSContextStack *nsContentUtils::sThreadJSContextStack;
+ nsIParserService *nsContentUtils::sParserService = nullptr;
+ nsINameSpaceManager *nsContentUtils::sNameSpaceManager;
+ nsIIOService *nsContentUtils::sIOService;
+@@ -3648,20 +3647,20 @@ nsContentUtils::ParseFragmentXML(const n
+                                  nsTArray<nsString>& aTagStack,
+                                  bool aPreventScriptExecution,
+                                  nsIDOMDocumentFragment** aReturn)
+ {
+   if (nsContentUtils::sFragmentParsingActive) {
+     NS_NOTREACHED("Re-entrant fragment parsing attempted.");
+     return NS_ERROR_DOM_INVALID_STATE_ERR;
+   }
+-  mozilla::AutoRestore<bool> guard(nsContentUtils::sFragmentParsingActive);
++  AutoRestore<bool> guard(nsContentUtils::sFragmentParsingActive);
+   nsContentUtils::sFragmentParsingActive = true;
+   if (!sXMLFragmentParser) {
+-    nsCOMPtr<nsIParser> parser = do_CreateInstance(kCParserCID);
++    nsCOMPtr<nsIParser> parser = nsIParser::Create();
+     parser.forget(&sXMLFragmentParser);
+     // sXMLFragmentParser now owns the parser
+   }
+   if (!sXMLFragmentSink) {
+     NS_NewXMLFragmentContentSink(&sXMLFragmentSink);
+     // sXMLFragmentSink now owns the sink
+   }
+   nsCOMPtr<nsIContentSink> contentsink = do_QueryInterface(sXMLFragmentSink);
+diff --git a/content/base/test/TestPlainTextSerializer.cpp b/content/base/test/TestPlainTextSerializer.cpp
+--- a/content/base/test/TestPlainTextSerializer.cpp
++++ b/content/base/test/TestPlainTextSerializer.cpp
+@@ -43,34 +43,29 @@
+ #include "nsIContentSink.h"
+ #include "nsIParserService.h"
+ #include "nsServiceManagerUtils.h"
+ #include "nsStringGlue.h"
+ #include "nsParserCIID.h"
+ #include "nsIDocumentEncoder.h"
+ #include "nsCRT.h"
+ 
+-static NS_DEFINE_CID(kCParserCID, NS_PARSER_CID);
+-
+ void
+ ConvertBufToPlainText(nsString &aConBuf, int aFlag)
+ {
+-  nsCOMPtr<nsIParser> parser = do_CreateInstance(kCParserCID);
+-  if (parser) {
+-    nsCOMPtr<nsIContentSink> sink;
+-    sink = do_CreateInstance(NS_PLAINTEXTSINK_CONTRACTID);
+-    if (sink) {
+-      nsCOMPtr<nsIHTMLToTextSink> textSink(do_QueryInterface(sink));
+-      if (textSink) {
+-        nsAutoString convertedText;
+-        textSink->Initialize(&convertedText, aFlag, 72);
+-        parser->SetContentSink(sink);
+-        parser->Parse(aConBuf, 0, NS_LITERAL_CSTRING("text/html"), true);
+-        aConBuf = convertedText;
+-      }
++  nsCOMPtr<nsIParser> parser = nsIParser::Create();
++  nsCOMPtr<nsIContentSink> sink = do_CreateInstance(NS_PLAINTEXTSINK_CONTRACTID);
++  if (sink) {
++    nsCOMPtr<nsIHTMLToTextSink> textSink(do_QueryInterface(sink));
++    if (textSink) {
++      nsAutoString convertedText;
++      textSink->Initialize(&convertedText, aFlag, 72);
++      parser->SetContentSink(sink);
++      parser->Parse(aConBuf, 0, NS_LITERAL_CSTRING("text/html"), true);
++      aConBuf = convertedText;
+     }
+   }
+ }
+ 
+ // Test for ASCII with format=flowed; delsp=yes
+ nsresult
+ TestASCIIWithFlowedDelSp()
+ {
+diff --git a/content/html/document/src/nsHTMLDocument.cpp b/content/html/document/src/nsHTMLDocument.cpp
+--- a/content/html/document/src/nsHTMLDocument.cpp
++++ b/content/html/document/src/nsHTMLDocument.cpp
+@@ -158,18 +158,16 @@ static bool gPlugDetector = false;
+ // Find/Search Includes
+ const int32_t kForward  = 0;
+ const int32_t kBackward = 1;
+ 
+ //#define DEBUG_charset
+ 
+ #define NS_USE_NEW_PLAIN_TEXT 1
+ 
+-static NS_DEFINE_CID(kCParserCID, NS_PARSER_CID);
+-
+ uint32_t       nsHTMLDocument::gWyciwygSessionCnt = 0;
+ 
+ // this function will return false if the command is not recognized
+ // inCommandID will be converted as necessary for internal operations
+ // inParam will be converted as necessary for internal operations
+ // outParam will be Empty if no parameter is needed or if returning a boolean
+ // outIsBoolean will determine whether to send param as a boolean or string
+ // outBooleanParam will not be set unless outIsBoolean
+@@ -748,18 +746,17 @@ nsHTMLDocument::StartDocumentLoad(const 
+           mParser->MarkAsNotScriptCreated("plain-text");
+         }
+       } else if (viewSource && !contentType.EqualsLiteral("text/html")) {
+         mParser->MarkAsNotScriptCreated("view-source-xml");
+       } else {
+         mParser->MarkAsNotScriptCreated(aCommand);
+       }
+     } else {
+-      mParser = do_CreateInstance(kCParserCID, &rv);
+-      NS_ENSURE_SUCCESS(rv, rv);
++      mParser = nsIParser::Create();
+     }
+   }
+ 
+   // Look for the parent document.  Note that at this point we don't have our
+   // content viewer set up yet, and therefore do not have a useful
+   // mParentDocument.
+ 
+   // in this block of code, if we get an error result, we return it
+@@ -1742,43 +1739,40 @@ nsHTMLDocument::Open(const nsAString& aC
+ 
+   // Store the security info of the caller now that we're done
+   // resetting the document.
+   mSecurityInfo = securityInfo;
+ 
+   bool loadAsHtml5 = nsHtml5Module::sEnabled;
+   if (loadAsHtml5) {
+     mParser = nsHtml5Module::NewHtml5Parser();
+-    rv = NS_OK;
+   } else {
+-    mParser = do_CreateInstance(kCParserCID, &rv);  
++    mParser = nsIParser::Create();
+   }
+ 
+   // This will be propagated to the parser when someone actually calls write()
+   SetContentTypeInternal(contentType);
+ 
+   mWriteState = eDocumentOpened;
+ 
+-  if (NS_SUCCEEDED(rv)) {
+-    if (loadAsHtml5) {
+-      nsHtml5Module::Initialize(mParser, this, uri, shell, channel);
+-    } else {
+-      nsCOMPtr<nsIHTMLContentSink> sink;
+-
+-      rv = NS_NewHTMLContentSink(getter_AddRefs(sink), this, uri, shell,
+-                                 channel);
+-      if (NS_FAILED(rv)) {
+-        // Don't use a parser without a content sink.
+-        mParser = nullptr;
+-        mWriteState = eNotWriting;
+-        return rv;
+-      }
+-
+-      mParser->SetContentSink(sink);
++  if (loadAsHtml5) {
++    nsHtml5Module::Initialize(mParser, this, uri, shell, channel);
++  } else {
++    nsCOMPtr<nsIHTMLContentSink> sink;
++
++    rv = NS_NewHTMLContentSink(getter_AddRefs(sink), this, uri, shell,
++                               channel);
++    if (NS_FAILED(rv)) {
++      // Don't use a parser without a content sink.
++      mParser = nullptr;
++      mWriteState = eNotWriting;
++      return rv;
+     }
++
++    mParser->SetContentSink(sink);
+   }
+ 
+   // Prepare the docshell and the document viewer for the impending
+   // out of band document.write()
+   shell->PrepareForNewContentModel();
+ 
+   // Now check whether we were opened with a "replace" argument.  If
+   // so, we need to tell the docshell to not create a new history
+@@ -1803,17 +1797,16 @@ nsHTMLDocument::Open(const nsAString& aC
+   // knows that document.open/write/close() is being called on this
+   // document.
+   ++mWriteLevel;
+ 
+   CreateAndAddWyciwygChannel();
+ 
+   --mWriteLevel;
+ 
+-  NS_ENSURE_SUCCESS(rv, rv);
+   return CallQueryInterface(this, aReturn);
+ }
+ 
+ NS_IMETHODIMP
+ nsHTMLDocument::Clear()
+ {
+   // This method has been deprecated
+   return NS_OK;
+diff --git a/content/xml/document/src/nsXMLDocument.cpp b/content/xml/document/src/nsXMLDocument.cpp
+--- a/content/xml/document/src/nsXMLDocument.cpp
++++ b/content/xml/document/src/nsXMLDocument.cpp
+@@ -31,19 +31,18 @@
+  * use your version of this file under the terms of the MPL, indicate your
+  * decision by deleting the provisions above and replace them with the notice
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
++#include "nsXMLDocument.h"
+ 
+-#include "nsXMLDocument.h"
+-#include "nsParserCIID.h"
+ #include "nsIParser.h"
+ #include "nsIXMLContentSink.h"
+ #include "nsPresContext.h" 
+ #include "nsIContent.h"
+ #include "nsIContentViewerContainer.h"
+ #include "nsIContentViewer.h"
+ #include "nsIDocShell.h"
+ #include "nsIMarkupDocumentViewer.h"
+@@ -533,20 +532,17 @@ nsXMLDocument::StartDocumentLoad(const c
+   int32_t charsetSource = kCharsetFromDocTypeDefault;
+   nsAutoCString charset(NS_LITERAL_CSTRING("UTF-8"));
+   TryChannelCharset(aChannel, charsetSource, charset);
+ 
+   nsCOMPtr<nsIURI> aUrl;
+   rv = aChannel->GetURI(getter_AddRefs(aUrl));
+   if (NS_FAILED(rv)) return rv;
+ 
+-  static NS_DEFINE_CID(kCParserCID, NS_PARSER_CID);
+-
+-  mParser = do_CreateInstance(kCParserCID, &rv);
+-  NS_ENSURE_SUCCESS(rv, rv);
++  mParser = nsIParser::Create();
+ 
+   nsCOMPtr<nsIXMLContentSink> sink;
+     
+   if (aSink) {
+     sink = do_QueryInterface(aSink);
+   }
+   else {
+     nsCOMPtr<nsIDocShell> docShell;
+diff --git a/content/xslt/src/xslt/txMozillaStylesheetCompiler.cpp b/content/xslt/src/xslt/txMozillaStylesheetCompiler.cpp
+--- a/content/xslt/src/xslt/txMozillaStylesheetCompiler.cpp
++++ b/content/xslt/src/xslt/txMozillaStylesheetCompiler.cpp
+@@ -71,18 +71,16 @@
+ #include "nsIScriptError.h"
+ #include "nsIURL.h"
+ #include "nsCrossSiteListenerProxy.h"
+ #include "nsDOMError.h"
+ #include "mozilla/dom/Element.h"
+ 
+ using namespace mozilla;
+ 
+-static NS_DEFINE_CID(kCParserCID, NS_PARSER_CID);
+-
+ static void
+ getSpec(nsIChannel* aChannel, nsAString& aSpec)
+ {
+     if (!aChannel) {
+         return;
+     }
+ 
+     nsCOMPtr<nsIURI> uri;
+@@ -503,21 +501,19 @@ txCompileObserver::startLoad(nsIURI* aUr
+ 
+         nsCOMPtr<nsIURI> referrerURI;
+         aReferrerPrincipal->GetURI(getter_AddRefs(referrerURI));
+         if (referrerURI) {
+             httpChannel->SetReferrer(referrerURI);
+         }
+     }
+ 
+-    nsCOMPtr<nsIParser> parser = do_CreateInstance(kCParserCID, &rv);
+-    NS_ENSURE_SUCCESS(rv, rv);
++    nsCOMPtr<nsIParser> parser = nsIParser::Create();
+ 
+     nsRefPtr<txStylesheetSink> sink = new txStylesheetSink(aCompiler, parser);
+-    NS_ENSURE_TRUE(sink, NS_ERROR_OUT_OF_MEMORY);
+ 
+     channel->SetNotificationCallbacks(sink);
+ 
+     parser->SetCommand(kLoadAsData);
+     parser->SetContentSink(sink);
+     parser->Parse(aUri);
+ 
+     // Always install in case of redirects
+diff --git a/content/xul/document/src/nsXULDocument.cpp b/content/xul/document/src/nsXULDocument.cpp
+--- a/content/xul/document/src/nsXULDocument.cpp
++++ b/content/xul/document/src/nsXULDocument.cpp
+@@ -129,23 +129,16 @@
+ #include "nsCCUncollectableMarker.h"
+ #include "nsURILoader.h"
+ #include "mozilla/dom/Element.h"
+ #include "mozilla/Preferences.h"
+ 
+ using namespace mozilla;
+ using namespace mozilla::dom;
+ 
+-//----------------------------------------------------------------------
+-//
+-// CIDs
+-//
+-
+-static NS_DEFINE_CID(kParserCID,                 NS_PARSER_CID);
+-
+ static bool IsChromeURI(nsIURI* aURI)
+ {
+     // why is this check a member function of nsXULDocument? -gagan
+     bool isChrome = false;
+     if (NS_SUCCEEDED(aURI->SchemeIs("chrome", &isChrome)) && isChrome)
+         return true;
+     return false;
+ }
+@@ -2108,35 +2101,30 @@ nsXULDocument::PrepareToLoadPrototype(ns
+         mMasterPrototype = mCurrentPrototype;
+         // Set our principal based on the master proto.
+         SetPrincipal(aDocumentPrincipal);
+     }
+ 
+     // Create a XUL content sink, a parser, and kick off a load for
+     // the overlay.
+     nsRefPtr<XULContentSinkImpl> sink = new XULContentSinkImpl();
+-    if (!sink) return NS_ERROR_OUT_OF_MEMORY;
+-
+     rv = sink->Init(this, mCurrentPrototype);
+     NS_ASSERTION(NS_SUCCEEDED(rv), "Unable to initialize datasource sink");
+     if (NS_FAILED(rv)) return rv;
+ 
+-    nsCOMPtr<nsIParser> parser = do_CreateInstance(kParserCID, &rv);
+-    NS_ASSERTION(NS_SUCCEEDED(rv), "unable to create parser");
+-    if (NS_FAILED(rv)) return rv;
++    nsCOMPtr<nsIParser> parser = nsIParser::Create();
+ 
+     parser->SetCommand(nsCRT::strcmp(aCommand, "view-source") ? eViewNormal :
+                        eViewSource);
+ 
+     parser->SetDocumentCharset(NS_LITERAL_CSTRING("UTF-8"),
+                                kCharsetFromDocTypeDefault);
+     parser->SetContentSink(sink); // grabs a reference to the parser
+ 
+-    *aResult = parser;
+-    NS_ADDREF(*aResult);
++    parser.forget(aResult);
+     return NS_OK;
+ }
+ 
+ 
+ nsresult
+ nsXULDocument::ApplyPersistentAttributes()
+ {
+     // For non-chrome documents, persistance is simply broken
+diff --git a/editor/libeditor/html/nsHTMLDataTransfer.cpp b/editor/libeditor/html/nsHTMLDataTransfer.cpp
+--- a/editor/libeditor/html/nsHTMLDataTransfer.cpp
++++ b/editor/libeditor/html/nsHTMLDataTransfer.cpp
+@@ -126,18 +126,16 @@
+ #include "nsIDocShellTreeItem.h"
+ #include "nsContentUtils.h"
+ #include "mozilla/Preferences.h"
+ 
+ using namespace mozilla;
+ 
+ const PRUnichar nbsp = 160;
+ 
+-static NS_DEFINE_CID(kCParserCID,     NS_PARSER_CID);
+-
+ // private clipboard data flavors for html copy/paste
+ #define kHTMLContext   "text/_moz_htmlcontext"
+ #define kHTMLInfo      "text/_moz_htmlinfo"
+ #define kInsertCookie  "_moz_Insert Here_moz_"
+ 
+ #define NS_FOUND_TARGET NS_ERROR_GENERATE_FAILURE(NS_ERROR_MODULE_EDITOR, 3)
+ 
+ // some little helpers
+diff --git a/parser/htmlparser/public/nsIParser.h b/parser/htmlparser/public/nsIParser.h
+--- a/parser/htmlparser/public/nsIParser.h
++++ b/parser/htmlparser/public/nsIParser.h
+@@ -130,16 +130,18 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsIDebugDu
+  *  This class defines the iparser interface. This XPCOM
+  *  inteface is all that parser clients ever need to see.
+  */
+ class nsIParser : public nsISupports {
+   public:
+ 
+     NS_DECLARE_STATIC_IID_ACCESSOR(NS_IPARSER_IID)
+ 
++    static NS_EXPORT_(nsIParser*) Create();
++
+     /**
+      * Select given content sink into parser for parser output
+      * @update	gess5/11/98
+      * @param   aSink is the new sink to be used by parser
+      * @return  
+      */
+     NS_IMETHOD_(void) SetContentSink(nsIContentSink* aSink)=0;
+ 
+diff --git a/parser/htmlparser/public/nsParserCIID.h b/parser/htmlparser/public/nsParserCIID.h
+--- a/parser/htmlparser/public/nsParserCIID.h
++++ b/parser/htmlparser/public/nsParserCIID.h
+@@ -37,20 +37,16 @@
+ 
+ #ifndef nsParserCIID_h__
+ #define nsParserCIID_h__
+ 
+ #include "nsISupports.h"
+ #include "nsIFactory.h"
+ #include "nsIComponentManager.h"
+ 
+-// {2ce606b0-bee6-11d1-aad9-00805f8a3e14}
+-#define NS_PARSER_CID      \
+-{ 0x2ce606b0, 0xbee6, 0x11d1, { 0xaa, 0xd9, 0x0, 0x80, 0x5f, 0x8a, 0x3e, 0x14 } }
+-
+ // XXX: This object should not be exposed outside of the parser.
+ //      Remove when CNavDTD subclasses do not need access
+ #define NS_PARSER_NODE_IID      \
+   {0x9039c670, 0x2717,  0x11d2,  \
+   {0x92, 0x46, 0x00,    0x80, 0x5f, 0x8a, 0x7a, 0xb6}}
+ 
+ // {a6cf9107-15b3-11d2-932e-00805f8add32}
+ #define NS_CNAVDTD_CID \
+diff --git a/parser/htmlparser/src/nsParser.cpp b/parser/htmlparser/src/nsParser.cpp
+--- a/parser/htmlparser/src/nsParser.cpp
++++ b/parser/htmlparser/src/nsParser.cpp
+@@ -80,19 +80,25 @@ using namespace mozilla;
+ #define NS_PARSER_FLAG_PARSER_ENABLED         0x00000002
+ #define NS_PARSER_FLAG_OBSERVERS_ENABLED      0x00000004
+ #define NS_PARSER_FLAG_PENDING_CONTINUE_EVENT 0x00000008
+ #define NS_PARSER_FLAG_CAN_INTERRUPT          0x00000010
+ #define NS_PARSER_FLAG_FLUSH_TOKENS           0x00000020
+ #define NS_PARSER_FLAG_CAN_TOKENIZE           0x00000040
+ 
+ static NS_DEFINE_IID(kISupportsIID, NS_ISUPPORTS_IID);
+-static NS_DEFINE_CID(kCParserCID, NS_PARSER_CID);
+ static NS_DEFINE_IID(kIParserIID, NS_IPARSER_IID);
+ 
++/* static */
++nsIParser*
++nsIParser::Create()
++{
++  return new nsParser();
++}
++
+ //-------------- Begin ParseContinue Event Definition ------------------------
+ /*
+ The parser can be explicitly interrupted by passing a return value of
+ NS_ERROR_HTMLPARSER_INTERRUPTED from BuildModel on the DTD. This will cause
+ the parser to stop processing and allow the application to return to the event
+ loop. The data which was left at the time of interruption will be processed
+ the next time OnDataAvailable is called. If the parser has received its final
+ chunk of data then OnDataAvailable will no longer be called by the networking
+diff --git a/parser/htmlparser/src/nsParserModule.cpp b/parser/htmlparser/src/nsParserModule.cpp
+--- a/parser/htmlparser/src/nsParserModule.cpp
++++ b/parser/htmlparser/src/nsParserModule.cpp
+@@ -60,37 +60,34 @@
+ 
+ //----------------------------------------------------------------------
+ 
+ #if defined(NS_DEBUG)
+ NS_GENERIC_FACTORY_CONSTRUCTOR(nsLoggingSink)
+ NS_GENERIC_FACTORY_CONSTRUCTOR(nsExpatDriver)
+ #endif
+ 
+-NS_GENERIC_FACTORY_CONSTRUCTOR(nsParser)
+ NS_GENERIC_FACTORY_CONSTRUCTOR(CNavDTD)
+ NS_GENERIC_FACTORY_CONSTRUCTOR(nsParserService)
+ 
+ NS_GENERIC_FACTORY_CONSTRUCTOR(nsSAXAttributes)
+ NS_GENERIC_FACTORY_CONSTRUCTOR(nsSAXXMLReader)
+ 
+ #if defined(NS_DEBUG)
+ NS_DEFINE_NAMED_CID(NS_EXPAT_DRIVER_CID);
+ #endif
+-NS_DEFINE_NAMED_CID(NS_PARSER_CID);
+ NS_DEFINE_NAMED_CID(NS_CNAVDTD_CID);
+ NS_DEFINE_NAMED_CID(NS_PARSERSERVICE_CID);
+ NS_DEFINE_NAMED_CID(NS_SAXATTRIBUTES_CID);
+ NS_DEFINE_NAMED_CID(NS_SAXXMLREADER_CID);
+ 
+ static const mozilla::Module::CIDEntry kParserCIDs[] = {
+ #if defined(NS_DEBUG)
+   { &kNS_EXPAT_DRIVER_CID, false, NULL, nsExpatDriverConstructor },
+ #endif
+-  { &kNS_PARSER_CID, false, NULL, nsParserConstructor },
+   { &kNS_CNAVDTD_CID, false, NULL, CNavDTDConstructor },
+   { &kNS_PARSERSERVICE_CID, false, NULL, nsParserServiceConstructor },
+   { &kNS_SAXATTRIBUTES_CID, false, NULL, nsSAXAttributesConstructor },
+   { &kNS_SAXXMLREADER_CID, false, NULL, nsSAXXMLReaderConstructor },
+   { NULL }
+ };
+ 
+ static const mozilla::Module::ContractIDEntry kParserContracts[] = {
+diff --git a/parser/xml/src/nsSAXXMLReader.cpp b/parser/xml/src/nsSAXXMLReader.cpp
+--- a/parser/xml/src/nsSAXXMLReader.cpp
++++ b/parser/xml/src/nsSAXXMLReader.cpp
+@@ -45,18 +45,16 @@
+ #include "nsStringStream.h"
+ #include "nsIScriptError.h"
+ #include "nsSAXAttributes.h"
+ #include "nsSAXLocator.h"
+ #include "nsSAXXMLReader.h"
+ 
+ #define XMLNS_URI "http://www.w3.org/2000/xmlns/"
+ 
+-static NS_DEFINE_CID(kParserCID, NS_PARSER_CID);
+-
+ NS_IMPL_CYCLE_COLLECTION_CLASS(nsSAXXMLReader)
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsSAXXMLReader)
+   NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mContentHandler)
+   NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mDTDHandler)
+   NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mErrorHandler)
+   NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mLexicalHandler)
+   NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mBaseURI)
+   NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mListener)
+@@ -609,30 +607,27 @@ nsSAXXMLReader::OnDataAvailable(nsIReque
+   NS_ENSURE_STATE(mListener);
+   return mListener->OnDataAvailable(aRequest, aContext, aInputStream, offset,
+                                     count);
+ }
+ 
+ nsresult
+ nsSAXXMLReader::InitParser(nsIRequestObserver *aObserver, nsIChannel *aChannel)
+ {
+-  nsresult rv;
+-
+   // setup the parser
+-  nsCOMPtr<nsIParser> parser = do_CreateInstance(kParserCID, &rv);
+-  NS_ENSURE_SUCCESS(rv, rv);
++  nsCOMPtr<nsIParser> parser = nsIParser::Create();
+ 
+   parser->SetContentSink(this);
+ 
+   int32_t charsetSource = kCharsetFromDocTypeDefault;
+   nsAutoCString charset(NS_LITERAL_CSTRING("UTF-8"));
+   TryChannelCharset(aChannel, charsetSource, charset);
+   parser->SetDocumentCharset(charset, charsetSource);
+ 
+-  rv = parser->Parse(mBaseURI, aObserver);
++  nsresult rv = parser->Parse(mBaseURI, aObserver);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   mListener = do_QueryInterface(parser, &rv);
+ 
+   return rv;
+ }
+ 
+ // from nsDocument.cpp
+diff --git a/rdf/base/src/nsRDFXMLParser.cpp b/rdf/base/src/nsRDFXMLParser.cpp
+--- a/rdf/base/src/nsRDFXMLParser.cpp
++++ b/rdf/base/src/nsRDFXMLParser.cpp
+@@ -34,42 +34,34 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsRDFXMLParser.h"
+ 
++#include "nsAutoPtr.h"
+ #include "nsIComponentManager.h"
+ #include "nsIParser.h"
+ #include "nsIRDFContentSink.h"
+-#include "nsParserCIID.h"
+ #include "nsStringStream.h"
+ #include "nsNetUtil.h"
+ 
+-static NS_DEFINE_CID(kParserCID, NS_PARSER_CID);
+ 
+ NS_IMPL_ISUPPORTS1(nsRDFXMLParser, nsIRDFXMLParser)
+ 
+ nsresult
+ nsRDFXMLParser::Create(nsISupports* aOuter, REFNSIID aIID, void** aResult)
+ {
+     if (aOuter)
+         return NS_ERROR_NO_AGGREGATION;
+ 
+-    nsRDFXMLParser* result = new nsRDFXMLParser();
+-    if (! result)
+-        return NS_ERROR_OUT_OF_MEMORY;
+-
+-    nsresult rv;
+-    NS_ADDREF(result);
+-    rv = result->QueryInterface(aIID, aResult);
+-    NS_RELEASE(result);
+-    return rv;
++    nsRefPtr<nsRDFXMLParser> result = new nsRDFXMLParser();
++    return result->QueryInterface(aIID, aResult);
+ }
+ 
+ nsRDFXMLParser::nsRDFXMLParser()
+ {
+     MOZ_COUNT_CTOR(nsRDFXMLParser);
+ }
+ 
+ nsRDFXMLParser::~nsRDFXMLParser()
+@@ -90,19 +82,17 @@ nsRDFXMLParser::ParseAsync(nsIRDFDataSou
+     rv = sink->Init(aBaseURI);
+     if (NS_FAILED(rv)) return rv;
+ 
+     // We set the content sink's data source directly to our in-memory
+     // store. This allows the initial content to be generated "directly".
+     rv = sink->SetDataSource(aSink);
+     if (NS_FAILED(rv)) return rv;
+ 
+-    nsCOMPtr<nsIParser> parser = do_CreateInstance(kParserCID, &rv);
+-    if (NS_FAILED(rv)) return rv;
+-
++    nsCOMPtr<nsIParser> parser = nsIParser::Create();
+     parser->SetDocumentCharset(NS_LITERAL_CSTRING("UTF-8"),
+                                kCharsetFromDocTypeDefault);
+     parser->SetContentSink(sink);
+ 
+     rv = parser->Parse(aBaseURI);
+     if (NS_FAILED(rv)) return rv;
+ 
+     return CallQueryInterface(parser, aResult);
+@@ -121,19 +111,17 @@ nsRDFXMLParser::ParseString(nsIRDFDataSo
+     rv = sink->Init(aBaseURI);
+     if (NS_FAILED(rv)) return rv;
+ 
+     // We set the content sink's data source directly to our in-memory
+     // store. This allows the initial content to be generated "directly".
+     rv = sink->SetDataSource(aSink);
+     if (NS_FAILED(rv)) return rv;
+ 
+-    nsCOMPtr<nsIParser> parser = do_CreateInstance(kParserCID, &rv);
+-    if (NS_FAILED(rv)) return rv;
+-
++    nsCOMPtr<nsIParser> parser = nsIParser::Create();
+     parser->SetDocumentCharset(NS_LITERAL_CSTRING("UTF-8"),
+                                kCharsetFromOtherComponent);
+     parser->SetContentSink(sink);
+ 
+     rv = parser->Parse(aBaseURI);
+     if (NS_FAILED(rv)) return rv;
+ 
+     nsCOMPtr<nsIStreamListener> listener =
+diff --git a/toolkit/components/feeds/nsScriptableUnescapeHTML.cpp b/toolkit/components/feeds/nsScriptableUnescapeHTML.cpp
+--- a/toolkit/components/feeds/nsScriptableUnescapeHTML.cpp
++++ b/toolkit/components/feeds/nsScriptableUnescapeHTML.cpp
+@@ -1,9 +1,9 @@
+-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* ***** BEGIN LICENSE BLOCK *****
+  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+  *
+  * The contents of this file are subject to the Mozilla Public License Version
+  * 1.1 (the "License"); you may not use this file except in compliance with
+  * the License. You may obtain a copy of the License at
+  * http://www.mozilla.org/MPL/
+  *
+@@ -67,36 +67,30 @@
+ #include "nsAutoPtr.h"
+ #include "nsTreeSanitizer.h"
+ #include "nsHtml5Module.h"
+ 
+ #define XHTML_DIV_TAG "div xmlns=\"http://www.w3.org/1999/xhtml\""
+ 
+ NS_IMPL_ISUPPORTS1(nsScriptableUnescapeHTML, nsIScriptableUnescapeHTML)
+ 
+-static NS_DEFINE_CID(kCParserCID, NS_PARSER_CID);
+-
+ // From /widget/HTMLConverter
+ //
+ // Takes HTML and converts it to plain text but in unicode.
+ //
+ NS_IMETHODIMP
+ nsScriptableUnescapeHTML::Unescape(const nsAString & aFromStr, 
+                                    nsAString & aToStr)
+ {
+   // create the parser to do the conversion.
+-  aToStr.SetLength(0);
+-  nsresult rv;
+-  nsCOMPtr<nsIParser> parser = do_CreateInstance(kCParserCID, &rv);
+-  if (NS_FAILED(rv)) return rv;
++  aToStr.Truncate();
++  nsCOMPtr<nsIParser> parser = nsIParser::Create();
+ 
+   // convert it!
+-  nsCOMPtr<nsIContentSink> sink;
+-
+-  sink = do_CreateInstance(NS_PLAINTEXTSINK_CONTRACTID);
++  nsCOMPtr<nsIContentSink> sink = do_CreateInstance(NS_PLAINTEXTSINK_CONTRACTID);
+   NS_ENSURE_TRUE(sink, NS_ERROR_FAILURE);
+ 
+   nsCOMPtr<nsIHTMLToTextSink> textSink(do_QueryInterface(sink));
+   NS_ENSURE_TRUE(textSink, NS_ERROR_FAILURE);
+ 
+   textSink->Initialize(&aToStr, nsIDocumentEncoder::OutputSelectionOnly
+                        | nsIDocumentEncoder::OutputAbsoluteLinks, 0);
+ 
+@@ -116,26 +110,20 @@ nsScriptableUnescapeHTML::ParseFragment(
+                                         bool aIsXML,
+                                         nsIURI* aBaseURI,
+                                         nsIDOMElement* aContextElement,
+                                         nsIDOMDocumentFragment** aReturn)
+ {
+   NS_ENSURE_ARG(aContextElement);
+   *aReturn = nullptr;
+ 
+-  nsresult rv;
+-  nsCOMPtr<nsIParser> parser = do_CreateInstance(kCParserCID, &rv);
+-  NS_ENSURE_SUCCESS(rv, rv);
++  nsCOMPtr<nsINode> contextNode = do_QueryInterface(aContextElement);
++  NS_ENSURE_TRUE(contextNode, NS_ERROR_NOT_AVAILABLE);
+ 
+-  nsCOMPtr<nsIDocument> document;
+-  nsCOMPtr<nsIDOMDocument> domDocument;
+-  nsCOMPtr<nsIDOMNode> contextNode;
+-  contextNode = do_QueryInterface(aContextElement);
+-  contextNode->GetOwnerDocument(getter_AddRefs(domDocument));
+-  document = do_QueryInterface(domDocument);
++  nsCOMPtr<nsIDocument> document = contextNode->GetOwnerDocument();
+   NS_ENSURE_TRUE(document, NS_ERROR_NOT_AVAILABLE);
+ 
+   // stop scripts
+   nsRefPtr<nsScriptLoader> loader;
+   bool scripts_enabled = false;
+   if (document) {
+     loader = document->ScriptLoader();
+     scripts_enabled = loader->GetEnabled();
+@@ -162,56 +150,56 @@ nsScriptableUnescapeHTML::ParseFragment(
+       NS_Free(escapedSpec);
+       base.Append(NS_LITERAL_CSTRING("\""));
+       tagStack.AppendElement(NS_ConvertUTF8toUTF16(base));
+     }  else {
+       tagStack.AppendElement(NS_LITERAL_STRING(XHTML_DIV_TAG));
+     }
+   }
+ 
+-  if (NS_SUCCEEDED(rv)) {
+-    nsCOMPtr<nsIContent> fragment;
+-    if (aIsXML) {
+-      rv = nsContentUtils::ParseFragmentXML(aFragment,
+-                                            document,
+-                                            tagStack,
+-                                            true,
+-                                            aReturn);
+-      fragment = do_QueryInterface(*aReturn);
+-    } else {
+-      NS_NewDocumentFragment(aReturn,
+-                             document->NodeInfoManager());
+-      fragment = do_QueryInterface(*aReturn);
+-      rv = nsContentUtils::ParseFragmentHTML(aFragment,
+-                                             fragment,
+-                                             nsGkAtoms::body,
+-                                             kNameSpaceID_XHTML,
+-                                             false,
+-                                             true);
+-      // Now, set the base URI on all subtree roots.
+-      if (aBaseURI) {
+-        aBaseURI->GetSpec(spec);
+-        nsAutoString spec16;
+-        CopyUTF8toUTF16(spec, spec16);
+-        nsIContent* node = fragment->GetFirstChild();
+-        while (node) {
+-          if (node->IsElement()) {
+-            node->SetAttr(kNameSpaceID_XML,
+-                          nsGkAtoms::base,
+-                          nsGkAtoms::xml,
+-                          spec16,
+-                          false);
+-          }
+-          node = node->GetNextSibling();
++  nsresult rv;
++  nsCOMPtr<nsIContent> fragment;
++  if (aIsXML) {
++    rv = nsContentUtils::ParseFragmentXML(aFragment,
++                                          document,
++                                          tagStack,
++                                          true,
++                                          aReturn);
++    fragment = do_QueryInterface(*aReturn);
++  } else {
++    NS_NewDocumentFragment(aReturn,
++                           document->NodeInfoManager());
++    fragment = do_QueryInterface(*aReturn);
++    rv = nsContentUtils::ParseFragmentHTML(aFragment,
++                                           fragment,
++                                           nsGkAtoms::body,
++                                           kNameSpaceID_XHTML,
++                                           false,
++                                           true);
++    // Now, set the base URI on all subtree roots.
++    if (aBaseURI) {
++      aBaseURI->GetSpec(spec);
++      nsAutoString spec16;
++      CopyUTF8toUTF16(spec, spec16);
++      nsIContent* node = fragment->GetFirstChild();
++      while (node) {
++        if (node->IsElement()) {
++          node->SetAttr(kNameSpaceID_XML,
++                        nsGkAtoms::base,
++                        nsGkAtoms::xml,
++                        spec16,
++                        false);
+         }
++        node = node->GetNextSibling();
+       }
+     }
+-    if (fragment) {
+-      nsTreeSanitizer sanitizer(false, false);
+-      sanitizer.Sanitize(fragment);
+-    }
++  }
++  if (fragment) {
++    nsTreeSanitizer sanitizer(false, false);
++    sanitizer.Sanitize(fragment);
+   }
+ 
+-  if (scripts_enabled)
+-      loader->SetEnabled(true);
++  if (scripts_enabled) {
++    loader->SetEnabled(true);
++  }
+   
+   return rv;
+ }
+diff --git a/toolkit/components/places/nsPlacesImportExportService.cpp b/toolkit/components/places/nsPlacesImportExportService.cpp
+--- a/toolkit/components/places/nsPlacesImportExportService.cpp
++++ b/toolkit/components/places/nsPlacesImportExportService.cpp
+@@ -104,18 +104,16 @@
+ #include "prprf.h"
+ #include "nsIObserverService.h"
+ #include "nsISupportsPrimitives.h"
+ #include "nsPlacesMacros.h"
+ #include "mozilla/Util.h"
+ 
+ using namespace mozilla;
+ 
+-static NS_DEFINE_CID(kParserCID, NS_PARSER_CID);
+-
+ #define KEY_TOOLBARFOLDER_LOWER "personal_toolbar_folder"
+ #define KEY_BOOKMARKSMENU_LOWER "bookmarks_menu"
+ #define KEY_UNFILEDFOLDER_LOWER "unfiled_bookmarks_folder"
+ #define KEY_PLACESROOT_LOWER "places_root"
+ #define KEY_HREF_LOWER "href"
+ #define KEY_FEEDURL_LOWER "feedurl"
+ #define KEY_WEB_PANEL_LOWER "web_panel"
+ #define KEY_LASTCHARSET_LOWER "last_charset"
+@@ -2205,18 +2203,17 @@ nsresult
+ nsPlacesImportExportService::ImportHTMLFromURIInternal(nsIURI* aURI,
+                                                        bool aAllowRootChanges,
+                                                        int64_t aFolder,
+                                                        bool aIsImportDefaults)
+ {
+   nsresult rv = EnsureServiceState();
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+-  nsCOMPtr<nsIParser> parser = do_CreateInstance(kParserCID);
+-  NS_ENSURE_TRUE(parser, NS_ERROR_OUT_OF_MEMORY);
++  nsCOMPtr<nsIParser> parser = nsIParser::Create();
+ 
+   nsCOMPtr<BookmarkContentSink> sink = new BookmarkContentSink();
+   NS_ENSURE_TRUE(sink, NS_ERROR_OUT_OF_MEMORY);
+   rv = sink->Init(aAllowRootChanges, aFolder, aIsImportDefaults);
+   NS_ENSURE_SUCCESS(rv, rv);
+   parser->SetContentSink(sink);
+ 
+   // Set the content type on the channel, otherwise the default "unknown" type
+diff --git a/widget/xpwidgets/nsHTMLFormatConverter.cpp b/widget/xpwidgets/nsHTMLFormatConverter.cpp
+--- a/widget/xpwidgets/nsHTMLFormatConverter.cpp
++++ b/widget/xpwidgets/nsHTMLFormatConverter.cpp
+@@ -52,18 +52,16 @@
+ #include "nsIParser.h"
+ #include "nsIDTD.h"
+ #include "nsParserCIID.h"
+ #include "nsIContentSink.h"
+ #include "nsPrimitiveHelpers.h"
+ #include "nsIDocumentEncoder.h"
+ #include "nsIHTMLToTextSink.h"
+ 
+-static NS_DEFINE_CID(kCParserCID, NS_PARSER_CID);
+-
+ nsHTMLFormatConverter::nsHTMLFormatConverter()
+ {
+ }
+ 
+ nsHTMLFormatConverter::~nsHTMLFormatConverter()
+ {
+ }
+ 
+@@ -268,26 +266,21 @@ nsHTMLFormatConverter::Convert(const cha
+ // ConvertFromHTMLToUnicode
+ //
+ // Takes HTML and converts it to plain text but in unicode.
+ //
+ NS_IMETHODIMP
+ nsHTMLFormatConverter::ConvertFromHTMLToUnicode(const nsAutoString & aFromStr, nsAutoString & aToStr)
+ {
+   // create the parser to do the conversion.
+-  aToStr.SetLength(0);
+-  nsresult rv;
+-  nsCOMPtr<nsIParser> parser = do_CreateInstance(kCParserCID, &rv);
+-  if ( !parser )
+-    return rv;
++  aToStr.Truncate();
++  nsCOMPtr<nsIParser> parser = nsIParser::Create();
+ 
+   // convert it!
+-  nsCOMPtr<nsIContentSink> sink;
+-
+-  sink = do_CreateInstance(NS_PLAINTEXTSINK_CONTRACTID);
++  nsCOMPtr<nsIContentSink> sink = do_CreateInstance(NS_PLAINTEXTSINK_CONTRACTID);
+   NS_ENSURE_TRUE(sink, NS_ERROR_FAILURE);
+ 
+   nsCOMPtr<nsIHTMLToTextSink> textSink(do_QueryInterface(sink));
+   NS_ENSURE_TRUE(textSink, NS_ERROR_FAILURE);
+ 
+   // We set OutputNoScriptContent and OutputNoFramesContent unconditionally
+   // here because |aFromStr| is already filtered based on user preferences.
+   uint32_t flags =

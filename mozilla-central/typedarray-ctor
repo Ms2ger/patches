@@ -1,0 +1,84 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/src/jstypedarray.cpp b/js/src/jstypedarray.cpp
+--- a/js/src/jstypedarray.cpp
++++ b/js/src/jstypedarray.cpp
+@@ -49,43 +49,16 @@ using mozilla::PodCopy;
+ 
+ /*
+  * Allocate array buffers with the maximum number of fixed slots marked as
+  * reserved, so that the fixed slots may be used for the buffer's contents.
+  * The last fixed slot is kept for the object's private data.
+  */
+ static const uint8_t ARRAYBUFFER_RESERVED_SLOTS = JSObject::MAX_FIXED_SLOTS - 1;
+ 
+-static bool
+-ValueIsLength(const Value &v, uint32_t *len)
+-{
+-    if (v.isInt32()) {
+-        int32_t i = v.toInt32();
+-        if (i < 0)
+-            return false;
+-        *len = i;
+-        return true;
+-    }
+-
+-    if (v.isDouble()) {
+-        double d = v.toDouble();
+-        if (IsNaN(d))
+-            return false;
+-
+-        uint32_t length = uint32_t(d);
+-        if (d != double(length))
+-            return false;
+-
+-        *len = length;
+-        return true;
+-    }
+-
+-    return false;
+-}
+-
+ /*
+  * Convert |v| to an array index for an array of length |length| per
+  * the Typed Array Specification section 7.0, |subarray|. If successful,
+  * the output value is in the range [0, length].
+  */
+ static bool
+ ToClampedIndex(JSContext *cx, const Value &v, uint32_t length, uint32_t *out)
+ {
+@@ -1840,25 +1813,25 @@ class TypedArrayTemplate
+         return true;
+     }
+ 
+     static JSObject *
+     create(JSContext *cx, unsigned argc, Value *argv)
+     {
+         /* N.B. there may not be an argv[-2]/argv[-1]. */
+ 
+-        /* () or (number) */
+-        uint32_t len = 0;
+-        if (argc == 0 || ValueIsLength(argv[0], &len))
+-            return fromLength(cx, len);
+-
+-        /* (not an object) */
+-        if (!argv[0].isObject()) {
+-            JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_TYPED_ARRAY_BAD_ARGS);
+-            return NULL;
++        /* () or (primitive) */
++        if (argc == 0)
++            return fromLength(cx, 0);
++
++        if (argv[0].isPrimitive()) {
++            uint32_t length;
++            if (!ToUint32(cx, argv[0], &length))
++                return NULL;
++            return fromLength(cx, length);
+         }
+ 
+         RootedObject dataObj(cx, &argv[0].toObject());
+ 
+         /*
+          * (typedArray)
+          * (type[] array)
+          *

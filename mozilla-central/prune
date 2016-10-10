@@ -1,0 +1,74 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/canvas/src/nsCanvasRenderingContext2D.cpp b/content/canvas/src/nsCanvasRenderingContext2D.cpp
+--- a/content/canvas/src/nsCanvasRenderingContext2D.cpp
++++ b/content/canvas/src/nsCanvasRenderingContext2D.cpp
+@@ -2051,51 +2051,63 @@ nsCanvasRenderingContext2D::MoveTo(float
+ }
+ 
+ NS_IMETHODIMP
+ nsCanvasRenderingContext2D::LineTo(float x, float y)
+ {
+     if (!FloatValidate(x,y))
+         return NS_OK;
+ 
++    gfxPoint p(x, y)
++    if (p == mThebes->CurrentPoint()) {
++        return NS_OK;
++    }
++
+     mHasPath = true;
+-    mThebes->LineTo(gfxPoint(x, y));
++    mThebes->LineTo(p);
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsCanvasRenderingContext2D::QuadraticCurveTo(float cpx, float cpy, float x, float y)
+ {
+     if (!FloatValidate(cpx,cpy,x,y))
+         return NS_OK;
+ 
+     // we will always have a current point, since beginPath forces
+     // a moveto(0,0)
+     gfxPoint c = mThebes->CurrentPoint();
++    gfxPoint cp(cpx, cpy);
+     gfxPoint p(x,y);
+-    gfxPoint cp(cpx, cpy);
++
++    if (c == cp) {
++        return NS_OK;
++    }
+ 
+     mHasPath = true;
+     mThebes->CurveTo((c+cp*2)/3.0, (p+cp*2)/3.0, p);
+ 
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsCanvasRenderingContext2D::BezierCurveTo(float cp1x, float cp1y,
+                                           float cp2x, float cp2y,
+                                           float x, float y)
+ {
+     if (!FloatValidate(cp1x,cp1y,cp2x,cp2y,x,y))
+         return NS_OK;
+ 
++    gfxPoint cp1(cp1x, cp1y);
++    if (cp1 == mThebes->CurrentPoint()) {
++        return NS_OK;
++    }
++
+     mHasPath = true;
+-    mThebes->CurveTo(gfxPoint(cp1x, cp1y),
+-                     gfxPoint(cp2x, cp2y),
+-                     gfxPoint(x, y));
++    mThebes->CurveTo(cp1, gfxPoint(cp2x, cp2y), gfxPoint(x, y));
+ 
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsCanvasRenderingContext2D::ArcTo(float x1, float y1, float x2, float y2, float radius)
+ {
+     if (!FloatValidate(x1,y1,x2,y2,radius))

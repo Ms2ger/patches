@@ -1,0 +1,308 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 660660, part f - Remove dead code; r=?sicking
+
+diff --git a/content/base/src/nsDocument.cpp b/content/base/src/nsDocument.cpp
+--- a/content/base/src/nsDocument.cpp
++++ b/content/base/src/nsDocument.cpp
+@@ -4784,17 +4784,16 @@ nsDocument::ImportNode(nsIDOMNode* aImpo
+   uint16_t nodeType;
+   aImportedNode->GetNodeType(&nodeType);
+   switch (nodeType) {
+     case nsIDOMNode::ATTRIBUTE_NODE:
+     case nsIDOMNode::DOCUMENT_FRAGMENT_NODE:
+     case nsIDOMNode::ELEMENT_NODE:
+     case nsIDOMNode::PROCESSING_INSTRUCTION_NODE:
+     case nsIDOMNode::TEXT_NODE:
+-    case nsIDOMNode::CDATA_SECTION_NODE:
+     case nsIDOMNode::COMMENT_NODE:
+     {
+       nsCOMPtr<nsINode> imported = do_QueryInterface(aImportedNode);
+       NS_ENSURE_TRUE(imported, NS_ERROR_FAILURE);
+ 
+       nsCOMPtr<nsIDOMNode> newNode;
+       nsCOMArray<nsINode> nodesWithProperties;
+       rv = nsNodeUtils::Clone(imported, aDeep, mNodeInfoManager,
+@@ -4808,16 +4807,17 @@ nsDocument::ImportNode(nsIDOMNode* aImpo
+                                                true);
+         NS_ENSURE_SUCCESS(rv, rv);
+       }
+ 
+       newNode.swap(*aResult);
+ 
+       return NS_OK;
+     }
++    case nsIDOMNode::CDATA_SECTION_NODE:
+     case nsIDOMNode::ENTITY_NODE:
+     case nsIDOMNode::ENTITY_REFERENCE_NODE:
+     case nsIDOMNode::NOTATION_NODE:
+     {
+       return NS_ERROR_NOT_IMPLEMENTED;
+     }
+     default:
+     {
+@@ -6087,17 +6087,16 @@ nsDocument::AdoptNode(nsIDOMNode *aAdopt
+       }
+ 
+       break;
+     }
+     case nsIDOMNode::DOCUMENT_FRAGMENT_NODE:
+     case nsIDOMNode::ELEMENT_NODE:
+     case nsIDOMNode::PROCESSING_INSTRUCTION_NODE:
+     case nsIDOMNode::TEXT_NODE:
+-    case nsIDOMNode::CDATA_SECTION_NODE:
+     case nsIDOMNode::COMMENT_NODE:
+     {
+       // We don't want to adopt an element into its own contentDocument or into
+       // a descendant contentDocument, so we check if the frameElement of this
+       // document or any of its parents is the adopted node or one of its
+       // descendants.
+       nsIDocument *doc = this;
+       do {
+@@ -6116,16 +6115,17 @@ nsDocument::AdoptNode(nsIDOMNode *aAdopt
+       nsINode* parent = adoptedNode->GetParentNode();
+       if (parent) {
+         rv = parent->RemoveChildAt(parent->IndexOf(adoptedNode), true);
+         NS_ENSURE_SUCCESS(rv, rv);
+       }
+ 
+       break;
+     }
++    case nsIDOMNode::CDATA_SECTION_NODE:
+     case nsIDOMNode::ENTITY_REFERENCE_NODE:
+     {
+       return NS_ERROR_NOT_IMPLEMENTED;
+     }
+     case nsIDOMNode::DOCUMENT_NODE:
+     case nsIDOMNode::DOCUMENT_TYPE_NODE:
+     case nsIDOMNode::ENTITY_NODE:
+     case nsIDOMNode::NOTATION_NODE:
+diff --git a/content/base/src/nsGenericDOMDataNode.cpp b/content/base/src/nsGenericDOMDataNode.cpp
+--- a/content/base/src/nsGenericDOMDataNode.cpp
++++ b/content/base/src/nsGenericDOMDataNode.cpp
+@@ -32,17 +32,17 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /*
+  * Base class for DOM Core's nsIDOMComment, nsIDOMDocumentType, nsIDOMText,
+- * nsIDOMCDATASection, and nsIDOMProcessingInstruction nodes.
++ * and nsIDOMProcessingInstruction nodes.
+  */
+ 
+ #include "nsGenericDOMDataNode.h"
+ #include "nsGenericElement.h"
+ #include "nsIDocument.h"
+ #include "nsEventListenerManager.h"
+ #include "nsIDOMDocument.h"
+ #include "nsReadableUtils.h"
+@@ -68,17 +68,16 @@
+ #include "prprf.h"
+ 
+ using namespace mozilla;
+ 
+ nsGenericDOMDataNode::nsGenericDOMDataNode(already_AddRefed<nsINodeInfo> aNodeInfo)
+   : nsIContent(aNodeInfo)
+ {
+   NS_ABORT_IF_FALSE(mNodeInfo->NodeType() == nsIDOMNode::TEXT_NODE ||
+-                    mNodeInfo->NodeType() == nsIDOMNode::CDATA_SECTION_NODE ||
+                     mNodeInfo->NodeType() == nsIDOMNode::COMMENT_NODE ||
+                     mNodeInfo->NodeType() ==
+                       nsIDOMNode::PROCESSING_INSTRUCTION_NODE ||
+                     mNodeInfo->NodeType() == nsIDOMNode::DOCUMENT_TYPE_NODE,
+                     "Bad NodeType in aNodeInfo");
+ }
+ 
+ nsGenericDOMDataNode::~nsGenericDOMDataNode()
+diff --git a/content/base/src/nsGenericElement.cpp b/content/base/src/nsGenericElement.cpp
+--- a/content/base/src/nsGenericElement.cpp
++++ b/content/base/src/nsGenericElement.cpp
+@@ -912,17 +912,16 @@ nsINode::IsEqualTo(nsINode* aOther)
+                                      eCaseMatters)) {
+             return false;
+           }
+         }
+         break;
+       }
+       case nsIDOMNode::TEXT_NODE:
+       case nsIDOMNode::COMMENT_NODE:
+-      case nsIDOMNode::CDATA_SECTION_NODE:
+       case nsIDOMNode::PROCESSING_INSTRUCTION_NODE:
+       {
+         string1.Truncate();
+         static_cast<nsIContent*>(node1)->AppendTextTo(string1);
+         string2.Truncate();
+         static_cast<nsIContent*>(node2)->AppendTextTo(string2);
+ 
+         if (!string1.Equals(string2)) {
+@@ -3712,17 +3711,16 @@ bool IsAllowedAsChild(nsIContent* aNew
+ 
+   // The allowed child nodes differ for documents and elements
+   switch (aNewChild->NodeType()) {
+   case nsIDOMNode::COMMENT_NODE :
+   case nsIDOMNode::PROCESSING_INSTRUCTION_NODE :
+     // OK in both cases
+     return true;
+   case nsIDOMNode::TEXT_NODE :
+-  case nsIDOMNode::CDATA_SECTION_NODE :
+   case nsIDOMNode::ENTITY_REFERENCE_NODE :
+     // Only allowed under elements
+     return aParent != nullptr;
+   case nsIDOMNode::ELEMENT_NODE :
+     {
+       if (!aParent->IsNodeOfType(nsINode::eDOCUMENT)) {
+         // Always ok to have elements under other elements or document fragments
+         return true;
+diff --git a/content/base/src/nsNodeInfo.cpp b/content/base/src/nsNodeInfo.cpp
+--- a/content/base/src/nsNodeInfo.cpp
++++ b/content/base/src/nsNodeInfo.cpp
+@@ -145,17 +145,16 @@ nsNodeInfo::nsNodeInfo(nsIAtom *aName, n
+           GetDocument()->IsHTML()) {
+         nsContentUtils::ASCIIToUpper(mQualifiedName, mNodeName);
+       } else {
+         mNodeName = mQualifiedName;
+       }
+       mInner.mName->ToString(mLocalName);
+       break;
+     case nsIDOMNode::TEXT_NODE:
+-    case nsIDOMNode::CDATA_SECTION_NODE:
+     case nsIDOMNode::COMMENT_NODE:
+     case nsIDOMNode::DOCUMENT_NODE:
+     case nsIDOMNode::DOCUMENT_FRAGMENT_NODE:
+       mInner.mName->ToString(mNodeName);
+       SetDOMStringToNull(mLocalName);
+       break;
+     case nsIDOMNode::PROCESSING_INSTRUCTION_NODE:
+     case nsIDOMNode::DOCUMENT_TYPE_NODE:
+diff --git a/content/base/src/nsNodeInfo.h b/content/base/src/nsNodeInfo.h
+--- a/content/base/src/nsNodeInfo.h
++++ b/content/base/src/nsNodeInfo.h
+@@ -97,17 +97,16 @@ private:
+    */
+    void LastRelease();
+ };
+ 
+ #define CHECK_VALID_NODEINFO(_nodeType, _name, _namespaceID, _extraName)    \
+ NS_ABORT_IF_FALSE(_nodeType == nsIDOMNode::ELEMENT_NODE ||                  \
+                   _nodeType == nsIDOMNode::ATTRIBUTE_NODE ||                \
+                   _nodeType == nsIDOMNode::TEXT_NODE ||                     \
+-                  _nodeType == nsIDOMNode::CDATA_SECTION_NODE ||            \
+                   _nodeType == nsIDOMNode::PROCESSING_INSTRUCTION_NODE ||   \
+                   _nodeType == nsIDOMNode::COMMENT_NODE ||                  \
+                   _nodeType == nsIDOMNode::DOCUMENT_NODE ||                 \
+                   _nodeType == nsIDOMNode::DOCUMENT_TYPE_NODE ||            \
+                   _nodeType == nsIDOMNode::DOCUMENT_FRAGMENT_NODE ||        \
+                   _nodeType == PR_UINT16_MAX,                               \
+                   "Invalid nodeType");                                      \
+ NS_ABORT_IF_FALSE((_nodeType == nsIDOMNode::PROCESSING_INSTRUCTION_NODE ||  \
+@@ -117,18 +116,16 @@ NS_ABORT_IF_FALSE((_nodeType == nsIDOMNo
+ NS_ABORT_IF_FALSE(_nodeType == nsIDOMNode::ELEMENT_NODE ||                  \
+                   _nodeType == nsIDOMNode::ATTRIBUTE_NODE ||                \
+                   _nodeType == PR_UINT16_MAX ||                             \
+                   aNamespaceID == kNameSpaceID_None,                        \
+                   "Only attributes and elements can be in a namespace");    \
+ NS_ABORT_IF_FALSE(_name && _name != nsGkAtoms::_empty, "Invalid localName");\
+ NS_ABORT_IF_FALSE(((_nodeType == nsIDOMNode::TEXT_NODE) ==                  \
+                    (_name == nsGkAtoms::textTagName)) &&                    \
+-                  ((_nodeType == nsIDOMNode::CDATA_SECTION_NODE) ==         \
+-                   (_name == nsGkAtoms::cdataTagName)) &&                   \
+                   ((_nodeType == nsIDOMNode::COMMENT_NODE) ==               \
+                    (_name == nsGkAtoms::commentTagName)) &&                 \
+                   ((_nodeType == nsIDOMNode::DOCUMENT_NODE) ==              \
+                    (_name == nsGkAtoms::documentNodeName)) &&               \
+                   ((_nodeType == nsIDOMNode::DOCUMENT_FRAGMENT_NODE) ==     \
+                    (_name == nsGkAtoms::documentFragmentNodeName)) &&       \
+                   ((_nodeType == nsIDOMNode::DOCUMENT_TYPE_NODE) ==         \
+                    (_name == nsGkAtoms::documentTypeNodeName)) &&           \
+diff --git a/content/test/unit/head_content.js b/content/test/unit/head_content.js
+--- a/content/test/unit/head_content.js
++++ b/content/test/unit/head_content.js
+@@ -138,17 +138,16 @@ function do_check_equiv(dom1, dom2) {
+   // There's no classinfo around, so we'll need to do some QIing to
+   // make sure the right interfaces are flattened as needed.
+   switch (dom1.nodeType) {
+   case nsIDOMNode.PROCESSING_INSTRUCTION_NODE:
+     do_check_eq(dom1.QueryInterface(nsIDOMProcessingInstruction).target, 
+                 dom2.QueryInterface(nsIDOMProcessingInstruction).target);
+     do_check_eq(dom1.data, dom2.data);
+   case nsIDOMNode.TEXT_NODE:
+-  case nsIDOMNode.CDATA_SECTION_NODE:
+   case nsIDOMNode.COMMENT_NODE:
+     do_check_eq(dom1.QueryInterface(nsIDOMCharacterData).data,
+                 dom2.QueryInterface(nsIDOMCharacterData).data);
+     break;
+   case nsIDOMNode.ELEMENT_NODE:
+     do_check_eq(dom1.namespaceURI, dom2.namespaceURI);
+     do_check_eq(dom1.localName, dom2.localName);
+     // Compare attrs in both directions -- do_compare_attrs does a
+diff --git a/content/xslt/src/xpath/nsXPathExpression.cpp b/content/xslt/src/xpath/nsXPathExpression.cpp
+--- a/content/xslt/src/xpath/nsXPathExpression.cpp
++++ b/content/xslt/src/xpath/nsXPathExpression.cpp
+@@ -104,18 +104,17 @@ nsXPathExpression::EvaluateWithContext(n
+ 
+         if (mDocument != contextDocument) {
+             return NS_ERROR_DOM_WRONG_DOCUMENT_ERR;
+         }
+     }
+ 
+     uint16_t nodeType = context->NodeType();
+ 
+-    if (nodeType == nsIDOMNode::TEXT_NODE ||
+-        nodeType == nsIDOMNode::CDATA_SECTION_NODE) {
++    if (nodeType == nsIDOMNode::TEXT_NODE) {
+         nsCOMPtr<nsIDOMCharacterData> textNode = do_QueryInterface(aContextNode);
+         NS_ENSURE_TRUE(textNode, NS_ERROR_FAILURE);
+ 
+         if (textNode) {
+             uint32_t textLength;
+             textNode->GetLength(&textLength);
+             if (textLength == 0)
+                 return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
+diff --git a/embedding/components/find/src/nsFind.cpp b/embedding/components/find/src/nsFind.cpp
+--- a/embedding/components/find/src/nsFind.cpp
++++ b/embedding/components/find/src/nsFind.cpp
+@@ -803,18 +803,17 @@ bool nsFind::IsBlockNode(nsIContent* a
+   return isBlock;
+ }
+ 
+ bool nsFind::IsTextNode(nsIDOMNode* aNode)
+ {
+   uint16_t nodeType;
+   aNode->GetNodeType(&nodeType);
+ 
+-  return nodeType == nsIDOMNode::TEXT_NODE ||
+-         nodeType == nsIDOMNode::CDATA_SECTION_NODE;
++  return nodeType == nsIDOMNode::TEXT_NODE;
+ }
+ 
+ bool nsFind::IsVisibleNode(nsIDOMNode *aDOMNode)
+ {
+   nsCOMPtr<nsIContent> content(do_QueryInterface(aDOMNode));
+   if (!content)
+     return false;
+ 
+diff --git a/toolkit/components/viewsource/content/viewPartialSource.js b/toolkit/components/viewsource/content/viewPartialSource.js
+--- a/toolkit/components/viewsource/content/viewPartialSource.js
++++ b/toolkit/components/viewsource/content/viewPartialSource.js
+@@ -99,18 +99,17 @@ function viewPartialSourceForSelection(s
+   var doc = ancestorContainer.ownerDocument;
+ 
+   var startContainer = range.startContainer;
+   var endContainer = range.endContainer;
+   var startOffset = range.startOffset;
+   var endOffset = range.endOffset;
+ 
+   // let the ancestor be an element
+-  if (ancestorContainer.nodeType == Node.TEXT_NODE ||
+-      ancestorContainer.nodeType == Node.CDATA_SECTION_NODE)
++  if (ancestorContainer.nodeType == Node.TEXT_NODE)
+     ancestorContainer = ancestorContainer.parentNode;
+ 
+   // for selectAll, let's use the entire document, including <html>...</html>
+   // @see DocumentViewerImpl::SelectAll() for how selectAll is implemented
+   try {
+     if (ancestorContainer == doc.body)
+       ancestorContainer = doc.documentElement;
+   } catch (e) { }

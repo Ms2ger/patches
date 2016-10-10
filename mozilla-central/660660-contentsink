@@ -1,0 +1,51 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 660660, part c - Make the XML content sink create Text nodes; r=?sicking
+
+diff --git a/content/xml/document/src/nsXMLContentSink.cpp b/content/xml/document/src/nsXMLContentSink.cpp
+--- a/content/xml/document/src/nsXMLContentSink.cpp
++++ b/content/xml/document/src/nsXMLContentSink.cpp
+@@ -47,17 +47,16 @@
+ #include "nsIDOMDOMImplementation.h"
+ #include "nsIContent.h"
+ #include "nsIURI.h"
+ #include "nsNetUtil.h"
+ #include "nsIDocShell.h"
+ #include "nsIDocShellTreeItem.h"
+ #include "nsIStyleSheetLinkingElement.h"
+ #include "nsIDOMComment.h"
+-#include "nsIDOMCDATASection.h"
+ #include "nsDOMDocumentType.h"
+ #include "nsHTMLParts.h"
+ #include "nsCRT.h"
+ #include "nsCSSStyleSheet.h"
+ #include "mozilla/css/Loader.h"
+ #include "nsGkAtoms.h"
+ #include "nsContentUtils.h"
+ #include "nsIScriptContext.h"
+@@ -1185,21 +1184,21 @@ nsXMLContentSink::HandleCDataSection(con
+   // XSLT doesn't differentiate between text and cdata and wants adjacent
+   // textnodes merged, so add as text.
+   if (mXSLTProcessor) {
+     return AddText(aData, aLength);
+   }
+ 
+   FlushText();
+   
+-  nsCOMPtr<nsIContent> cdata;
+-  nsresult rv = NS_NewXMLCDATASection(getter_AddRefs(cdata), mNodeInfoManager);
+-  if (cdata) {
+-    cdata->SetText(aData, aLength, false);
+-    rv = AddContentAsLeaf(cdata);
++  nsCOMPtr<nsIContent> text;
++  nsresult rv = NS_NewTextNode(getter_AddRefs(text), mNodeInfoManager, true);
++  if (text) {
++    text->SetText(aData, aLength, false);
++    rv = AddContentAsLeaf(text);
+     DidAddContent();
+   }
+ 
+   return NS_SUCCEEDED(rv) ? DidProcessATokenImpl() : rv;
+ }
+ 
+ NS_IMETHODIMP
+ nsXMLContentSink::HandleDoctypeDecl(const nsAString & aSubset, 

@@ -1,0 +1,128 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/public/nsAXPCNativeCallContext.h b/js/xpconnect/public/nsAXPCNativeCallContext.h
+--- a/js/xpconnect/public/nsAXPCNativeCallContext.h
++++ b/js/xpconnect/public/nsAXPCNativeCallContext.h
+@@ -12,27 +12,20 @@ class nsIXPConnectWrappedNative;
+ /**
+ * A native call context is allocated on the stack when XPConnect calls a
+ * native method. Holding a pointer to this object beyond the currently
+ * executing stack frame is not permitted.
+ */
+ class nsAXPCNativeCallContext
+ {
+ public:
+-    NS_IMETHOD GetCallee(nsISupports **aResult) = 0;
+-    NS_IMETHOD GetCalleeMethodIndex(uint16_t *aResult) = 0;
+     NS_IMETHOD GetCalleeWrapper(nsIXPConnectWrappedNative **aResult) = 0;
+     NS_IMETHOD GetJSContext(JSContext **aResult) = 0;
+     virtual void GetArguments(uint32_t *aArgc, JS::Value **aArgv);
+ 
+-    // Methods added since mozilla 0.6....
+-
+-    NS_IMETHOD GetCalleeInterface(nsIInterfaceInfo **aResult) = 0;
+-    NS_IMETHOD GetCalleeClassInfo(nsIClassInfo **aResult) = 0;
+-
+     NS_IMETHOD GetPreviousCallContext(nsAXPCNativeCallContext **aResult) = 0;
+ 
+     enum { LANG_UNKNOWN = 0,
+            LANG_JS      = 1,
+            LANG_NATIVE  = 2 };
+ 
+     NS_IMETHOD GetLanguage(uint16_t *aResult) = 0;
+ };
+diff --git a/js/xpconnect/src/XPCCallContext.cpp b/js/xpconnect/src/XPCCallContext.cpp
+--- a/js/xpconnect/src/XPCCallContext.cpp
++++ b/js/xpconnect/src/XPCCallContext.cpp
+@@ -274,64 +274,26 @@ XPCCallContext::~XPCCallContext()
+             NS_ASSERTION(poppedCX == mJSContext, "bad pop");
+         }
+     }
+ 
+     if (shouldReleaseXPC && mXPC)
+         NS_RELEASE(mXPC);
+ }
+ 
+-/* readonly attribute nsISupports Callee; */
+-NS_IMETHODIMP
+-XPCCallContext::GetCallee(nsISupports * *aCallee)
+-{
+-    nsISupports* temp = mWrapper ? mWrapper->GetIdentityObject() : nullptr;
+-    NS_IF_ADDREF(temp);
+-    *aCallee = temp;
+-    return NS_OK;
+-}
+-
+-/* readonly attribute uint16_t CalleeMethodIndex; */
+-NS_IMETHODIMP
+-XPCCallContext::GetCalleeMethodIndex(uint16_t *aCalleeMethodIndex)
+-{
+-    *aCalleeMethodIndex = mMethodIndex;
+-    return NS_OK;
+-}
+-
+ /* readonly attribute nsIXPConnectWrappedNative CalleeWrapper; */
+ NS_IMETHODIMP
+ XPCCallContext::GetCalleeWrapper(nsIXPConnectWrappedNative * *aCalleeWrapper)
+ {
+     nsIXPConnectWrappedNative* temp = mWrapper;
+     NS_IF_ADDREF(temp);
+     *aCalleeWrapper = temp;
+     return NS_OK;
+ }
+ 
+-/* readonly attribute XPCNativeInterface CalleeInterface; */
+-NS_IMETHODIMP
+-XPCCallContext::GetCalleeInterface(nsIInterfaceInfo * *aCalleeInterface)
+-{
+-    nsIInterfaceInfo* temp = mInterface->GetInterfaceInfo();
+-    NS_IF_ADDREF(temp);
+-    *aCalleeInterface = temp;
+-    return NS_OK;
+-}
+-
+-/* readonly attribute nsIClassInfo CalleeClassInfo; */
+-NS_IMETHODIMP
+-XPCCallContext::GetCalleeClassInfo(nsIClassInfo * *aCalleeClassInfo)
+-{
+-    nsIClassInfo* temp = mWrapper ? mWrapper->GetClassInfo() : nullptr;
+-    NS_IF_ADDREF(temp);
+-    *aCalleeClassInfo = temp;
+-    return NS_OK;
+-}
+-
+ /* readonly attribute JSContextPtr JSContext; */
+ NS_IMETHODIMP
+ XPCCallContext::GetJSContext(JSContext * *aJSContext)
+ {
+     JS_AbortIfWrongThread(JS_GetRuntime(mJSContext));
+     *aJSContext = mJSContext;
+     return NS_OK;
+ }
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -1032,23 +1032,19 @@ class AutoJSContextDestroyer
+   public:
+     AutoJSContextDestroyer(JSContext *aCx) : mCx(aCx) {}
+     ~AutoJSContextDestroyer() { JS_DestroyContext(mCx); }
+ };
+ 
+ class MOZ_STACK_CLASS XPCCallContext : public nsAXPCNativeCallContext
+ {
+ public:
+-    NS_IMETHOD GetCallee(nsISupports **aResult);
+-    NS_IMETHOD GetCalleeMethodIndex(uint16_t *aResult);
+     NS_IMETHOD GetCalleeWrapper(nsIXPConnectWrappedNative **aResult);
+     NS_IMETHOD GetJSContext(JSContext **aResult);
+     virtual void GetArguments(uint32_t *aArgc, JS::Value **aArgv);
+-    NS_IMETHOD GetCalleeInterface(nsIInterfaceInfo **aResult);
+-    NS_IMETHOD GetCalleeClassInfo(nsIClassInfo **aResult);
+     NS_IMETHOD GetPreviousCallContext(nsAXPCNativeCallContext **aResult);
+     NS_IMETHOD GetLanguage(uint16_t *aResult);
+ 
+     enum {NO_ARGS = (unsigned) -1};
+ 
+     static JSContext* GetDefaultJSContext();
+ 
+     XPCCallContext(XPCContext::LangType callerLanguage,

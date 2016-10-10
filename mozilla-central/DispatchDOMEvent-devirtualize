@@ -1,0 +1,310 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsINode.cpp b/content/base/src/nsINode.cpp
+--- a/content/base/src/nsINode.cpp
++++ b/content/base/src/nsINode.cpp
+@@ -1145,26 +1145,16 @@ nsINode::DispatchEvent(nsIDOMEvent *aEve
+ }
+ 
+ nsresult
+ nsINode::PostHandleEvent(nsEventChainPostVisitor& /*aVisitor*/)
+ {
+   return NS_OK;
+ }
+ 
+-nsresult
+-nsINode::DispatchDOMEvent(nsEvent* aEvent,
+-                          nsIDOMEvent* aDOMEvent,
+-                          nsPresContext* aPresContext,
+-                          nsEventStatus* aEventStatus)
+-{
+-  return nsEventDispatcher::DispatchDOMEvent(this, aEvent, aDOMEvent,
+-                                             aPresContext, aEventStatus);
+-}
+-
+ nsEventListenerManager*
+ nsINode::GetListenerManager(bool aCreateIfNotFound)
+ {
+   return nsContentUtils::GetListenerManager(this, aCreateIfNotFound);
+ }
+ 
+ nsIScriptContext*
+ nsINode::GetContextForEventHandlers(nsresult* aRv)
+diff --git a/content/events/public/EventTarget.h b/content/events/public/EventTarget.h
+--- a/content/events/public/EventTarget.h
++++ b/content/events/public/EventTarget.h
+@@ -65,16 +65,38 @@ public:
+   virtual void EventListenerAdded(nsIAtom* aType) {}
+   virtual void EventListenerRemoved(nsIAtom* aType) {}
+ 
+   // Returns an outer window that corresponds to the inner window this event
+   // target is associated with.  Will return null if the inner window is not the
+   // current inner or if there is no window around at all.
+   virtual nsIDOMWindow* GetOwnerGlobal() = 0;
+ 
++  /**
++   * Dispatch an event.
++   * @param aEvent the event that is being dispatched.
++   * @param aDOMEvent the event that is being dispatched, use if you want to
++   *                  dispatch nsIDOMEvent, not only nsEvent.
++   * @param aPresContext the current presentation context, can be nullptr.
++   * @param aEventStatus the status returned from the function, can be nullptr.
++   *
++   * @note If both aEvent and aDOMEvent are used, aEvent must be the internal
++   *       event of the aDOMEvent.
++   *
++   * If aDOMEvent is not nullptr (in which case aEvent can be nullptr) it is used
++   * for dispatching, otherwise aEvent is used.
++   *
++   * @deprecated This method is here just until all the callers outside Gecko
++   *             have been converted to use nsIDOMEventTarget::dispatchEvent.
++   */
++  nsresult DispatchDOMEvent(nsEvent* aEvent,
++                            nsIDOMEvent* aDOMEvent,
++                            nsPresContext* aPresContext,
++                            nsEventStatus* aEventStatus);
++
+ protected:
+   EventHandlerNonNull* GetEventHandler(nsIAtom* aType);
+   void SetEventHandler(nsIAtom* aType, EventHandlerNonNull* aHandler,
+                        ErrorResult& rv);
+ };
+ 
+ NS_DEFINE_STATIC_IID_ACCESSOR(EventTarget, NS_EVENTTARGET_IID)
+ 
+diff --git a/content/events/src/EventTarget.cpp b/content/events/src/EventTarget.cpp
+--- a/content/events/src/EventTarget.cpp
++++ b/content/events/src/EventTarget.cpp
+@@ -1,17 +1,18 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "mozilla/dom/EventTarget.h"
++
++#include "nsEventDispatcher.h"
+ #include "nsEventListenerManager.h"
+ 
+-
+ namespace mozilla {
+ namespace dom {
+ 
+ void
+ EventTarget::RemoveEventListener(const nsAString& aType,
+                                  nsIDOMEventListener* aListener,
+                                  bool aUseCapture,
+                                  ErrorResult& aRv)
+@@ -31,10 +32,20 @@ EventTarget::GetEventHandler(nsIAtom* aT
+ 
+ void
+ EventTarget::SetEventHandler(nsIAtom* aType, EventHandlerNonNull* aHandler,
+                              ErrorResult& rv)
+ {
+   rv = GetListenerManager(true)->SetEventHandler(aType, aHandler);
+ }
+ 
++nsresult
++EventTarget::DispatchDOMEvent(nsEvent* aEvent,
++                              nsIDOMEvent* aDOMEvent,
++                              nsPresContext* aPresContext,
++                              nsEventStatus* aEventStatus)
++{
++  return nsEventDispatcher::DispatchDOMEvent(this, aEvent, aDOMEvent,
++                                             aPresContext, aEventStatus);
++}
++
+ } // namespace dom
+ } // namespace mozilla
+diff --git a/content/events/src/nsDOMEventTargetHelper.cpp b/content/events/src/nsDOMEventTargetHelper.cpp
+--- a/content/events/src/nsDOMEventTargetHelper.cpp
++++ b/content/events/src/nsDOMEventTargetHelper.cpp
+@@ -315,27 +315,16 @@ nsDOMEventTargetHelper::PreHandleEvent(n
+ }
+ 
+ nsresult
+ nsDOMEventTargetHelper::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
+ {
+   return NS_OK;
+ }
+ 
+-nsresult
+-nsDOMEventTargetHelper::DispatchDOMEvent(nsEvent* aEvent,
+-                                         nsIDOMEvent* aDOMEvent,
+-                                         nsPresContext* aPresContext,
+-                                         nsEventStatus* aEventStatus)
+-{
+-  return
+-    nsEventDispatcher::DispatchDOMEvent(this, aEvent, aDOMEvent, aPresContext,
+-                                        aEventStatus);
+-}
+-
+ nsEventListenerManager*
+ nsDOMEventTargetHelper::GetListenerManager(bool aCreateIfNotFound)
+ {
+   if (!mListenerManager && aCreateIfNotFound) {
+     mListenerManager = new nsEventListenerManager(this);
+   }
+ 
+   return mListenerManager;
+diff --git a/content/events/src/nsDOMEventTargetHelper.h b/content/events/src/nsDOMEventTargetHelper.h
+--- a/content/events/src/nsDOMEventTargetHelper.h
++++ b/content/events/src/nsDOMEventTargetHelper.h
+@@ -202,19 +202,16 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsDOMEvent
+     return _to GetTargetForEventTargetChain(); \
+   } \
+   virtual nsresult WillHandleEvent(nsEventChainPostVisitor & aVisitor) { \
+     return _to WillHandleEvent(aVisitor); \
+   } \
+   virtual nsresult PostHandleEvent(nsEventChainPostVisitor & aVisitor) { \
+     return _to PostHandleEvent(aVisitor); \
+   } \
+-  virtual nsresult DispatchDOMEvent(nsEvent *aEvent, nsIDOMEvent *aDOMEvent, nsPresContext *aPresContext, nsEventStatus *aEventStatus) { \
+-    return _to DispatchDOMEvent(aEvent, aDOMEvent, aPresContext, aEventStatus); \
+-  } \
+   virtual nsEventListenerManager * GetListenerManager(bool aMayCreate) { \
+     return _to GetListenerManager(aMayCreate); \
+   } \
+   virtual nsIScriptContext * GetContextForEventHandlers(nsresult *aRv) { \
+     return _to GetContextForEventHandlers(aRv); \
+   } \
+   virtual JSContext * GetJSContextForEventHandlers(void) { \
+     return _to GetJSContextForEventHandlers(); \
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -3100,28 +3100,16 @@ nsGlobalWindow::PostHandleEvent(nsEventC
+       // null as the pres context all the time here.
+       nsEventDispatcher::Dispatch(content, nullptr, &event, nullptr, &status);
+     }
+   }
+ 
+   return NS_OK;
+ }
+ 
+-nsresult
+-nsGlobalWindow::DispatchDOMEvent(nsEvent* aEvent,
+-                                 nsIDOMEvent* aDOMEvent,
+-                                 nsPresContext* aPresContext,
+-                                 nsEventStatus* aEventStatus)
+-{
+-  return
+-    nsEventDispatcher::DispatchDOMEvent(static_cast<nsPIDOMWindow*>(this),
+-                                       aEvent, aDOMEvent, aPresContext,
+-                                       aEventStatus);
+-}
+-
+ void
+ nsGlobalWindow::OnFinalize(JSObject* aObject)
+ {
+   if (aObject == mJSObject) {
+     mJSObject = NULL;
+   }
+ }
+ 
+diff --git a/dom/base/nsWindowRoot.cpp b/dom/base/nsWindowRoot.cpp
+--- a/dom/base/nsWindowRoot.cpp
++++ b/dom/base/nsWindowRoot.cpp
+@@ -78,27 +78,16 @@ nsWindowRoot::DispatchEvent(nsIDOMEvent*
+ {
+   nsEventStatus status = nsEventStatus_eIgnore;
+   nsresult rv =  nsEventDispatcher::DispatchDOMEvent(
+     static_cast<EventTarget*>(this), nullptr, aEvt, nullptr, &status);
+   *aRetVal = (status != nsEventStatus_eConsumeNoDefault);
+   return rv;
+ }
+ 
+-nsresult
+-nsWindowRoot::DispatchDOMEvent(nsEvent* aEvent,
+-                               nsIDOMEvent* aDOMEvent,
+-                               nsPresContext* aPresContext,
+-                               nsEventStatus* aEventStatus)
+-{
+-  return nsEventDispatcher::DispatchDOMEvent(static_cast<EventTarget*>(this),
+-                                             aEvent, aDOMEvent,
+-                                             aPresContext, aEventStatus);
+-}
+-
+ NS_IMETHODIMP
+ nsWindowRoot::AddEventListener(const nsAString& aType,
+                                nsIDOMEventListener *aListener,
+                                bool aUseCapture, bool aWantsUntrusted,
+                                uint8_t aOptionalArgc)
+ {
+   NS_ASSERTION(!aWantsUntrusted || aOptionalArgc > 1,
+                "Won't check if this is chrome, you want to set "
+diff --git a/dom/devicestorage/nsDeviceStorage.cpp b/dom/devicestorage/nsDeviceStorage.cpp
+--- a/dom/devicestorage/nsDeviceStorage.cpp
++++ b/dom/devicestorage/nsDeviceStorage.cpp
+@@ -3428,28 +3428,16 @@ nsDOMDeviceStorage::WillHandleEvent(nsEv
+ }
+ 
+ nsresult
+ nsDOMDeviceStorage::PostHandleEvent(nsEventChainPostVisitor & aVisitor)
+ {
+   return nsDOMEventTargetHelper::PostHandleEvent(aVisitor);
+ }
+ 
+-nsresult
+-nsDOMDeviceStorage::DispatchDOMEvent(nsEvent *aEvent,
+-                                     nsIDOMEvent *aDOMEvent,
+-                                     nsPresContext *aPresContext,
+-                                     nsEventStatus *aEventStatus)
+-{
+-  return nsDOMEventTargetHelper::DispatchDOMEvent(aEvent,
+-                                                  aDOMEvent,
+-                                                  aPresContext,
+-                                                  aEventStatus);
+-}
+-
+ nsEventListenerManager *
+ nsDOMDeviceStorage::GetListenerManager(bool aMayCreate)
+ {
+   return nsDOMEventTargetHelper::GetListenerManager(aMayCreate);
+ }
+ 
+ nsIScriptContext *
+ nsDOMDeviceStorage::GetContextForEventHandlers(nsresult *aRv)
+diff --git a/dom/interfaces/events/nsIDOMEventTarget.idl b/dom/interfaces/events/nsIDOMEventTarget.idl
+--- a/dom/interfaces/events/nsIDOMEventTarget.idl
++++ b/dom/interfaces/events/nsIDOMEventTarget.idl
+@@ -240,39 +240,16 @@ interface nsIDOMEventTarget : nsISupport
+    *
+    * @see nsEventDispatcher.h for documentation about aVisitor.
+    * @note Only nsEventDispatcher should call this method.
+    */
+   [noscript, nostdcall]
+   void PostHandleEvent(in nsEventChainPostVisitorRef aVisitor);
+ 
+   /**
+-   * Dispatch an event.
+-   * @param aEvent the event that is being dispatched.
+-   * @param aDOMEvent the event that is being dispatched, use if you want to
+-   *                  dispatch nsIDOMEvent, not only nsEvent.
+-   * @param aPresContext the current presentation context, can be nullptr.
+-   * @param aEventStatus the status returned from the function, can be nullptr.
+-   *
+-   * @note If both aEvent and aDOMEvent are used, aEvent must be the internal
+-   *       event of the aDOMEvent.
+-   *
+-   * If aDOMEvent is not nullptr (in which case aEvent can be nullptr) it is used
+-   * for dispatching, otherwise aEvent is used.
+-   *
+-   * @deprecated This method is here just until all the callers outside Gecko
+-   *             have been converted to use nsIDOMEventTarget::dispatchEvent.
+-   */
+-  [noscript, nostdcall]
+-  void DispatchDOMEvent(in nsEventPtr aEvent,
+-                        in nsIDOMEvent aDOMEvent,
+-                        in nsPresContextPtr aPresContext,
+-                        in nsEventStatusPtr aEventStatus);
+-
+-  /**
+    * Get the event listener manager, the guy you talk to to register for events
+    * on this node.
+    * @param aMayCreate If PR_FALSE, returns a listener manager only if
+    *                   one already exists.
+    */
+   [notxpcom, nostdcall]
+   nsEventListenerManagerPtr GetListenerManager(in boolean aMayCreate);
+ 

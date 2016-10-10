@@ -1,0 +1,121 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/base/nsEditor.cpp b/editor/libeditor/base/nsEditor.cpp
+--- a/editor/libeditor/base/nsEditor.cpp
++++ b/editor/libeditor/base/nsEditor.cpp
+@@ -3771,43 +3771,40 @@ nsEditor::GetNodeAtRangeOffsetPoint(nsID
+ //                        the first range in the selection.
+ nsresult 
+ nsEditor::GetStartNodeAndOffset(nsISelection *aSelection,
+                                        nsIDOMNode **outStartNode,
+                                        int32_t *outStartOffset)
+ {
+   NS_ENSURE_TRUE(outStartNode && outStartOffset && aSelection, NS_ERROR_NULL_POINTER);
+ 
+-  *outStartNode = nullptr;
+-  *outStartOffset = 0;
+-
+-  Selection* selection = static_cast<Selection*>(aSelection);
+-  NS_ENSURE_TRUE(selection->GetRangeCount(), NS_ERROR_FAILURE);
+-
+-  nsRange* range = selection->GetRangeAt(0);
+-  NS_ENSURE_TRUE(range, NS_ERROR_FAILURE);
+-
+-  nsresult result = range->GetStartContainer(outStartNode);
+-  NS_ENSURE_SUCCESS(result, result);
+-
+-  result = range->GetStartOffset(outStartOffset);
+-  NS_ENSURE_SUCCESS(result, result);
+-
++  nsCOMPtr<nsINode> startNode;
++  nsresult rv = GetStartNodeAndOffset(static_cast<Selection*>(aSelection),
++                                      getter_AddRefs(startNode),
++                                      outStartOffset);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  if (startNode) {
++    NS_ADDREF(*outStartNode = startNode->AsDOMNode());
++  } else {
++    *outStartNode = nullptr;
++  }
+   return NS_OK;
+ }
+ 
+ nsresult
+ nsEditor::GetStartNodeAndOffset(Selection* aSelection, nsINode** aStartNode,
+                                 int32_t* aStartOffset)
+ {
+   MOZ_ASSERT(aSelection);
+   MOZ_ASSERT(aStartNode);
+   MOZ_ASSERT(aStartOffset);
+ 
+   *aStartNode = nullptr;
++  *aStartOffset = 0;
+ 
+   NS_ENSURE_TRUE(aSelection->GetRangeCount(), NS_ERROR_FAILURE);
+ 
+   const nsRange* range = aSelection->GetRangeAt(0);
+   NS_ENSURE_TRUE(range, NS_ERROR_FAILURE);
+ 
+   NS_ENSURE_TRUE(range->IsPositioned(), NS_ERROR_FAILURE);
+ 
+@@ -3820,45 +3817,42 @@ nsEditor::GetStartNodeAndOffset(Selectio
+ ///////////////////////////////////////////////////////////////////////////
+ // GetEndNodeAndOffset: returns whatever the end parent & offset is of 
+ //                        the first range in the selection.
+ nsresult 
+ nsEditor::GetEndNodeAndOffset(nsISelection *aSelection,
+                                        nsIDOMNode **outEndNode,
+                                        int32_t *outEndOffset)
+ {
+-  NS_ENSURE_TRUE(outEndNode && outEndOffset, NS_ERROR_NULL_POINTER);
+-
+-  *outEndNode = nullptr;
+-    
+-  Selection* selection = static_cast<Selection*>(aSelection);
+-  NS_ENSURE_TRUE(selection, NS_ERROR_FAILURE);
+-  NS_ENSURE_TRUE(selection->GetRangeCount(), NS_ERROR_FAILURE);
+-
+-  nsRange* range = selection->GetRangeAt(0);
+-  NS_ENSURE_TRUE(range, NS_ERROR_FAILURE);
+-    
+-  if (NS_FAILED(range->GetEndContainer(outEndNode)))
+-    return NS_ERROR_FAILURE;
+-    
+-  if (NS_FAILED(range->GetEndOffset(outEndOffset)))
+-    return NS_ERROR_FAILURE;
+-    
++  NS_ENSURE_TRUE(outEndNode && outEndOffset && aSelection, NS_ERROR_NULL_POINTER);
++
++  nsCOMPtr<nsINode> endNode;
++  nsresult rv = GetEndNodeAndOffset(static_cast<Selection*>(aSelection),
++                                    getter_AddRefs(endNode),
++                                    outEndOffset);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  if (endNode) {
++    NS_ADDREF(*outEndNode = endNode->AsDOMNode());
++  } else {
++    *outEndNode = nullptr;
++  }
+   return NS_OK;
+ }
+ 
+ nsresult
+ nsEditor::GetEndNodeAndOffset(Selection* aSelection, nsINode** aEndNode,
+                               int32_t* aEndOffset)
+ {
+   MOZ_ASSERT(aSelection);
+   MOZ_ASSERT(aEndNode);
+   MOZ_ASSERT(aEndOffset);
+ 
+   *aEndNode = nullptr;
++  *aEndOffset = 0;
+ 
+   NS_ENSURE_TRUE(aSelection->GetRangeCount(), NS_ERROR_FAILURE);
+ 
+   const nsRange* range = aSelection->GetRangeAt(0);
+   NS_ENSURE_TRUE(range, NS_ERROR_FAILURE);
+ 
+   NS_ENSURE_TRUE(range->IsPositioned(), NS_ERROR_FAILURE);
+ 

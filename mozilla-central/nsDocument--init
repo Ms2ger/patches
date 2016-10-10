@@ -1,0 +1,83 @@
+From: Ms2ger <ms2ger@gmail.com>
+Cleanup nsDocument::Init a bit.
+
+diff --git a/content/base/public/nsINode.h b/content/base/public/nsINode.h
+--- a/content/base/public/nsINode.h
++++ b/content/base/public/nsINode.h
+@@ -1177,19 +1177,18 @@ protected:
+ 
+   nsSlots* GetSlots()
+   {
+     if (HasSlots()) {
+       return FlagsAsSlots();
+     }
+ 
+     nsSlots* newSlots = CreateSlots();
+-    if (newSlots) {
+-      mFlagsOrSlots = reinterpret_cast<PtrBits>(newSlots);
+-    }
++    NS_ASSERTION(newSlots, "CreateSlots should be infallible.");
++    mFlagsOrSlots = reinterpret_cast<PtrBits>(newSlots);
+ 
+     return newSlots;
+   }
+ 
+   nsTObserverArray<nsIMutationObserver*> *GetMutationObservers()
+   {
+     return HasSlots() ? &FlagsAsSlots()->mMutationObservers : nullptr;
+   }
+diff --git a/content/base/src/nsDocument.cpp b/content/base/src/nsDocument.cpp
+--- a/content/base/src/nsDocument.cpp
++++ b/content/base/src/nsDocument.cpp
+@@ -1939,50 +1939,44 @@ nsDocument::Init()
+   }
+ 
+   mIdentifierMap.Init();
+   (void)mStyledLinks.Init();
+   mRadioGroups.Init();
+ 
+   // Force initialization.
+   nsINode::nsSlots* slots = GetSlots();
+-  NS_ENSURE_TRUE(slots,NS_ERROR_OUT_OF_MEMORY);
+ 
+   // Prepend self as mutation-observer whether we need it or not (some
+   // subclasses currently do, other don't). This is because the code in
+   // nsNodeUtils always notifies the first observer first, expecting the
+   // first observer to be the document.
+   NS_ENSURE_TRUE(slots->mMutationObservers.PrependElementUnlessExists(static_cast<nsIMutationObserver*>(this)),
+                  NS_ERROR_OUT_OF_MEMORY);
+ 
+ 
+   mOnloadBlocker = new nsOnloadBlocker();
+-  NS_ENSURE_TRUE(mOnloadBlocker, NS_ERROR_OUT_OF_MEMORY);
+ 
+   mCSSLoader = new mozilla::css::Loader(this);
+-  NS_ENSURE_TRUE(mCSSLoader, NS_ERROR_OUT_OF_MEMORY);
+   NS_ADDREF(mCSSLoader);
+   // Assume we're not quirky, until we know otherwise
+   mCSSLoader->SetCompatibilityMode(eCompatibility_FullStandards);
+ 
+   mNodeInfoManager = new nsNodeInfoManager();
+-  NS_ENSURE_TRUE(mNodeInfoManager, NS_ERROR_OUT_OF_MEMORY);
+-
+   NS_ADDREF(mNodeInfoManager);
+ 
+-  nsresult  rv = mNodeInfoManager->Init(this);
++  nsresult rv = mNodeInfoManager->Init(this);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   mNodeInfo = mNodeInfoManager->GetDocumentNodeInfo();
+   NS_ENSURE_TRUE(mNodeInfo, NS_ERROR_OUT_OF_MEMORY);
+ 
+   NS_ASSERTION(GetOwnerDoc() == this, "Our nodeinfo is busted!");
+ 
+   mScriptLoader = new nsScriptLoader(this);
+-  NS_ENSURE_TRUE(mScriptLoader, NS_ERROR_OUT_OF_MEMORY);
+ 
+   if (!mImageTracker.Init()) {
+     return NS_ERROR_OUT_OF_MEMORY;
+   }
+ 
+   return NS_OK;
+ }
+ 

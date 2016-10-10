@@ -1,0 +1,75 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/src/frontend/BytecodeEmitter.cpp b/js/src/frontend/BytecodeEmitter.cpp
+--- a/js/src/frontend/BytecodeEmitter.cpp
++++ b/js/src/frontend/BytecodeEmitter.cpp
+@@ -4917,34 +4917,30 @@ EmitDelete(JSContext *cx, BytecodeEmitte
+      * must evaluate the operand if it appears it might have side effects.
+      */
+     ParseNode *pn2 = pn->pn_kid;
+     switch (pn2->getKind()) {
+       case PNK_NAME:
+       {
+         if (!BindNameToSlot(cx, bce, pn2))
+             return false;
++
+         JSOp op = pn2->getOp();
+-        if (op == JSOP_FALSE) {
+-            if (Emit1(cx, bce, op) < 0)
+-                return false;
+-        } else {
+-            if (!EmitAtomOp(cx, pn2, op, bce))
+-                return false;
+-        }
+-        break;
++        if (op == JSOP_FALSE)
++            return Emit1(cx, bce, op) >= 0;
++
++        return EmitAtomOp(cx, pn2, op, bce);
+       }
++
+       case PNK_DOT:
+-        if (!EmitPropOp(cx, pn2, JSOP_DELPROP, bce, false))
+-            return false;
+-        break;
++        return EmitPropOp(cx, pn2, JSOP_DELPROP, bce, false);
++
+       case PNK_ELEM:
+-        if (!EmitElemOp(cx, pn2, JSOP_DELELEM, bce))
+-            return false;
+-        break;
++        return EmitElemOp(cx, pn2, JSOP_DELELEM, bce);
++
+       default:
+       {
+         /*
+          * If useless, just emit JSOP_TRUE; otherwise convert delete foo()
+          * to foo(), true (a comma expression).
+          */
+         bool useful = false;
+         if (!CheckSideEffects(cx, bce, pn2, &useful))
+@@ -4953,22 +4949,21 @@ EmitDelete(JSContext *cx, BytecodeEmitte
+         if (useful) {
+             JS_ASSERT_IF(pn2->isKind(PNK_CALL), !(pn2->pn_xflags & PNX_SETCALL));
+             if (!EmitTree(cx, bce, pn2))
+                 return false;
+             if (Emit1(cx, bce, JSOP_POP) < 0)
+                 return false;
+         }
+ 
+-        if (Emit1(cx, bce, JSOP_TRUE) < 0)
+-            return false;
++        return Emit1(cx, bce, JSOP_TRUE) >= 0;
+       }
+     }
+ 
+-    return true;
++    MOZ_ASSUME_UNREACHABLE("Switch always returns.");
+ }
+ 
+ static bool
+ EmitCallOrNew(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
+ {
+     bool callop = pn->isKind(PNK_CALL);
+ 
+     /*

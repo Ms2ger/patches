@@ -1,0 +1,274 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -2904,82 +2904,24 @@ DefineInterfaceConstants(JSContext *cx, 
+     iim(do_GetService(NS_INTERFACEINFOMANAGER_SERVICE_CONTRACTID));
+   NS_ENSURE_TRUE(iim, NS_ERROR_UNEXPECTED);
+ 
+   nsCOMPtr<nsIInterfaceInfo> if_info;
+ 
+   nsresult rv = iim->GetInfoForIID(aIID, getter_AddRefs(if_info));
+   NS_ENSURE_TRUE(NS_SUCCEEDED(rv) && if_info, rv);
+ 
+-  uint16_t constant_count;
+-
+-  if_info->GetConstantCount(&constant_count);
+-
+-  if (!constant_count) {
++  ConstantSpec* constants = if_info->GetConstants();
++  if (!constants) {
+     return NS_OK;
+   }
+ 
+-  nsCOMPtr<nsIInterfaceInfo> parent_if_info;
+-
+-  rv = if_info->GetParent(getter_AddRefs(parent_if_info));
+-  NS_ENSURE_TRUE(NS_SUCCEEDED(rv) && parent_if_info, rv);
+-
+-  uint16_t parent_constant_count, i;
+-  parent_if_info->GetConstantCount(&parent_constant_count);
+-
+-  for (i = parent_constant_count; i < constant_count; i++) {
+-    const nsXPTConstant *c = nullptr;
+-
+-    rv = if_info->GetConstant(i, &c);
+-    NS_ENSURE_TRUE(NS_SUCCEEDED(rv) && c, rv);
+-
+-    uint16_t type = c->GetType().TagPart();
+-
+-    jsval v;
+-    switch (type) {
+-      case nsXPTType::T_I8:
+-      case nsXPTType::T_U8:
+-      {
+-        v = INT_TO_JSVAL(c->GetValue()->val.u8);
+-        break;
+-      }
+-      case nsXPTType::T_I16:
+-      case nsXPTType::T_U16:
+-      {
+-        v = INT_TO_JSVAL(c->GetValue()->val.u16);
+-        break;
+-      }
+-      case nsXPTType::T_I32:
+-      {
+-        v = JS_NumberValue(c->GetValue()->val.i32);
+-        break;
+-      }
+-      case nsXPTType::T_U32:
+-      {
+-        v = JS_NumberValue(c->GetValue()->val.u32);
+-        break;
+-      }
+-      default:
+-      {
+-#ifdef DEBUG
+-        NS_ERROR("Non-numeric constant found in interface.");
+-#endif
+-        continue;
+-      }
+-    }
+-
+-    if (!::JS_DefineProperty(cx, obj, c->GetName(), v,
+-                             JS_PropertyStub, JS_StrictPropertyStub,
+-                             JSPROP_ENUMERATE | JSPROP_READONLY |
+-                             JSPROP_PERMANENT)) {
+-      return NS_ERROR_UNEXPECTED;
+-    }
+-  }
+-
+-  return NS_OK;
++  bool ok = DefineConstants(cx, obj, constants);
++  delete[] constants;
++  return ok ? NS_OK : NS_ERROR_UNEXPECTED;
+ }
+ 
+ // This code is temporary until we remove support for the constants defined
+ // on IDBCursor/IDBRequest/IDBTransaction
+ 
+ struct IDBConstant
+ {
+   const char* interface;
+diff --git a/xpcom/reflect/xptinfo/public/nsIInterfaceInfo.idl b/xpcom/reflect/xptinfo/public/nsIInterfaceInfo.idl
+--- a/xpcom/reflect/xptinfo/public/nsIInterfaceInfo.idl
++++ b/xpcom/reflect/xptinfo/public/nsIInterfaceInfo.idl
+@@ -9,25 +9,31 @@
+ #include "nsISupports.idl"
+ 
+ // forward declaration of non-XPCOM types
+ 
+ [ptr] native nsXPTMethodInfoPtr(nsXPTMethodInfo);
+ [ptr] native nsXPTConstantPtr(nsXPTConstant);
+ [ptr] native nsXPTParamInfoPtr(nsXPTParamInfo);
+       native nsXPTType(nsXPTType);
++[ptr] native ConstantSpecPtr(mozilla::dom::ConstantSpec);
+ 
+ // We bend the rules to do a [shared] nsIID (but this is never scriptable)  
+ [ptr] native nsIIDPtrShared(nsIID);
+ 
+ %{C++
+ class nsXPTMethodInfo;
+ class nsXPTConstant;
+ class nsXPTParamInfo;
+ class nsXPTType;
++namespace mozilla {
++namespace dom {
++struct ConstantSpec;
++} // namespace dom
++} // namespace mozilla
+ %}
+ 
+ /* this is NOT intended to be scriptable */
+ [uuid(1affa260-8965-4612-869a-78af4ccfb287)]
+ interface nsIInterfaceInfo : nsISupports
+ {
+     readonly attribute string   name;
+     readonly attribute nsIIDPtr InterfaceIID;
+@@ -93,10 +99,12 @@ interface nsIInterfaceInfo : nsISupports
+ 
+     boolean isFunction();
+ 
+     boolean hasAncestor(in nsIIDPtr iid);
+ 
+     [notxpcom] nsresult getIIDForParamNoAlloc(in uint16_t methodIndex, 
+                                               [const] in nsXPTParamInfoPtr param,
+                                               out nsIID iid);
++
++    [notxpcom,nostdcall] ConstantSpecPtr getConstants();
+ };
+ 
+diff --git a/xpcom/reflect/xptinfo/src/xptiInterfaceInfo.cpp b/xpcom/reflect/xptinfo/src/xptiInterfaceInfo.cpp
+--- a/xpcom/reflect/xptinfo/src/xptiInterfaceInfo.cpp
++++ b/xpcom/reflect/xptinfo/src/xptiInterfaceInfo.cpp
+@@ -1,18 +1,20 @@
+ /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ /* Implementation of xptiInterfaceEntry and xptiInterfaceInfo. */
+ 
+ #include "xptiprivate.h"
++#include "mozilla/dom/BindingUtils.h"
+ #include "mozilla/XPTInterfaceInfoManager.h"
+ #include "nsAtomicRefcnt.h"
++#include "xptcall.h"
+ 
+ using namespace mozilla;
+ 
+ /***************************************************************************/
+ // Debug Instrumentation...
+ 
+ #ifdef SHOW_INFO_COUNT_STATS
+ static int DEBUG_TotalInfos = 0;
+@@ -339,16 +341,68 @@ xptiInterfaceEntry::GetIIDForParamNoAllo
+     xptiInterfaceEntry* entry;
+     nsresult rv = GetEntryForParam(methodIndex, param, &entry);
+     if(NS_FAILED(rv))
+         return rv;
+     *iid = entry->mIID;    
+     return NS_OK;
+ }
+ 
++static JS::Value
++ValueForConst(nsXPTConstant* c)
++{
++    uint16_t type = c->GetType().TagPart();
++
++    switch (type) {
++    case nsXPTType::T_I8:
++    case nsXPTType::T_U8:
++    {
++        return INT_TO_JSVAL(c->GetValue()->val.u8);
++    }
++    case nsXPTType::T_I16:
++    case nsXPTType::T_U16:
++    {
++        return INT_TO_JSVAL(c->GetValue()->val.u16);
++    }
++    case nsXPTType::T_I32:
++    {
++        return INT_TO_JSVAL(c->GetValue()->val.i32);
++    }
++    case nsXPTType::T_U32:
++    {
++        return UINT_TO_JSVAL(c->GetValue()->val.u32);
++    }
++    default:
++    {
++        NS_ERROR("Non-numeric constant found in interface.");
++        return JSVAL_VOID;
++    }
++    }
++}
++
++dom::ConstantSpec*
++xptiInterfaceEntry::GetConstants()
++{
++    if (!EnsureResolved())
++        return NULL;
++
++    dom::ConstantSpec* arr =
++        new dom::ConstantSpec[mDescriptor->num_constants + 1]();
++
++    for (uint16_t i = 0; i < mDescriptor->num_constants; ++i) {
++        nsXPTConstant* c = 
++            reinterpret_cast<nsXPTConstant*>
++                            (&mDescriptor->const_descriptors[i]);
++        arr[i].name = c->GetName();
++        arr[i].value = ValueForConst(c);
++    }
++
++    return arr;
++}
++
+ // this is a private helper
+ nsresult
+ xptiInterfaceEntry::GetTypeInArray(const nsXPTParamInfo* param,
+                                   uint16_t dimension,
+                                   const XPTTypeDescriptor** type)
+ {
+     NS_ASSERTION(IsFullyResolved(), "bad state");
+ 
+diff --git a/xpcom/reflect/xptinfo/src/xptiprivate.h b/xpcom/reflect/xptinfo/src/xptiprivate.h
+--- a/xpcom/reflect/xptinfo/src/xptiprivate.h
++++ b/xpcom/reflect/xptinfo/src/xptiprivate.h
+@@ -236,16 +236,17 @@ public:
+     nsresult GetSizeIsArgNumberForParam(uint16_t methodIndex, const nsXPTParamInfo * param, uint16_t dimension, uint8_t *_retval);
+     nsresult GetInterfaceIsArgNumberForParam(uint16_t methodIndex, const nsXPTParamInfo * param, uint8_t *_retval);
+     nsresult IsIID(const nsIID * IID, bool *_retval);
+     nsresult GetNameShared(const char **name);
+     nsresult GetIIDShared(const nsIID * *iid);
+     nsresult IsFunction(bool *_retval);
+     nsresult HasAncestor(const nsIID * iid, bool *_retval);
+     nsresult GetIIDForParamNoAlloc(uint16_t methodIndex, const nsXPTParamInfo * param, nsIID *iid);
++    mozilla::dom::ConstantSpec* GetConstants();
+ 
+ private:
+     xptiInterfaceEntry(const char* name,
+                        size_t nameLength,
+                        const nsID& iid,
+                        XPTInterfaceDescriptor* aDescriptor,
+                        xptiTypelibGuts* aTypelib);
+     ~xptiInterfaceEntry();
+@@ -317,17 +318,17 @@ public:
+     NS_IMETHOD GetSizeIsArgNumberForParam(uint16_t methodIndex, const nsXPTParamInfo * param, uint16_t dimension, uint8_t *_retval) { return !mEntry ? NS_ERROR_UNEXPECTED : mEntry->GetSizeIsArgNumberForParam(methodIndex, param, dimension, _retval); }
+     NS_IMETHOD GetInterfaceIsArgNumberForParam(uint16_t methodIndex, const nsXPTParamInfo * param, uint8_t *_retval) { return !mEntry ? NS_ERROR_UNEXPECTED : mEntry->GetInterfaceIsArgNumberForParam(methodIndex, param, _retval); }
+     NS_IMETHOD IsIID(const nsIID * IID, bool *_retval) { return !mEntry ? NS_ERROR_UNEXPECTED : mEntry->IsIID(IID, _retval); }
+     NS_IMETHOD GetNameShared(const char **name) { return !mEntry ? NS_ERROR_UNEXPECTED : mEntry->GetNameShared(name); }
+     NS_IMETHOD GetIIDShared(const nsIID * *iid) { return !mEntry ? NS_ERROR_UNEXPECTED : mEntry->GetIIDShared(iid); }
+     NS_IMETHOD IsFunction(bool *_retval) { return !mEntry ? NS_ERROR_UNEXPECTED : mEntry->IsFunction(_retval); }
+     NS_IMETHOD HasAncestor(const nsIID * iid, bool *_retval) { return !mEntry ? NS_ERROR_UNEXPECTED : mEntry->HasAncestor(iid, _retval); }
+     NS_IMETHOD GetIIDForParamNoAlloc(uint16_t methodIndex, const nsXPTParamInfo * param, nsIID *iid) { return !mEntry ? NS_ERROR_UNEXPECTED : mEntry->GetIIDForParamNoAlloc(methodIndex, param, iid); }
+-
++    virtual mozilla::dom::ConstantSpec* GetConstants() { return !mEntry ? NULL : mEntry->GetConstants(); }
+ public:
+     xptiInterfaceInfo(xptiInterfaceEntry* entry);
+ 
+     void Invalidate() 
+         {NS_IF_RELEASE(mParent); mEntry = nullptr;}
+ 
+ private:
+ 

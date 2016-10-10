@@ -1,0 +1,119 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/content/reftests/577306-ref.xhtml b/content/html/content/reftests/577306-ref.xhtml
+new file mode 100644
+--- /dev/null
++++ b/content/html/content/reftests/577306-ref.xhtml
+@@ -0,0 +1,14 @@
++<html xmlns="http://www.w3.org/1999/xhtml">
++<head>
++</head>
++<body>
++<select multiple="">
++  <optgroup>
++    <optgroup>
++      <option>A</option>
++    </optgroup>
++  </optgroup>
++  <option>B</option>
++</select>
++</body>
++</html>
+diff --git a/content/html/content/reftests/577306.xhtml b/content/html/content/reftests/577306.xhtml
+new file mode 100644
+--- /dev/null
++++ b/content/html/content/reftests/577306.xhtml
+@@ -0,0 +1,14 @@
++<html xmlns="http://www.w3.org/1999/xhtml">
++<head>
++</head>
++<body>
++<select multiple="">
++  <optgroup disabled="">
++    <optgroup>
++      <option>A</option>
++    </optgroup>
++  </optgroup>
++  <option>B</option>
++</select>
++</body>
++</html>
+diff --git a/content/html/content/reftests/reftest.list b/content/html/content/reftests/reftest.list
+--- a/content/html/content/reftests/reftest.list
++++ b/content/html/content/reftests/reftest.list
+@@ -13,5 +13,6 @@
+ == 560059-video-dimensions.html 560059-video-dimensions-ref.html
+ == 573322-quirks.html 573322-quirks-ref.html
+ == 573322-no-quirks.html 573322-no-quirks-ref.html
++== 577306.xhtml 577306-ref.xhtml
+ == href-attr-change-restyles.html href-attr-change-restyles-ref.html
+ == figure.html figure-ref.html
+diff --git a/content/html/content/src/nsHTMLSelectElement.cpp b/content/html/content/src/nsHTMLSelectElement.cpp
+--- a/content/html/content/src/nsHTMLSelectElement.cpp
++++ b/content/html/content/src/nsHTMLSelectElement.cpp
+@@ -1107,39 +1107,11 @@
+   // If there are no artifacts, there are no optgroups
+   if (mNonOptionChildren) {
+     nsCOMPtr<nsIDOMNode> parent;
+-    while (1) {
+-      optionNode->GetParentNode(getter_AddRefs(parent));
+-
+-      // If we reached the top of the doc (scary), we're done
+-      if (!parent) {
+-        break;
+-      }
+-
+-      // If we reached the select element, we're done
+-      nsCOMPtr<nsIDOMHTMLSelectElement> selectElement =
+-        do_QueryInterface(parent);
+-      if (selectElement) {
+-        break;
+-      }
+-
+-      nsCOMPtr<nsIDOMHTMLOptGroupElement> optGroupElement =
+-        do_QueryInterface(parent);
+-
+-      if (optGroupElement) {
+-        bool isDisabled;
+-        optGroupElement->GetDisabled(&isDisabled);
+-
+-        if (isDisabled) {
+-          *aIsDisabled = true;
+-          return NS_OK;
+-        }
+-      } else {
+-        // If you put something else between you and the optgroup, you're a
+-        // moron and you deserve not to have optgroup disabling work.
+-        break;
+-      }
+-
+-      optionNode = parent;
++    optionNode->GetParentNode(getter_AddRefs(parent));
++    nsCOMPtr<nsIDOMHTMLOptGroupElement> optGroupElement =
++      do_QueryInterface(parent);
++    if (optGroupElement) {
++      optGroupElement->GetDisabled(aIsDisabled);
+     }
+   }
+ 
+diff --git a/layout/style/forms.css b/layout/style/forms.css
+--- a/layout/style/forms.css
++++ b/layout/style/forms.css
+@@ -355,7 +355,7 @@
+ input[disabled],
+ textarea[disabled],
+ option[disabled],
+-optgroup[disabled],
++optgroup[disabled] > option,
+ select[disabled] {
+   -moz-user-input: disabled;
+   -moz-user-focus: ignore;
+@@ -365,7 +365,7 @@
+ }
+ 
+ option[disabled],
+-optgroup[disabled] {
++optgroup[disabled] > option {
+   background-color: transparent;
+ }
+ 

@@ -1,0 +1,159 @@
+From: L. David Baron <dbaron@dbaron.org>
+
+Warn when nsIDOMCSSStyleDeclaration::GetPropertyCSSValue is called.  (Bug 474655)  r+sr=bzbarsky
+
+diff --git a/dom/locales/en-US/chrome/layout/css.properties b/dom/locales/en-US/chrome/layout/css.properties
+--- a/dom/locales/en-US/chrome/layout/css.properties
++++ b/dom/locales/en-US/chrome/layout/css.properties
+@@ -36,6 +36,8 @@
+ 
+ MimeNotCss=The stylesheet %1$S was not loaded because its MIME type, "%2$S", is not "text/css".
+ MimeNotCssWarn=The stylesheet %1$S was loaded as CSS even though its MIME type, "%2$S", is not "text/css".
++
++UseOfGetPropertyCSSValueWarning=Use of getPropertyCSSValue() is deprecated.  To upgrade your code, use getPropertyValue() instead.
+ 
+ PEUnexpEOF2=Unexpected end of file while searching for %1$S.
+ PEParseRuleWSOnly=Whitespace-only string given to be parsed as rule.
+diff --git a/layout/style/nsCSSRules.cpp b/layout/style/nsCSSRules.cpp
+--- a/layout/style/nsCSSRules.cpp
++++ b/layout/style/nsCSSRules.cpp
+@@ -1718,6 +1718,14 @@
+ nsCSSFontFaceStyleDecl::GetPropertyCSSValue(const nsAString & propertyName,
+                                             nsIDOMCSSValue **aResult NS_OUTPARAM)
+ {
++  nsCOMPtr<nsIURI> sheetURI;
++  nsIStyleSheet *sheet = ContainingRule()->mSheet;
++  if (sheet) {
++    sheetURI = sheet->GetSheetURI();
++  }
++  nsStyleUtil::ReportUseOfDeprecatedMethod(sheetURI,
++                                           "UseOfGetPropertyCSSValueWarning");
++
+   // ??? nsDOMCSSDeclaration returns null/NS_OK, but that seems wrong.
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+diff --git a/layout/style/nsComputedDOMStyle.cpp b/layout/style/nsComputedDOMStyle.cpp
+--- a/layout/style/nsComputedDOMStyle.cpp
++++ b/layout/style/nsComputedDOMStyle.cpp
+@@ -315,7 +315,8 @@
+ 
+   aReturn.Truncate();
+ 
+-  nsresult rv = GetPropertyCSSValue(aPropertyName, getter_AddRefs(val));
++  nsresult rv =
++    GetPropertyCSSValueInternal(aPropertyName, getter_AddRefs(val));
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   if (val) {
+@@ -414,6 +415,23 @@
+ NS_IMETHODIMP
+ nsComputedDOMStyle::GetPropertyCSSValue(const nsAString& aPropertyName,
+                                         nsIDOMCSSValue** aReturn)
++{
++  // Issue this warning only for content; chrome currently uses this
++  // method and we haven't yet implemented an alternative.
++  if (!nsContentUtils::IsCallerChrome()) {
++    nsCOMPtr<nsIDocument> document = do_QueryReferent(mDocumentWeak);
++    nsStyleUtil::
++      ReportUseOfDeprecatedMethod(document ? document->GetDocumentURI()
++                                           : nullptr,
++                                  "UseOfGetPropertyCSSValueWarning");
++  }
++
++  return GetPropertyCSSValueInternal(aPropertyName, aReturn);
++}
++
++nsresult
++nsComputedDOMStyle::GetPropertyCSSValueInternal(const nsAString& aPropertyName,
++                                                nsIDOMCSSValue** aReturn)
+ {
+   NS_ASSERTION(!mStyleContextHolder, "bad state");
+ 
+diff --git a/layout/style/nsComputedDOMStyle.h b/layout/style/nsComputedDOMStyle.h
+--- a/layout/style/nsComputedDOMStyle.h
++++ b/layout/style/nsComputedDOMStyle.h
+@@ -101,6 +101,9 @@
+   }
+ 
+ private:
++  nsresult GetPropertyCSSValueInternal(const nsAString& aPropertyName,
++                                       nsIDOMCSSValue** aReturn);
++
+   void AssertFlushedPendingReflows() {
+     NS_ASSERTION(mFlushedPendingReflows,
+                  "property getter should have been marked layout-dependent");
+diff --git a/layout/style/nsDOMCSSDeclaration.cpp b/layout/style/nsDOMCSSDeclaration.cpp
+--- a/layout/style/nsDOMCSSDeclaration.cpp
++++ b/layout/style/nsDOMCSSDeclaration.cpp
+@@ -51,6 +51,7 @@
+ #include "nsIPrincipal.h"
+ 
+ #include "nsContentUtils.h"
++#include "nsStyleUtil.h"
+ #include "mozAutoDocUpdate.h"
+ 
+ namespace css = mozilla::css;
+@@ -149,6 +150,19 @@
+                                          nsIDOMCSSValue** aReturn)
+ {
+   NS_ENSURE_ARG_POINTER(aReturn);
++
++  nsRefPtr<css::Loader> cssLoader;
++  nsCOMPtr<nsIURI> baseURI, sheetURI;
++  nsCOMPtr<nsIPrincipal> sheetPrincipal;
++
++  nsresult result = GetCSSParsingEnvironment(getter_AddRefs(sheetURI),
++                                             getter_AddRefs(baseURI),
++                                             getter_AddRefs(sheetPrincipal),
++                                             getter_AddRefs(cssLoader));
++  if (NS_SUCCEEDED(result)) {
++    nsStyleUtil::ReportUseOfDeprecatedMethod(sheetURI,
++                                             "UseOfGetPropertyCSSValueWarning");
++  }
+ 
+   // We don't support CSSValue yet so we'll just return null...
+   *aReturn = nullptr;
+diff --git a/layout/style/nsStyleUtil.cpp b/layout/style/nsStyleUtil.cpp
+--- a/layout/style/nsStyleUtil.cpp
++++ b/layout/style/nsStyleUtil.cpp
+@@ -49,6 +49,7 @@
+ #include "nsReadableUtils.h"
+ #include "nsContentUtils.h"
+ #include "nsTextFormatter.h"
++#include "nsIScriptError.h"
+ #include "nsCSSProps.h"
+ 
+ // XXX This is here because nsCachedStyleData is accessed outside of
+@@ -577,3 +578,12 @@
+           !aChild->TextIsOnlyWhitespace());
+ }
+ 
++/* static */ void
++nsStyleUtil::ReportUseOfDeprecatedMethod(nsIURI* aURI, const char* aWarning)
++{
++  nsContentUtils::ReportToConsole(nsContentUtils::eCSS_PROPERTIES,
++                                  aWarning, nullptr, 0, aURI,
++                                  EmptyString(), 0, 0,
++                                  nsIScriptError::warningFlag,
++                                  "CSS Object Model");
++}
+diff --git a/layout/style/nsStyleUtil.h b/layout/style/nsStyleUtil.h
+--- a/layout/style/nsStyleUtil.h
++++ b/layout/style/nsStyleUtil.h
+@@ -45,6 +45,7 @@
+ class nsString;
+ class nsStringComparator;
+ class nsIContent;
++class nsIURI;
+ 
+ enum nsFontSizeType {
+   eFontSize_HTML = 1,
+@@ -117,6 +118,8 @@
+   static bool IsSignificantChild(nsIContent* aChild,
+                                    bool aTextIsSignificant,
+                                    bool aWhitespaceIsSignificant);
++
++  static void ReportUseOfDeprecatedMethod(nsIURI* aURI, const char* aWarning);
+ };
+ 
+ 

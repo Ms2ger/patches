@@ -1,0 +1,117 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+Bug 665345 - Move sniffing functions out of test_canvas.html
+We will need these functions in standalone tests in the following patches.
+
+diff --git a/content/canvas/test/test_canvas.html b/content/canvas/test/test_canvas.html
+--- a/content/canvas/test/test_canvas.html
++++ b/content/canvas/test/test_canvas.html
+@@ -1,53 +1,31 @@
+ <!DOCTYPE html><title>Canvas Tests</title>
+ <script src="/tests/SimpleTest/SimpleTest.js"></script>
+ <link href="/tests/SimpleTest/test.css" rel="stylesheet">
+ <body>
+ <script>
+ 
+ SimpleTest.waitForExplicitFinish();
+-const Cc = SpecialPowers.Cc;
+-const Cr = SpecialPowers.Cr;
+ 
+ function IsD2DEnabled() {
+-    var enabled = false;
+-
+-    try {
+-        enabled = Cc["@mozilla.org/gfx/info;1"].getService(SpecialPowers.Ci.nsIGfxInfo).D2DEnabled;
+-    } catch(e) {}
+-    
+-    return enabled;
++  return SpecialPowers.isD2DEnabled;
+ }
+ 
+ function IsLinux() {
+     return navigator.platform.indexOf("Linux") == 0 &&
+            navigator.appVersion.indexOf("Android") == -1;
+ }
+ 
+ function IsAzureSkia() {
+-  var enabled = false;
+-  
+-  try {
+-    var backend = Cc["@mozilla.org/gfx/info;1"].getService(SpecialPowers.Ci.nsIGfxInfo).getInfo().AzureCanvasBackend;
+-    enabled = (backend == "skia");
+-  } catch (e) { }
+-
+-  return enabled;
++  return SpecialPowers.isAzureSkia;
+ }
+ 
+ function IsAzureCairo() {
+-  var enabled = false;
+-  
+-  try {
+-    var backend = Cc["@mozilla.org/gfx/info;1"].getService(SpecialPowers.Ci.nsIGfxInfo).getInfo().AzureCanvasBackend;
+-    enabled = (backend == "cairo");
+-  } catch (e) { }
+-
+-  return enabled;
++  return SpecialPowers.isAzureCairo;
+ }
+ 
+ function isPixel(ctx, x,y, r,g,b,a, d) {
+   var pos = x + "," + y;
+   var colour = r + "," + g + "," + b + "," + a;
+   var pixel = ctx.getImageData(x, y, 1, 1);
+   var pr = pixel.data[0],
+       pg = pixel.data[1],
+diff --git a/testing/specialpowers/content/specialpowersAPI.js b/testing/specialpowers/content/specialpowersAPI.js
+--- a/testing/specialpowers/content/specialpowersAPI.js
++++ b/testing/specialpowers/content/specialpowersAPI.js
+@@ -1546,16 +1546,48 @@ SpecialPowersAPI.prototype = {
+   getMozFullPath: function(file) {
+     return file.mozFullPath;
+   },
+ 
+   isWindowPrivate: function(win) {
+     return PrivateBrowsingUtils.isWindowPrivate(win);
+   },
+ 
++  get isD2DEnabled() {
++    delete this.isD2DEnabled;
++    var enabled = false;
++    try {
++      enabled = Cc["@mozilla.org/gfx/info;1"]
++                  .getService(Ci.nsIGfxInfo)
++                  .D2DEnabled;
++    } catch(e) {}
++    return this.isD2DEnabled = enabled;
++  },
++
++  get _azureBackend() {
++    try {
++      return Cc["@mozilla.org/gfx/info;1"]
++               .getService(Ci.nsIGfxInfo)
++               .getInfo()
++               .AzureCanvasBackend;
++    } catch (e) {
++      return "";
++    }
++  },
++
++  get isAzureSkia() {
++    delete this.isAzureSkia;
++    return this.isAzureSkia = (this._azureBackend == "skia");
++  },
++
++  get isAzureCairo() {
++    delete this.isAzureCairo;
++    return this.isAzureCairo = (this._azureBackend == "cairo");
++  },
++
+   notifyObserversInParentProcess: function(subject, topic, data) {
+     if (subject) {
+       throw new Error("Can't send subject to another process!");
+     }
+     if (this.isMainProcess()) {
+       return this.notifyObservers(subject, topic, data);
+     }
+     var msg = {

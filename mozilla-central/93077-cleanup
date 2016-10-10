@@ -1,0 +1,133 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/layout/base/nsPresShell.cpp b/layout/base/nsPresShell.cpp
+--- a/layout/base/nsPresShell.cpp
++++ b/layout/base/nsPresShell.cpp
+@@ -179,16 +179,17 @@
+ #include "GeckoProfiler.h"
+ #include "mozilla/css/ImageLoader.h"
+ 
+ #include "Layers.h"
+ #include "mozilla/layers/Compositor.h"
+ #include "nsTransitionManager.h"
+ #include "LayerTreeInvalidation.h"
+ #include "nsAsyncDOMEvent.h"
++#include "nsContentList.h"
+ #include "nsIImageLoadingContent.h"
+ 
+ #define ANCHOR_SCROLL_FLAGS \
+   (nsIPresShell::SCROLL_OVERFLOW_HIDDEN | nsIPresShell::SCROLL_NO_PARENT_FRAMES)
+ 
+ using namespace mozilla;
+ using namespace mozilla::css;
+ using namespace mozilla::dom;
+@@ -2764,77 +2765,37 @@ PresShell::GoToAnchor(const nsAString& a
+   nsRefPtr<nsEventStateManager> esm = mPresContext->EventStateManager();
+ 
+   if (aAnchorName.IsEmpty()) {
+     NS_ASSERTION(!aScroll, "can't scroll to empty anchor name");
+     esm->SetContentState(nullptr, NS_EVENT_STATE_URLTARGET);
+     return NS_OK;
+   }
+ 
+-  nsCOMPtr<nsIDOMHTMLDocument> htmlDoc = do_QueryInterface(mDocument);
+-  nsresult rv = NS_OK;
+   nsCOMPtr<nsIContent> content;
+ 
+   // Search for an element with a matching "id" attribute
+   if (mDocument) {    
+     content = mDocument->GetElementById(aAnchorName);
+   }
+ 
+-  // Search for an anchor element with a matching "name" attribute
+-  if (!content && htmlDoc) {
+-    nsCOMPtr<nsIDOMNodeList> list;
+-    // Find a matching list of named nodes
+-    rv = htmlDoc->GetElementsByName(aAnchorName, getter_AddRefs(list));
+-    if (NS_SUCCEEDED(rv) && list) {
+-      uint32_t i;
+-      // Loop through the named nodes looking for the first anchor
+-      for (i = 0; true; i++) {
+-        nsCOMPtr<nsIDOMNode> node;
+-        rv = list->Item(i, getter_AddRefs(node));
+-        if (!node) {  // End of list
+-          break;
+-        }
+-        // Ensure it's an anchor element
+-        content = do_QueryInterface(node);
+-        if (content) {
+-          if (content->Tag() == nsGkAtoms::a && content->IsHTML()) {
+-            break;
+-          }
+-          content = nullptr;
+-        }
+-      }
+-    }
+-  }
+-
+-  // Search for anchor in the HTML namespace with a matching name
+-  if (!content && !htmlDoc)
+-  {
+-    nsCOMPtr<nsIDOMDocument> doc = do_QueryInterface(mDocument);
+-    nsCOMPtr<nsIDOMNodeList> list;
+-    NS_NAMED_LITERAL_STRING(nameSpace, "http://www.w3.org/1999/xhtml");
+-    // Get the list of anchor elements
+-    rv = doc->GetElementsByTagNameNS(nameSpace, NS_LITERAL_STRING("a"), getter_AddRefs(list));
+-    if (NS_SUCCEEDED(rv) && list) {
+-      uint32_t i;
+-      // Loop through the named nodes looking for the first anchor
+-      for (i = 0; true; i++) {
+-        nsCOMPtr<nsIDOMNode> node;
+-        rv = list->Item(i, getter_AddRefs(node));
+-        if (!node) { // End of list
+-          break;
+-        }
+-        // Compare the name attribute
+-        nsCOMPtr<nsIDOMElement> element = do_QueryInterface(node);
+-        nsAutoString value;
+-        if (element && NS_SUCCEEDED(element->GetAttribute(NS_LITERAL_STRING("name"), value))) {
+-          if (value.Equals(aAnchorName)) {
+-            content = do_QueryInterface(element);
+-            break;
+-          }
+-        }
++  // Search for an anchor element in the HTML namespace with a matching "name"
++  // attribute.
++  if (!content) {
++    nsRefPtr<nsContentList> anchors =
++      NS_GetContentList(mDocument, kNameSpaceID_XHTML, NS_LITERAL_STRING("a"));
++    // Loop through the named nodes looking for the first anchor
++    for (uint32_t i = 0, len = anchors->Length(true); i < len; i++) {
++      nsIContent* node = anchors->Item(i);
++      if (node->AttrValueIs(kNameSpaceID_None,
++                            nsGkAtoms::name,
++                            aAnchorName,
++                            eCaseMatters)) {
++        content = node;
++        break;
+       }
+     }
+   }
+ 
+   esm->SetContentState(content, NS_EVENT_STATE_URLTARGET);
+ 
+ #ifdef ACCESSIBILITY
+   nsIContent *anchorTarget = content;
+@@ -2842,16 +2803,17 @@ PresShell::GoToAnchor(const nsAString& a
+ 
+   nsIScrollableFrame* rootScroll = GetRootScrollFrameAsScrollable();
+   if (rootScroll && rootScroll->DidHistoryRestore()) {
+     // Scroll position restored from history trumps scrolling to anchor.
+     aScroll = false;
+     rootScroll->ClearDidHistoryRestore();
+   }
+ 
++  nsresult rv = NS_OK;
+   if (content) {
+     if (aScroll) {
+       rv = ScrollContentIntoView(content,
+                                  ScrollAxis(SCROLL_TOP, SCROLL_ALWAYS),
+                                  ScrollAxis(),
+                                  ANCHOR_SCROLL_FLAGS);
+       NS_ENSURE_SUCCESS(rv, rv);
+ 

@@ -1,0 +1,77 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/content/src/HTMLOptionElement.cpp b/content/html/content/src/HTMLOptionElement.cpp
+--- a/content/html/content/src/HTMLOptionElement.cpp
++++ b/content/html/content/src/HTMLOptionElement.cpp
+@@ -141,23 +141,18 @@ HTMLOptionElement::GetIndex(int32_t* aIn
+   *aIndex = 0;
+ 
+   // Only select elements can contain a list of options.
+   HTMLSelectElement* selectElement = GetSelect();
+   if (!selectElement) {
+     return NS_OK;
+   }
+ 
+-  HTMLOptionsCollection* options = selectElement->GetOptions();
+-  if (!options) {
+-    return NS_OK;
+-  }
+-
+   // aIndex will not be set if GetOptionsIndex fails.
+-  return options->GetOptionIndex(this, 0, true, aIndex);
++  return selectElement->Options()->GetOptionIndex(this, 0, true, aIndex);
+ }
+ 
+ bool
+ HTMLOptionElement::Selected() const
+ {
+   // If we haven't been explictly selected or deselected, use our default value
+   if (!mSelectedChanged) {
+     return DefaultSelected();
+diff --git a/content/html/content/src/HTMLSelectElement.cpp b/content/html/content/src/HTMLSelectElement.cpp
+--- a/content/html/content/src/HTMLSelectElement.cpp
++++ b/content/html/content/src/HTMLSelectElement.cpp
+@@ -704,17 +704,17 @@ HTMLSelectElement::Remove(int32_t aIndex
+   }
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ HTMLSelectElement::GetOptions(nsIDOMHTMLCollection** aValue)
+ {
+-  NS_IF_ADDREF(*aValue = GetOptions());
++  NS_IF_ADDREF(*aValue = Options());
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ HTMLSelectElement::GetType(nsAString& aType)
+ {
+   if (HasAttr(kNameSpaceID_None, nsGkAtoms::multiple)) {
+diff --git a/content/html/content/src/HTMLSelectElement.h b/content/html/content/src/HTMLSelectElement.h
+--- a/content/html/content/src/HTMLSelectElement.h
++++ b/content/html/content/src/HTMLSelectElement.h
+@@ -369,21 +369,16 @@ public:
+                                               int32_t aModType) const MOZ_OVERRIDE;
+   NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const MOZ_OVERRIDE;
+ 
+   virtual nsresult Clone(nsINodeInfo* aNodeInfo, nsINode** aResult) const MOZ_OVERRIDE;
+ 
+   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(HTMLSelectElement,
+                                            nsGenericHTMLFormElement)
+ 
+-  HTMLOptionsCollection* GetOptions()
+-  {
+-    return mOptions;
+-  }
+-
+   virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
+ 
+   // nsIConstraintValidation
+   nsresult GetValidationMessage(nsAString& aValidationMessage,
+                                 ValidityStateType aType) MOZ_OVERRIDE;
+ 
+   /**
+    * Insert aElement before the node given by aBefore

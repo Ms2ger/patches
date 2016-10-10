@@ -1,0 +1,223 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 660660, part a - Implement Text.mozSerializeAsCDATA; r=?sicking
+
+diff --git a/content/base/public/nsContentCreatorFunctions.h b/content/base/public/nsContentCreatorFunctions.h
+--- a/content/base/public/nsContentCreatorFunctions.h
++++ b/content/base/public/nsContentCreatorFunctions.h
+@@ -64,17 +64,18 @@ NS_NewElement(nsIContent** aResult, PRIn
+ 
+ nsresult
+ NS_NewXMLElement(nsIContent** aResult, already_AddRefed<nsINodeInfo> aNodeInfo);
+ 
+ /**
+  * aNodeInfoManager must not be null.
+  */
+ nsresult
+-NS_NewTextNode(nsIContent **aResult, nsNodeInfoManager *aNodeInfoManager);
++NS_NewTextNode(nsIContent **aResult, nsNodeInfoManager *aNodeInfoManager,
++               bool aIsCDATA = false);
+ 
+ /**
+  * aNodeInfoManager must not be null.
+  */
+ nsresult
+ NS_NewCommentNode(nsIContent **aResult, nsNodeInfoManager *aNodeInfoManager);
+ 
+ /**
+diff --git a/content/base/src/nsGenericDOMDataNode.h b/content/base/src/nsGenericDOMDataNode.h
+--- a/content/base/src/nsGenericDOMDataNode.h
++++ b/content/base/src/nsGenericDOMDataNode.h
+@@ -332,16 +332,27 @@ protected:
+   nsresult ReplaceWholeText(const nsAString& aContent, nsIDOMText **aReturn);
+ 
+   nsresult GetIsElementContentWhitespace(bool *aReturn)
+   {
+     *aReturn = TextIsOnlyWhitespace();
+     return NS_OK;
+   }
+ 
++  nsresult GetMozSerializeAsCDATA(bool* aIsCDATA)
++  {
++    *aIsCDATA = mIsCDATA;
++    return NS_OK;
++  }
++  nsresult SetMozSerializeAsCDATA(bool aIsCDATA)
++  {
++    mIsCDATA = !!aIsCDATA;
++    return NS_OK;
++  }
++
+   static int32_t FirstLogicallyAdjacentTextNode(nsIContent* aParent,
+                                                 int32_t aIndex);
+ 
+   static int32_t LastLogicallyAdjacentTextNode(nsIContent* aParent,
+                                                int32_t aIndex,
+                                                uint32_t aCount);
+ 
+   nsresult SetTextInternal(uint32_t aOffset, uint32_t aCount,
+@@ -355,16 +366,17 @@ protected:
+    * @param aOwnerDocument the ownerDocument of the clone
+    * @param aCloneText if true the text content will be cloned too
+    * @return the clone
+    */
+   virtual nsGenericDOMDataNode *CloneDataNode(nsINodeInfo *aNodeInfo,
+                                               bool aCloneText) const = 0;
+ 
+   nsTextFragment mText;
++  bool mIsCDATA;
+ 
+ private:
+   void UpdateBidiStatus(const PRUnichar* aBuffer, uint32_t aLength);
+ 
+   already_AddRefed<nsIAtom> GetCurrentValueAtom();
+ };
+ 
+ #endif /* nsGenericDOMDataNode_h___ */
+diff --git a/content/base/src/nsTextNode.cpp b/content/base/src/nsTextNode.cpp
+--- a/content/base/src/nsTextNode.cpp
++++ b/content/base/src/nsTextNode.cpp
+@@ -56,17 +56,17 @@ class nsAttributeTextNode : public nsTex
+                             public nsStubMutationObserver
+ {
+ public:
+   NS_DECL_ISUPPORTS_INHERITED
+   
+   nsAttributeTextNode(already_AddRefed<nsINodeInfo> aNodeInfo,
+                       int32_t aNameSpaceID,
+                       nsIAtom* aAttrName) :
+-    nsTextNode(aNodeInfo),
++    nsTextNode(aNodeInfo, false),
+     mGrandparent(nullptr),
+     mNameSpaceID(aNameSpaceID),
+     mAttrName(aAttrName)
+   {
+     NS_ASSERTION(mNameSpaceID != kNameSpaceID_Unknown, "Must know namespace");
+     NS_ASSERTION(mAttrName, "Must have attr name");
+   }
+ 
+@@ -113,40 +113,37 @@ private:
+   nsIContent* mGrandparent;
+   // What attribute we're showing
+   int32_t mNameSpaceID;
+   nsCOMPtr<nsIAtom> mAttrName;
+ };
+ 
+ nsresult
+ NS_NewTextNode(nsIContent** aInstancePtrResult,
+-               nsNodeInfoManager *aNodeInfoManager)
++               nsNodeInfoManager *aNodeInfoManager,
++               bool aIsCDATA /* = false*/)
+ {
+   NS_PRECONDITION(aNodeInfoManager, "Missing nodeInfoManager");
+ 
+   *aInstancePtrResult = nullptr;
+ 
+   nsCOMPtr<nsINodeInfo> ni = aNodeInfoManager->GetTextNodeInfo();
+   if (!ni) {
+     return NS_ERROR_OUT_OF_MEMORY;
+   }
+ 
+-  nsTextNode *instance = new nsTextNode(ni.forget());
+-  if (!instance) {
+-    return NS_ERROR_OUT_OF_MEMORY;
+-  }
+-
+-  NS_ADDREF(*aInstancePtrResult = instance);
+-
++  nsRefPtr<nsTextNode> instance = new nsTextNode(ni.forget(), aIsCDATA);
++  instance.forget(aInstancePtrResult);
+   return NS_OK;
+ }
+ 
+-nsTextNode::nsTextNode(already_AddRefed<nsINodeInfo> aNodeInfo)
++nsTextNode::nsTextNode(already_AddRefed<nsINodeInfo> aNodeInfo, bool aIsCDATA)
+   : nsGenericDOMDataNode(aNodeInfo)
+ {
++  mIsCDATA = aIsCDATA;
+   NS_ABORT_IF_FALSE(mNodeInfo->NodeType() == nsIDOMNode::TEXT_NODE,
+                     "Bad NodeType in aNodeInfo");
+ }
+ 
+ nsTextNode::~nsTextNode()
+ {
+ }
+ 
+@@ -168,18 +165,18 @@ nsTextNode::IsNodeOfType(uint32_t aFlags
+ {
+   return !(aFlags & ~(eCONTENT | eTEXT | eDATA_NODE));
+ }
+ 
+ nsGenericDOMDataNode*
+ nsTextNode::CloneDataNode(nsINodeInfo *aNodeInfo, bool aCloneText) const
+ {
+   nsCOMPtr<nsINodeInfo> ni = aNodeInfo;
+-  nsTextNode *it = new nsTextNode(ni.forget());
+-  if (it && aCloneText) {
++  nsTextNode *it = new nsTextNode(ni.forget(), mIsCDATA);
++  if (aCloneText) {
+     it->mText = mText;
+   }
+ 
+   return it;
+ }
+ 
+ nsresult
+ nsTextNode::BindToAttribute(nsIAttribute* aAttr)
+diff --git a/content/base/src/nsTextNode.h b/content/base/src/nsTextNode.h
+--- a/content/base/src/nsTextNode.h
++++ b/content/base/src/nsTextNode.h
+@@ -50,17 +50,17 @@
+ 
+ /**
+  * Class used to implement DOM text nodes
+  */
+ class nsTextNode : public nsGenericDOMDataNode,
+                    public nsIDOMText
+ {
+ public:
+-  nsTextNode(already_AddRefed<nsINodeInfo> aNodeInfo);
++  nsTextNode(already_AddRefed<nsINodeInfo> aNodeInfo, bool aIsCDATA);
+   virtual ~nsTextNode();
+ 
+   // nsISupports
+   NS_DECL_ISUPPORTS_INHERITED
+ 
+   // nsIDOMNode
+   NS_FORWARD_NSIDOMNODE(nsGenericDOMDataNode::)
+ 
+diff --git a/content/xml/content/src/nsXMLCDATASection.cpp b/content/xml/content/src/nsXMLCDATASection.cpp
+--- a/content/xml/content/src/nsXMLCDATASection.cpp
++++ b/content/xml/content/src/nsXMLCDATASection.cpp
+@@ -99,16 +99,17 @@ NS_NewXMLCDATASection(nsIContent** aInst
+   NS_ADDREF(*aInstancePtrResult = instance);
+ 
+   return NS_OK;
+ }
+ 
+ nsXMLCDATASection::nsXMLCDATASection(already_AddRefed<nsINodeInfo> aNodeInfo)
+   : nsGenericDOMDataNode(aNodeInfo)
+ {
++  mIsCDATA = true;
+   NS_ABORT_IF_FALSE(mNodeInfo->NodeType() == nsIDOMNode::CDATA_SECTION_NODE,
+                     "Bad NodeType in aNodeInfo");
+ }
+ 
+ nsXMLCDATASection::~nsXMLCDATASection()
+ {
+ }
+ 
+diff --git a/dom/interfaces/core/nsIDOMText.idl b/dom/interfaces/core/nsIDOMText.idl
+--- a/dom/interfaces/core/nsIDOMText.idl
++++ b/dom/interfaces/core/nsIDOMText.idl
+@@ -71,9 +71,11 @@ interface nsIDOMText : nsIDOMCharacterDa
+ 
+   /**
+    * If content is empty, removes all logically adjacent text nodes (including
+    * this node) from the DOM tree, returning null; otherwise, replaces the
+    * contents of this node with aContent and removes all other logically
+    * adjacent text nodes from the DOM tree, returning this node.
+    */
+   nsIDOMText replaceWholeText(in DOMString content) raises(DOMException);
++
++  attribute boolean mozSerializeAsCDATA;
+ };

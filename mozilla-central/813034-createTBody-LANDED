@@ -1,0 +1,101 @@
+# HG changeset patch
+# User Marc Jessome <marc.jessome@gmail.com>
+# Date 1354597470 18000
+# Node ID 943cfbe59ca09b562d588eaa2322419ec7b242bb
+# Parent 330526fad0377c03b682b67d00e2fe27665f9c5a
+Bug 813034: Implement table.createTBody()
+
+diff --git a/content/html/content/src/HTMLTableElement.cpp b/content/html/content/src/HTMLTableElement.cpp
+--- a/content/html/content/src/HTMLTableElement.cpp
++++ b/content/html/content/src/HTMLTableElement.cpp
+@@ -708,16 +708,45 @@ HTMLTableElement::DeleteCaption()
+     nsINode::RemoveChild(*caption, rv);
+     MOZ_ASSERT(!rv.Failed());
+   }
+ 
+   return NS_OK;
+ }
+ 
+ already_AddRefed<nsGenericHTMLElement>
++HTMLTableElement::CreateTBody()
++{
++  nsCOMPtr<nsINodeInfo> nodeInfo =
++    OwnerDoc()->NodeInfoManager()->GetNodeInfo(nsGkAtoms::tbody, nullptr,
++                                               kNameSpaceID_XHTML,
++                                               nsIDOMNode::ELEMENT_NODE);
++  MOZ_ASSERT(nodeInfo);
++
++  nsCOMPtr<nsGenericHTMLElement> newBody =
++    NS_NewHTMLTableSectionElement(nodeInfo.forget());
++  MOZ_ASSERT(newBody);
++
++  nsIContent* referenceNode = nullptr;
++  for (nsIContent* child = nsINode::GetLastChild();
++       child;
++       child = child->GetPreviousSibling()) {
++    if (child->IsHTML(nsGkAtoms::tbody)) {
++      referenceNode = child->GetNextSibling();
++      break;
++    }
++  }
++
++  ErrorResult rv;
++  nsINode::InsertBefore(*newBody, referenceNode, rv);
++
++  return newBody.forget();
++}
++
++already_AddRefed<nsGenericHTMLElement>
+ HTMLTableElement::InsertRow(int32_t aIndex, ErrorResult& aError)
+ {
+   /* get the ref row at aIndex
+      if there is one, 
+        get its parent
+        insert the new row just before the ref row
+      else
+        get the first row group
+diff --git a/content/html/content/src/HTMLTableElement.h b/content/html/content/src/HTMLTableElement.h
+--- a/content/html/content/src/HTMLTableElement.h
++++ b/content/html/content/src/HTMLTableElement.h
+@@ -88,16 +88,19 @@ public:
+     DeleteTFoot();
+     if (aTFoot) {
+       nsINode::AppendChild(*aTFoot, aError);
+     }
+   }
+   already_AddRefed<nsGenericHTMLElement> CreateTFoot();
+ 
+   nsIHTMLCollection* TBodies();
++
++  already_AddRefed<nsGenericHTMLElement> CreateTBody();
++
+   nsIHTMLCollection* Rows();
+ 
+   already_AddRefed<nsGenericHTMLElement> InsertRow(int32_t aIndex,
+                                                    ErrorResult& aError);
+   void DeleteRow(int32_t aIndex, ErrorResult& aError);
+ 
+   void GetAlign(nsString& aAlign)
+   {
+diff --git a/dom/webidl/HTMLTableElement.webidl b/dom/webidl/HTMLTableElement.webidl
+--- a/dom/webidl/HTMLTableElement.webidl
++++ b/dom/webidl/HTMLTableElement.webidl
+@@ -19,17 +19,17 @@ interface HTMLTableElement : HTMLElement
+            attribute HTMLTableSectionElement? tHead;
+   HTMLElement createTHead();
+   void deleteTHead();
+            [SetterThrows]
+            attribute HTMLTableSectionElement? tFoot;
+   HTMLElement createTFoot();
+   void deleteTFoot();
+   readonly attribute HTMLCollection tBodies;
+-  //HTMLElement createTBody();
++  HTMLElement createTBody();
+   readonly attribute HTMLCollection rows;
+   [Throws]
+   HTMLElement insertRow(optional long index = -1);
+   [Throws]
+   void deleteRow(long index);
+   //         attribute boolean sortable;
+   //void stopSorting();
+ };

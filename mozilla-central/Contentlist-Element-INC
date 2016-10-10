@@ -1,0 +1,747 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/accessible/src/base/nsAccessibilityService.cpp b/accessible/src/base/nsAccessibilityService.cpp
+--- a/accessible/src/base/nsAccessibilityService.cpp
++++ b/accessible/src/base/nsAccessibilityService.cpp
+@@ -68,17 +68,19 @@
+ #include "nsILink.h"
+ #include "nsIObserverService.h"
+ #include "nsIPluginInstance.h"
+ #include "nsISupportsUtils.h"
+ #include "nsObjectFrame.h"
+ #include "nsOuterDocAccessible.h"
+ #include "nsRootAccessibleWrap.h"
+ #include "nsTextFragment.h"
++#include "mozilla/FunctionTimer.h"
+ #include "mozilla/Services.h"
++#include "mozilla/dom/Element.h"
+ 
+ #ifdef MOZ_XUL
+ #include "nsXULAlertAccessible.h"
+ #include "nsXULColorPickerAccessible.h"
+ #include "nsXULComboboxAccessible.h"
+ #include "nsXULFormControlAccessible.h"
+ #include "nsXULListboxAccessibleWrap.h"
+ #include "nsXULMenuAccessibleWrap.h"
+@@ -93,18 +95,16 @@
+ #include "nsHTMLWin32ObjectAccessible.h"
+ #endif
+ 
+ #ifndef DISABLE_XFORMS_HOOKS
+ #include "nsXFormsFormControlsAccessible.h"
+ #include "nsXFormsWidgetsAccessible.h"
+ #endif
+ 
+-#include "mozilla/FunctionTimer.h"
+-
+ ////////////////////////////////////////////////////////////////////////////////
+ // nsAccessibilityService
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+ nsAccessibilityService *nsAccessibilityService::gAccessibilityService = nullptr;
+ bool nsAccessibilityService::gIsShutdown = true;
+ 
+ nsAccessibilityService::nsAccessibilityService() : nsAccDocManager()
+diff --git a/content/base/src/nsContentList.h b/content/base/src/nsContentList.h
+--- a/content/base/src/nsContentList.h
++++ b/content/base/src/nsContentList.h
+@@ -51,17 +51,16 @@
+ #include "nsIDOMNodeList.h"
+ #include "nsINodeList.h"
+ #include "nsStubMutationObserver.h"
+ #include "nsIAtom.h"
+ #include "nsINameSpaceManager.h"
+ #include "nsCycleCollectionParticipant.h"
+ #include "nsWrapperCache.h"
+ #include "nsCRT.h"
+-#include "mozilla/dom/Element.h"
+ 
+ // Magic namespace id that means "match all namespaces".  This is
+ // negative so it won't collide with actual namespace constants.
+ #define kNameSpaceID_Wildcard PR_INT32_MIN
+ 
+ // This is a callback function type that can be used to implement an
+ // arbitrary matching algorithm.  aContent is the content that may
+ // match the list, while aNamespaceID, aAtom, and aData are whatever
+@@ -70,17 +69,21 @@ typedef bool (*nsContentListMatchFunc)
+                                          int32_t aNamespaceID,
+                                          nsIAtom* aAtom,
+                                          void* aData);
+ 
+ typedef void (*nsContentListDestroyFunc)(void* aData);
+ 
+ class nsIDocument;
+ class nsIDOMHTMLFormElement;
+-
++namespace mozilla {
++namespace dom {
++class Element;
++}
++}
+ 
+ class nsBaseContentList : public nsINodeList
+ {
+ public:
+   virtual ~nsBaseContentList();
+ 
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+ 
+diff --git a/content/base/src/nsCopySupport.cpp b/content/base/src/nsCopySupport.cpp
+--- a/content/base/src/nsCopySupport.cpp
++++ b/content/base/src/nsCopySupport.cpp
+@@ -36,17 +36,17 @@
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsCopySupport.h"
+ #include "nsIDocumentEncoder.h"
+ #include "nsISupports.h"
+-#include "nsIContent.h"
++#include "mozilla/dom/Element.h"
+ #include "nsIComponentManager.h" 
+ #include "nsIServiceManager.h"
+ #include "nsIClipboard.h"
+ #include "nsISelection.h"
+ #include "nsWidgetsCID.h"
+ #include "nsXPCOM.h"
+ #include "nsISupportsPrimitives.h"
+ #include "nsIDOMRange.h"
+diff --git a/content/base/src/nsDOMAttribute.h b/content/base/src/nsDOMAttribute.h
+--- a/content/base/src/nsDOMAttribute.h
++++ b/content/base/src/nsDOMAttribute.h
+@@ -49,16 +49,17 @@
+ #include "nsString.h"
+ #include "nsCOMPtr.h"
+ #include "nsINodeInfo.h"
+ #include "nsIDOM3Attr.h"
+ #include "nsDOMAttributeMap.h"
+ #include "nsCycleCollectionParticipant.h"
+ #include "nsContentUtils.h"
+ #include "nsStubMutationObserver.h"
++#include "nsIContent.h"
+ 
+ // Attribute helper class used to wrap up an attribute with a dom
+ // object that implements nsIDOMAttr, nsIDOM3Attr, nsIDOMNode, nsIDOM3Node
+ class nsDOMAttribute : public nsIAttribute,
+                        public nsIDOMAttr,
+                        public nsIDOM3Attr,
+                        public nsStubMutationObserver
+ {
+diff --git a/content/base/src/nsInProcessTabChildGlobal.cpp b/content/base/src/nsInProcessTabChildGlobal.cpp
+--- a/content/base/src/nsInProcessTabChildGlobal.cpp
++++ b/content/base/src/nsInProcessTabChildGlobal.cpp
+@@ -44,16 +44,17 @@
+ #include "nsIComponentManager.h"
+ #include "nsIServiceManager.h"
+ #include "nsIJSRuntimeService.h"
+ #include "nsComponentManagerUtils.h"
+ #include "nsNetUtil.h"
+ #include "nsScriptLoader.h"
+ #include "nsIJSContextStack.h"
+ #include "nsFrameLoader.h"
++#include "nsIContent.h"
+ 
+ bool SendSyncMessageToParent(void* aCallbackData,
+                              const nsAString& aMessage,
+                              const nsAString& aJSON,
+                              nsTArray<nsString>* aJSONRetVal)
+ {
+   nsInProcessTabChildGlobal* tabChild =
+     static_cast<nsInProcessTabChildGlobal*>(aCallbackData);
+diff --git a/content/canvas/src/nsCanvasRenderingContext2D.cpp b/content/canvas/src/nsCanvasRenderingContext2D.cpp
+--- a/content/canvas/src/nsCanvasRenderingContext2D.cpp
++++ b/content/canvas/src/nsCanvasRenderingContext2D.cpp
+@@ -52,16 +52,17 @@
+ #endif
+ 
+ #include "prmem.h"
+ #include "prenv.h"
+ 
+ #include "nsIServiceManager.h"
+ 
+ #include "nsContentUtils.h"
++#include "mozilla/dom/Element.h"
+ 
+ #include "nsIDOMDocument.h"
+ #include "nsIDocument.h"
+ #include "nsIDOMCanvasRenderingContext2D.h"
+ #include "nsICanvasRenderingContextInternal.h"
+ #include "nsHTMLCanvasElement.h"
+ #include "nsPresContext.h"
+ #include "nsIPresShell.h"
+diff --git a/content/events/src/nsEventStateManager.cpp b/content/events/src/nsEventStateManager.cpp
+--- a/content/events/src/nsEventStateManager.cpp
++++ b/content/events/src/nsEventStateManager.cpp
+@@ -44,17 +44,17 @@
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsCOMPtr.h"
+ #include "nsEventStateManager.h"
+ #include "nsEventListenerManager.h"
+ #include "nsIMEStateManager.h"
+ #include "nsContentEventHandler.h"
+-#include "nsIContent.h"
++#include "mozilla/dom/Element.h"
+ #include "nsINodeInfo.h"
+ #include "nsIDocument.h"
+ #include "nsIFrame.h"
+ #include "nsIWidget.h"
+ #include "nsPresContext.h"
+ #include "nsIPresShell.h"
+ #include "nsDOMEvent.h"
+ #include "nsGkAtoms.h"
+diff --git a/content/smil/nsSMILCSSProperty.cpp b/content/smil/nsSMILCSSProperty.cpp
+--- a/content/smil/nsSMILCSSProperty.cpp
++++ b/content/smil/nsSMILCSSProperty.cpp
+@@ -37,17 +37,17 @@
+ 
+ /* representation of a SMIL-animatable CSS property on an element */
+ 
+ #include "nsSMILCSSProperty.h"
+ #include "nsSMILCSSValueType.h"
+ #include "nsSMILValue.h"
+ #include "nsComputedDOMStyle.h"
+ #include "nsStyleAnimation.h"
+-#include "nsIContent.h"
++#include "mozilla/dom/Element.h"
+ #include "nsIDOMElement.h"
+ 
+ using namespace mozilla::dom;
+ 
+ // Helper function
+ static bool
+ GetCSSComputedValue(nsIContent* aElem,
+                     nsCSSProperty aPropID,
+diff --git a/content/smil/nsSMILMappedAttribute.cpp b/content/smil/nsSMILMappedAttribute.cpp
+--- a/content/smil/nsSMILMappedAttribute.cpp
++++ b/content/smil/nsSMILMappedAttribute.cpp
+@@ -36,17 +36,17 @@
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* representation of a SMIL-animatable mapped attribute on an element */
+ #include "nsSMILMappedAttribute.h"
+ #include "nsPropertyTable.h"
+ #include "nsContentErrors.h" // For NS_PROPTABLE_PROP_OVERWRITTEN
+ #include "nsSMILValue.h"
+ #include "nsSMILCSSValueType.h"
+-#include "nsIContent.h"
++#include "mozilla/dom/Element.h"
+ #include "nsIDocument.h"
+ #include "nsIPresShell.h"
+ #include "nsCSSProps.h"
+ 
+ // Callback function, for freeing string buffers stored in property table
+ static void
+ ReleaseStringBufferPropertyValue(void*    aObject,       /* unused */
+                                  nsIAtom* aPropertyName, /* unused */
+diff --git a/content/xbl/src/nsBindingManager.cpp b/content/xbl/src/nsBindingManager.cpp
+--- a/content/xbl/src/nsBindingManager.cpp
++++ b/content/xbl/src/nsBindingManager.cpp
+@@ -44,20 +44,20 @@
+ #include "nsIURI.h"
+ #include "nsIURL.h"
+ #include "nsIChannel.h"
+ #include "nsXPIDLString.h"
+ #include "nsIParser.h"
+ #include "nsParserCIID.h"
+ #include "nsNetUtil.h"
+ #include "plstr.h"
+-#include "nsIContent.h"
+ #include "nsIDOMElement.h"
+ #include "nsIDocument.h"
+ #include "mozilla/FunctionTimer.h"
++#include "mozilla/dom/Element.h"
+ #include "nsContentUtils.h"
+ #include "nsIPresShell.h"
+ #include "nsIXMLContentSink.h"
+ #include "nsContentCID.h"
+ #include "nsXMLDocument.h"
+ #include "nsIStreamListener.h"
+ 
+ #include "nsXBLBinding.h"
+diff --git a/content/xbl/src/nsXBLWindowKeyHandler.cpp b/content/xbl/src/nsXBLWindowKeyHandler.cpp
+--- a/content/xbl/src/nsXBLWindowKeyHandler.cpp
++++ b/content/xbl/src/nsXBLWindowKeyHandler.cpp
+@@ -35,17 +35,17 @@
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsCOMPtr.h"
+ #include "nsXBLPrototypeHandler.h"
+ #include "nsXBLWindowKeyHandler.h"
+-#include "nsIContent.h"
++#include "mozilla/dom/Element.h"
+ #include "nsIAtom.h"
+ #include "nsIDOMNSUIEvent.h"
+ #include "nsIDOMKeyEvent.h"
+ #include "nsIDOMEventTarget.h"
+ #include "nsIDOMNSEvent.h"
+ #include "nsXBLService.h"
+ #include "nsIServiceManager.h"
+ #include "nsGkAtoms.h"
+diff --git a/content/xml/document/src/nsXMLDocument.cpp b/content/xml/document/src/nsXMLDocument.cpp
+--- a/content/xml/document/src/nsXMLDocument.cpp
++++ b/content/xml/document/src/nsXMLDocument.cpp
+@@ -37,17 +37,17 @@
+  * ***** END LICENSE BLOCK ***** */
+ 
+ 
+ #include "nsXMLDocument.h"
+ #include "nsParserCIID.h"
+ #include "nsIParser.h"
+ #include "nsIXMLContentSink.h"
+ #include "nsPresContext.h" 
+-#include "nsIContent.h"
++#include "mozilla/dom/Element.h"
+ #include "nsIContentViewerContainer.h"
+ #include "nsIContentViewer.h"
+ #include "nsIDocShell.h"
+ #include "nsIMarkupDocumentViewer.h"
+ #include "nsHTMLParts.h"
+ #include "nsIComponentManager.h"
+ #include "nsIDOMComment.h"
+ #include "nsIDOMElement.h"
+diff --git a/content/xslt/src/xpath/txMozillaXPathTreeWalker.cpp b/content/xslt/src/xpath/txMozillaXPathTreeWalker.cpp
+--- a/content/xslt/src/xpath/txMozillaXPathTreeWalker.cpp
++++ b/content/xslt/src/xpath/txMozillaXPathTreeWalker.cpp
+@@ -50,16 +50,17 @@
+ #include "nsReadableUtils.h"
+ #include "nsString.h"
+ #include "nsTextFragment.h"
+ #include "txXMLUtils.h"
+ #include "txLog.h"
+ #include "nsUnicharUtils.h"
+ #include "nsAttrName.h"
+ #include "nsTArray.h"
++#include "mozilla/dom/Element.h"
+ 
+ const uint32_t kUnknownIndex = uint32_t(-1);
+ 
+ txXPathTreeWalker::txXPathTreeWalker(const txXPathTreeWalker& aOther)
+     : mPosition(aOther.mPosition),
+       mCurrentIndex(aOther.mCurrentIndex)
+ {
+ }
+diff --git a/content/xul/content/src/nsXULPopupListener.cpp b/content/xul/content/src/nsXULPopupListener.cpp
+--- a/content/xul/content/src/nsXULPopupListener.cpp
++++ b/content/xul/content/src/nsXULPopupListener.cpp
+@@ -50,16 +50,17 @@
+ #include "nsIDOMElement.h"
+ #include "nsIDOMXULElement.h"
+ #include "nsIDOMNodeList.h"
+ #include "nsIDOMDocument.h"
+ #include "nsIDOMDocumentXBL.h"
+ #include "nsContentCID.h"
+ #include "nsContentUtils.h"
+ #include "nsXULPopupManager.h"
++#include "mozilla/dom/Element.h"
+ 
+ #include "nsIScriptContext.h"
+ #include "nsIDOMWindowInternal.h"
+ #include "nsIDOMXULDocument.h"
+ #include "nsIDocument.h"
+ #include "nsIDOMNSUIEvent.h"
+ #include "nsIDOMEventTarget.h"
+ #include "nsIDOMNSEvent.h"
+diff --git a/editor/libeditor/base/nsEditor.cpp b/editor/libeditor/base/nsEditor.cpp
+--- a/editor/libeditor/base/nsEditor.cpp
++++ b/editor/libeditor/base/nsEditor.cpp
+@@ -78,17 +78,17 @@
+ #include "nsIPlaintextEditor.h"
+ #include "nsIPrivateDOMEvent.h"
+ #include "nsGUIEvent.h"
+ 
+ #include "nsIFrame.h"  // Needed by IME code
+ 
+ #include "nsCSSStyleSheet.h"
+ 
+-#include "nsIContent.h"
++#include "mozilla/dom/Element.h"
+ #include "nsServiceManagerUtils.h"
+ 
+ // transactions the editor knows how to build
+ #include "EditAggregateTxn.h"
+ #include "PlaceholderTxn.h"
+ #include "ChangeAttributeTxn.h"
+ #include "CreateElementTxn.h"
+ #include "InsertElementTxn.h"
+diff --git a/editor/libeditor/base/nsEditorEventListener.cpp b/editor/libeditor/base/nsEditorEventListener.cpp
+--- a/editor/libeditor/base/nsEditorEventListener.cpp
++++ b/editor/libeditor/base/nsEditorEventListener.cpp
+@@ -55,16 +55,17 @@
+ #include "nsIPrivateTextEvent.h"
+ #include "nsIEditorMailSupport.h"
+ #include "nsIPrefBranch.h"
+ #include "nsIPrefService.h"
+ #include "nsILookAndFeel.h"
+ #include "nsFocusManager.h"
+ #include "nsIEventListenerManager.h"
+ #include "nsIDOMEventGroup.h"
++#include "mozilla/dom/Element.h"
+ 
+ // Drag & Drop, Clipboard
+ #include "nsIServiceManager.h"
+ #include "nsIClipboard.h"
+ #include "nsIDragService.h"
+ #include "nsIDragSession.h"
+ #include "nsIContent.h"
+ #include "nsISupportsPrimitives.h"
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -95,16 +95,17 @@
+ #include "nsPresContext.h"
+ #include "nsXPCOM.h"
+ #include "nsISupportsPrimitives.h"
+ #include "SetDocTitleTxn.h"
+ #include "nsGUIEvent.h"
+ #include "nsTextFragment.h"
+ #include "nsFocusManager.h"
+ #include "nsPIDOMWindow.h"
++#include "mozilla/dom/Element.h"
+ 
+ // netwerk
+ #include "nsIURI.h"
+ #include "nsNetUtil.h"
+ 
+ // Drag & Drop, Clipboard
+ #include "nsIClipboard.h"
+ #include "nsITransferable.h"
+diff --git a/layout/base/nsDocumentViewer.cpp b/layout/base/nsDocumentViewer.cpp
+--- a/layout/base/nsDocumentViewer.cpp
++++ b/layout/base/nsDocumentViewer.cpp
+@@ -42,17 +42,17 @@
+ /* container for a document and its presentation */
+ 
+ #include "nscore.h"
+ #include "nsCOMPtr.h"
+ #include "nsCRT.h"
+ #include "nsString.h"
+ #include "nsReadableUtils.h"
+ #include "nsISupports.h"
+-#include "nsIContent.h"
++#include "mozilla/dom/Element.h"
+ #include "nsIContentViewerContainer.h"
+ #include "nsIDocumentViewer.h"
+ #include "mozilla/FunctionTimer.h"
+ #include "nsIDocumentViewerPrint.h"
+ #include "nsIDOMDocumentEvent.h"
+ #include "nsIPrivateDOMEvent.h"
+ #include "nsIDOMBeforeUnloadEvent.h"
+ #include "nsIDocument.h"
+diff --git a/layout/base/nsFrameManager.cpp b/layout/base/nsFrameManager.cpp
+--- a/layout/base/nsFrameManager.cpp
++++ b/layout/base/nsFrameManager.cpp
+@@ -1,12 +1,11 @@
+-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+- * vim:cindent:ts=2:et:sw=2:
+- *
+- * ***** BEGIN LICENSE BLOCK *****
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim:cindent:ts=2:et:sw=2: */
++/* ***** BEGIN LICENSE BLOCK *****
+  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+  *
+  * The contents of this file are subject to the Mozilla Public License Version
+  * 1.1 (the "License"); you may not use this file except in compliance with
+  * the License. You may obtain a copy of the License at
+  * http://www.mozilla.org/MPL/
+  *
+  * Software distributed under the License is distributed on an "AS IS" basis,
+@@ -64,17 +63,17 @@
+ #include "nsGkAtoms.h"
+ #include "nsCSSAnonBoxes.h"
+ #include "nsCSSPseudoElements.h"
+ #ifdef NS_DEBUG
+ #include "nsIStyleRule.h"
+ #endif
+ #include "nsILayoutHistoryState.h"
+ #include "nsPresState.h"
+-#include "nsIContent.h"
++#include "mozilla/dom/Element.h"
+ #include "nsINameSpaceManager.h"
+ #include "nsIDocument.h"
+ #include "nsIScrollableFrame.h"
+ 
+ #include "nsIHTMLDocument.h"
+ #include "nsIDOMHTMLDocument.h"
+ #include "nsIDOMNodeList.h"
+ #include "nsIDOMHTMLCollection.h"
+diff --git a/layout/forms/nsButtonFrameRenderer.cpp b/layout/forms/nsButtonFrameRenderer.cpp
+--- a/layout/forms/nsButtonFrameRenderer.cpp
++++ b/layout/forms/nsButtonFrameRenderer.cpp
+@@ -40,16 +40,17 @@
+ #include "nsPresContext.h"
+ #include "nsGkAtoms.h"
+ #include "nsCSSPseudoElements.h"
+ #include "nsINameSpaceManager.h"
+ #include "nsStyleSet.h"
+ #include "nsDisplayList.h"
+ #include "nsITheme.h"
+ #include "nsThemeConstants.h"
++#include "mozilla/dom/Element.h"
+ 
+ #define ACTIVE   "active"
+ #define HOVER    "hover"
+ #define FOCUS    "focus"
+ 
+ nsButtonFrameRenderer::nsButtonFrameRenderer()
+ {
+   MOZ_COUNT_CTOR(nsButtonFrameRenderer);
+diff --git a/layout/generic/nsImageFrame.cpp b/layout/generic/nsImageFrame.cpp
+--- a/layout/generic/nsImageFrame.cpp
++++ b/layout/generic/nsImageFrame.cpp
+@@ -79,16 +79,17 @@
+ #ifdef ACCESSIBILITY
+ #include "nsIAccessibilityService.h"
+ #endif
+ #include "nsIServiceManager.h"
+ #include "nsIDOMNode.h"
+ #include "nsGUIEvent.h"
+ #include "nsLayoutUtils.h"
+ #include "nsDisplayList.h"
++#include "mozilla/dom/Element.h"
+ 
+ #include "imgIContainer.h"
+ #include "imgILoader.h"
+ 
+ #include "nsContentPolicyUtils.h"
+ #include "nsCSSFrameConstructor.h"
+ #include "nsIPrefBranch2.h"
+ #include "nsIPrefService.h"
+diff --git a/layout/generic/nsSelection.cpp b/layout/generic/nsSelection.cpp
+--- a/layout/generic/nsSelection.cpp
++++ b/layout/generic/nsSelection.cpp
+@@ -51,16 +51,17 @@
+ #include "nsISelection.h"
+ #include "nsISelection2.h"
+ #include "nsISelection3.h"
+ #include "nsISelectionPrivate.h"
+ #include "nsISelectionListener.h"
+ #include "nsIComponentManager.h"
+ #include "nsContentCID.h"
+ #include "nsIContent.h"
++#include "mozilla/dom/Element.h"
+ #include "nsIDOMElement.h"
+ #include "nsIDOMNode.h"
+ #include "nsRange.h"
+ #include "nsCOMArray.h"
+ #include "nsGUIEvent.h"
+ #include "nsIDOMKeyEvent.h"
+ #include "nsITableLayout.h"
+ #include "nsITableCellLayout.h"
+diff --git a/layout/inspector/src/inDOMUtils.cpp b/layout/inspector/src/inDOMUtils.cpp
+--- a/layout/inspector/src/inDOMUtils.cpp
++++ b/layout/inspector/src/inDOMUtils.cpp
+@@ -52,16 +52,17 @@
+ #include "nsICSSStyleRuleDOMWrapper.h"
+ #include "nsIDOMWindowInternal.h"
+ #include "nsXBLBinding.h"
+ #include "nsXBLPrototypeBinding.h"
+ #include "nsIDOMElement.h"
+ #include "nsIMutableArray.h"
+ #include "nsBindingManager.h"
+ #include "nsComputedDOMStyle.h"
++#include "mozilla/dom/Element.h"
+ 
+ ///////////////////////////////////////////////////////////////////////////////
+ 
+ inDOMUtils::inDOMUtils()
+ {
+ }
+ 
+ inDOMUtils::~inDOMUtils()
+diff --git a/layout/style/nsStyleAnimation.cpp b/layout/style/nsStyleAnimation.cpp
+--- a/layout/style/nsStyleAnimation.cpp
++++ b/layout/style/nsStyleAnimation.cpp
+@@ -47,16 +47,17 @@
+ #include "nsStyleContext.h"
+ #include "nsStyleSet.h"
+ #include "nsComputedDOMStyle.h"
+ #include "nsCSSParser.h"
+ #include "mozilla/css/Declaration.h"
+ #include "nsCSSStruct.h"
+ #include "prlog.h"
+ #include <math.h>
++#include "mozilla/dom/Element.h"
+ 
+ namespace css = mozilla::css;
+ 
+ // HELPER METHODS
+ // --------------
+ /*
+  * Given two units, this method returns a common unit that they can both be
+  * converted into, if possible.  This is intended to facilitate
+diff --git a/layout/style/nsTransitionManager.cpp b/layout/style/nsTransitionManager.cpp
+--- a/layout/style/nsTransitionManager.cpp
++++ b/layout/style/nsTransitionManager.cpp
+@@ -38,16 +38,17 @@
+ 
+ /* Code to start and animate CSS transitions. */
+ 
+ #include "nsTransitionManager.h"
+ #include "nsIContent.h"
+ #include "nsStyleContext.h"
+ #include "nsCSSProps.h"
+ #include "mozilla/TimeStamp.h"
++#include "mozilla/dom/Element.h"
+ #include "nsRefreshDriver.h"
+ #include "nsRuleProcessorData.h"
+ #include "nsIStyleRule.h"
+ #include "nsRuleWalker.h"
+ #include "nsRuleData.h"
+ #include "nsSMILKeySpline.h"
+ #include "gfxColor.h"
+ #include "nsCSSPropertySet.h"
+diff --git a/layout/xul/base/src/nsListBoxBodyFrame.cpp b/layout/xul/base/src/nsListBoxBodyFrame.cpp
+--- a/layout/xul/base/src/nsListBoxBodyFrame.cpp
++++ b/layout/xul/base/src/nsListBoxBodyFrame.cpp
+@@ -66,16 +66,17 @@
+ #include "nsStyleSet.h"
+ #include "nsIDOMNSDocument.h"
+ #include "nsPIBoxObject.h"
+ #include "nsINodeInfo.h"
+ #include "nsLayoutUtils.h"
+ #include "nsPIListBoxObject.h"
+ #include "nsContentUtils.h"
+ #include "nsChildIterator.h"
++#include "mozilla/dom/Element.h"
+ 
+ /////////////// nsListScrollSmoother //////////////////
+ 
+ /* A mediator used to smooth out scrolling. It works by seeing if 
+  * we have time to scroll the amount of rows requested. This is determined
+  * by measuring how long it takes to scroll a row. If we can scroll the 
+  * rows in time we do so. If not we start a timer and skip the request. We
+  * do this until the timer finally first because the user has stopped moving
+diff --git a/layout/xul/base/src/nsResizerFrame.cpp b/layout/xul/base/src/nsResizerFrame.cpp
+--- a/layout/xul/base/src/nsResizerFrame.cpp
++++ b/layout/xul/base/src/nsResizerFrame.cpp
+@@ -34,17 +34,17 @@
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsCOMPtr.h"
+ #include "nsIServiceManager.h"
+ #include "nsResizerFrame.h"
+-#include "nsIContent.h"
++#include "mozilla/dom/Element.h"
+ #include "nsIDocument.h"
+ #include "nsIDOMXULDocument.h"
+ #include "nsIDOMNodeList.h"
+ #include "nsGkAtoms.h"
+ #include "nsINameSpaceManager.h"
+ #include "nsIDOMElementCSSInlineStyle.h"
+ #include "nsIDOMCSSStyleDeclaration.h"
+ 
+diff --git a/layout/xul/base/src/nsSplitterFrame.cpp b/layout/xul/base/src/nsSplitterFrame.cpp
+--- a/layout/xul/base/src/nsSplitterFrame.cpp
++++ b/layout/xul/base/src/nsSplitterFrame.cpp
+@@ -67,16 +67,17 @@
+ #include "nsHTMLContainerFrame.h"
+ #include "nsGUIEvent.h"
+ #include "nsAutoPtr.h"
+ #include "nsContentCID.h"
+ #include "nsStyleSet.h"
+ #include "nsLayoutUtils.h"
+ #include "nsDisplayList.h"
+ #include "nsContentUtils.h"
++#include "mozilla/dom/Element.h"
+ 
+ class nsSplitterInfo {
+ public:
+   nscoord min;
+   nscoord max;
+   nscoord current;
+   nscoord changed;
+   nsCOMPtr<nsIContent> childElem;
+diff --git a/layout/xul/base/src/nsXULTooltipListener.cpp b/layout/xul/base/src/nsXULTooltipListener.cpp
+--- a/layout/xul/base/src/nsXULTooltipListener.cpp
++++ b/layout/xul/base/src/nsXULTooltipListener.cpp
+@@ -56,16 +56,17 @@
+ #include "nsIScriptContext.h"
+ #include "nsPIDOMWindow.h"
+ #include "nsContentUtils.h"
+ #ifdef MOZ_XUL
+ #include "nsXULPopupManager.h"
+ #endif
+ #include "nsIRootBox.h"
+ #include "nsEventDispatcher.h"
++#include "mozilla/dom/Element.h"
+ 
+ nsXULTooltipListener* nsXULTooltipListener::mInstance = nullptr;
+ 
+ //////////////////////////////////////////////////////////////////////////
+ //// nsISupports
+ 
+ nsXULTooltipListener::nsXULTooltipListener()
+   : mMouseScreenX(0)
+diff --git a/layout/xul/base/src/tree/src/nsTreeStyleCache.cpp b/layout/xul/base/src/tree/src/nsTreeStyleCache.cpp
+--- a/layout/xul/base/src/tree/src/nsTreeStyleCache.cpp
++++ b/layout/xul/base/src/tree/src/nsTreeStyleCache.cpp
+@@ -35,16 +35,17 @@
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsTreeStyleCache.h"
+ #include "nsISupportsArray.h"
+ #include "nsStyleSet.h"
++#include "mozilla/dom/Element.h"
+ 
+ // The style context cache impl
+ nsStyleContext*
+ nsTreeStyleCache::GetStyleContext(nsICSSPseudoComparator* aComparator,
+                                   nsPresContext* aPresContext,
+                                   nsIContent* aContent, 
+                                   nsStyleContext* aContext,
+                                   nsIAtom* aPseudoElement,
+diff --git a/toolkit/components/typeaheadfind/src/nsTypeAheadFind.cpp b/toolkit/components/typeaheadfind/src/nsTypeAheadFind.cpp
+--- a/toolkit/components/typeaheadfind/src/nsTypeAheadFind.cpp
++++ b/toolkit/components/typeaheadfind/src/nsTypeAheadFind.cpp
+@@ -34,16 +34,18 @@
+  * use your version of this file under the terms of the MPL, indicate your
+  * decision by deleting the provisions above and replace them with the notice
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
++#include "nsTypeAheadFind.h"
++
+ #include "nsCOMPtr.h"
+ #include "nsMemory.h"
+ #include "nsIServiceManager.h"
+ #include "mozilla/ModuleUtils.h"
+ #include "nsIWebBrowserChrome.h"
+ #include "nsCURILoader.h"
+ #include "nsNetUtil.h"
+ #include "nsIURL.h"
+@@ -86,17 +88,17 @@
+ #include "nsLayoutCID.h"
+ #include "nsWidgetsCID.h"
+ #include "nsIFormControl.h"
+ #include "nsINameSpaceManager.h"
+ #include "nsIWindowWatcher.h"
+ #include "nsIObserverService.h"
+ #include "nsFocusManager.h"
+ 
+-#include "nsTypeAheadFind.h"
++#include "mozilla/dom/Element.h"
+ 
+ NS_INTERFACE_MAP_BEGIN(nsTypeAheadFind)
+   NS_INTERFACE_MAP_ENTRY(nsITypeAheadFind)
+   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsITypeAheadFind)
+   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
+   NS_INTERFACE_MAP_ENTRY(nsIObserver)
+ NS_INTERFACE_MAP_END
+ 

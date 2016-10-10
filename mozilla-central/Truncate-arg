@@ -1,0 +1,2356 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/caps/src/nsPrincipal.cpp b/caps/src/nsPrincipal.cpp
+--- a/caps/src/nsPrincipal.cpp
++++ b/caps/src/nsPrincipal.cpp
+@@ -1017,28 +1017,28 @@ nsPrincipal::GetPreferences(char** aPref
+   if (mCapabilities) {
+     CapabilityList capList = CapabilityList();
+     capList.granted = &grantedListStr;
+     capList.denied = &deniedListStr;
+     mCapabilities->Enumerate(AppendCapability, (void*)&capList);
+   }
+ 
+   if (!grantedListStr.IsEmpty()) {
+-    grantedListStr.Truncate(grantedListStr.Length() - 1);
++    grantedListStr.SetLength(grantedListStr.Length() - 1);
+     granted = ToNewCString(grantedListStr);
+     if (!granted) {
+       nsMemory::Free(prefName);
+       nsMemory::Free(id);
+       nsMemory::Free(subjectName);
+       return NS_ERROR_OUT_OF_MEMORY;
+     }
+   }
+ 
+   if (!deniedListStr.IsEmpty()) {
+-    deniedListStr.Truncate(deniedListStr.Length() - 1);
++    deniedListStr.SetLength(deniedListStr.Length() - 1);
+     denied = ToNewCString(deniedListStr);
+     if (!denied) {
+       nsMemory::Free(prefName);
+       nsMemory::Free(id);
+       nsMemory::Free(subjectName);
+       if (granted) {
+         nsMemory::Free(granted);
+       }
+diff --git a/content/base/src/nsPlainTextSerializer.cpp b/content/base/src/nsPlainTextSerializer.cpp
+--- a/content/base/src/nsPlainTextSerializer.cpp
++++ b/content/base/src/nsPlainTextSerializer.cpp
+@@ -1415,17 +1415,17 @@ nsPlainTextSerializer::AddToLine(const P
+         if (nsCRT::IsAsciiSpace(mCurrentLine.CharAt(goodSpace))) {
+           mCurrentLine.Right(restOfLine, linelength-goodSpace-1);
+         }
+         else {
+           mCurrentLine.Right(restOfLine, linelength-goodSpace);
+         }
+         // if breaker was U+0020, it has to consider for delsp=yes support
+         bool breakBySpace = mCurrentLine.CharAt(goodSpace) == ' ';
+-        mCurrentLine.Truncate(goodSpace); 
++        mCurrentLine.SetLength(goodSpace); 
+         EndLine(true, breakBySpace);
+         mCurrentLine.Truncate();
+         // Space stuff new line?
+         if(mFlags & nsIDocumentEncoder::OutputFormatFlowed) {
+           if(!restOfLine.IsEmpty() && IsSpaceStuffable(restOfLine.get())
+               && mCiteQuoteLevel == 0  // We space-stuff quoted lines anyway
+             )
+           {
+diff --git a/content/base/src/nsScriptLoader.cpp b/content/base/src/nsScriptLoader.cpp
+--- a/content/base/src/nsScriptLoader.cpp
++++ b/content/base/src/nsScriptLoader.cpp
+@@ -704,17 +704,17 @@ nsScriptLoader::ProcessScriptElement(nsI
+       nsIURI* uri = mDocument->GetDocumentURI();
+       nsAutoCString asciiSpec;
+       uri->GetAsciiSpec(asciiSpec);
+       nsAutoString scriptText;
+       aElement->GetScriptText(scriptText);
+ 
+       // cap the length of the script sample at 40 chars
+       if (scriptText.Length() > 40) {
+-        scriptText.Truncate(40);
++        scriptText.SetLength(40);
+         scriptText.Append(NS_LITERAL_STRING("..."));
+       }
+ 
+       csp->LogViolationDetails(nsIContentSecurityPolicy::VIOLATION_TYPE_INLINE_SCRIPT,
+                                NS_ConvertUTF8toUTF16(asciiSpec),
+                                scriptText,
+                                aElement->GetScriptLineNumber());
+       return false;
+diff --git a/content/base/src/nsXHTMLContentSerializer.cpp b/content/base/src/nsXHTMLContentSerializer.cpp
+--- a/content/base/src/nsXHTMLContentSerializer.cpp
++++ b/content/base/src/nsXHTMLContentSerializer.cpp
+@@ -215,17 +215,17 @@ nsXHTMLContentSerializer::EscapeURI(nsIC
+     textToSubURI = do_GetService(NS_ITEXTTOSUBURI_CONTRACTID, &rv);
+     NS_ENSURE_SUCCESS(rv, rv);
+   }
+ 
+   int32_t start = 0;
+   int32_t end;
+   nsAutoString part;
+   nsXPIDLCString escapedURI;
+-  aEscapedURI.Truncate(0);
++  aEscapedURI.Truncate();
+ 
+   // Loop and escape parts by avoiding escaping reserved characters
+   // (and '%', '#', as well as '[' and ']' for IPv6 address literals).
+   while ((end = uri.FindCharInSet("%#;/?:@&=+$,[]", start)) != -1) {
+     part = Substring(aURI, start, (end-start));
+     if (textToSubURI && !IsASCII(part)) {
+       rv = textToSubURI->ConvertAndEscape(mCharset.get(), part.get(), getter_Copies(escapedURI));
+       NS_ENSURE_SUCCESS(rv, rv);
+diff --git a/content/html/content/src/nsFormSubmission.cpp b/content/html/content/src/nsFormSubmission.cpp
+--- a/content/html/content/src/nsFormSubmission.cpp
++++ b/content/html/content/src/nsFormSubmission.cpp
+@@ -355,24 +355,24 @@ nsFSURLEncoded::GetEncodedSubmission(nsI
+       nsAutoCString path;
+       rv = aURI->GetPath(path);
+       NS_ENSURE_SUCCESS(rv, rv);
+       // Bug 42616: Trim off named anchor and save it to add later
+       int32_t namedAnchorPos = path.FindChar('#');
+       nsAutoCString namedAnchor;
+       if (kNotFound != namedAnchorPos) {
+         path.Right(namedAnchor, (path.Length() - namedAnchorPos));
+-        path.Truncate(namedAnchorPos);
++        path.SetLength(namedAnchorPos);
+       }
+ 
+       // Chop off old query string (bug 25330, 57333)
+       // Only do this for GET not POST (bug 41585)
+       int32_t queryStart = path.FindChar('?');
+       if (kNotFound != queryStart) {
+-        path.Truncate(queryStart);
++        path.SetLength(queryStart);
+       }
+ 
+       path.Append('?');
+       // Bug 42616: Add named anchor to end after query string
+       path.Append(mQueryString + namedAnchor);
+ 
+       aURI->SetPath(path);
+     }
+diff --git a/content/html/content/src/nsHTMLFontElement.cpp b/content/html/content/src/nsHTMLFontElement.cpp
+--- a/content/html/content/src/nsHTMLFontElement.cpp
++++ b/content/html/content/src/nsHTMLFontElement.cpp
+@@ -158,17 +158,17 @@ nsHTMLFontElement::ParseAttribute(PRInt3
+           if (aResult.ParseEnumValue(aValue, kRelFontSizeTable, false))
+               return true;
+ 
+           // truncate after digit, then parse it again.
+           uint32_t i;
+           for (i = 1; i < tmp.Length(); i++) {
+               ch = tmp.CharAt(i);
+               if (!nsCRT::IsAsciiDigit(ch)) {
+-                  tmp.Truncate(i);
++                  tmp.SetLength(i);
+                   break;
+               }
+           }
+           return aResult.ParseEnumValue(tmp, kRelFontSizeTable, false);
+       }
+ 
+       return aResult.ParseIntValue(aValue);
+     }
+diff --git a/content/html/content/src/nsHTMLInputElement.cpp b/content/html/content/src/nsHTMLInputElement.cpp
+--- a/content/html/content/src/nsHTMLInputElement.cpp
++++ b/content/html/content/src/nsHTMLInputElement.cpp
+@@ -3876,17 +3876,17 @@ nsHTMLInputElement::GetValidationMessage
+       nsAutoString title;
+       GetAttr(kNameSpaceID_None, nsGkAtoms::title, title);
+       if (title.IsEmpty()) {
+         rv = nsContentUtils::GetLocalizedString(nsContentUtils::eDOM_PROPERTIES,
+                                                 "FormValidationPatternMismatch",
+                                                 message);
+       } else {
+         if (title.Length() > nsIConstraintValidation::sContentSpecifiedMaxLengthMessage) {
+-          title.Truncate(nsIConstraintValidation::sContentSpecifiedMaxLengthMessage);
++          title.SetLength(nsIConstraintValidation::sContentSpecifiedMaxLengthMessage);
+         }
+         const PRUnichar* params[] = { title.get() };
+         rv = nsContentUtils::FormatLocalizedString(nsContentUtils::eDOM_PROPERTIES,
+                                                    "FormValidationPatternMismatchWithTitle",
+                                                    params, 1, message);
+       }
+       aValidationMessage = message;
+       break;
+diff --git a/content/html/content/src/nsIConstraintValidation.cpp b/content/html/content/src/nsIConstraintValidation.cpp
+--- a/content/html/content/src/nsIConstraintValidation.cpp
++++ b/content/html/content/src/nsIConstraintValidation.cpp
+@@ -85,22 +85,22 @@ nsIConstraintValidation::GetValidationMe
+ 
+     nsAutoString authorMessage;
+     content->GetAttr(kNameSpaceID_None, nsGkAtoms::x_moz_errormessage,
+                      authorMessage);
+ 
+     if (!authorMessage.IsEmpty()) {
+       aValidationMessage.Assign(authorMessage);
+       if (aValidationMessage.Length() > sContentSpecifiedMaxLengthMessage) {
+-        aValidationMessage.Truncate(sContentSpecifiedMaxLengthMessage);
++        aValidationMessage.SetLength(sContentSpecifiedMaxLengthMessage);
+       }
+     } else if (GetValidityState(VALIDITY_STATE_CUSTOM_ERROR)) {
+       aValidationMessage.Assign(mCustomValidity);
+       if (aValidationMessage.Length() > sContentSpecifiedMaxLengthMessage) {
+-        aValidationMessage.Truncate(sContentSpecifiedMaxLengthMessage);
++        aValidationMessage.SetLength(sContentSpecifiedMaxLengthMessage);
+       }
+     } else if (GetValidityState(VALIDITY_STATE_TOO_LONG)) {
+       GetValidationMessage(aValidationMessage, VALIDITY_STATE_TOO_LONG);
+     } else if (GetValidityState(VALIDITY_STATE_VALUE_MISSING)) {
+       GetValidationMessage(aValidationMessage, VALIDITY_STATE_VALUE_MISSING);
+     } else if (GetValidityState(VALIDITY_STATE_TYPE_MISMATCH)) {
+       GetValidationMessage(aValidationMessage, VALIDITY_STATE_TYPE_MISMATCH);
+     } else if (GetValidityState(VALIDITY_STATE_PATTERN_MISMATCH)) {
+diff --git a/content/html/document/src/nsHTMLContentSink.cpp b/content/html/document/src/nsHTMLContentSink.cpp
+--- a/content/html/document/src/nsHTMLContentSink.cpp
++++ b/content/html/document/src/nsHTMLContentSink.cpp
+@@ -2305,17 +2305,17 @@ HTMLContentSink::AddDocTypeDecl(const ns
+           hasQuote = true;
+         }
+ 
+         /*
+          * If we didn't find a closing quote or a '>' we leave publicId as
+          * it is.
+          */
+         if (end >= 0) {
+-          publicId.Truncate(end);
++          publicId.SetLength(end);
+         }
+       } else {
+         // No quotes, ignore the public id
+         publicId.Truncate();
+       }
+ 
+       /*
+        * Make sure the 'SYSTEM' word we found is not inside the pubilc id
+@@ -2363,17 +2363,17 @@ HTMLContentSink::AddDocTypeDecl(const ns
+           // cut of the '>' on the end of the doctype declaration
+ 
+           end = systemId.FindChar('>');
+         }
+ 
+         // If we found an closing quote nor a '>' we truncate systemId
+         // at that length.
+         if (end >= 0) {
+-          systemId.Truncate(end);
++          systemId.SetLength(end);
+         }
+       } else {
+         systemId.Truncate();
+       }
+     }
+   } else {
+     name.Assign(docTypeStr);
+   }
+@@ -2412,30 +2412,30 @@ HTMLContentSink::AddDocTypeDecl(const ns
+       if (publicEnd < 0) {
+         publicEnd = publicId.FindChar('>');
+       }
+ 
+       if (publicEnd < 0) {
+         publicEnd = publicId.Length();
+       }
+ 
+-      publicId.Truncate(publicEnd);
++      publicId.SetLength(publicEnd);
+     } else {
+       // No quotes, no public id
+       publicId.Truncate();
+     }
+   }
+ 
+   if (nameEnd >= 0) {
+-    name.Truncate(nameEnd);
++    name.SetLength(nameEnd);
+   } else {
+     nameEnd = name.FindChar('>');
+ 
+     if (nameEnd >= 0) {
+-      name.Truncate(nameEnd);
++      name.SetLength(nameEnd);
+     }
+   }
+ 
+   if (!publicId.IsEmpty() || !systemId.IsEmpty() || !name.IsEmpty()) {
+     nsCOMPtr<nsIDOMDocumentType> oldDocType;
+     nsCOMPtr<nsIDOMDocumentType> docType;
+ 
+     nsCOMPtr<nsIDOMDocument> doc(do_QueryInterface(mHTMLDocument));
+diff --git a/content/xbl/src/nsXBLProtoImplMethod.cpp b/content/xbl/src/nsXBLProtoImplMethod.cpp
+--- a/content/xbl/src/nsXBLProtoImplMethod.cpp
++++ b/content/xbl/src/nsXBLProtoImplMethod.cpp
+@@ -225,17 +225,17 @@ nsXBLProtoImplMethod::CompileMember(nsIS
+     body.Rebind(bodyText);
+ 
+   // Now that we have a body and args, compile the function
+   // and then define it.
+   NS_ConvertUTF16toUTF8 cname(mName);
+   nsAutoCString functionUri(aClassStr);
+   int32_t hash = functionUri.RFindChar('#');
+   if (hash != kNotFound) {
+-    functionUri.Truncate(hash);
++    functionUri.SetLength(hash);
+   }
+ 
+   JSObject* methodObject = nullptr;
+   nsresult rv = aContext->CompileFunction(aClassObject,
+                                           cname,
+                                           paramCount,
+                                           const_cast<const char**>(args),
+                                           body, 
+diff --git a/content/xbl/src/nsXBLProtoImplProperty.cpp b/content/xbl/src/nsXBLProtoImplProperty.cpp
+--- a/content/xbl/src/nsXBLProtoImplProperty.cpp
++++ b/content/xbl/src/nsXBLProtoImplProperty.cpp
+@@ -232,17 +232,17 @@ nsXBLProtoImplProperty::CompileMember(ns
+   // We have a property.
+   nsresult rv = NS_OK;
+ 
+   nsAutoCString functionUri;
+   if (mGetterText || mSetterText) {
+     functionUri = aClassStr;
+     int32_t hash = functionUri.RFindChar('#');
+     if (hash != kNotFound) {
+-      functionUri.Truncate(hash);
++      functionUri.SetLength(hash);
+     }
+   }
+ 
+   bool deletedGetter = false;
+   if (mGetterText && mGetterText->GetText()) {
+     nsDependentString getter(mGetterText->GetText());
+     if (!getter.IsEmpty()) {
+       // Compile into a temp object so we don't wipe out mGetterText
+diff --git a/content/xslt/src/xslt/txFormatNumberFunctionCall.cpp b/content/xslt/src/xslt/txFormatNumberFunctionCall.cpp
+--- a/content/xslt/src/xslt/txFormatNumberFunctionCall.cpp
++++ b/content/xslt/src/xslt/txFormatNumberFunctionCall.cpp
+@@ -348,26 +348,26 @@ txFormatNumberFunctionCall::evaluate(txI
+         }
+ 
+         if (hasFraction || digit != 0 || i < bufIntDigits+minFractionSize) {
+             hasFraction = true;
+             res.SetCharAt((PRUnichar)(digit + format->mZeroDigit),
+                           resPos--);
+         }
+         else {
+-            res.Truncate(resPos--);
++            res.SetLength(resPos--);
+         }
+     }
+ 
+     // Decimal separator
+     if (hasFraction) {
+         res.SetCharAt(format->mDecimalSeparator, resPos--);
+     }
+     else {
+-        res.Truncate(resPos--);
++        res.SetLength(resPos--);
+     }
+ 
+     // Integer digits
+     for (i = 0; i < intDigits; ++i) {
+         int digit;
+         if (bufIntDigits-i-1 >= buflen || bufIntDigits-i-1 < 0) {
+             digit = 0;
+         }
+diff --git a/content/xul/document/src/nsXULDocument.cpp b/content/xul/document/src/nsXULDocument.cpp
+--- a/content/xul/document/src/nsXULDocument.cpp
++++ b/content/xul/document/src/nsXULDocument.cpp
+@@ -1420,17 +1420,17 @@ nsXULDocument::Persist(nsIContent* aElem
+     nsAutoString valuestr;
+     aElement->GetAttr(kNameSpaceID_None, aAttribute, valuestr);
+ 
+     // prevent over-long attributes that choke the parser (bug 319846)
+     // (can't simply Truncate without testing, it's implemented
+     // using SetLength and will grow a short string)
+     if (valuestr.Length() > kMaxAttributeLength) {
+         NS_WARNING("Truncating persisted attribute value");
+-        valuestr.Truncate(kMaxAttributeLength);
++        valuestr.SetLength(kMaxAttributeLength);
+     }
+ 
+     // See if there was an old value...
+     nsCOMPtr<nsIRDFNode> oldvalue;
+     rv = mLocalStore->GetTarget(element, attr, true, getter_AddRefs(oldvalue));
+     if (NS_FAILED(rv)) return rv;
+ 
+     if (oldvalue && valuestr.IsEmpty()) {
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -5129,17 +5129,17 @@ nsGlobalWindow::Home()
+     // prevent any possibilities of leaking the users list of home
+     // pages to the first home page.
+     //
+     // Once bug https://bugzilla.mozilla.org/show_bug.cgi?id=221445 is
+     // fixed we can revisit this.
+     int32_t firstPipe = homeURL.FindChar('|');
+ 
+     if (firstPipe > 0) {
+-      homeURL.Truncate(firstPipe);
++      homeURL.SetLength(firstPipe);
+     }
+   }
+ #endif
+ 
+   nsresult rv;
+   nsCOMPtr<nsIWebNavigation> webNav(do_QueryInterface(mDocShell));
+   NS_ENSURE_TRUE(webNav, NS_ERROR_FAILURE);
+   rv = webNav->LoadURI(homeURL.get(),
+diff --git a/dom/indexedDB/Key.h b/dom/indexedDB/Key.h
+--- a/dom/indexedDB/Key.h
++++ b/dom/indexedDB/Key.h
+@@ -282,17 +282,17 @@ private:
+   // step.
+   void TrimBuffer()
+   {
+     const char* end = mBuffer.EndReading() - 1;
+     while (!*end) {
+       --end;
+     }
+ 
+-    mBuffer.Truncate(end + 1 - mBuffer.BeginReading());
++    mBuffer.SetLength(end + 1 - mBuffer.BeginReading());
+   }
+ 
+   // Encoding functions. These append the encoded value to the end of mBuffer
+   nsresult EncodeJSVal(JSContext* aCx, const jsval aVal, uint8_t aTypeOffset);
+   void EncodeString(const nsAString& aString, uint8_t aTypeOffset);
+   void EncodeNumber(double aFloat, uint8_t aType);
+ 
+   // Decoding functions. aPos points into mBuffer and is adjusted to point
+diff --git a/dom/ipc/TabParent.cpp b/dom/ipc/TabParent.cpp
+--- a/dom/ipc/TabParent.cpp
++++ b/dom/ipc/TabParent.cpp
+@@ -379,17 +379,17 @@ TabParent::RecvNotifyIMEFocus(const bool
+   if (aFocus) {
+     if (NS_SUCCEEDED(rv) && rv != NS_SUCCESS_IME_NO_UPDATES) {
+       *aPreference = widget->GetIMEUpdatePreference();
+     } else {
+       aPreference->mWantUpdates = false;
+       aPreference->mWantHints = false;
+     }
+   } else {
+-    mIMECacheText.Truncate(0);
++    mIMECacheText.Truncate();
+   }
+   return true;
+ }
+ 
+ bool
+ TabParent::RecvNotifyIMETextChange(const uint32_t& aStart,
+                                    const uint32_t& aEnd,
+                                    const uint32_t& aNewEnd)
+@@ -449,17 +449,17 @@ TabParent::HandleQueryContentEvent(nsQue
+   aEvent.mReply.mFocusedWidget = nsCOMPtr<nsIWidget>(GetWidget()).get();
+ 
+   switch (aEvent.message)
+   {
+   case NS_QUERY_SELECTED_TEXT:
+     {
+       aEvent.mReply.mOffset = NS_MIN(mIMESelectionAnchor, mIMESelectionFocus);
+       if (mIMESelectionAnchor == mIMESelectionFocus) {
+-        aEvent.mReply.mString.Truncate(0);
++        aEvent.mReply.mString.Truncate();
+       } else {
+         if (mIMESelectionAnchor > mIMECacheText.Length() ||
+             mIMESelectionFocus > mIMECacheText.Length()) {
+           break;
+         }
+         uint32_t selLen = mIMESelectionAnchor > mIMESelectionFocus ?
+                           mIMESelectionAnchor - mIMESelectionFocus :
+                           mIMESelectionFocus - mIMESelectionAnchor;
+@@ -554,17 +554,17 @@ TabParent::RecvEndIMEComposition(const b
+   if (aCancel) {
+     widget->CancelIMEComposition();
+   } else {
+     widget->ResetInputState();
+   }
+ 
+   mIMECompositionEnding = false;
+   *aComposition = mIMECompositionText;
+-  mIMECompositionText.Truncate(0);  
++  mIMECompositionText.Truncate();
+   return true;
+ }
+ 
+ bool
+ TabParent::RecvGetInputContext(int32_t* aIMEEnabled,
+                                int32_t* aIMEOpen)
+ {
+   nsCOMPtr<nsIWidget> widget = GetWidget();
+diff --git a/editor/libeditor/base/nsEditor.cpp b/editor/libeditor/base/nsEditor.cpp
+--- a/editor/libeditor/base/nsEditor.cpp
++++ b/editor/libeditor/base/nsEditor.cpp
+@@ -1921,17 +1921,17 @@ nsEditor::StopPreservingSelection()
+ }
+ 
+ 
+ nsresult
+ nsEditor::BeginIMEComposition()
+ {
+   mInIMEMode = true;
+   if (mPhonetic) {
+-    mPhonetic->Truncate(0);
++    mPhonetic->Truncate();
+   }
+   return NS_OK;
+ }
+ 
+ nsresult
+ nsEditor::EndIMEComposition()
+ {
+   NS_ENSURE_TRUE(mInIMEMode, NS_OK); // nothing to do
+@@ -1967,17 +1967,17 @@ nsEditor::EndIMEComposition()
+ 
+ 
+ NS_IMETHODIMP
+ nsEditor::GetPhonetic(nsAString& aPhonetic)
+ {
+   if (mPhonetic)
+     aPhonetic = *mPhonetic;
+   else
+-    aPhonetic.Truncate(0);
++    aPhonetic.Truncate();
+ 
+   return NS_OK;
+ }
+ 
+ 
+ static nsresult
+ GetEditorContentWindow(dom::Element *aRoot, nsIWidget **aResult)
+ {
+diff --git a/editor/libeditor/html/nsHTMLEditRules.cpp b/editor/libeditor/html/nsHTMLEditRules.cpp
+--- a/editor/libeditor/html/nsHTMLEditRules.cpp
++++ b/editor/libeditor/html/nsHTMLEditRules.cpp
+@@ -1056,17 +1056,17 @@ nsHTMLEditRules::GetIndentState(bool *aC
+ 
+ nsresult 
+ nsHTMLEditRules::GetParagraphState(bool *aMixed, nsAString &outFormat)
+ {
+   // This routine is *heavily* tied to our ui choices in the paragraph
+   // style popup.  I can't see a way around that.
+   NS_ENSURE_TRUE(aMixed, NS_ERROR_NULL_POINTER);
+   *aMixed = true;
+-  outFormat.Truncate(0);
++  outFormat.Truncate();
+   
+   bool bMixed = false;
+   // using "x" as an uninitialized value, since "" is meaningful
+   nsAutoString formatStr(NS_LITERAL_STRING("x")); 
+   
+   nsCOMArray<nsIDOMNode> arrayOfNodes;
+   nsresult res = GetParagraphFormatNodes(arrayOfNodes, true);
+   NS_ENSURE_SUCCESS(res, res);
+@@ -1129,17 +1129,17 @@ nsHTMLEditRules::GetParagraphState(bool 
+     else
+     {
+       nsCOMPtr<nsIDOMNode> node, tmp = curNode;
+       tmp->GetParentNode(getter_AddRefs(node));
+       while (node)
+       {
+         if (node == rootElem)
+         {
+-          format.Truncate(0);
++          format.Truncate();
+           break;
+         }
+         else if (nsHTMLEditUtils::IsFormatNode(node))
+         {
+           GetFormatString(node, format);
+           break;
+         }
+         // else keep looking up
+@@ -7551,17 +7551,17 @@ nsresult
+ nsHTMLEditRules::ClearCachedStyles()
+ {
+   // clear the mPresent bits in mCachedStyles array
+   
+   int32_t j;
+   for (j=0; j<SIZE_STYLE_TABLE; j++)
+   {
+     mCachedStyles[j].mPresent = false;
+-    mCachedStyles[j].value.Truncate(0);
++    mCachedStyles[j].value.Truncate();
+   }
+   return NS_OK;
+ }
+ 
+ 
+ nsresult 
+ nsHTMLEditRules::AdjustSpecialBreaks(bool aSafeToAskFrames)
+ {
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -3825,17 +3825,17 @@ nsHTMLEditor::GetHeadContentsAsHTML(nsAS
+       aOutputString.BeginWriting(writeIter);
+       // Ensure the string ends in a newline
+       PRUnichar newline ('\n');
+       findIter.advance(-1);
+       if (offset ==0 || (offset >0 &&  (*findIter) != newline)) //check for 0
+       {
+         writeIter.advance(offset);
+         *writeIter = newline;
+-        aOutputString.Truncate(offset+1);
++        aOutputString.SetLength(offset+1);
+       }
+     }
+   }
+   return res;
+ }
+ 
+ NS_IMETHODIMP
+ nsHTMLEditor::DebugUnitTests(int32_t *outNumTests, int32_t *outNumTestsFailed)
+diff --git a/editor/libeditor/text/nsTextEditRules.cpp b/editor/libeditor/text/nsTextEditRules.cpp
+--- a/editor/libeditor/text/nsTextEditRules.cpp
++++ b/editor/libeditor/text/nsTextEditRules.cpp
+@@ -536,17 +536,17 @@ nsTextEditRules::HandleNewLines(nsString
+       // we get first *non-empty* line.
+       int32_t offset = 0;
+       while (firstCRLF == offset)
+       {
+         offset++;
+         firstCRLF = aString.FindCharInSet(CRLF, offset);
+       }
+       if (firstCRLF > 0)
+-        aString.Truncate(firstCRLF);
++        aString.SetLength(firstCRLF);
+       if (offset > 0)
+         aString.Cut(0, offset);
+     }
+     break;
+   case nsIPlaintextEditor::eNewlinesReplaceWithCommas:
+     aString.Trim(CRLF, true, true);
+     aString.ReplaceChar(CRLF, ',');
+     break;
+@@ -1244,17 +1244,17 @@ nsTextEditRules::TruncateInsertionIfNeed
+         *aTruncated = true;
+       }
+     }
+     else
+     {
+       int32_t inCount = aOutString->Length();
+       if (inCount + resultingDocLength > aMaxLength)
+       {
+-        aOutString->Truncate(aMaxLength - resultingDocLength);
++        aOutString->SetLength(aMaxLength - resultingDocLength);
+         if (aTruncated) {
+           *aTruncated = true;
+         }
+       }
+     }
+   }
+   return res;
+ }
+diff --git a/embedding/browser/webBrowser/nsContextMenuInfo.cpp b/embedding/browser/webBrowser/nsContextMenuInfo.cpp
+--- a/embedding/browser/webBrowser/nsContextMenuInfo.cpp
++++ b/embedding/browser/webBrowser/nsContextMenuInfo.cpp
+@@ -95,17 +95,17 @@ nsContextMenuInfo::GetTargetNode(nsIDOMN
+   return NS_OK;
+ }
+ 
+ /* readonly attribute AString associatedLink; */
+ NS_IMETHODIMP
+ nsContextMenuInfo::GetAssociatedLink(nsAString& aHRef)
+ {
+   NS_ENSURE_STATE(mAssociatedLink);
+-  aHRef.Truncate(0);
++  aHRef.Truncate();
+     
+   nsCOMPtr<nsIDOMElement> content(do_QueryInterface(mAssociatedLink));
+   nsAutoString localName;
+   if (content)
+     content->GetLocalName(localName);
+ 
+   nsCOMPtr<nsIDOMElement> linkContent;
+   ToLowerCase(localName);
+diff --git a/embedding/components/webbrowserpersist/src/nsWebBrowserPersist.cpp b/embedding/components/webbrowserpersist/src/nsWebBrowserPersist.cpp
+--- a/embedding/components/webbrowserpersist/src/nsWebBrowserPersist.cpp
++++ b/embedding/components/webbrowserpersist/src/nsWebBrowserPersist.cpp
+@@ -1989,29 +1989,29 @@ nsWebBrowserPersist::CalculateUniqueFile
+ 
+     // Test if the filename is longer than allowed by the OS
+     int32_t needToChop = filename.Length() - kDefaultMaxFilenameLength;
+     if (needToChop > 0)
+     {
+         // Truncate the base first and then the ext if necessary
+         if (base.Length() > (uint32_t) needToChop)
+         {
+-            base.Truncate(base.Length() - needToChop);
++            base.SetLength(base.Length() - needToChop);
+         }
+         else
+         {
+             needToChop -= base.Length() - 1;
+-            base.Truncate(1);
++            base.SetLength(1);
+             if (ext.Length() > (uint32_t) needToChop)
+             {
+-                ext.Truncate(ext.Length() - needToChop);
++                ext.SetLength(ext.Length() - needToChop);
+             }
+             else
+             {
+-                ext.Truncate(0);
++                ext.Truncate();
+             }
+             // If kDefaultMaxFilenameLength were 1 we'd be in trouble here,
+             // but that won't happen because it will be set to a sensible
+             // value.
+         }
+ 
+         filename.Assign(base);
+         filename.Append(ext);
+@@ -2245,17 +2245,17 @@ nsWebBrowserPersist::CalculateAndAppendF
+                     mimeInfo->GetPrimaryExtension(fileExt);
+                 } 
+ 
+                 if (!fileExt.IsEmpty())
+                 {
+                     uint32_t newLength = newFileName.Length() + fileExt.Length() + 1;
+                     if (newLength > kDefaultMaxFilenameLength)
+                     {
+-                        newFileName.Truncate(newFileName.Length() - (newLength - kDefaultMaxFilenameLength));
++                        newFileName.SetLength(newFileName.Length() - (newLength - kDefaultMaxFilenameLength));
+                     }
+                     newFileName.Append(".");
+                     newFileName.Append(fileExt);
+                 }
+ 
+                 if (localFile)
+                 {
+                     localFile->SetLeafName(NS_ConvertUTF8toUTF16(newFileName));
+@@ -2717,17 +2717,17 @@ nsresult nsWebBrowserPersist::FixupXMLSt
+         if (!charset.IsEmpty())
+         {
+             newData += NS_LITERAL_STRING("charset=\"") + charset + kCloseAttr;
+         }
+         if (!alternate.IsEmpty())
+         {
+             newData += NS_LITERAL_STRING("alternate=\"") + alternate + kCloseAttr;
+         }
+-        newData.Truncate(newData.Length() - 1);  // Remove the extra space on the end.
++        newData.SetLength(newData.Length() - 1);  // Remove the extra space on the end.
+         aPI->SetData(newData);
+     }
+ 
+     return rv;
+ }
+ 
+ nsresult nsWebBrowserPersist::GetXMLStyleSheetLink(nsIDOMProcessingInstruction *aPI, nsAString &aHref)
+ {
+diff --git a/extensions/pref/autoconfig/src/nsAutoConfig.cpp b/extensions/pref/autoconfig/src/nsAutoConfig.cpp
+--- a/extensions/pref/autoconfig/src/nsAutoConfig.cpp
++++ b/extensions/pref/autoconfig/src/nsAutoConfig.cpp
+@@ -253,21 +253,21 @@ nsresult nsAutoConfig::downloadAutoConfi
+     }
+     
+     // If there is an email address appended as an argument to the ConfigURL
+     // in the previous read, we need to remove it when timer kicks in and 
+     // downloads the autoconfig file again. 
+     // If necessary, the email address will be added again as an argument.
+     int32_t index = mConfigURL.RFindChar((PRUnichar)'?');
+     if (index != -1)
+-        mConfigURL.Truncate(index);
++        mConfigURL.SetLength(index);
+ 
+     // Clean up the previous read, the new read is going to use the same buffer
+     if (!mBuf.IsEmpty())
+-        mBuf.Truncate(0);
++        mBuf.Truncate();
+ 
+     // Get the preferences branch and save it to the member variable
+     if (!mPrefBranch) {
+         nsCOMPtr<nsIPrefService> prefs =
+             do_GetService(NS_PREFSERVICE_CONTRACTID, &rv);
+         if (NS_FAILED(rv)) 
+             return rv;
+     
+@@ -509,17 +509,17 @@ nsresult nsAutoConfig::getEmailAddr(nsAC
+         emailAddr = NS_LITERAL_CSTRING("mail.account.") +
+             prefValue + NS_LITERAL_CSTRING(".identities");
+         rv = mPrefBranch->GetCharPref(PromiseFlatCString(emailAddr).get(),
+                                       getter_Copies(prefValue));
+         if (NS_FAILED(rv) || prefValue.IsEmpty())
+             return PromptForEMailAddress(emailAddr);
+         int32_t commandIndex = prefValue.FindChar(',');
+         if (commandIndex != kNotFound)
+-          prefValue.Truncate(commandIndex);
++          prefValue.SetLength(commandIndex);
+         emailAddr = NS_LITERAL_CSTRING("mail.identity.") +
+             prefValue + NS_LITERAL_CSTRING(".useremail");
+         rv = mPrefBranch->GetCharPref(PromiseFlatCString(emailAddr).get(),
+                                       getter_Copies(prefValue));
+         if (NS_FAILED(rv)  || prefValue.IsEmpty())
+             return PromptForEMailAddress(emailAddr);
+         emailAddr = prefValue;
+     }
+diff --git a/gfx/thebes/gfxFontUtils.cpp b/gfx/thebes/gfxFontUtils.cpp
+--- a/gfx/thebes/gfxFontUtils.cpp
++++ b/gfx/thebes/gfxFontUtils.cpp
+@@ -1757,17 +1757,17 @@ gfxFontUtils::DecodeFontName(const PRUin
+     // make space for the converted string
+     aName.SetLength(destLength);
+     rv = decoder->Convert(reinterpret_cast<const char*>(aNameData), &aByteLen,
+                           aName.BeginWriting(), &destLength);
+     if (NS_FAILED(rv)) {
+         NS_WARNING("decoder->Convert failed, invalid font name?");
+         return false;
+     }
+-    aName.Truncate(destLength); // set the actual length
++    aName.SetLength(destLength); // set the actual length
+ 
+     return true;
+ }
+ 
+ nsresult
+ gfxFontUtils::ReadNames(FallibleTArray<uint8_t>& aNameTable, uint32_t aNameID, 
+                         int32_t aLangID, int32_t aPlatformID,
+                         nsTArray<nsString>& aNames)
+diff --git a/intl/hyphenation/src/nsHyphenationManager.cpp b/intl/hyphenation/src/nsHyphenationManager.cpp
+--- a/intl/hyphenation/src/nsHyphenationManager.cpp
++++ b/intl/hyphenation/src/nsHyphenationManager.cpp
+@@ -106,17 +106,17 @@ nsHyphenationManager::GetHyphenator(nsIA
+       }
+     }
+     if (!uri) {
+       // In the case of a locale such as "de-DE-1996", we try replacing
+       // successive trailing subtags with "-*" to find fallback patterns,
+       // so "de-DE-1996" -> "de-DE-*" (and then recursively -> "de-*")
+       nsAtomCString localeStr(aLocale);
+       if (StringEndsWith(localeStr, NS_LITERAL_CSTRING("-*"))) {
+-        localeStr.Truncate(localeStr.Length() - 2);
++        localeStr.SetLength(localeStr.Length() - 2);
+       }
+       int32_t i = localeStr.RFindChar('-');
+       if (i > 1) {
+         localeStr.Replace(i, localeStr.Length() - i, "-*");
+         nsCOMPtr<nsIAtom> fuzzyLocale = do_GetAtom(localeStr);
+         return GetHyphenator(fuzzyLocale);
+       } else {
+         return nullptr;
+diff --git a/intl/locale/src/nsLanguageAtomService.cpp b/intl/locale/src/nsLanguageAtomService.cpp
+--- a/intl/locale/src/nsLanguageAtomService.cpp
++++ b/intl/locale/src/nsLanguageAtomService.cpp
+@@ -168,18 +168,19 @@ nsLanguageAtomService::GetLanguageGroup(
+     aLanguage->ToString(langStr);
+ 
+     nsXPIDLString langGroupStr;
+     res = mLangGroups->GetStringFromName(langStr.get(),
+                                          getter_Copies(langGroupStr));
+     if (NS_FAILED(res)) {
+       int32_t hyphen = langStr.FindChar('-');
+       if (hyphen >= 0) {
++        // XXX Do we need this copy?
+         nsAutoString truncated(langStr);
+-        truncated.Truncate(hyphen);
++        truncated.SetLength(hyphen);
+         res = mLangGroups->GetStringFromName(truncated.get(),
+                                              getter_Copies(langGroupStr));
+         if (NS_FAILED(res)) {
+           langGroupStr.AssignLiteral("x-unicode");
+         }
+       } else {
+         langGroupStr.AssignLiteral("x-unicode");
+       }
+diff --git a/js/jsd/jsd_xpc.cpp b/js/jsd/jsd_xpc.cpp
+--- a/js/jsd/jsd_xpc.cpp
++++ b/js/jsd/jsd_xpc.cpp
+@@ -290,27 +290,27 @@ jsds_SyncFilter (FilterRecord *rec, jsdI
+         if (urlPattern[0] == '*') {
+             /* pattern starts with a *, shift all chars once to the left,
+              * including the trailing null. */
+             urlPattern = Substring(urlPattern, 1, len);
+ 
+             if (urlPattern[len - 2] == '*') {
+                 /* pattern is in the format "*foo*", overwrite the final * with
+                  * a null. */
+-                urlPattern.Truncate(len - 2);
++                urlPattern.SetLength(len - 2);
+                 rec->patternType = ptContains;
+             } else {
+                 /* pattern is in the format "*foo", just make a note of the
+                  * new length. */
+                 rec->patternType = ptEndsWith;
+             }
+         } else if (urlPattern[len - 1] == '*') {
+             /* pattern is in the format "foo*", overwrite the final * with a 
+              * null. */
+-            urlPattern.Truncate(len - 1);
++            urlPattern.SetLength(len - 1);
+             rec->patternType = ptStartsWith;
+         } else {
+             /* pattern is in the format "foo". */
+             rec->patternType = ptEquals;
+         }
+     } else {
+         rec->patternType = ptIgnore;
+     }
+diff --git a/js/xpconnect/src/XPCConvert.cpp b/js/xpconnect/src/XPCConvert.cpp
+--- a/js/xpconnect/src/XPCConvert.cpp
++++ b/js/xpconnect/src/XPCConvert.cpp
+@@ -651,17 +651,16 @@ XPCConvert::JSData2Native(XPCCallContext
+                     if (!rs)
+                         return false;
+                     *((const nsAString**)d) = rs;
+                 }
+             } else {
+                 nsAString* ws = *((nsAString**)d);
+ 
+                 if (JSVAL_IS_NULL(s) || (!isDOMString && JSVAL_IS_VOID(s))) {
+-                    ws->Truncate();
+                     ws->SetIsVoid(true);
+                 } else
+                     ws->Assign(chars, length);
+             }
+             return true;
+         }
+ 
+         case nsXPTType::T_CHAR_STR:
+@@ -742,17 +741,16 @@ XPCConvert::JSData2Native(XPCCallContext
+                     nsACString *rs = new nsCString();
+                     if (!rs)
+                         return false;
+ 
+                     rs->SetIsVoid(true);
+                     *((nsACString**)d) = rs;
+                 } else {
+                     nsCString* rs = *((nsCString**)d);
+-                    rs->Truncate();
+                     rs->SetIsVoid(true);
+                 }
+                 return true;
+             }
+ 
+             // The JS val is neither null nor void...
+ 
+             if (!(str = JS_ValueToString(cx, s))||
+@@ -786,17 +784,16 @@ XPCConvert::JSData2Native(XPCCallContext
+                     nsACString *rs = new nsCString();
+                     if (!rs)
+                         return false;
+ 
+                     rs->SetIsVoid(true);
+                     *((nsACString**)d) = rs;
+                 } else {
+                     nsACString* rs = *((nsACString**)d);
+-                    rs->Truncate();
+                     rs->SetIsVoid(true);
+                 }
+                 return true;
+             }
+ 
+             // The JS val is neither null nor void...
+             JSString* str = JS_ValueToString(cx, s);
+             if (!str) {
+diff --git a/layout/forms/nsGfxButtonControlFrame.cpp b/layout/forms/nsGfxButtonControlFrame.cpp
+--- a/layout/forms/nsGfxButtonControlFrame.cpp
++++ b/layout/forms/nsGfxButtonControlFrame.cpp
+@@ -252,17 +252,17 @@ nsGfxButtonControlFrame::GetLabel(nsXPID
+     // space or so; the result is that the text is misaligned, even with the
+     // recentering we do in nsHTMLButtonFrame::Reflow.  So to solve this, even
+     // if the whitespace is significant, single leading and trailing _spaces_
+     // (and not other whitespace) are removed.  The proper solution, of
+     // course, is to not have the focus rect painting taking up 6px of
+     // horizontal space. We should do that instead (via XBL form controls or
+     // changing the renderer) and remove this.
+     aLabel.Cut(0, 1);
+-    aLabel.Truncate(aLabel.Length() - 1);
++    aLabel.SetLength(aLabel.Length() - 1);
+   }
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsGfxButtonControlFrame::AttributeChanged(int32_t         aNameSpaceID,
+                                           nsIAtom*        aAttribute,
+diff --git a/layout/forms/nsListControlFrame.cpp b/layout/forms/nsListControlFrame.cpp
+--- a/layout/forms/nsListControlFrame.cpp
++++ b/layout/forms/nsListControlFrame.cpp
+@@ -2519,17 +2519,17 @@ nsListControlFrame::KeyPress(nsIDOMEvent
+       if (isControl && charcode != ' ') {
+         return NS_OK;
+       }
+ 
+       didIncrementalSearch = true;
+       if (charcode == 0) {
+         // Backspace key will delete the last char in the string
+         if (keycode == NS_VK_BACK && !GetIncrementalString().IsEmpty()) {
+-          GetIncrementalString().Truncate(GetIncrementalString().Length() - 1);
++          GetIncrementalString().SetLength(GetIncrementalString().Length() - 1);
+           aKeyEvent->PreventDefault();
+         }
+         return NS_OK;
+       }
+       
+       DOMTimeStamp keyTime;
+       aKeyEvent->GetTimeStamp(&keyTime);
+ 
+@@ -2555,17 +2555,17 @@ nsListControlFrame::KeyPress(nsIDOMEvent
+ 
+       // See bug 188199, if all letters in incremental string are same, just try to match the first one
+       nsAutoString incrementalString(GetIncrementalString());
+       uint32_t charIndex = 1, stringLength = incrementalString.Length();
+       while (charIndex < stringLength && incrementalString[charIndex] == incrementalString[charIndex - 1]) {
+         charIndex++;
+       }
+       if (charIndex == stringLength) {
+-        incrementalString.Truncate(1);
++        incrementalString.SetLength(1);
+         stringLength = 1;
+       }
+ 
+       // Determine where we're going to start reading the string
+       // If we have multiple characters to look for, we start looking *at* the
+       // current option.  If we have only one character to look for, we start
+       // looking *after* the current option.	
+       // Exception: if there is no option selected to start at, we always start
+diff --git a/layout/forms/nsTextControlFrame.cpp b/layout/forms/nsTextControlFrame.cpp
+--- a/layout/forms/nsTextControlFrame.cpp
++++ b/layout/forms/nsTextControlFrame.cpp
+@@ -1371,17 +1371,17 @@ nsTextControlFrame::GetText(nsString& aT
+   }
+   return rv;
+ }
+ 
+ 
+ nsresult
+ nsTextControlFrame::GetPhonetic(nsAString& aPhonetic)
+ {
+-  aPhonetic.Truncate(0); 
++  aPhonetic.Truncate();
+ 
+   nsCOMPtr<nsIEditor> editor;
+   nsresult rv = GetEditor(getter_AddRefs(editor));
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   nsCOMPtr<nsIEditorIMESupport> imeSupport = do_QueryInterface(editor);
+   if (imeSupport) {
+     nsCOMPtr<nsIPhonetic> phonetic = do_QueryInterface(imeSupport);
+diff --git a/layout/generic/nsPageFrame.cpp b/layout/generic/nsPageFrame.cpp
+--- a/layout/generic/nsPageFrame.cpp
++++ b/layout/generic/nsPageFrame.cpp
+@@ -353,17 +353,17 @@ nsPageFrame::DrawHeaderFooter(nsRenderin
+         // we can't fit in all the text
+         if (indx > 3) {
+           // But we can fit in at least 4 chars.  Show all but 3 of them, then
+           // an ellipsis.
+           // XXXbz for non-plane0 text, this may be cutting things in the
+           // middle of a codepoint!  Also, we have no guarantees that the three
+           // dots will fit in the space the three chars we removed took up with
+           // these font metrics!
+-          str.Truncate(indx-3);
++          str.SetLength(indx - 3);
+           str.AppendLiteral("...");
+         } else {
+           // We can only fit 3 or fewer chars.  Just show nothing
+           str.Truncate();
+         }
+       }
+     } else { 
+       return; // bail if couldn't find the correct length
+diff --git a/layout/mathml/nsMathMLChar.cpp b/layout/mathml/nsMathMLChar.cpp
+--- a/layout/mathml/nsMathMLChar.cpp
++++ b/layout/mathml/nsMathMLChar.cpp
+@@ -129,17 +129,17 @@ typedef enum {eExtension_base, eExtensio
+ #define NS_TABLE_STATE_READY        1
+ 
+ // helper to trim off comments from data in a MathFont Property File
+ static void
+ Clean(nsString& aValue)
+ {
+   // chop the trailing # comment portion if any ...
+   int32_t comment = aValue.RFindChar('#');
+-  if (comment > 0) aValue.Truncate(comment);
++  if (comment > 0) aValue.SetLength(comment);
+   aValue.CompressWhitespace();
+ }
+ 
+ // helper to load a MathFont Property File
+ static nsresult
+ LoadProperties(const nsString& aName,
+                nsCOMPtr<nsIPersistentProperties>& aProperties)
+ {
+diff --git a/layout/style/Declaration.cpp b/layout/style/Declaration.cpp
+--- a/layout/style/Declaration.cpp
++++ b/layout/style/Declaration.cpp
+@@ -139,17 +139,17 @@ Declaration::AppendValueToString(nsCSSPr
+ 
+   val->AppendToString(aProperty, aResult);
+   return true;
+ }
+ 
+ void
+ Declaration::GetValue(nsCSSProperty aProperty, nsAString& aValue) const
+ {
+-  aValue.Truncate(0);
++  aValue.Truncate();
+ 
+   // simple properties are easy.
+   if (!nsCSSProps::IsShorthand(aProperty)) {
+     AppendValueToString(aProperty, aValue);
+     return;
+   }
+ 
+   // DOM Level 2 Style says (when describing CSS2Properties, although
+@@ -941,17 +941,17 @@ Declaration::ToString(nsAString& aString
+       continue;
+ 
+     NS_ABORT_IF_FALSE(value.IsEmpty(), "value should be empty now");
+     AppendPropertyAndValueToString(property, value, aString);
+   }
+   if (! aString.IsEmpty()) {
+     // if the string is not empty, we have trailing whitespace we
+     // should remove
+-    aString.Truncate(aString.Length() - 1);
++    aString.SetLength(aString.Length() - 1);
+   }
+ }
+ 
+ #ifdef DEBUG
+ void
+ Declaration::List(FILE* out, int32_t aIndent) const
+ {
+   for (int32_t index = aIndent; --index >= 0; ) fputs("  ", out);
+diff --git a/layout/style/nsCSSParser.cpp b/layout/style/nsCSSParser.cpp
+--- a/layout/style/nsCSSParser.cpp
++++ b/layout/style/nsCSSParser.cpp
+@@ -3407,17 +3407,17 @@ CSSParserImpl::ParsePseudoClassWithNthPa
+       truncAt = 1;
+     } else if (StringBeginsWith(mToken.mIdent, NS_LITERAL_STRING("-n-"))) {
+       truncAt = 2;
+     }
+     if (truncAt != 0) {
+       for (uint32_t i = mToken.mIdent.Length() - 1; i >= truncAt; --i) {
+         mScanner.Pushback(mToken.mIdent[i]);
+       }
+-      mToken.mIdent.Truncate(truncAt);
++      mToken.mIdent.SetLength(truncAt);
+     }
+   }
+ 
+   if (eCSSToken_Ident == mToken.mType) {
+     if (mToken.mIdent.LowerCaseEqualsLiteral("odd")) {
+       numbers[0] = 2;
+       numbers[1] = 1;
+       lookForB = false;
+diff --git a/layout/style/nsCSSRules.cpp b/layout/style/nsCSSRules.cpp
+--- a/layout/style/nsCSSRules.cpp
++++ b/layout/style/nsCSSRules.cpp
+@@ -1247,24 +1247,24 @@ AppendSerializedFontSrc(const nsCSSValue
+     while (i < sources.Count() &&
+            sources[i].GetUnit() == eCSSUnit_Font_Format) {
+       formats.Append('"');
+       formats.Append(sources[i].GetStringBufferValue());
+       formats.AppendLiteral("\", ");
+       i++;
+     }
+     if (formats.Length() > 0) {
+-      formats.Truncate(formats.Length() - 2); // remove the last comma
++      formats.SetLength(formats.Length() - 2); // remove the last comma
+       aResult.AppendLiteral(" format(");
+       aResult.Append(formats);
+       aResult.Append(')');
+     }
+     aResult.AppendLiteral(", ");
+   }
+-  aResult.Truncate(aResult.Length() - 2); // remove the last comma-space
++  aResult.SetLength(aResult.Length() - 2); // remove the last comma-space
+ }
+ 
+ // print all characters with at least four hex digits
+ static void
+ AppendSerializedUnicodePoint(uint32_t aCode, nsACString &aBuf NS_OUTPARAM)
+ {
+   aBuf.Append(nsPrintfCString("%04X", aCode));
+ }
+@@ -1299,17 +1299,17 @@ AppendSerializedUnicodeRange(nsCSSValue 
+     AppendSerializedUnicodePoint(min, buf);
+ 
+     if (min != max) {
+       buf.Append('-');
+       AppendSerializedUnicodePoint(max, buf);
+     }
+     buf.AppendLiteral(", ");
+   }
+-  buf.Truncate(buf.Length() - 2); // remove the last comma-space
++  buf.SetLength(buf.Length() - 2); // remove the last comma-space
+   CopyASCIItoUTF16(buf, aResult);
+ }
+ 
+ // Mapping from nsCSSFontDesc codes to nsCSSFontFaceStyleDecl fields.
+ nsCSSValue nsCSSFontFaceStyleDecl::* const
+ nsCSSFontFaceStyleDecl::Fields[] = {
+ #define CSS_FONT_DESC(name_, method_) &nsCSSFontFaceStyleDecl::m##method_,
+ #include "nsCSSFontDescList.h"
+diff --git a/layout/xul/base/src/nsMenuPopupFrame.cpp b/layout/xul/base/src/nsMenuPopupFrame.cpp
+--- a/layout/xul/base/src/nsMenuPopupFrame.cpp
++++ b/layout/xul/base/src/nsMenuPopupFrame.cpp
+@@ -1624,17 +1624,17 @@ nsMenuPopupFrame::FindMenuWithShortcut(n
+ 
+   // See bug 188199 & 192346, if all letters in incremental string are same, just try to match the first one
+   nsAutoString incrementalString(mIncrementalString);
+   uint32_t charIndex = 1, stringLength = incrementalString.Length();
+   while (charIndex < stringLength && incrementalString[charIndex] == incrementalString[charIndex - 1]) {
+     charIndex++;
+   }
+   if (charIndex == stringLength) {
+-    incrementalString.Truncate(1);
++    incrementalString.SetLength(1);
+     stringLength = 1;
+   }
+ 
+   lastKeyTime = keyTime;
+ 
+   nsIFrame* currFrame;
+   // NOTE: If you crashed here due to a bogus |immediateParent| it is 
+   //       possible that the menu whose shortcut is being looked up has 
+diff --git a/layout/xul/base/src/nsTextBoxFrame.cpp b/layout/xul/base/src/nsTextBoxFrame.cpp
+--- a/layout/xul/base/src/nsTextBoxFrame.cpp
++++ b/layout/xul/base/src/nsTextBoxFrame.cpp
+@@ -701,17 +701,17 @@ nsTextBoxFrame::CalculateTitleForWidth(n
+ #endif // IBMBIDI
+             }
+ 
+             if (i == 0)
+                 return titleWidth;
+ 
+             // insert what character we can in.
+             nsAutoString title( mTitle );
+-            title.Truncate(i);
++            title.SetLength(i);
+             mCroppedTitle.Insert(title, 0);
+         }
+         break;
+ 
+         case CropLeft:
+         {
+             nscoord cwidth;
+             nscoord twidth = 0;
+diff --git a/layout/xul/base/src/tree/src/nsTreeBodyFrame.cpp b/layout/xul/base/src/tree/src/nsTreeBodyFrame.cpp
+--- a/layout/xul/base/src/tree/src/nsTreeBodyFrame.cpp
++++ b/layout/xul/base/src/tree/src/nsTreeBodyFrame.cpp
+@@ -1407,17 +1407,17 @@ nsTreeBodyFrame::AdjustForCellText(nsAut
+           for (i = 0; i < length; ++i) {
+             PRUnichar ch = aText[i];
+             // XXX this is horrible and doesn't handle clusters
+             cwidth = aRenderingContext.GetWidth(ch);
+             if (twidth + cwidth > width)
+               break;
+             twidth += cwidth;
+           }
+-          aText.Truncate(i);
++          aText.SetLength(i);
+           aText.Append(kEllipsis);
+         }
+         break;
+ 
+         case 2: {
+           // Crop left.
+           nscoord cwidth;
+           nscoord twidth = 0;
+diff --git a/modules/libpref/src/nsPrefBranch.cpp b/modules/libpref/src/nsPrefBranch.cpp
+--- a/modules/libpref/src/nsPrefBranch.cpp
++++ b/modules/libpref/src/nsPrefBranch.cpp
+@@ -139,17 +139,17 @@ NS_INTERFACE_MAP_END
+ 
+ /*
+  * nsIPrefBranch Implementation
+  */
+ 
+ NS_IMETHODIMP nsPrefBranch::GetRoot(char **aRoot)
+ {
+   NS_ENSURE_ARG_POINTER(aRoot);
+-  mPrefRoot.Truncate(mPrefRootLength);
++  mPrefRoot.SetLength(mPrefRootLength);
+   *aRoot = ToNewCString(mPrefRoot);
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP nsPrefBranch::GetPrefType(const char *aPrefName, int32_t *_retval)
+ {
+   NS_ENSURE_ARG(aPrefName);
+   const char *pref = getPrefName(aPrefName);
+@@ -744,17 +744,17 @@ const char *nsPrefBranch::getPrefName(co
+ {
+   NS_ASSERTION(aPrefName, "null pref name!");
+ 
+   // for speed, avoid strcpy if we can:
+   if (mPrefRoot.IsEmpty())
+     return aPrefName;
+ 
+   // isn't there a better way to do this? this is really kind of gross.
+-  mPrefRoot.Truncate(mPrefRootLength);
++  mPrefRoot.SetLength(mPrefRootLength);
+   mPrefRoot.Append(aPrefName);
+   return mPrefRoot.get();
+ }
+ 
+ static PLDHashOperator
+ pref_enumChild(PLDHashTable *table, PLDHashEntryHdr *heh,
+                uint32_t i, void *arg)
+ {
+diff --git a/netwerk/base/src/nsURLHelper.cpp b/netwerk/base/src/nsURLHelper.cpp
+--- a/netwerk/base/src/nsURLHelper.cpp
++++ b/netwerk/base/src/nsURLHelper.cpp
+@@ -460,17 +460,17 @@ net_ResolveRelativePath(const nsACString
+                 // If we already have the delim at end, then
+                 //  skip over that when searching for next one to the left
+                 int32_t offset = path.Length() - (needsDelim ? 1 : 2);
+                 // First check for errors
+                 if (offset < 0 ) 
+                     return NS_ERROR_MALFORMED_URI;
+                 int32_t pos = path.RFind("/", false, offset);
+                 if (pos >= 0)
+-                    path.Truncate(pos + 1);
++                    path.SetLength(pos + 1);
+                 else
+                     path.Truncate();
+             }
+             else if (name.IsEmpty() || name.EqualsLiteral(".")) {
+                 // do nothing
+             }
+             else {
+                 // append name to path
+diff --git a/netwerk/cache/nsCache.cpp b/netwerk/cache/nsCache.cpp
+--- a/netwerk/cache/nsCache.cpp
++++ b/netwerk/cache/nsCache.cpp
+@@ -142,12 +142,12 @@ ClientKeyFromCacheKey(const nsCString& k
+     key.EndReading(end);
+         
+     if (FindCharInReadable(':', start, end)) {
+         ++start;  // advance past clientID ':' delimiter
+         result.Assign(Substring(start, end));
+     } else {
+         NS_ASSERTION(false, "FindCharInRead failed to find ':'");
+         rv = NS_ERROR_UNEXPECTED;
+-        result.Truncate(0);
++        result.Truncate();
+     }
+     return rv;
+ }
+diff --git a/netwerk/cache/nsDiskCacheDeviceSQL.cpp b/netwerk/cache/nsDiskCacheDeviceSQL.cpp
+--- a/netwerk/cache/nsDiskCacheDeviceSQL.cpp
++++ b/netwerk/cache/nsDiskCacheDeviceSQL.cpp
+@@ -2350,17 +2350,17 @@ nsOfflineCacheDevice::IsActiveCache(cons
+   return mActiveCachesByGroup.Get(group, &active) && *active == clientID;
+ }
+ 
+ nsresult
+ nsOfflineCacheDevice::GetGroupForCache(const nsACString &clientID,
+                                        nsCString &out)
+ {
+   out.Assign(clientID);
+-  out.Truncate(out.FindChar('|'));
++  out.SetLength(out.FindChar('|'));
+   NS_UnescapeURL(out);
+ 
+   return NS_OK;
+ }
+ 
+ /**
+  * Preference accessors
+  */
+diff --git a/netwerk/cookie/nsCookieService.cpp b/netwerk/cookie/nsCookieService.cpp
+--- a/netwerk/cookie/nsCookieService.cpp
++++ b/netwerk/cookie/nsCookieService.cpp
+@@ -3205,17 +3205,17 @@ nsCookieService::CheckPath(nsCookieAttri
+     // otherwise, it's not an nsIURL and can't have a query string, so just find the last slash.
+     nsCOMPtr<nsIURL> hostURL = do_QueryInterface(aHostURI);
+     if (hostURL) {
+       hostURL->GetDirectory(aCookieAttributes.path);
+     } else {
+       aHostURI->GetPath(aCookieAttributes.path);
+       int32_t slash = aCookieAttributes.path.RFindChar('/');
+       if (slash != kNotFound) {
+-        aCookieAttributes.path.Truncate(slash + 1);
++        aCookieAttributes.path.SetLength(slash + 1);
+       }
+     }
+ 
+ #if 0
+   } else {
+     /**
+      * The following test is part of the RFC2109 spec.  Loosely speaking, it says that a site
+      * cannot set a cookie for a path that it is not on.  See bug 155083.  However this patch
+diff --git a/netwerk/dns/nsEffectiveTLDService.cpp b/netwerk/dns/nsEffectiveTLDService.cpp
+--- a/netwerk/dns/nsEffectiveTLDService.cpp
++++ b/netwerk/dns/nsEffectiveTLDService.cpp
+@@ -177,17 +177,17 @@ nsEffectiveTLDService::GetBaseDomainInte
+                                              nsACString &aBaseDomain)
+ {
+   if (aHostname.IsEmpty())
+     return NS_ERROR_INSUFFICIENT_DOMAIN_LEVELS;
+ 
+   // chomp any trailing dot, and keep track of it for later
+   bool trailingDot = aHostname.Last() == '.';
+   if (trailingDot)
+-    aHostname.Truncate(aHostname.Length() - 1);
++    aHostname.SetLength(aHostname.Length() - 1);
+ 
+   // check the edge cases of the host being '.' or having a second trailing '.',
+   // since subsequent checks won't catch it.
+   if (aHostname.IsEmpty() || aHostname.Last() == '.')
+     return NS_ERROR_INVALID_ARG;
+ 
+   // Check if we're dealing with an IPv4/IPv6 hostname, and return
+   PRNetAddr addr;
+diff --git a/netwerk/protocol/about/nsAboutProtocolUtils.h b/netwerk/protocol/about/nsAboutProtocolUtils.h
+--- a/netwerk/protocol/about/nsAboutProtocolUtils.h
++++ b/netwerk/protocol/about/nsAboutProtocolUtils.h
+@@ -51,17 +51,17 @@ NS_GetAboutModuleName(nsIURI *aAboutURI,
+     }
+ #endif
+ 
+     nsresult rv = aAboutURI->GetPath(aModule);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     int32_t f = aModule.FindCharInSet(NS_LITERAL_CSTRING("#?"));
+     if (f != kNotFound) {
+-        aModule.Truncate(f);
++        aModule.SetLength(f);
+     }
+ 
+     // convert to lowercase, as all about: modules are lowercase
+     ToLowerCase(aModule);
+     return NS_OK;
+ }
+ 
+ inline nsresult
+diff --git a/netwerk/protocol/ftp/nsFtpConnectionThread.cpp b/netwerk/protocol/ftp/nsFtpConnectionThread.cpp
+--- a/netwerk/protocol/ftp/nsFtpConnectionThread.cpp
++++ b/netwerk/protocol/ftp/nsFtpConnectionThread.cpp
+@@ -860,17 +860,17 @@ nsFtpState::R_pwd() {
+         return FTP_S_TYPE;
+ 
+     nsAutoCString respStr(mResponseMsg);
+     int32_t pos = respStr.FindChar('"');
+     if (pos > -1) {
+         respStr.Cut(0, pos+1);
+         pos = respStr.FindChar('"');
+         if (pos > -1) {
+-            respStr.Truncate(pos);
++            respStr.SetLength(pos);
+             if (mServerType == FTP_VMS_TYPE)
+                 ConvertDirspecFromVMS(respStr);
+             if (respStr.Last() != '/')
+                 respStr.Append('/');
+             mPwd = respStr;
+         }
+     }
+     return FTP_S_TYPE;
+@@ -1807,17 +1807,17 @@ nsFtpState::Connect()
+         mState = FTP_ERROR;
+         CloseWithStatus(mInternalError);
+     }
+ }
+ 
+ void
+ nsFtpState::KillControlConnection()
+ {
+-    mControlReadCarryOverBuf.Truncate(0);
++    mControlReadCarryOverBuf.Truncate();
+ 
+     mAddressChecked = false;
+     mServerIsIPv6 = false;
+ 
+     // if everything went okay, save the connection. 
+     // FIX: need a better way to determine if we can cache the connections.
+     //      there are some errors which do not mean that we need to kill the connection
+     //      e.g. fnf.
+@@ -2013,17 +2013,17 @@ nsFtpState::ConvertDirspecToVMS(nsCStrin
+ {
+     LOG(("FTP:(%x) ConvertDirspecToVMS from: \"%s\"\n", this, dirSpec.get()));
+     if (!dirSpec.IsEmpty()) {
+         if (dirSpec.Last() != '/')
+             dirSpec.Append('/');
+         // we can use the filespec routine if we make it look like a file name
+         dirSpec.Append('x');
+         ConvertFilespecToVMS(dirSpec);
+-        dirSpec.Truncate(dirSpec.Length()-1);
++        dirSpec.SetLength(dirSpec.Length() - 1);
+     }
+     LOG(("FTP:(%x) ConvertDirspecToVMS   to: \"%s\"\n", this, dirSpec.get()));
+ }
+ 
+ // Convert an absolute VMS style dirspec to UNIX format
+ void
+ nsFtpState::ConvertDirspecFromVMS(nsCString& dirSpec)
+ {
+@@ -2269,17 +2269,17 @@ nsFtpState::CheckCache()
+             return false;
+     }
+ 
+     // Generate cache key (remove trailing #ref if any):
+     nsAutoCString key;
+     mChannel->URI()->GetAsciiSpec(key);
+     int32_t pos = key.RFindChar('#');
+     if (pos != kNotFound)
+-        key.Truncate(pos);
++        key.SetLength(pos);
+     NS_ENSURE_FALSE(key.IsEmpty(), false);
+ 
+     // Try to open a cache entry immediately, but if the cache entry is busy,
+     // then wait for it to be available.
+ 
+     nsresult rv = session->OpenCacheEntry(key, accessReq, false,
+                                           getter_AddRefs(mCacheEntry));
+     if (NS_SUCCEEDED(rv) && mCacheEntry) {
+diff --git a/netwerk/protocol/ftp/nsFtpProtocolHandler.cpp b/netwerk/protocol/ftp/nsFtpProtocolHandler.cpp
+--- a/netwerk/protocol/ftp/nsFtpProtocolHandler.cpp
++++ b/netwerk/protocol/ftp/nsFtpProtocolHandler.cpp
+@@ -219,17 +219,17 @@ nsFtpProtocolHandler::NewURI(const nsACS
+     char *fwdPtr = spec.BeginWriting();
+ 
+     // now unescape it... %xx reduced inline to resulting character
+ 
+     int32_t len = NS_UnescapeURL(fwdPtr);
+ 
+     // NS_UnescapeURL() modified spec's buffer, truncate to ensure
+     // spec knows its new length.
+-    spec.Truncate(len);
++    spec.SetLength(len);
+ 
+     // return an error if we find a NUL, CR, or LF in the path
+     if (spec.FindCharInSet(CRLF) >= 0 || spec.FindChar('\0') >= 0)
+         return NS_ERROR_MALFORMED_URI;
+ 
+     nsresult rv;
+     nsCOMPtr<nsIStandardURL> url = do_CreateInstance(NS_STANDARDURL_CONTRACTID, &rv);
+     if (NS_FAILED(rv)) return rv;
+diff --git a/netwerk/protocol/http/nsHttpDigestAuth.cpp b/netwerk/protocol/http/nsHttpDigestAuth.cpp
+--- a/netwerk/protocol/http/nsHttpDigestAuth.cpp
++++ b/netwerk/protocol/http/nsHttpDigestAuth.cpp
+@@ -140,17 +140,17 @@ nsHttpDigestAuth::GetMethodAndPath(nsIHt
+         rv  = authChannel->GetRequestMethod(httpMethod);
+         rv |= uri->GetPath(path);
+         if (NS_SUCCEEDED(rv)) {
+           //
+           // strip any fragment identifier from the URL path.
+           //
+           int32_t ref = path.RFindChar('#');
+           if (ref != kNotFound)
+-            path.Truncate(ref);
++            path.SetLength(ref);
+           //
+           // make sure we escape any UTF-8 characters in the URI path.  the
+           // digest auth uri attribute needs to match the request-URI.
+           //
+           // XXX we should really ask the HTTP channel for this string
+           // instead of regenerating it here.
+           //
+           nsAutoCString buf;
+diff --git a/netwerk/protocol/http/nsHttpTransaction.cpp b/netwerk/protocol/http/nsHttpTransaction.cpp
+--- a/netwerk/protocol/http/nsHttpTransaction.cpp
++++ b/netwerk/protocol/http/nsHttpTransaction.cpp
+@@ -823,17 +823,17 @@ nsHttpTransaction::ParseLineSegment(char
+ {
+     NS_PRECONDITION(!mHaveAllHeaders, "already have all headers");
+ 
+     if (!mLineBuf.IsEmpty() && mLineBuf.Last() == '\n') {
+         // trim off the new line char, and if this segment is
+         // not a continuation of the previous or if we haven't
+         // parsed the status line yet, then parse the contents
+         // of mLineBuf.
+-        mLineBuf.Truncate(mLineBuf.Length() - 1);
++        mLineBuf.SetLength(mLineBuf.Length() - 1);
+         if (!mHaveStatusLine || (*segment != ' ' && *segment != '\t')) {
+             nsresult rv = ParseLine(mLineBuf.BeginWriting());
+             mLineBuf.Truncate();
+             if (NS_FAILED(rv)) {
+                 return rv;
+             }
+         }
+     }
+diff --git a/netwerk/streamconv/converters/nsIndexedToHTML.cpp b/netwerk/streamconv/converters/nsIndexedToHTML.cpp
+--- a/netwerk/streamconv/converters/nsIndexedToHTML.cpp
++++ b/netwerk/streamconv/converters/nsIndexedToHTML.cpp
+@@ -853,19 +853,19 @@ nsIndexedToHTML::OnIndexAvailable(nsIReq
+         if (NS_FAILED(rv)) return rv;
+ 
+         //XXX this potentially truncates after a combining char (bug 391472)
+         nsXPIDLString descriptionAffix;
+         descriptionAffix.Assign(description);
+         descriptionAffix.Cut(0, descriptionAffix.Length() - 25);
+         if (NS_IS_LOW_SURROGATE(descriptionAffix.First()))
+             descriptionAffix.Cut(0, 1);
+-        description.Truncate(NS_MIN<uint32_t>(71, description.Length() - 28));
++        description.SetLength(NS_MIN<uint32_t>(71, description.Length() - 28));
+         if (NS_IS_HIGH_SURROGATE(description.Last()))
+-            description.Truncate(description.Length() - 1);
++            description.SetLength(description.Length() - 1);
+ 
+         escapedShort.Adopt(nsEscapeHTML2(description.get(), description.Length()));
+ 
+         escapedShort.Append(mEscapedEllipsis);
+         // add ZERO WIDTH SPACE (U+200B) for wrapping
+         escapedShort.AppendLiteral("&#8203;");
+         nsString tmp;
+         tmp.Adopt(nsEscapeHTML2(descriptionAffix.get(), descriptionAffix.Length()));
+diff --git a/parser/htmlparser/src/nsHTMLEntities.cpp b/parser/htmlparser/src/nsHTMLEntities.cpp
+--- a/parser/htmlparser/src/nsHTMLEntities.cpp
++++ b/parser/htmlparser/src/nsHTMLEntities.cpp
+@@ -193,17 +193,17 @@ nsHTMLEntities::EntityToUnicode(const ns
+   if (!gEntityToUnicode.ops)
+     return -1;
+ 
+     //this little piece of code exists because entities may or may not have the terminating ';'.
+     //if we see it, strip if off for this test...
+ 
+     if(';'==aEntity.Last()) {
+       nsAutoCString temp(aEntity);
+-      temp.Truncate(aEntity.Length()-1);
++      temp.SetLength(aEntity.Length()-1);
+       return EntityToUnicode(temp);
+     }
+       
+   EntityNodeEntry* entry = 
+     static_cast<EntityNodeEntry*>
+                (PL_DHashTableOperate(&gEntityToUnicode, aEntity.get(), PL_DHASH_LOOKUP));
+ 
+   if (!entry || PL_DHASH_ENTRY_IS_FREE(entry))
+@@ -212,17 +212,17 @@ nsHTMLEntities::EntityToUnicode(const ns
+   return entry->node->mUnicode;
+ }
+ 
+ 
+ int32_t 
+ nsHTMLEntities::EntityToUnicode(const nsAString& aEntity) {
+   nsAutoCString theEntity; theEntity.AssignWithConversion(aEntity);
+   if(';'==theEntity.Last()) {
+-    theEntity.Truncate(theEntity.Length()-1);
++    theEntity.SetLength(theEntity.Length()-1);
+   }
+ 
+   return EntityToUnicode(theEntity);
+ }
+ 
+ 
+ const char*
+ nsHTMLEntities::UnicodeToEntity(int32_t aUnicode)
+diff --git a/parser/htmlparser/src/nsHTMLTokens.cpp b/parser/htmlparser/src/nsHTMLTokens.cpp
+--- a/parser/htmlparser/src/nsHTMLTokens.cpp
++++ b/parser/htmlparser/src/nsHTMLTokens.cpp
+@@ -834,17 +834,17 @@ CTextToken::ConsumeParsedCharacterData(b
+     if (NS_FAILED(result)) {
+       if (kEOF == result && !aScanner.IsIncremental()) {
+         aFound = true; // this is as good as it gets.
+         result = kFakeEndTag;
+ 
+         if (aConservativeConsume && altEndPos != endPos) {
+           // We ran out of room looking for a </title>. Go back to the first
+           // place that looked like a tag and use that as our stopping point.
+-          theContent.writable().Truncate(truncPos);
++          theContent.writable().SetLength(truncPos);
+           mNewlineCount = truncNewlineCount;
+           aScanner.SetPosition(altEndPos, false, true);
+         }
+         // else we take everything we consumed.
+         mTextValue.Rebind(theContent.str());
+       } else {
+         aFound = false;
+       }
+@@ -1689,17 +1689,17 @@ ConsumeQuotedString(PRUnichar aChar,
+ 
+   // Ref: Bug 35806
+   // A back up measure when disaster strikes...
+   // Ex <table> <tr d="><td>hello</td></tr></table>
+   if (!aString.str().IsEmpty() && aString.str().Last() != aChar &&
+       !aScanner.IsIncremental() && result == kEOF) {
+     static const nsReadEndCondition
+       theAttributeTerminator(kAttributeTerminalChars);
+-    aString.writable().Truncate(origLen);
++    aString.writable().SetLength(origLen);
+     aScanner.SetPosition(theOffset, false, true);
+     result = ConsumeUntil(aString, aNewlineCount, aScanner,
+                           theAttributeTerminator, false, true, aFlag);
+     if (NS_SUCCEEDED(result) && (aFlag & NS_IPARSER_FLAG_VIEW_SOURCE)) {
+       // Remember that this string literal was unterminated.
+       result = NS_ERROR_HTMLPARSER_UNTERMINATEDSTRINGLITERAL;
+     }
+   }
+diff --git a/parser/htmlparser/src/nsParser.cpp b/parser/htmlparser/src/nsParser.cpp
+--- a/parser/htmlparser/src/nsParser.cpp
++++ b/parser/htmlparser/src/nsParser.cpp
+@@ -2168,17 +2168,17 @@ nsParser::ResumeParse(bool allowIteratio
+ 
+       while (result == NS_OK && theIterationIsOk) {
+         if (!mUnusedInput.IsEmpty() && mParserContext->mScanner) {
+           // -- Ref: Bug# 22485 --
+           // Insert the unused input into the source buffer
+           // as if it was read from the input stream.
+           // Adding UngetReadable() per vidur!!
+           mParserContext->mScanner->UngetReadable(mUnusedInput);
+-          mUnusedInput.Truncate(0);
++          mUnusedInput.Truncate();
+         }
+ 
+         // Only allow parsing to be interrupted in the subsequent call to
+         // build model.
+         SetCanInterrupt(aCanInterrupt);
+         nsresult theTokenizerResult = (mFlags & NS_PARSER_FLAG_CAN_TOKENIZE)
+                                       ? Tokenize(aIsFinalChunk)
+                                       : NS_OK;
+diff --git a/rdf/base/src/nsRDFService.cpp b/rdf/base/src/nsRDFService.cpp
+--- a/rdf/base/src/nsRDFService.cpp
++++ b/rdf/base/src/nsRDFService.cpp
+@@ -1434,17 +1434,17 @@ RDFServiceImpl::GetDataSource(const char
+         // It's a built-in data source. Convert it to a contract ID.
+         nsAutoCString contractID(
+                 NS_LITERAL_CSTRING(NS_RDF_DATASOURCE_CONTRACTID_PREFIX) +
+                 Substring(spec, 4, spec.Length() - 4));
+ 
+         // Strip params to get ``base'' contractID for data source.
+         int32_t p = contractID.FindChar(PRUnichar('&'));
+         if (p >= 0)
+-            contractID.Truncate(p);
++            contractID.SetLength(p);
+ 
+         ds = do_GetService(contractID.get(), &rv);
+         if (NS_FAILED(rv)) return rv;
+ 
+         nsCOMPtr<nsIRDFRemoteDataSource> remote = do_QueryInterface(ds);
+         if (remote) {
+             rv = remote->Init(spec.get());
+             if (NS_FAILED(rv)) return rv;
+diff --git a/security/manager/ssl/src/nsCertOverrideService.cpp b/security/manager/ssl/src/nsCertOverrideService.cpp
+--- a/security/manager/ssl/src/nsCertOverrideService.cpp
++++ b/security/manager/ssl/src/nsCertOverrideService.cpp
+@@ -308,17 +308,17 @@ nsCertOverrideService::Read()
+       continue; // Ignore broken entries
+ 
+     int32_t portParseError;
+     nsAutoCString portString(Substring(host, portIndex+1));
+     port = portString.ToInteger(&portParseError);
+     if (portParseError)
+       continue; // Ignore broken entries
+ 
+-    host.Truncate(portIndex);
++    host.SetLength(portIndex);
+     
+     AddEntryToList(host, port, 
+                    nullptr, // don't have the cert
+                    false, // not temporary
+                    algo_string, fingerprint, bits, db_key);
+   }
+ 
+   return NS_OK;
+diff --git a/storage/src/StorageBaseStatementInternal.cpp b/storage/src/StorageBaseStatementInternal.cpp
+--- a/storage/src/StorageBaseStatementInternal.cpp
++++ b/storage/src/StorageBaseStatementInternal.cpp
+@@ -225,17 +225,17 @@ StorageBaseStatementInternal::EscapeStri
+   const nsAString &aValue,
+   const PRUnichar aEscapeChar,
+   nsAString &_escapedString
+ )
+ {
+   const PRUnichar MATCH_ALL('%');
+   const PRUnichar MATCH_ONE('_');
+ 
+-  _escapedString.Truncate(0);
++  _escapedString.Truncate();
+ 
+   for (uint32_t i = 0; i < aValue.Length(); i++) {
+     if (aValue[i] == aEscapeChar || aValue[i] == MATCH_ALL ||
+         aValue[i] == MATCH_ONE) {
+       _escapedString += aEscapeChar;
+     }
+     _escapedString += aValue[i];
+   }
+diff --git a/storage/src/Variant.h b/storage/src/Variant.h
+--- a/storage/src/Variant.h
++++ b/storage/src/Variant.h
+@@ -320,25 +320,25 @@ public:
+     NS_ENSURE_ARG_POINTER(_type);
+     *_type = nsIDataType::VTYPE_EMPTY;
+     return NS_OK;
+   }
+ 
+   NS_IMETHOD GetAsAUTF8String(nsACString &_str)
+   {
+     // Return a void string.
+-    _str.Truncate(0);
++    _str.Truncate();
+     _str.SetIsVoid(true);
+     return NS_OK;
+   }
+ 
+   NS_IMETHOD GetAsAString(nsAString &_str)
+   {
+     // Return a void string.
+-    _str.Truncate(0);
++    _str.Truncate();
+     _str.SetIsVoid(true);
+     return NS_OK;
+   }
+ };
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ //// Template Implementation
+ 
+diff --git a/storage/src/mozStorageArgValueArray.cpp b/storage/src/mozStorageArgValueArray.cpp
+--- a/storage/src/mozStorageArgValueArray.cpp
++++ b/storage/src/mozStorageArgValueArray.cpp
+@@ -136,17 +136,16 @@ NS_IMETHODIMP
+ ArgValueArray::GetUTF8String(uint32_t aIndex,
+                              nsACString &_value)
+ {
+   ENSURE_INDEX_VALUE(aIndex, mArgc);
+ 
+   if (::sqlite3_value_type(mArgv[aIndex]) == SQLITE_NULL) {
+     // NULL columns should have IsVoid set to distinguish them from an empty
+     // string.
+-    _value.Truncate(0);
+     _value.SetIsVoid(true);
+   }
+   else {
+     _value.Assign(reinterpret_cast<const char *>(::sqlite3_value_text(mArgv[aIndex])),
+                   ::sqlite3_value_bytes(mArgv[aIndex]));
+   }
+   return NS_OK;
+ }
+@@ -155,17 +154,16 @@ NS_IMETHODIMP
+ ArgValueArray::GetString(uint32_t aIndex,
+                          nsAString &_value)
+ {
+   ENSURE_INDEX_VALUE(aIndex, mArgc);
+ 
+   if (::sqlite3_value_type(mArgv[aIndex]) == SQLITE_NULL) {
+     // NULL columns should have IsVoid set to distinguish them from an empty
+     // string.
+-    _value.Truncate(0);
+     _value.SetIsVoid(true);
+   } else {
+     _value.Assign(static_cast<const PRUnichar *>(::sqlite3_value_text16(mArgv[aIndex])),
+                   ::sqlite3_value_bytes16(mArgv[aIndex]) / 2);
+   }
+   return NS_OK;
+ }
+ 
+diff --git a/storage/src/mozStorageStatement.cpp b/storage/src/mozStorageStatement.cpp
+--- a/storage/src/mozStorageStatement.cpp
++++ b/storage/src/mozStorageStatement.cpp
+@@ -782,17 +782,16 @@ Statement::GetUTF8String(uint32_t aIndex
+ {
+   // Get type of Index will check aIndex for us, so we don't have to.
+   int32_t type;
+   nsresult rv = GetTypeOfIndex(aIndex, &type);
+   NS_ENSURE_SUCCESS(rv, rv);
+   if (type == mozIStorageStatement::VALUE_TYPE_NULL) {
+     // NULL columns should have IsVoid set to distinguish them from the empty
+     // string.
+-    _value.Truncate(0);
+     _value.SetIsVoid(true);
+   }
+   else {
+     const char *value =
+       reinterpret_cast<const char *>(::sqlite3_column_text(mDBStatement,
+                                                            aIndex));
+     _value.Assign(value, ::sqlite3_column_bytes(mDBStatement, aIndex));
+   }
+@@ -805,17 +804,16 @@ Statement::GetString(uint32_t aIndex,
+ {
+   // Get type of Index will check aIndex for us, so we don't have to.
+   int32_t type;
+   nsresult rv = GetTypeOfIndex(aIndex, &type);
+   NS_ENSURE_SUCCESS(rv, rv);
+   if (type == mozIStorageStatement::VALUE_TYPE_NULL) {
+     // NULL columns should have IsVoid set to distinguish them from the empty
+     // string.
+-    _value.Truncate(0);
+     _value.SetIsVoid(true);
+   } else {
+     const PRUnichar *value =
+       static_cast<const PRUnichar *>(::sqlite3_column_text16(mDBStatement,
+                                                              aIndex));
+     _value.Assign(value, ::sqlite3_column_bytes16(mDBStatement, aIndex) / 2);
+   }
+   return NS_OK;
+diff --git a/toolkit/components/intl/nsCharsetMenu.cpp b/toolkit/components/intl/nsCharsetMenu.cpp
+--- a/toolkit/components/intl/nsCharsetMenu.cpp
++++ b/toolkit/components/intl/nsCharsetMenu.cpp
+@@ -1555,17 +1555,17 @@ nsresult nsCharsetMenu::UpdateCachePrefs
+   if ((cachePrefValue.Find(currentCharset) == kNotFound) && 
+       (staticPrefValue.Find(currentCharset) == kNotFound)) {
+ 
+     if (!cachePrefValue.IsEmpty())
+       cachePrefValue.Insert(", ", 0);
+ 
+     cachePrefValue.Insert(currentCharset, 0);
+     if (cacheSize < (int32_t) cachePrefValue.CountChar(',') + 1)
+-      cachePrefValue.Truncate(cachePrefValue.RFindChar(','));
++      cachePrefValue.SetLength(cachePrefValue.RFindChar(','));
+ 
+     rv = mPrefs->SetCharPref(aCacheKey, cachePrefValue);
+   }
+ 
+   return rv;
+ }
+ 
+ nsresult nsCharsetMenu::ClearMenu(nsIRDFContainer        * aContainer,
+diff --git a/toolkit/components/places/AsyncFaviconHelpers.cpp b/toolkit/components/places/AsyncFaviconHelpers.cpp
+--- a/toolkit/components/places/AsyncFaviconHelpers.cpp
++++ b/toolkit/components/places/AsyncFaviconHelpers.cpp
+@@ -619,18 +619,18 @@ AsyncFetchAndSetIconFromNetwork::~AsyncF
+ NS_IMETHODIMP
+ AsyncFetchAndSetIconFromNetwork::Run()
+ {
+   NS_PRECONDITION(NS_IsMainThread(),
+                   "This should be called on the main thread");
+ 
+   // Ensure data is cleared, since it's going to be overwritten.
+   if (mIcon.data.Length() > 0) {
+-    mIcon.data.Truncate(0);
+-    mIcon.mimeType.Truncate(0);
++    mIcon.data.Truncate();
++    mIcon.mimeType.Truncate();
+   }
+ 
+   nsCOMPtr<nsIURI> iconURI;
+   nsresult rv = NS_NewURI(getter_AddRefs(iconURI), mIcon.spec);
+   NS_ENSURE_SUCCESS(rv, rv);
+   rv = NS_NewChannel(getter_AddRefs(mChannel), iconURI);
+   NS_ENSURE_SUCCESS(rv, rv);
+   nsCOMPtr<nsIInterfaceRequestor> listenerRequestor =
+diff --git a/toolkit/components/places/Helpers.cpp b/toolkit/components/places/Helpers.cpp
+--- a/toolkit/components/places/Helpers.cpp
++++ b/toolkit/components/places/Helpers.cpp
+@@ -226,17 +226,17 @@ GetReversedHostname(const nsString& aFor
+ {
+   ReverseString(aForward, aRevHost);
+   aRevHost.Append(PRUnichar('.'));
+ }
+ 
+ void
+ ReverseString(const nsString& aInput, nsString& aReversed)
+ {
+-  aReversed.Truncate(0);
++  aReversed.Truncate();
+   for (int32_t i = aInput.Length() - 1; i >= 0; i--) {
+     aReversed.Append(aInput[i]);
+   }
+ }
+ 
+ static
+ nsresult
+ Base64urlEncode(const uint8_t* aBytes,
+diff --git a/toolkit/components/places/SQLFunctions.cpp b/toolkit/components/places/SQLFunctions.cpp
+--- a/toolkit/components/places/SQLFunctions.cpp
++++ b/toolkit/components/places/SQLFunctions.cpp
+@@ -718,18 +718,18 @@ namespace places {
+ 
+     nsAutoString src;
+     aArguments->GetString(0, src);
+ 
+     nsCOMPtr<nsIWritableVariant> result =
+       do_CreateInstance("@mozilla.org/variant;1");
+     NS_ENSURE_STATE(result);
+ 
+-    if (src.Length()>1) {
+-      src.Truncate(src.Length() - 1);
++    if (src.Length() > 1) {
++      src.SetLength(src.Length() - 1);
+       nsAutoString dest;
+       ReverseString(src, dest);
+       result->SetAsAString(dest);
+     }
+     else {
+       result->SetAsAString(EmptyString());
+     }
+     NS_ADDREF(*_result = result);
+diff --git a/toolkit/components/places/nsNavBookmarks.cpp b/toolkit/components/places/nsNavBookmarks.cpp
+--- a/toolkit/components/places/nsNavBookmarks.cpp
++++ b/toolkit/components/places/nsNavBookmarks.cpp
+@@ -2625,17 +2625,17 @@ nsNavBookmarks::SetKeywordForBookmark(PR
+   return NS_OK;
+ }
+ 
+ 
+ NS_IMETHODIMP
+ nsNavBookmarks::GetKeywordForURI(nsIURI* aURI, nsAString& aKeyword)
+ {
+   NS_ENSURE_ARG(aURI);
+-  aKeyword.Truncate(0);
++  aKeyword.Truncate();
+ 
+   nsCOMPtr<mozIStorageStatement> stmt = mDB->GetStatement(
+     "SELECT k.keyword "
+     "FROM moz_places h "
+     "JOIN moz_bookmarks b ON b.fk = h.id "
+     "JOIN moz_keywords k ON k.id = b.keyword_id "
+     "WHERE h.url = :page_url "
+   );
+@@ -2658,17 +2658,17 @@ nsNavBookmarks::GetKeywordForURI(nsIURI*
+   return NS_OK;
+ }
+ 
+ 
+ NS_IMETHODIMP
+ nsNavBookmarks::GetKeywordForBookmark(int64_t aBookmarkId, nsAString& aKeyword)
+ {
+   NS_ENSURE_ARG_MIN(aBookmarkId, 1);
+-  aKeyword.Truncate(0);
++  aKeyword.Truncate();
+ 
+   nsresult rv = EnsureKeywordsHash();
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   nsAutoString keyword;
+   if (!mBookmarkToKeywordHash.Get(aBookmarkId, &keyword)) {
+     aKeyword.SetIsVoid(true);
+   }
+diff --git a/toolkit/components/places/nsNavHistory.cpp b/toolkit/components/places/nsNavHistory.cpp
+--- a/toolkit/components/places/nsNavHistory.cpp
++++ b/toolkit/components/places/nsNavHistory.cpp
+@@ -3104,17 +3104,17 @@ nsNavHistory::RemovePagesFromHost(const 
+   rv = hostSupports->SetData(host16);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   // see BindQueryClauseParameters for how this host selection works
+   nsAutoString revHostDot;
+   GetReversedHostname(host16, revHostDot);
+   NS_ASSERTION(revHostDot[revHostDot.Length() - 1] == '.', "Invalid rev. host");
+   nsAutoString revHostSlash(revHostDot);
+-  revHostSlash.Truncate(revHostSlash.Length() - 1);
++  revHostSlash.SetLength(revHostSlash.Length() - 1);
+   revHostSlash.Append(NS_LITERAL_STRING("/"));
+ 
+   // build condition string based on host selection type
+   nsAutoCString conditionString;
+   if (aEntireDomain)
+     conditionString.AssignLiteral("rev_host >= ?1 AND rev_host < ?2 ");
+   else
+     conditionString.AssignLiteral("rev_host = ?1 ");
+@@ -3713,17 +3713,17 @@ nsNavHistory::SetPageTitle(nsIURI* aURI,
+ }
+ 
+ NS_IMETHODIMP
+ nsNavHistory::GetPageTitle(nsIURI* aURI, nsAString& aTitle)
+ {
+   NS_ASSERTION(NS_IsMainThread(), "This can only be called on the main thread");
+   NS_ENSURE_ARG(aURI);
+ 
+-  aTitle.Truncate(0);
++  aTitle.Truncate();
+ 
+   nsCOMPtr<mozIStorageStatement> stmt = mDB->GetStatement(
+     "SELECT id, url, title, rev_host, visit_count, guid "
+     "FROM moz_places "
+     "WHERE url = :page_url "
+   );
+   NS_ENSURE_STATE(stmt);
+   mozStorageStatementScoper scoper(stmt);
+@@ -4357,17 +4357,17 @@ nsNavHistory::BindQueryClauseParameters(
+       // for "mozilla.org" do query >= "gro.allizom." AND < "gro.allizom/"
+       // which will get everything starting with "gro.allizom." while using the
+       // index (using SUBSTRING() causes indexes to be discarded).
+       NS_ASSERTION(revDomain[revDomain.Length() - 1] == '.', "Invalid rev. host");
+       rv = statement->BindStringByName(
+         NS_LITERAL_CSTRING("domain_lower") + qIndex, revDomain
+       );
+       NS_ENSURE_SUCCESS(rv, rv);
+-      revDomain.Truncate(revDomain.Length() - 1);
++      revDomain.SetLength(revDomain.Length() - 1);
+       revDomain.Append(PRUnichar('/'));
+       rv = statement->BindStringByName(
+         NS_LITERAL_CSTRING("domain_upper") + qIndex, revDomain
+       );
+       NS_ENSURE_SUCCESS(rv, rv);
+     }
+   }
+ 
+diff --git a/toolkit/components/remote/nsXRemoteService.cpp b/toolkit/components/remote/nsXRemoteService.cpp
+--- a/toolkit/components/remote/nsXRemoteService.cpp
++++ b/toolkit/components/remote/nsXRemoteService.cpp
+@@ -296,17 +296,17 @@ nsXRemoteService::HandleCommand(char* aC
+   int32_t p1, p2;
+   p1 = command.FindChar('(');
+   p2 = command.FindChar(')');
+ 
+   if (p1 == kNotFound || p2 == kNotFound || p1 == 0 || p2 < p1) {
+     return "500 command not parseable";
+   }
+ 
+-  command.Truncate(p1);
++  command.SetLength(p1);
+   command.Trim(" ", true, true);
+   ToLowerCase(command);
+ 
+   if (!command.EqualsLiteral("ping")) {
+     nsAutoCString desktopStartupID;
+     nsDependentCString cmd(aCommand);
+     FindExtensionParameterInCommand("DESKTOP_STARTUP_ID",
+                                     cmd, '\n',
+diff --git a/toolkit/components/startup/nsUserInfoUnix.cpp b/toolkit/components/startup/nsUserInfoUnix.cpp
+--- a/toolkit/components/startup/nsUserInfoUnix.cpp
++++ b/toolkit/components/startup/nsUserInfoUnix.cpp
+@@ -84,17 +84,17 @@ nsUserInfo::GetFullname(PRUnichar **aFul
+     // now try to parse the GECOS information, which will be in the form
+     // Full Name, <other stuff> - eliminate the ", <other stuff>
+     // also, sometimes GECOS uses "&" to mean "the user name" so do
+     // the appropriate substitution
+     
+     // truncate at first comma (field delimiter)
+     int32_t index;
+     if ((index = fullname.Find(",")) != kNotFound)
+-        fullname.Truncate(index);
++        fullname.SetLength(index);
+ 
+     // replace ampersand with username
+     if (pw->pw_name) {
+         nsAutoCString username(pw->pw_name);
+         if (!username.IsEmpty() && nsCRT::IsLower(username.CharAt(0)))
+             username.SetCharAt(nsCRT::ToUpper(username.CharAt(0)), 0);
+             
+         fullname.ReplaceSubstring("&", username.get());
+diff --git a/toolkit/crashreporter/nsExceptionHandler.cpp b/toolkit/crashreporter/nsExceptionHandler.cpp
+--- a/toolkit/crashreporter/nsExceptionHandler.cpp
++++ b/toolkit/crashreporter/nsExceptionHandler.cpp
+@@ -1196,17 +1196,17 @@ nsresult AnnotateCrashReport(const nsACS
+   }
+ 
+   MutexAutoLock lock(*crashReporterAPILock);
+ 
+   rv = crashReporterAPIData_Hash->Put(key, escapedData);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   // now rebuild the file contents
+-  crashReporterAPIData->Truncate(0);
++  crashReporterAPIData->Truncate();
+   crashReporterAPIData_Hash->EnumerateRead(EnumerateEntries,
+                                            crashReporterAPIData);
+ 
+   return NS_OK;
+ }
+ 
+ nsresult AppendAppNotesToCrashReport(const nsACString& data)
+ {
+diff --git a/toolkit/xre/nsAppRunner.cpp b/toolkit/xre/nsAppRunner.cpp
+--- a/toolkit/xre/nsAppRunner.cpp
++++ b/toolkit/xre/nsAppRunner.cpp
+@@ -2121,17 +2121,17 @@ SelectProfile(nsIProfileLock* *aResult, 
+     if (profile) {
+       nsCOMPtr<nsIProfileUnlocker> unlocker;
+       rv = profile->Lock(getter_AddRefs(unlocker), aResult);
+       if (NS_SUCCEEDED(rv)) {
+         // Try to grab the profile name.
+         if (aProfileName) {
+           rv = profile->GetName(*aProfileName);
+           if (NS_FAILED(rv))
+-            aProfileName->Truncate(0);
++            aProfileName->Truncate();
+         }
+         return NS_OK;
+       }
+ 
+       nsCOMPtr<nsILocalFile> profileDir;
+       rv = profile->GetRootDir(getter_AddRefs(profileDir));
+       NS_ENSURE_SUCCESS(rv, rv);
+ 
+diff --git a/uriloader/exthandler/unix/nsGNOMERegistry.cpp b/uriloader/exthandler/unix/nsGNOMERegistry.cpp
+--- a/uriloader/exthandler/unix/nsGNOMERegistry.cpp
++++ b/uriloader/exthandler/unix/nsGNOMERegistry.cpp
+@@ -123,17 +123,17 @@ nsGNOMERegistry::GetAppDescForScheme(con
+     bool isEnabled;
+     if (NS_FAILED(gconf->GetAppForProtocol(aScheme, &isEnabled, name)))
+       return;
+ 
+     if (!name.IsEmpty()) {
+       // Try to only provide the executable name, as it is much simpler than with the path and arguments
+       int32_t firstSpace = name.FindChar(' ');
+       if (firstSpace != kNotFound) {
+-        name.Truncate(firstSpace);
++        name.SetLength(firstSpace);
+         int32_t lastSlash = name.RFindChar('/');
+         if (lastSlash != kNotFound) {
+           name.Cut(0, lastSlash + 1);
+         }
+       }
+     }
+   }
+ 
+diff --git a/uriloader/exthandler/unix/nsOSHelperAppService.cpp b/uriloader/exthandler/unix/nsOSHelperAppService.cpp
+--- a/uriloader/exthandler/unix/nsOSHelperAppService.cpp
++++ b/uriloader/exthandler/unix/nsOSHelperAppService.cpp
+@@ -381,18 +381,18 @@ nsOSHelperAppService::GetTypeAndDescript
+     CopyASCIItoUTF16(cBuf, buf);
+     // read through, building up an entry.  If we finish an entry, check for
+     // a match and return out of the loop if we match
+ 
+     // skip comments and empty lines
+     if (!buf.IsEmpty() && buf.First() != '#') {
+       entry.Append(buf);
+       if (entry.Last() == '\\') {
+-        entry.Truncate(entry.Length() - 1);
+-        entry.Append(PRUnichar(' '));  // in case there is no trailing whitespace on this line
++        // in case there is no trailing whitespace on this line
++        entry.Replace(entry.Length() - 1, 1, PRUnichar(' '));
+       } else {  // we have a full entry
+         LOG(("Current entry: '%s'\n",
+              NS_LossyConvertUTF16toASCII(entry).get()));
+         if (netscapeFormat) {
+           rv = ParseNetscapeMIMETypesEntry(entry,
+                                            majorTypeStart, majorTypeEnd,
+                                            minorTypeStart, minorTypeEnd,
+                                            extensions,
+@@ -549,18 +549,18 @@ nsOSHelperAppService::GetExtensionsAndDe
+     CopyASCIItoUTF16(cBuf, buf);
+     // read through, building up an entry.  If we finish an entry, check for
+     // a match and return out of the loop if we match
+ 
+     // skip comments and empty lines
+     if (!buf.IsEmpty() && buf.First() != '#') {
+       entry.Append(buf);
+       if (entry.Last() == '\\') {
+-        entry.Truncate(entry.Length() - 1);
+-        entry.Append(PRUnichar(' '));  // in case there is no trailing whitespace on this line
++        // in case there is no trailing whitespace on this line
++        entry.Replace(entry.Length() - 1, 1, PRUnichar(' '));
+       } else {  // we have a full entry
+         LOG(("Current entry: '%s'\n",
+              NS_LossyConvertUTF16toASCII(entry).get()));
+         if (netscapeFormat) {
+           rv = ParseNetscapeMIMETypesEntry(entry,
+                                            majorTypeStart, majorTypeEnd,
+                                            minorTypeStart, minorTypeEnd,
+                                            extensions,
+@@ -1013,18 +1013,18 @@ nsOSHelperAppService::GetHandlerAndDescr
+   }
+ 
+   do {  // return on end-of-file in the loop
+ 
+     CopyASCIItoUTF16(cBuffer, buffer);
+     if (!buffer.IsEmpty() && buffer.First() != '#') {
+       entry.Append(buffer);
+       if (entry.Last() == '\\') {  // entry continues on next line
+-        entry.Truncate(entry.Length()-1);
+-        entry.Append(PRUnichar(' ')); // in case there is no trailing whitespace on this line
++        // in case there is no trailing whitespace on this line
++        entry.Replace(entry.Length() - 1, 1, PRUnichar(' '));
+       } else {  // we have a full entry in entry.  Check it for the type
+         LOG(("Current entry: '%s'\n",
+              NS_LossyConvertUTF16toASCII(entry).get()));
+ 
+         nsAString::const_iterator semicolon_iter,
+                                   start_iter, end_iter,
+                                   majorTypeStart, majorTypeEnd,
+                                   minorTypeStart, minorTypeEnd;
+diff --git a/widget/gtk2/nsWindow.cpp b/widget/gtk2/nsWindow.cpp
+--- a/widget/gtk2/nsWindow.cpp
++++ b/widget/gtk2/nsWindow.cpp
+@@ -1798,17 +1798,17 @@ nsWindow::SetTitle(const nsAString& aTit
+ #define UTF8_FOLLOWBYTE(ch) (((ch) & 0xC0) == 0x80)
+     NS_ConvertUTF16toUTF8 titleUTF8(aTitle);
+     if (titleUTF8.Length() > NS_WINDOW_TITLE_MAX_LENGTH) {
+         // Truncate overlong titles (bug 167315). Make sure we chop after a
+         // complete sequence by making sure the next char isn't a follow-byte.
+         uint32_t len = NS_WINDOW_TITLE_MAX_LENGTH;
+         while(UTF8_FOLLOWBYTE(titleUTF8[len]))
+             --len;
+-        titleUTF8.Truncate(len);
++        titleUTF8.SetLength(len);
+     }
+     gtk_window_set_title(GTK_WINDOW(mShell), (const char *)titleUTF8.get());
+ 
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsWindow::SetIcon(const nsAString& aIconSpec)
+diff --git a/xpcom/build/FileLocation.cpp b/xpcom/build/FileLocation.cpp
+--- a/xpcom/build/FileLocation.cpp
++++ b/xpcom/build/FileLocation.cpp
+@@ -47,19 +47,19 @@ FileLocation::FileLocation(const FileLoc
+     if (file.mBaseFile) {
+       Init(file.mBaseFile, file.mPath.get());
+     } else {
+       Init(file.mBaseZip, file.mPath.get());
+     }
+     if (path) {
+       int32_t i = mPath.RFindChar('/');
+       if (kNotFound == i) {
+-        mPath.Truncate(0);
++        mPath.Truncate();
+       } else {
+-        mPath.Truncate(i + 1);
++        mPath.SetLength(i + 1);
+       }
+       mPath += path;
+     }
+   } else {
+     if (path) {
+       nsCOMPtr<nsIFile> cfile;
+       file.mBaseFile->GetParent(getter_AddRefs(cfile));
+       nsCOMPtr<nsILocalFile> clfile = do_QueryInterface(cfile);
+diff --git a/xpcom/io/nsLocalFileCommon.cpp b/xpcom/io/nsLocalFileCommon.cpp
+--- a/xpcom/io/nsLocalFileCommon.cpp
++++ b/xpcom/io/nsLocalFileCommon.cpp
+@@ -226,17 +226,17 @@ nsLocalFile::GetRelativeDescriptor(nsILo
+     NS_ENSURE_ARG_POINTER(fromFile);
+     const int32_t kMaxNodesInPath = 32;
+ 
+     //
+     // _retval will be UTF-8 encoded
+     // 
+         
+     nsresult rv;
+-    _retval.Truncate(0);
++    _retval.Truncate();
+ 
+     nsAutoString thisPath, fromPath;
+     PRUnichar *thisNodes[kMaxNodesInPath], *fromNodes[kMaxNodesInPath];
+     int32_t  thisNodeCnt, fromNodeCnt, nodeIndex;
+     
+     rv = GetPath(thisPath);
+     if (NS_FAILED(rv))
+         return rv;
+diff --git a/xpcom/string/public/nsTSubstring.h b/xpcom/string/public/nsTSubstring.h
+--- a/xpcom/string/public/nsTSubstring.h
++++ b/xpcom/string/public/nsTSubstring.h
+@@ -469,20 +469,19 @@ class nsTSubstring_CharT
+          * @returns true on success
+          *          false on out-of-memory, or if requesting a size bigger
+          *                   than a string can hold (2^31 chars).
+          */
+       bool NS_FASTCALL SetCapacity( size_type newCapacity );
+ 
+       void NS_FASTCALL SetLength( size_type newLength );
+ 
+-      void Truncate( size_type newLength = 0 )
++      void Truncate()
+         {
+-          NS_ASSERTION(newLength <= mLength, "Truncate cannot make string longer");
+-          SetLength(newLength);
++          SetLength(0);
+         }
+ 
+ 
+         /**
+          * buffer access
+          */
+ 
+ 
+diff --git a/xpfe/components/directory/nsDirectoryViewer.cpp b/xpfe/components/directory/nsDirectoryViewer.cpp
+--- a/xpfe/components/directory/nsDirectoryViewer.cpp
++++ b/xpfe/components/directory/nsDirectoryViewer.cpp
+@@ -455,17 +455,17 @@ nsHTTPIndex::OnIndexAvailable(nsIRequest
+       if (NS_FAILED(rv)) return rv;
+       
+       nsXPIDLString xpstr;
+ 
+       // description
+       rv = aIndex->GetDescription(getter_Copies(xpstr));
+       if (NS_FAILED(rv)) return rv;
+       if (xpstr.Last() == '/')
+-        xpstr.Truncate(xpstr.Length() - 1);
++        xpstr.SetLength(xpstr.Length() - 1);
+ 
+       rv = mDirRDF->GetLiteral(xpstr.get(), getter_AddRefs(lit));
+       if (NS_FAILED(rv)) return rv;
+       rv = Assert(entry, kNC_Description, lit, true);
+       if (NS_FAILED(rv)) return rv;
+       
+       // contentlength
+       int64_t size;

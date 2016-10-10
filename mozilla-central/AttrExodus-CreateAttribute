@@ -1,0 +1,173 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsDocument.cpp b/content/base/src/nsDocument.cpp
+--- a/content/base/src/nsDocument.cpp
++++ b/content/base/src/nsDocument.cpp
+@@ -4464,63 +4464,16 @@ nsDocument::CreateProcessingInstruction(
+                                       mNodeInfoManager, aTarget, aData);
+   if (NS_FAILED(rv)) {
+     return rv;
+   }
+ 
+   return CallQueryInterface(content, aReturn);
+ }
+ 
+-NS_IMETHODIMP
+-nsDocument::CreateAttribute(const nsAString& aName,
+-                            nsIDOMAttr** aReturn)
+-{
+-  *aReturn = nullptr;
+-  NS_ENSURE_TRUE(mNodeInfoManager, NS_ERROR_NOT_INITIALIZED);
+-
+-  nsresult rv = nsContentUtils::CheckQName(aName, false);
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  nsAutoString value;
+-  nsDOMAttribute* attribute;
+-
+-  nsCOMPtr<nsINodeInfo> nodeInfo;
+-  rv = mNodeInfoManager->GetNodeInfo(aName, nullptr, kNameSpaceID_None,
+-                                     getter_AddRefs(nodeInfo));
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  attribute = new nsDOMAttribute(nullptr, nodeInfo.forget(), value, false);
+-  NS_ENSURE_TRUE(attribute, NS_ERROR_OUT_OF_MEMORY);
+-
+-  return CallQueryInterface(attribute, aReturn);
+-}
+-
+-NS_IMETHODIMP
+-nsDocument::CreateAttributeNS(const nsAString & aNamespaceURI,
+-                              const nsAString & aQualifiedName,
+-                              nsIDOMAttr **aResult)
+-{
+-  NS_ENSURE_ARG_POINTER(aResult);
+-  *aResult = nullptr;
+-
+-  nsCOMPtr<nsINodeInfo> nodeInfo;
+-  nsresult rv = nsContentUtils::GetNodeInfoFromQName(aNamespaceURI,
+-                                                     aQualifiedName,
+-                                                     mNodeInfoManager,
+-                                                     getter_AddRefs(nodeInfo));
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  nsAutoString value;
+-  nsDOMAttribute* attribute =
+-    new nsDOMAttribute(nullptr, nodeInfo.forget(), value, true);
+-  NS_ENSURE_TRUE(attribute, NS_ERROR_OUT_OF_MEMORY);
+-
+-  return CallQueryInterface(attribute, aResult);
+-}
+-
+ already_AddRefed<nsContentList>
+ nsDocument::GetElementsByTagName(const nsAString& aTagname)
+ {
+   nsAutoString lowercaseName;
+   nsContentUtils::ASCIIToLower(aTagname, lowercaseName);
+   nsCOMPtr<nsIAtom> xmlAtom = do_GetAtom(aTagname);
+   nsCOMPtr<nsIAtom> htmlAtom = do_GetAtom(lowercaseName);
+ 
+diff --git a/content/html/document/src/nsHTMLDocument.cpp b/content/html/document/src/nsHTMLDocument.cpp
+--- a/content/html/document/src/nsHTMLDocument.cpp
++++ b/content/html/document/src/nsHTMLDocument.cpp
+@@ -1279,22 +1279,16 @@ nsHTMLDocument::CreateDocumentFragment(n
+ 
+ NS_IMETHODIMP
+ nsHTMLDocument::CreateComment(const nsAString& aData, nsIDOMComment** aReturn)
+ {
+   return nsDocument::CreateComment(aData, aReturn);
+ }
+ 
+ NS_IMETHODIMP
+-nsHTMLDocument::CreateAttribute(const nsAString& aName, nsIDOMAttr** aReturn)
+-{
+-  return nsDocument::CreateAttribute(aName, aReturn);
+-}
+-
+-NS_IMETHODIMP
+ nsHTMLDocument::CreateTextNode(const nsAString& aData, nsIDOMText** aReturn)
+ {
+   return nsDocument::CreateTextNode(aData, aReturn);
+ }
+ 
+ NS_IMETHODIMP
+ nsHTMLDocument::GetElementsByTagName(const nsAString& aTagname,
+                                      nsIDOMNodeList** aReturn)
+@@ -2193,24 +2187,16 @@ NS_IMETHODIMP
+ nsHTMLDocument::ImportNode(nsIDOMNode* aImportedNode,
+                            bool aDeep,
+                            nsIDOMNode** aReturn)
+ {
+   return nsDocument::ImportNode(aImportedNode, aDeep, aReturn);
+ }
+ 
+ NS_IMETHODIMP
+-nsHTMLDocument::CreateAttributeNS(const nsAString& aNamespaceURI,
+-                                  const nsAString& aQualifiedName,
+-                                  nsIDOMAttr** aReturn)
+-{
+-  return nsDocument::CreateAttributeNS(aNamespaceURI, aQualifiedName, aReturn);
+-}
+-
+-NS_IMETHODIMP
+ nsHTMLDocument::GetElementsByTagNameNS(const nsAString& aNamespaceURI,
+                                        const nsAString& aLocalName,
+                                        nsIDOMNodeList** aReturn)
+ {
+   return nsDocument::GetElementsByTagNameNS(aNamespaceURI, aLocalName, aReturn);
+ }
+ 
+ NS_IMETHODIMP
+diff --git a/dom/interfaces/core/nsIDOMDocument.idl b/dom/interfaces/core/nsIDOMDocument.idl
+--- a/dom/interfaces/core/nsIDOMDocument.idl
++++ b/dom/interfaces/core/nsIDOMDocument.idl
+@@ -47,48 +47,42 @@
+  * cannot exist outside the context of a Document, the nsIDOMDocument 
+  * interface also contains the factory methods needed to create these 
+  * objects.
+  *
+  * For more information on this interface please see 
+  * http://www.w3.org/TR/DOM-Level-2-Core/
+  */
+ 
+-[scriptable, uuid(f404cc00-9312-43b1-a381-71ef1904d01b)]
++[scriptable, uuid(0e1d8fbe-3935-46bf-a271-e4d0cc9cc303)]
+ interface nsIDOMDocument : nsIDOMNode
+ {
+   readonly attribute nsIDOMDocumentType         doctype;
+   readonly attribute nsIDOMDOMImplementation    implementation;
+   readonly attribute nsIDOMElement              documentElement;
+   nsIDOMElement                 createElement(in DOMString tagName)
+                                   raises(DOMException);
+   nsIDOMDocumentFragment        createDocumentFragment();
+   nsIDOMText                    createTextNode(in DOMString data);
+   nsIDOMComment                 createComment(in DOMString data);
+   nsIDOMCDATASection            createCDATASection(in DOMString data)
+                                   raises(DOMException);
+   nsIDOMProcessingInstruction   createProcessingInstruction(in DOMString target, 
+                                                             in DOMString data)
+                                   raises(DOMException);
+-  nsIDOMAttr                    createAttribute(in DOMString name)
+-                                  raises(DOMException);
+   nsIDOMNodeList                getElementsByTagName(in DOMString tagname);
+ 
+   // Introduced in DOM Level 2:
+   nsIDOMNode                    importNode(in nsIDOMNode importedNode,
+                                            in boolean deep)
+                                   raises(DOMException);
+   // Introduced in DOM Level 2:
+   nsIDOMElement                 createElementNS(in DOMString namespaceURI,
+                                                 in DOMString qualifiedName)
+                                   raises(DOMException);
+   // Introduced in DOM Level 2:
+-  nsIDOMAttr                    createAttributeNS(in DOMString namespaceURI,
+-                                                  in DOMString qualifiedName)
+-                                  raises(DOMException);
+-  // Introduced in DOM Level 2:
+   nsIDOMNodeList                getElementsByTagNameNS(in DOMString namespaceURI,
+                                                        in DOMString localName);
+   // Introduced in DOM Level 2:
+   nsIDOMElement                 getElementById(in DOMString elementId);
+ 
+   readonly attribute nsIDOMWindow               defaultView;
+ };

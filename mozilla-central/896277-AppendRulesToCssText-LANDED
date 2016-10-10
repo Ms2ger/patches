@@ -1,0 +1,126 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 896277 - Don't return nsresult from GroupRule::AppendRulesToCssText; r=dbaron
+
+diff --git a/layout/style/GroupRule.h b/layout/style/GroupRule.h
+--- a/layout/style/GroupRule.h
++++ b/layout/style/GroupRule.h
+@@ -70,17 +70,17 @@ public:
+                                     nsMediaQueryResultCacheKey& aKey) = 0;
+ 
+   // non-virtual -- it is only called by subclasses
+   size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+   virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const = 0;
+ 
+ protected:
+   // to help implement nsIDOMCSSRule
+-  nsresult AppendRulesToCssText(nsAString& aCssText);
++  void AppendRulesToCssText(nsAString& aCssText);
+ 
+   // to implement common methods on nsIDOMCSSMediaRule and
+   // nsIDOMCSSMozDocumentRule
+   nsresult GetCssRules(nsIDOMCSSRuleList* *aRuleList);
+   nsresult InsertRule(const nsAString & aRule, uint32_t aIndex,
+                       uint32_t* _retval);
+   nsresult DeleteRule(uint32_t aIndex);
+ 
+diff --git a/layout/style/nsCSSRules.cpp b/layout/style/nsCSSRules.cpp
+--- a/layout/style/nsCSSRules.cpp
++++ b/layout/style/nsCSSRules.cpp
+@@ -696,17 +696,17 @@ GroupRule::ReplaceStyleRule(Rule* aOld, 
+   mRules.ReplaceObjectAt(aNew, index);
+   aNew->SetStyleSheet(GetStyleSheet());
+   aNew->SetParentRule(this);
+   aOld->SetStyleSheet(nullptr);
+   aOld->SetParentRule(nullptr);
+   return NS_OK;
+ }
+ 
+-nsresult
++void
+ GroupRule::AppendRulesToCssText(nsAString& aCssText)
+ {
+   aCssText.AppendLiteral(" {\n");
+ 
+   // get all the rules
+   for (int32_t index = 0, count = mRules.Count(); index < count; ++index) {
+     Rule* rule = mRules.ObjectAt(index);
+     nsIDOMCSSRule* domRule = rule->GetDOMRule();
+@@ -715,18 +715,16 @@ GroupRule::AppendRulesToCssText(nsAStrin
+       domRule->GetCssText(cssText);
+       aCssText.Append(NS_LITERAL_STRING("  ") +
+                       cssText +
+                       NS_LITERAL_STRING("\n"));
+     }
+   }
+ 
+   aCssText.AppendLiteral("}");
+-
+-  return NS_OK;
+ }
+ 
+ // nsIDOMCSSMediaRule or nsIDOMCSSMozDocumentRule methods
+ nsresult
+ GroupRule::GetCssRules(nsIDOMCSSRuleList* *aRuleList)
+ {
+   if (!mRuleCollection) {
+     mRuleCollection = new css::GroupRuleRuleList(this);
+@@ -880,17 +878,18 @@ MediaRule::GetType(uint16_t* aType)
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ MediaRule::GetCssText(nsAString& aCssText)
+ {
+   aCssText.AssignLiteral("@media ");
+   AppendConditionText(aCssText);
+-  return GroupRule::AppendRulesToCssText(aCssText);
++  GroupRule::AppendRulesToCssText(aCssText);
++  return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ MediaRule::SetCssText(const nsAString& aCssText)
+ {
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 
+@@ -1087,17 +1086,18 @@ DocumentRule::GetType(uint16_t* aType)
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ DocumentRule::GetCssText(nsAString& aCssText)
+ {
+   aCssText.AssignLiteral("@-moz-document ");
+   AppendConditionText(aCssText);
+-  return GroupRule::AppendRulesToCssText(aCssText);
++  GroupRule::AppendRulesToCssText(aCssText);
++  return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ DocumentRule::SetCssText(const nsAString& aCssText)
+ {
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 
+@@ -2946,17 +2946,18 @@ CSSSupportsRule::GetType(uint16_t* aType
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ CSSSupportsRule::GetCssText(nsAString& aCssText)
+ {
+   aCssText.AssignLiteral("@supports ");
+   aCssText.Append(mCondition);
+-  return css::GroupRule::AppendRulesToCssText(aCssText);
++  css::GroupRule::AppendRulesToCssText(aCssText);
++  return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ CSSSupportsRule::SetCssText(const nsAString& aCssText)
+ {
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 

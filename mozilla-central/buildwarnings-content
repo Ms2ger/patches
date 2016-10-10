@@ -1,0 +1,155 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/public/nsINode.h b/content/base/public/nsINode.h
+--- a/content/base/public/nsINode.h
++++ b/content/base/public/nsINode.h
+@@ -1922,14 +1922,14 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsINode, N
+     return nsINode::GetUserData(aKey, aResult); \
+   } \
+   NS_IMETHOD Contains(nsIDOMNode* aOther, bool* aResult) __VA_ARGS__ \
+   { \
+     return nsINode::Contains(aOther, aResult); \
+   }
+ 
+ #define NS_FORWARD_NSIDOMNODE_TO_NSINODE \
+-  NS_FORWARD_NSIDOMNODE_TO_NSINODE_HELPER(MOZ_FINAL)
++  NS_FORWARD_NSIDOMNODE_TO_NSINODE_HELPER(MOZ_OVERRIDE MOZ_FINAL)
+ 
+ #define NS_FORWARD_NSIDOMNODE_TO_NSINODE_OVERRIDABLE \
+-  NS_FORWARD_NSIDOMNODE_TO_NSINODE_HELPER()
++  NS_FORWARD_NSIDOMNODE_TO_NSINODE_HELPER(MOZ_OVERRIDE)
+ 
+ #endif /* nsINode_h___ */
+diff --git a/content/base/src/Element.cpp b/content/base/src/Element.cpp
+--- a/content/base/src/Element.cpp
++++ b/content/base/src/Element.cpp
+@@ -305,28 +305,28 @@ Element::ClearStyleStateLocks()
+   ClearHasLockedStyleStates();
+ 
+   NotifyStyleStateChange(locks);
+ }
+ 
+ bool
+ Element::GetBindingURL(nsIDocument *aDocument, css::URLValue **aResult)
+ {
++  *aResult = nullptr;
++
+   // If we have a frame the frame has already loaded the binding.  And
+   // otherwise, don't do anything else here unless we're dealing with
+   // XUL or an HTML element that may have a plugin-related overlay
+   // (i.e. object, embed, or applet).
+   bool isXULorPluginElement = (IsXUL() ||
+                                IsHTML(nsGkAtoms::object) ||
+                                IsHTML(nsGkAtoms::embed) ||
+                                IsHTML(nsGkAtoms::applet));
+   nsIPresShell *shell = aDocument->GetShell();
+   if (!shell || GetPrimaryFrame() || !isXULorPluginElement) {
+-    *aResult = nullptr;
+-
+     return true;
+   }
+ 
+   // Get the computed -moz-binding directly from the style context
+   nsPresContext *pctx = shell->GetPresContext();
+   NS_ENSURE_TRUE(pctx, false);
+ 
+   nsRefPtr<nsStyleContext> sc = pctx->StyleSet()->ResolveStyleFor(this,
+diff --git a/content/base/src/nsHostObjectURI.h b/content/base/src/nsHostObjectURI.h
+--- a/content/base/src/nsHostObjectURI.h
++++ b/content/base/src/nsHostObjectURI.h
+@@ -27,16 +27,18 @@ public:
+   virtual ~nsHostObjectURI() {}
+ 
+   // For use only from deserialization
+   nsHostObjectURI() : nsSimpleURI() {}
+ 
+   NS_DECL_ISUPPORTS_INHERITED
+   NS_DECL_NSIURIWITHPRINCIPAL
+   NS_DECL_NSISERIALIZABLE
++  using nsSimpleURI::Read;
++  using nsSimpleURI::Write;
+   NS_DECL_NSICLASSINFO
+ 
+   // Override CloneInternal() and EqualsInternal()
+   virtual nsresult CloneInternal(RefHandlingEnum aRefHandlingMode,
+                                  nsIURI** aClone) MOZ_OVERRIDE;
+   virtual nsresult EqualsInternal(nsIURI* aOther,
+                                   RefHandlingEnum aRefHandlingMode,
+                                   bool* aResult) MOZ_OVERRIDE;
+diff --git a/content/html/document/src/nsHTMLDocument.cpp b/content/html/document/src/nsHTMLDocument.cpp
+--- a/content/html/document/src/nsHTMLDocument.cpp
++++ b/content/html/document/src/nsHTMLDocument.cpp
+@@ -2593,17 +2593,17 @@ nsHTMLDocument::DeferredContentEditableC
+         }
+ 
+         nsCOMPtr<nsIInlineSpellChecker> spellChecker;
+         rv = editor->GetInlineSpellChecker(false,
+                                            getter_AddRefs(spellChecker));
+         NS_ENSURE_SUCCESS_VOID(rv);
+ 
+         if (spellChecker) {
+-          rv = spellChecker->SpellCheckRange(range);
++          spellChecker->SpellCheckRange(range);
+         }
+       }
+     }
+   }
+ }
+ 
+ static bool
+ DocAllResultMatch(nsIContent* aContent, int32_t aNamespaceID, nsIAtom* aAtom,
+diff --git a/content/media/ogg/OggCodecState.cpp b/content/media/ogg/OggCodecState.cpp
+--- a/content/media/ogg/OggCodecState.cpp
++++ b/content/media/ogg/OggCodecState.cpp
+@@ -349,20 +349,25 @@ TheoraState::Time(int64_t granulepos) {
+   return TheoraState::Time(&mInfo, granulepos);
+ }
+ 
+ bool
+ TheoraState::IsHeader(ogg_packet* aPacket) {
+   return th_packet_isheader(aPacket);
+ }
+ 
+-# define TH_VERSION_CHECK(_info,_maj,_min,_sub) \
+- (((_info)->version_major>(_maj)||(_info)->version_major==(_maj))&& \
+- (((_info)->version_minor>(_min)||(_info)->version_minor==(_min))&& \
+- (_info)->version_subminor>=(_sub)))
++static inline int64_t
++TH_VERSION_CHECK(th_info* aInfo, unsigned char aMaj, unsigned char aMin,
++                 unsigned char aSub)
++{
++  return aInfo->version_major > aMaj ||
++         (aInfo->version_major == aMaj &&
++          (aInfo->version_minor > aMin ||
++           (aInfo->version_minor == aMin && aInfo->version_subminor >= aSub)));
++}
+ 
+ int64_t TheoraState::Time(th_info* aInfo, int64_t aGranulepos)
+ {
+   if (aGranulepos < 0 || aInfo->fps_numerator == 0) {
+     return -1;
+   }
+   // Implementation of th_granule_frame inlined here to operate
+   // on the th_info structure instead of the theora_state.
+diff --git a/content/svg/content/src/SVGPathData.cpp b/content/svg/content/src/SVGPathData.cpp
+--- a/content/svg/content/src/SVGPathData.cpp
++++ b/content/svg/content/src/SVGPathData.cpp
+@@ -532,17 +532,17 @@ SVGPathData::GetMarkerPositioningData(ns
+   // info on current [sub]path (reset every M command):
+   gfxPoint pathStart(0.0, 0.0);
+   float pathStartAngle = 0.0f;
+ 
+   // info on previous segment:
+   uint16_t prevSegType = PATHSEG_UNKNOWN;
+   gfxPoint prevSegEnd(0.0, 0.0);
+   float prevSegEndAngle = 0.0f;
+-  gfxPoint prevCP; // if prev seg was a bezier, this was its last control point
++  gfxPoint prevCP(0.0, 0.0); // if prev seg was a bezier, this was its last control point
+ 
+   uint32_t i = 0;
+   while (i < mData.Length()) {
+ 
+     // info on current segment:
+     uint16_t segType =
+       SVGPathSegUtils::DecodeType(mData[i++]); // advances i to args
+     gfxPoint &segStart = prevSegEnd;

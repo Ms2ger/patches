@@ -1,0 +1,500 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/src/jsapi.h b/js/src/jsapi.h
+--- a/js/src/jsapi.h
++++ b/js/src/jsapi.h
+@@ -2876,17 +2876,17 @@ struct JSClass {
+  * member initial value.  The "original ... value" verbiage is there because
+  * in ECMA-262, global properties naming class objects are read/write and
+  * deleteable, for the most part.
+  *
+  * Implementing this efficiently requires that global objects have classes
+  * with the following flags. Failure to use JSCLASS_GLOBAL_FLAGS was
+  * prevously allowed, but is now an ES5 violation and thus unsupported.
+  */
+-#define JSCLASS_GLOBAL_SLOT_COUNT      (JSProto_LIMIT * 3 + 24)
++#define JSCLASS_GLOBAL_SLOT_COUNT      (JSProto_LIMIT * 3 + 23)
+ #define JSCLASS_GLOBAL_FLAGS_WITH_SLOTS(n)                                    \
+     (JSCLASS_IS_GLOBAL | JSCLASS_HAS_RESERVED_SLOTS(JSCLASS_GLOBAL_SLOT_COUNT + (n)))
+ #define JSCLASS_GLOBAL_FLAGS                                                  \
+     JSCLASS_GLOBAL_FLAGS_WITH_SLOTS(0)
+ #define JSCLASS_HAS_GLOBAL_FLAG_AND_SLOTS(clasp)                              \
+   (((clasp)->flags & JSCLASS_IS_GLOBAL)                                       \
+    && JSCLASS_RESERVED_SLOTS(clasp) >= JSCLASS_GLOBAL_SLOT_COUNT)
+ 
+diff --git a/js/src/jscompartment.cpp b/js/src/jscompartment.cpp
+--- a/js/src/jscompartment.cpp
++++ b/js/src/jscompartment.cpp
+@@ -75,16 +75,17 @@ JSCompartment::~JSCompartment()
+     js_delete(ionCompartment_);
+ #endif
+ 
+     js_delete(watchpointMap);
+     js_delete(scriptCountsMap);
+     js_delete(debugScriptMap);
+     js_delete(debugScopes);
+     js_free(enumerators);
++    js_delete(debuggers_);
+ 
+     rt->numCompartments--;
+ }
+ 
+ bool
+ JSCompartment::init(JSContext *cx)
+ {
+     /*
+@@ -878,8 +879,17 @@ JSCompartment::initializeIntrinsicsHolde
+     intrinsicsHolder_ = holder;
+ 
+     /* Define a property 'global' with the current global as its value. */
+     RootedValue globalValue(cx, ObjectValue(*global));
+     return JSObject::defineProperty(cx, holder, cx->names().global, globalValue,
+                                     JS_PropertyStub, JS_StrictPropertyStub,
+                                     JSPROP_PERMANENT | JSPROP_READONLY);
+ }
++
++JSCompartment::DebuggerVector *
++JSCompartment::getOrCreateDebuggers(JSContext *cx)
++{
++    if (!debuggers_)
++        debuggers_ = cx->new_<DebuggerVector>();
++    
++    return debuggers_;
++}
+diff --git a/js/src/jscompartment.h b/js/src/jscompartment.h
+--- a/js/src/jscompartment.h
++++ b/js/src/jscompartment.h
+@@ -373,16 +373,36 @@ struct JSCompartment
+         js::RootedObject holder(cx, intrinsicsHolder());
+         js::RootedValue valCopy(cx, value);
+         return JSObject::setProperty(cx, holder, holder, name, &valCopy, false);
+     }
+ 
+   private:
+     JSObject *intrinsicsHolder_;
+ 
++  public:
++    typedef js::Vector<js::Debugger *, 0, js::SystemAllocPolicy> DebuggerVector;
++
++    /*
++     * The collection of Debugger objects debugging this global. If this global
++     * is not a debuggee, this returns either NULL or an empty vector.
++     */
++    DebuggerVector *getDebuggers() const {
++        return debuggers_;
++    }
++
++    /*
++     * The same, but create the empty vector if one does not already
++     * exist. Returns NULL only on OOM.
++     */
++    DebuggerVector *getOrCreateDebuggers(JSContext *cx);
++
++  private:
++    DebuggerVector *debuggers_;
++
+     void sweepBreakpoints(js::FreeOp *fop);
+ 
+   public:
+     js::WatchpointMap *watchpointMap;
+ 
+     js::ScriptCountsMap *scriptCountsMap;
+ 
+     js::DebugScriptMap *debugScriptMap;
+diff --git a/js/src/vm/Debugger.cpp b/js/src/vm/Debugger.cpp
+--- a/js/src/vm/Debugger.cpp
++++ b/js/src/vm/Debugger.cpp
+@@ -129,17 +129,17 @@ ValueToIdentifier(JSContext *cx, HandleV
+  * Debugger::removeDebuggeeGlobal to make sure only current debuggers have Frame
+  * objects with .live === true.
+  */
+ class Debugger::FrameRange
+ {
+     AbstractFramePtr frame;
+ 
+     /* The debuggers in |fp|'s compartment, or NULL if there are none. */
+-    GlobalObject::DebuggerVector *debuggers;
++    JSCompartment::DebuggerVector *debuggers;
+ 
+     /*
+      * The index of the front Debugger.Frame's debugger in debuggers.
+      * nextDebugger < debuggerCount if and only if the range is not empty.
+      */
+     size_t debuggerCount, nextDebugger;
+ 
+     /*
+@@ -168,17 +168,17 @@ class Debugger::FrameRange
+         /* Find our global, if we were not given one. */
+         if (!global)
+             global = &frame.script()->global();
+ 
+         /* The frame and global must match. */
+         JS_ASSERT(&frame.script()->global() == global);
+ 
+         /* Find the list of debuggers we'll iterate over. There may be none. */
+-        debuggers = global->getDebuggers();
++        debuggers = global->compartment()->getDebuggers();
+         if (debuggers) {
+             debuggerCount = debuggers->length();
+             findNext();
+         } else {
+             debuggerCount = 0;
+         }
+     }
+ 
+@@ -490,17 +490,17 @@ Debugger::hasAnyLiveHooks() const
+ 
+ JSTrapStatus
+ Debugger::slowPathOnEnterFrame(JSContext *cx, AbstractFramePtr frame, MutableHandleValue vp)
+ {
+     /* Build the list of recipients. */
+     AutoValueVector triggered(cx);
+     Handle<GlobalObject*> global = cx->global();
+ 
+-    if (GlobalObject::DebuggerVector *debuggers = global->getDebuggers()) {
++    if (JSCompartment::DebuggerVector *debuggers = global->compartment()->getDebuggers()) {
+         for (Debugger **p = debuggers->begin(); p != debuggers->end(); p++) {
+             Debugger *dbg = *p;
+             JS_ASSERT(dbg->observesFrame(frame));
+             if (dbg->observesEnterFrame() && !triggered.append(ObjectValue(*dbg->toJSObject())))
+                 return JSTRAP_ERROR;
+         }
+     }
+ 
+@@ -1031,17 +1031,17 @@ Debugger::dispatchHook(JSContext *cx, Mu
+      * Make a copy of the list, since the original is mutable and we will be
+      * calling into arbitrary JS.
+      *
+      * Note: In the general case, 'triggered' contains references to objects in
+      * different compartments--every compartment *except* this one.
+      */
+     AutoValueVector triggered(cx);
+     Handle<GlobalObject*> global = cx->global();
+-    if (GlobalObject::DebuggerVector *debuggers = global->getDebuggers()) {
++    if (JSCompartment::DebuggerVector *debuggers = global->compartment()->getDebuggers()) {
+         for (Debugger **p = debuggers->begin(); p != debuggers->end(); p++) {
+             Debugger *dbg = *p;
+             if (dbg->enabled && dbg->getHook(which)) {
+                 if (!triggered.append(ObjectValue(*dbg->toJSObject())))
+                     return JSTRAP_ERROR;
+             }
+         }
+     }
+@@ -1059,17 +1059,17 @@ Debugger::dispatchHook(JSContext *cx, Mu
+             if (st != JSTRAP_CONTINUE)
+                 return st;
+         }
+     }
+     return JSTRAP_CONTINUE;
+ }
+ 
+ static bool
+-AddNewScriptRecipients(GlobalObject::DebuggerVector *src, AutoValueVector *dest)
++AddNewScriptRecipients(JSCompartment::DebuggerVector *src, AutoValueVector *dest)
+ {
+     bool wasEmpty = dest->length() == 0;
+     for (Debugger **p = src->begin(); p != src->end(); p++) {
+         Debugger *dbg = *p;
+         Value v = ObjectValue(*dbg->toJSObject());
+         if (dbg->observesNewScript() &&
+             (wasEmpty || Find(dest->begin(), dest->end(), v) == dest->end()) &&
+             !dest->append(v))
+@@ -1093,24 +1093,24 @@ Debugger::slowPathOnNewScript(JSContext 
+     /*
+      * Build the list of recipients. For compile-and-go scripts, this is the
+      * same as the generic Debugger::dispatchHook code, but non-compile-and-go
+      * scripts are not tied to particular globals. We deliver them to every
+      * debugger observing any global in the script's compartment.
+      */
+     AutoValueVector triggered(cx);
+     if (script->compileAndGo) {
+-        if (GlobalObject::DebuggerVector *debuggers = compileAndGoGlobal->getDebuggers()) {
++        if (JSCompartment::DebuggerVector *debuggers = compileAndGoGlobal->compartment()->getDebuggers()) {
+             if (!AddNewScriptRecipients(debuggers, &triggered))
+                 return;
+         }
+     } else {
+         GlobalObjectSet &debuggees = script->compartment()->getDebuggees();
+         for (GlobalObjectSet::Range r = debuggees.all(); !r.empty(); r.popFront()) {
+-            if (!AddNewScriptRecipients(r.front()->getDebuggers(), &triggered))
++            if (!AddNewScriptRecipients(r.front()->compartment()->getDebuggers(), &triggered))
+                 return;
+         }
+     }
+ 
+     /*
+      * Deliver the event to each debugger, checking again as in
+      * Debugger::dispatchHook.
+      */
+@@ -1232,17 +1232,17 @@ Debugger::onSingleStep(JSContext *cx, Mu
+      *
+      * The converse --- ensuring that we do receive traps when we should --- can
+      * be done with unit tests.
+      */
+     {
+         uint32_t stepperCount = 0;
+         JSScript *trappingScript = iter.script();
+         GlobalObject *global = cx->global();
+-        if (GlobalObject::DebuggerVector *debuggers = global->getDebuggers()) {
++        if (JSCompartment::DebuggerVector *debuggers = global->compartment()->getDebuggers()) {
+             for (Debugger **p = debuggers->begin(); p != debuggers->end(); p++) {
+                 Debugger *dbg = *p;
+                 for (FrameMap::Range r = dbg->frames.all(); !r.empty(); r.popFront()) {
+                     AbstractFramePtr frame = r.front().key;
+                     JSObject *frameobj = r.front().value;
+                     if (frame.script() == trappingScript &&
+                         !frameobj->getReservedSlot(JSSLOT_DEBUGFRAME_ONSTEP_HANDLER).isUndefined())
+                     {
+@@ -1451,17 +1451,17 @@ Debugger::markAllIteratively(GCMarker *t
+                 continue;
+             else if (global != e.front())
+                 e.rekeyFront(global);
+ 
+             /*
+              * Every debuggee has at least one debugger, so in this case
+              * getDebuggers can't return NULL.
+              */
+-            const GlobalObject::DebuggerVector *debuggers = global->getDebuggers();
++            const JSCompartment::DebuggerVector *debuggers = global->compartment()->getDebuggers();
+             JS_ASSERT(debuggers);
+             for (Debugger * const *p = debuggers->begin(); p != debuggers->end(); p++) {
+                 Debugger *dbg = *p;
+ 
+                 /*
+                  * dbg is a Debugger with at least one debuggee. Check three things:
+                  *   - dbg is actually in a compartment that is being marked
+                  *   - it isn't already marked
+@@ -1516,17 +1516,17 @@ Debugger::markAll(JSTracer *trc)
+         GlobalObjectSet &debuggees = c->getDebuggees();
+         for (GlobalObjectSet::Enum e(debuggees); !e.empty(); e.popFront()) {
+             GlobalObject *global = e.front();
+ 
+             MarkObjectUnbarriered(trc, &global, "Global Object");
+             if (global != e.front())
+                 e.rekeyFront(global);
+ 
+-            const GlobalObject::DebuggerVector *debuggers = global->getDebuggers();
++            const JSCompartment::DebuggerVector *debuggers = global->compartment()->getDebuggers();
+             JS_ASSERT(debuggers);
+             for (Debugger * const *p = debuggers->begin(); p != debuggers->end(); p++) {
+                 Debugger *dbg = *p;
+ 
+                 HeapPtrObject &dbgobj = dbg->toJSObjectRef();
+                 MarkObject(trc, &dbgobj, "Debugger Object");
+ 
+                 dbg->scripts.trace(trc);
+@@ -1612,17 +1612,17 @@ Debugger::sweepAll(FreeOp *fop)
+         }
+     }
+ }
+ 
+ void
+ Debugger::detachAllDebuggersFromGlobal(FreeOp *fop, GlobalObject *global,
+                                        GlobalObjectSet::Enum *compartmentEnum)
+ {
+-    const GlobalObject::DebuggerVector *debuggers = global->getDebuggers();
++    const JSCompartment::DebuggerVector *debuggers = global->compartment()->getDebuggers();
+     JS_ASSERT(!debuggers->empty());
+     while (!debuggers->empty())
+         debuggers->back()->removeDebuggeeGlobal(fop, global, compartmentEnum, NULL);
+ }
+ 
+ /* static */ void
+ Debugger::findCompartmentEdges(Zone *zone, js::gc::ComponentFinder<Zone> &finder)
+ {
+@@ -2142,17 +2142,17 @@ Debugger::addDebuggeeGlobal(JSContext *c
+             return false;
+         }
+ 
+         /*
+          * Find all compartments containing debuggers debugging global objects
+          * in c. Add those compartments to visited.
+          */
+         for (GlobalObjectSet::Range r = c->getDebuggees().all(); !r.empty(); r.popFront()) {
+-            GlobalObject::DebuggerVector *v = r.front()->getDebuggers();
++            JSCompartment::DebuggerVector *v = r.front()->compartment()->getDebuggers();
+             for (Debugger **p = v->begin(); p != v->end(); p++) {
+                 JSCompartment *next = (*p)->object->compartment();
+                 if (Find(visited, next) == visited.end() && !visited.append(next))
+                     return false;
+             }
+         }
+     }
+ 
+@@ -2162,24 +2162,24 @@ Debugger::addDebuggeeGlobal(JSContext *c
+         return false;
+     }
+ 
+     /*
+      * Each debugger-debuggee relation must be stored in up to three places.
+      * JSCompartment::addDebuggee enables debug mode if needed.
+      */
+     AutoCompartment ac(cx, global);
+-    GlobalObject::DebuggerVector *v = GlobalObject::getOrCreateDebuggers(cx, global);
++    JSCompartment::DebuggerVector *v = debuggeeCompartment->getOrCreateDebuggers(cx);
+     if (!v || !v->append(this)) {
+         js_ReportOutOfMemory(cx);
+     } else {
+         if (!debuggees.put(global)) {
+             js_ReportOutOfMemory(cx);
+         } else {
+-            if (global->getDebuggers()->length() > 1)
++            if (debuggeeCompartment->getDebuggers()->length() > 1)
+                 return true;
+             if (debuggeeCompartment->addDebuggee(cx, global, dmgc))
+                 return true;
+ 
+             /* Maintain consistency on error. */
+             debuggees.remove(global);
+         }
+         JS_ASSERT(v->back() == this);
+@@ -2226,17 +2226,17 @@ Debugger::removeDebuggeeGlobal(FreeOp *f
+     for (FrameMap::Enum e(frames); !e.empty(); e.popFront()) {
+         AbstractFramePtr frame = e.front().key;
+         if (&frame.script()->global() == global) {
+             DebuggerFrame_freeScriptFrameIterData(fop, e.front().value);
+             e.removeFront();
+         }
+     }
+ 
+-    GlobalObject::DebuggerVector *v = global->getDebuggers();
++    JSCompartment::DebuggerVector *v = global->compartment()->getDebuggers();
+     Debugger **p;
+     for (p = v->begin(); p != v->end(); p++) {
+         if (*p == this)
+             break;
+     }
+     JS_ASSERT(p != v->end());
+ 
+     /*
+diff --git a/js/src/vm/GlobalObject.cpp b/js/src/vm/GlobalObject.cpp
+--- a/js/src/vm/GlobalObject.cpp
++++ b/js/src/vm/GlobalObject.cpp
+@@ -546,69 +546,8 @@ js::DefinePropertiesAndBrand(JSContext *
+     RootedObject obj(cx, obj_);
+ 
+     if (ps && !JS_DefineProperties(cx, obj, ps))
+         return false;
+     if (fs && !JS_DefineFunctions(cx, obj, fs))
+         return false;
+     return true;
+ }
+-
+-static void
+-GlobalDebuggees_finalize(FreeOp *fop, JSObject *obj)
+-{
+-    fop->delete_((GlobalObject::DebuggerVector *) obj->getPrivate());
+-}
+-
+-static Class
+-GlobalDebuggees_class = {
+-    "GlobalDebuggee", JSCLASS_HAS_PRIVATE,
+-    JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
+-    JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, GlobalDebuggees_finalize
+-};
+-
+-GlobalObject::DebuggerVector *
+-GlobalObject::getDebuggers()
+-{
+-    Value debuggers = getReservedSlot(DEBUGGERS);
+-    if (debuggers.isUndefined())
+-        return NULL;
+-    JS_ASSERT(debuggers.toObject().getClass() == &GlobalDebuggees_class);
+-    return (DebuggerVector *) debuggers.toObject().getPrivate();
+-}
+-
+-/* static */ GlobalObject::DebuggerVector *
+-GlobalObject::getOrCreateDebuggers(JSContext *cx, Handle<GlobalObject*> global)
+-{
+-    assertSameCompartment(cx, global);
+-    DebuggerVector *debuggers = global->getDebuggers();
+-    if (debuggers)
+-        return debuggers;
+-
+-    JSObject *obj = NewObjectWithGivenProto(cx, &GlobalDebuggees_class, NULL, global);
+-    if (!obj)
+-        return NULL;
+-    debuggers = cx->new_<DebuggerVector>();
+-    if (!debuggers)
+-        return NULL;
+-    obj->setPrivate(debuggers);
+-    global->setReservedSlot(DEBUGGERS, ObjectValue(*obj));
+-    return debuggers;
+-}
+-
+-/* static */ bool
+-GlobalObject::addDebugger(JSContext *cx, Handle<GlobalObject*> global, Debugger *dbg)
+-{
+-    DebuggerVector *debuggers = getOrCreateDebuggers(cx, global);
+-    if (!debuggers)
+-        return false;
+-#ifdef DEBUG
+-    for (Debugger **p = debuggers->begin(); p != debuggers->end(); p++)
+-        JS_ASSERT(*p != dbg);
+-#endif
+-    if (debuggers->empty() && !global->compartment()->addDebuggee(cx, global))
+-        return false;
+-    if (!debuggers->append(dbg)) {
+-        global->compartment()->removeDebuggee(cx->runtime()->defaultFreeOp(), global);
+-        return false;
+-    }
+-    return true;
+-}
+diff --git a/js/src/vm/GlobalObject.h b/js/src/vm/GlobalObject.h
+--- a/js/src/vm/GlobalObject.h
++++ b/js/src/vm/GlobalObject.h
+@@ -91,20 +91,19 @@ class GlobalObject : public JSObject
+     static const unsigned MAP_ITERATOR_PROTO      = GENERATOR_PROTO + 1;
+     static const unsigned SET_ITERATOR_PROTO      = MAP_ITERATOR_PROTO + 1;
+     static const unsigned COLLATOR_PROTO          = SET_ITERATOR_PROTO + 1;
+     static const unsigned NUMBER_FORMAT_PROTO     = COLLATOR_PROTO + 1;
+     static const unsigned DATE_TIME_FORMAT_PROTO  = NUMBER_FORMAT_PROTO + 1;
+     static const unsigned REGEXP_STATICS          = DATE_TIME_FORMAT_PROTO + 1;
+     static const unsigned FUNCTION_NS             = REGEXP_STATICS + 1;
+     static const unsigned RUNTIME_CODEGEN_ENABLED = FUNCTION_NS + 1;
+-    static const unsigned DEBUGGERS               = RUNTIME_CODEGEN_ENABLED + 1;
+ 
+     /* Total reserved-slot count for global objects. */
+-    static const unsigned RESERVED_SLOTS = DEBUGGERS + 1;
++    static const unsigned RESERVED_SLOTS = RUNTIME_CODEGEN_ENABLED + 1;
+ 
+     void staticAsserts() {
+         /*
+          * The slot count must be in the public API for JSCLASS_GLOBAL_FLAGS,
+          * and we aren't going to expose GlobalObject, so just assert that the
+          * two values are synchronized.
+          */
+         JS_STATIC_ASSERT(JSCLASS_GLOBAL_SLOT_COUNT == RESERVED_SLOTS);
+@@ -403,32 +402,16 @@ class GlobalObject : public JSObject
+ 
+     // Implemented in Intl.cpp.
+     static bool initIntlObject(JSContext *cx, Handle<GlobalObject*> global);
+     static bool initCollatorProto(JSContext *cx, Handle<GlobalObject*> global);
+     static bool initNumberFormatProto(JSContext *cx, Handle<GlobalObject*> global);
+     static bool initDateTimeFormatProto(JSContext *cx, Handle<GlobalObject*> global);
+ 
+     static bool initStandardClasses(JSContext *cx, Handle<GlobalObject*> global);
+-
+-    typedef js::Vector<js::Debugger *, 0, js::SystemAllocPolicy> DebuggerVector;
+-
+-    /*
+-     * The collection of Debugger objects debugging this global. If this global
+-     * is not a debuggee, this returns either NULL or an empty vector.
+-     */
+-    DebuggerVector *getDebuggers();
+-
+-    /*
+-     * The same, but create the empty vector if one does not already
+-     * exist. Returns NULL only on OOM.
+-     */
+-    static DebuggerVector *getOrCreateDebuggers(JSContext *cx, Handle<GlobalObject*> global);
+-
+-    static bool addDebugger(JSContext *cx, Handle<GlobalObject*> global, Debugger *dbg);
+ };
+ 
+ /*
+  * Define ctor.prototype = proto as non-enumerable, non-configurable, and
+  * non-writable; define proto.constructor = ctor as non-enumerable but
+  * configurable and writable.
+  */
+ extern bool

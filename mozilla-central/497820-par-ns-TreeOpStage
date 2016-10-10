@@ -1,0 +1,231 @@
+diff --git a/parser/html/Makefile.in b/parser/html/Makefile.in
+--- a/parser/html/Makefile.in
++++ b/parser/html/Makefile.in
+@@ -69,7 +69,7 @@
+ 		nsHtml5ReleasableElementName.cpp \
+ 		nsHtml5MetaScanner.cpp \
+ 		nsHtml5TreeOperation.cpp \
+-		nsHtml5TreeOpStage.cpp \
++		TreeOpStage.cpp \
+ 		nsHtml5StateSnapshot.cpp \
+ 		nsHtml5TreeOpExecutor.cpp \
+ 		nsHtml5StreamParser.cpp \
+diff --git a/parser/html/nsHtml5TreeOpStage.cpp b/parser/html/TreeOpStage.cpp
+rename from parser/html/nsHtml5TreeOpStage.cpp
+rename to parser/html/TreeOpStage.cpp
+--- a/parser/html/nsHtml5TreeOpStage.cpp
++++ b/parser/html/TreeOpStage.cpp
+@@ -35,21 +35,22 @@
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+-#include "nsHtml5TreeOpStage.h"
++#include "TreeOpStage.h"
+ 
+-using namespace mozilla::htmlparser;
++namespace mozilla {
++namespace htmlparser {
+ 
+-nsHtml5TreeOpStage::nsHtml5TreeOpStage()
+- : mMutex("nsHtml5TreeOpStage mutex")
++TreeOpStage::TreeOpStage()
++ : mMutex("TreeOpStage mutex")
+ {
+ }
+     
+-nsHtml5TreeOpStage::~nsHtml5TreeOpStage()
++TreeOpStage::~TreeOpStage()
+ {
+ }
+ 
+ void
+-nsHtml5TreeOpStage::MoveOpsFrom(nsTArray<nsHtml5TreeOperation>& aOpQueue)
++TreeOpStage::MoveOpsFrom(nsTArray<nsHtml5TreeOperation>& aOpQueue)
+ {
+   mozilla::MutexAutoLock autoLock(mMutex);
+   if (mOpQueue.IsEmpty()) {
+@@ -60,7 +61,7 @@
+ }
+     
+ void
+-nsHtml5TreeOpStage::MoveOpsAndSpeculativeLoadsTo(nsTArray<nsHtml5TreeOperation>& aOpQueue,
++TreeOpStage::MoveOpsAndSpeculativeLoadsTo(nsTArray<nsHtml5TreeOperation>& aOpQueue,
+     nsTArray<SpeculativeLoad>& aSpeculativeLoadQueue)
+ {
+   mozilla::MutexAutoLock autoLock(mMutex);
+@@ -77,7 +78,7 @@
+ }
+ 
+ void
+-nsHtml5TreeOpStage::MoveSpeculativeLoadsFrom(nsTArray<SpeculativeLoad>& aSpeculativeLoadQueue)
++TreeOpStage::MoveSpeculativeLoadsFrom(nsTArray<SpeculativeLoad>& aSpeculativeLoadQueue)
+ {
+   mozilla::MutexAutoLock autoLock(mMutex);
+   if (mSpeculativeLoadQueue.IsEmpty()) {
+@@ -88,7 +89,7 @@
+ }
+ 
+ void
+-nsHtml5TreeOpStage::MoveSpeculativeLoadsTo(nsTArray<SpeculativeLoad>& aSpeculativeLoadQueue)
++TreeOpStage::MoveSpeculativeLoadsTo(nsTArray<SpeculativeLoad>& aSpeculativeLoadQueue)
+ {
+   mozilla::MutexAutoLock autoLock(mMutex);
+   if (aSpeculativeLoadQueue.IsEmpty()) {
+@@ -100,10 +101,13 @@
+ 
+ #ifdef DEBUG
+ void
+-nsHtml5TreeOpStage::AssertEmpty()
++TreeOpStage::AssertEmpty()
+ {
+   mozilla::MutexAutoLock autoLock(mMutex);
+   // This shouldn't really need the mutex
+   NS_ASSERTION(mOpQueue.IsEmpty(), "The stage was supposed to be empty.");
+ }
+ #endif
++
++} // namespace htmlparser
++} // namespace mozilla
+diff --git a/parser/html/nsHtml5TreeOpStage.h b/parser/html/TreeOpStage.h
+rename from parser/html/nsHtml5TreeOpStage.h
+rename to parser/html/TreeOpStage.h
+--- a/parser/html/nsHtml5TreeOpStage.h
++++ b/parser/html/TreeOpStage.h
+@@ -35,8 +35,8 @@
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+-#ifndef nsHtml5TreeOpStage_h___
+-#define nsHtml5TreeOpStage_h___
++#ifndef mozilla_htmlparser_TreeOpStage_h
++#define mozilla_htmlparser_TreeOpStage_h
+ 
+ #include "mozilla/Mutex.h"
+ #include "nsHtml5TreeOperation.h"
+@@ -44,34 +44,37 @@
+ #include "nsAHtml5TreeOpSink.h"
+ #include "SpeculativeLoad.h"
+ 
+-class nsHtml5TreeOpStage : public nsAHtml5TreeOpSink {
++namespace mozilla {
++namespace htmlparser {
++
++class TreeOpStage : public nsAHtml5TreeOpSink {
+   public:
+-  
+-    nsHtml5TreeOpStage();
+-    
+-    ~nsHtml5TreeOpStage();
+-  
++
++    TreeOpStage();
++
++    ~TreeOpStage();
++
+     /**
+      * Flush the operations from the tree operations from the argument
+      * queue unconditionally.
+      */
+     virtual void MoveOpsFrom(nsTArray<nsHtml5TreeOperation>& aOpQueue);
+-    
++
+     /**
+      * Retrieve the staged operations and speculative loads into the arguments.
+      */
+     void MoveOpsAndSpeculativeLoadsTo(nsTArray<nsHtml5TreeOperation>& aOpQueue,
+-        nsTArray<mozilla::htmlparser::SpeculativeLoad>& aSpeculativeLoadQueue);
++        nsTArray<SpeculativeLoad>& aSpeculativeLoadQueue);
+ 
+     /**
+      * Move the speculative loads from the argument into the staging queue.
+      */
+-    void MoveSpeculativeLoadsFrom(nsTArray<mozilla::htmlparser::SpeculativeLoad>& aSpeculativeLoadQueue);
++    void MoveSpeculativeLoadsFrom(nsTArray<SpeculativeLoad>& aSpeculativeLoadQueue);
+ 
+     /**
+      * Retrieve the staged speculative loads into the argument.
+      */
+-    void MoveSpeculativeLoadsTo(nsTArray<mozilla::htmlparser::SpeculativeLoad>& aSpeculativeLoadQueue);
++    void MoveSpeculativeLoadsTo(nsTArray<SpeculativeLoad>& aSpeculativeLoadQueue);
+ 
+ #ifdef DEBUG
+     void AssertEmpty();
+@@ -79,9 +82,12 @@
+ 
+   private:
+     nsTArray<nsHtml5TreeOperation> mOpQueue;
+-    nsTArray<mozilla::htmlparser::SpeculativeLoad> mSpeculativeLoadQueue;
++    nsTArray<SpeculativeLoad> mSpeculativeLoadQueue;
+     mozilla::Mutex mMutex;
+-    
++
+ };
+ 
+-#endif /* nsHtml5TreeOpStage_h___ */
++} // namespace htmlparser
++} // namespace mozilla
++
++#endif // mozilla_htmlparser_TreeOpStage_h
+diff --git a/parser/html/nsHtml5TreeBuilderCppSupplement.h b/parser/html/nsHtml5TreeBuilderCppSupplement.h
+--- a/parser/html/nsHtml5TreeBuilderCppSupplement.h
++++ b/parser/html/nsHtml5TreeBuilderCppSupplement.h
+@@ -51,7 +51,7 @@
+ class nsPresContext;
+ 
+ nsHtml5TreeBuilder::nsHtml5TreeBuilder(nsAHtml5TreeOpSink* aOpSink,
+-                                       nsHtml5TreeOpStage* aStage)
++                                       mozilla::htmlparser::TreeOpStage* aStage)
+   : scriptingEnabled(false)
+   , fragment(false)
+   , contextNode(nullptr)
+diff --git a/parser/html/nsHtml5TreeBuilderHSupplement.h b/parser/html/nsHtml5TreeBuilderHSupplement.h
+--- a/parser/html/nsHtml5TreeBuilderHSupplement.h
++++ b/parser/html/nsHtml5TreeBuilderHSupplement.h
+@@ -46,7 +46,7 @@
+     nsAutoArrayPtr<nsIContent*>            mHandles;
+     int32_t                                mHandlesUsed;
+     nsTArray<nsAutoArrayPtr<nsIContent*> > mOldHandles;
+-    nsHtml5TreeOpStage*                    mSpeculativeLoadStage;
++    mozilla::htmlparser::TreeOpStage*      mSpeculativeLoadStage;
+     nsIContent**                           mDeepTreeSurrogateParent;
+     bool                                   mCurrentHtmlScriptIsAsyncOrDefer;
+ #ifdef DEBUG
+@@ -64,7 +64,7 @@
+   public:
+ 
+     nsHtml5TreeBuilder(nsAHtml5TreeOpSink* aOpSink,
+-                       nsHtml5TreeOpStage* aStage);
++                       mozilla::htmlparser::TreeOpStage* aStage);
+ 
+     ~nsHtml5TreeBuilder();
+     
+diff --git a/parser/html/nsHtml5TreeOpExecutor.h b/parser/html/nsHtml5TreeOpExecutor.h
+--- a/parser/html/nsHtml5TreeOpExecutor.h
++++ b/parser/html/nsHtml5TreeOpExecutor.h
+@@ -55,7 +55,7 @@
+ #include "nsIParser.h"
+ #include "nsCOMArray.h"
+ #include "nsAHtml5TreeOpSink.h"
+-#include "nsHtml5TreeOpStage.h"
++#include "TreeOpStage.h"
+ #include "nsHashSets.h"
+ #include "nsIURI.h"
+ 
+@@ -114,7 +114,7 @@
+      */
+     bool                          mStarted;
+ 
+-    nsHtml5TreeOpStage            mStage;
++    mozilla::htmlparser::TreeOpStage mStage;
+ 
+     eHtml5FlushState              mFlushState;
+ 
+@@ -371,7 +371,7 @@
+      */
+     virtual void MoveOpsFrom(nsTArray<nsHtml5TreeOperation>& aOpQueue);
+     
+-    nsHtml5TreeOpStage* GetStage() {
++    mozilla::htmlparser::TreeOpStage* GetStage() {
+       return &mStage;
+     }
+     

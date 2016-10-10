@@ -1,0 +1,40 @@
+diff --git a/content/base/src/nsDocument.cpp b/content/base/src/nsDocument.cpp
+--- a/content/base/src/nsDocument.cpp
++++ b/content/base/src/nsDocument.cpp
+@@ -7542,25 +7542,17 @@
+     return;
+   }
+ 
+-  nsAutoCString ref;
+-
+-  // Since all URI's that pass through here aren't URL's we can't
+-  // rely on the nsIURI implementation for providing a way for
+-  // finding the 'ref' part of the URI, we'll haveto revert to
+-  // string routines for finding the data past '#'
+-
+-  aDocumentURI->GetSpec(ref);
+-
+-  nsReadingIterator<char> start, end;
+-
+-  ref.BeginReading(start);
+-  ref.EndReading(end);
+-
+-  if (FindCharInReadable('#', start, end)) {
+-    ++start; // Skip over the '#'
+-
+-    mScrollToRef = Substring(start, end);
+-  }
++  nsCOMPtr<nsIURL> url(do_QueryInterface(aDocumentURI));
++  if (!url) {
++    // If this isn't a URL, we shouldn't scroll.
++    return;
++  }
++
++#ifdef DEBUG
++  nsresult rv =
++#endif
++  url->GetRef(mScrollToRef);
++  NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "Couldn't get the ref.");
+ }
+ 
+ void

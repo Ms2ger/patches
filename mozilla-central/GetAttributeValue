@@ -1,0 +1,112 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -4519,70 +4519,76 @@ nsHTMLEditor::IsEmptyNodeImpl(nsINode* a
+ nsresult
+ nsHTMLEditor::SetAttributeOrEquivalent(nsIDOMElement * aElement,
+                                        const nsAString & aAttribute,
+                                        const nsAString & aValue,
+                                        bool aSuppressTransaction)
+ {
+   nsAutoScriptBlocker scriptBlocker;
+ 
++  nsCOMPtr<dom::Element> element = do_QueryInterface(aElement);
++  NS_ENSURE_STATE(element);
++
++  nsCOMPtr<nsIAtom> attribute = do_GetAtom(aAttribute);
++  MOZ_ASSERT(attribute);
++
+   nsresult res = NS_OK;
+   if (IsCSSEnabled() && mHTMLCSSUtils) {
+     int32_t count;
+     res = mHTMLCSSUtils->SetCSSEquivalentToHTMLStyle(aElement, nullptr, &aAttribute, &aValue, &count,
+                                                      aSuppressTransaction);
+     NS_ENSURE_SUCCESS(res, res);
+     if (count) {
+-      // we found an equivalence ; let's remove the HTML attribute itself if it is set
+-      nsAutoString existingValue;
+-      bool wasSet = false;
+-      res = GetAttributeValue(aElement, aAttribute, existingValue, &wasSet);
+-      NS_ENSURE_SUCCESS(res, res);
+-      if (wasSet) {
+-        if (aSuppressTransaction)
+-          res = aElement->RemoveAttribute(aAttribute);
+-        else
++      // We found an equivalence; let's remove the HTML attribute itself if it
++      // is set.
++      if (element->HasAttr(kNameSpaceID_None, attribute)) {
++        if (aSuppressTransaction) {
++          res = element->UnsetAttr(kNameSpaceID_None, attribute,
++                                   /* aNotify = */ true);
++        } else {
+           res = RemoveAttribute(aElement, aAttribute);
++        }
+       }
+-    }
+-    else {
++    } else {
+       // count is an integer that represents the number of CSS declarations applied to the
+       // element. If it is zero, we found no equivalence in this implementation for the
+       // attribute
+-      if (aAttribute.EqualsLiteral("style")) {
++      if (attribute == nsGkAtoms::style) {
+         // if it is the style attribute, just add the new value to the existing style
+         // attribute's value
+         nsAutoString existingValue;
+-        bool wasSet = false;
+-        res = GetAttributeValue(aElement, NS_LITERAL_STRING("style"), existingValue, &wasSet);
+-        NS_ENSURE_SUCCESS(res, res);
++        element->GetAttr(kNameSpaceID_None, nsGkAtoms::style, existingValue);
+         existingValue.AppendLiteral(" ");
+         existingValue.Append(aValue);
+-        if (aSuppressTransaction)
+-          res = aElement->SetAttribute(aAttribute, existingValue);
+-        else
++        if (aSuppressTransaction) {
++          res = element->SetAttr(kNameSpaceID_None, nsGkAtoms::style,
++                                 existingValue, /* aNotify = */ true);
++        } else {
+           res = SetAttribute(aElement, aAttribute, existingValue);
+-      }
+-      else {
++        }
++      } else {
+         // we have no CSS equivalence for this attribute and it is not the style
+         // attribute; let's set it the good'n'old HTML way
+-        if (aSuppressTransaction)
+-          res = aElement->SetAttribute(aAttribute, aValue);
+-        else
++        if (aSuppressTransaction) {
++          res = element->SetAttr(kNameSpaceID_None, attribute, aValue,
++                                 /* aNotify = */ true);
++        } else {
+           res = SetAttribute(aElement, aAttribute, aValue);
++        }
+       }
+     }
++  } else {
++    // we are not in an HTML+CSS editor; let's set the attribute the HTML way
++    if (aSuppressTransaction) {
++      res = element->SetAttr(kNameSpaceID_None, attribute, aValue,
++                             /* aNotify = */ true);
++    } else {
++      res = SetAttribute(aElement, aAttribute, aValue);
++    }
+   }
+-  else {
+-    // we are not in an HTML+CSS editor; let's set the attribute the HTML way
+-    if (aSuppressTransaction)
+-      res = aElement->SetAttribute(aAttribute, aValue);
+-    else
+-      res = SetAttribute(aElement, aAttribute, aValue);
+-  }  
+   return res;
+ }
+ 
+ nsresult
+ nsHTMLEditor::RemoveAttributeOrEquivalent(nsIDOMElement* aElement,
+                                           const nsAString& aAttribute,
+                                           bool aSuppressTransaction)
+ {

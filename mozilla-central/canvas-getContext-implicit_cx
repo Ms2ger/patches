@@ -1,0 +1,137 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/content/src/nsHTMLCanvasElement.cpp b/content/html/content/src/nsHTMLCanvasElement.cpp
+--- a/content/html/content/src/nsHTMLCanvasElement.cpp
++++ b/content/html/content/src/nsHTMLCanvasElement.cpp
+@@ -154,17 +154,17 @@ nsHTMLCanvasElement::SetAttr(int32_t aNa
+ nsresult
+ nsHTMLCanvasElement::CopyInnerTo(nsGenericElement* aDest) const
+ {
+   nsresult rv = nsGenericHTMLElement::CopyInnerTo(aDest);
+   NS_ENSURE_SUCCESS(rv, rv);
+   if (aDest->OwnerDoc()->IsStaticDocument()) {
+     nsHTMLCanvasElement* dest = static_cast<nsHTMLCanvasElement*>(aDest);
+     nsCOMPtr<nsISupports> cxt;
+-    dest->GetContext(NS_LITERAL_STRING("2d"), JSVAL_VOID, getter_AddRefs(cxt));
++    dest->GetContext(NS_LITERAL_STRING("2d"), JSVAL_VOID, NULL, getter_AddRefs(cxt));
+     nsCOMPtr<nsIDOMCanvasRenderingContext2D> context2d = do_QueryInterface(cxt);
+     if (context2d) {
+       context2d->DrawImage(const_cast<nsHTMLCanvasElement*>(this),
+                            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0);
+     }
+   }
+   return rv;
+ }
+@@ -461,16 +461,17 @@ nsHTMLCanvasElement::GetContextHelper(co
+   ctx.forget(aContext);
+ 
+   return rv;
+ }
+ 
+ NS_IMETHODIMP
+ nsHTMLCanvasElement::GetContext(const nsAString& aContextId,
+                                 const jsval& aContextOptions,
++                                JSContext* aCx,
+                                 nsISupports **aContext)
+ {
+   nsresult rv;
+ 
+   bool forceThebes = false;
+ 
+   while (mCurrentContextId.IsEmpty()) {
+     rv = GetContextHelper(aContextId, forceThebes, getter_AddRefs(mCurrentContext));
+@@ -487,61 +488,59 @@ nsHTMLCanvasElement::GetContext(const ns
+       mCurrentContext = nullptr;
+       return NS_ERROR_FAILURE;
+     }
+ 
+     nsCOMPtr<nsIWritablePropertyBag2> contextProps;
+     if (!JSVAL_IS_NULL(aContextOptions) &&
+         !JSVAL_IS_VOID(aContextOptions))
+     {
+-      JSContext *cx = nsContentUtils::GetCurrentJSContext();
+-
+       // note: if any contexts end up supporting something other
+       // than objects, e.g. plain strings, then we'll need to expand
+       // this to know how to create nsISupportsStrings etc.
+       if (JSVAL_IS_OBJECT(aContextOptions)) {
+         contextProps = do_CreateInstance("@mozilla.org/hash-property-bag;1");
+ 
+         JSObject *opts = JSVAL_TO_OBJECT(aContextOptions);
+-        JSIdArray *props = JS_Enumerate(cx, opts);
+-        for (int i = 0; props && i < JS_IdArrayLength(cx, props); ++i) {
+-          jsid propid = JS_IdArrayGet(cx, props, i);
++        JSIdArray *props = JS_Enumerate(aCx, opts);
++        for (int i = 0; props && i < JS_IdArrayLength(aCx, props); ++i) {
++          jsid propid = JS_IdArrayGet(aCx, props, i);
+           jsval propname, propval;
+-          if (!JS_IdToValue(cx, propid, &propname) ||
+-              !JS_GetPropertyById(cx, opts, propid, &propval)) {
++          if (!JS_IdToValue(aCx, propid, &propname) ||
++              !JS_GetPropertyById(aCx, opts, propid, &propval)) {
+             continue;
+           }
+ 
+-          JSString *propnameString = JS_ValueToString(cx, propname);
++          JSString *propnameString = JS_ValueToString(aCx, propname);
+           nsDependentJSString pstr;
+-          if (!propnameString || !pstr.init(cx, propnameString)) {
+-            JS_DestroyIdArray(cx, props);
++          if (!propnameString || !pstr.init(aCx, propnameString)) {
++            JS_DestroyIdArray(aCx, props);
+             mCurrentContext = nullptr;
+             return NS_ERROR_FAILURE;
+           }
+ 
+           if (JSVAL_IS_BOOLEAN(propval)) {
+             contextProps->SetPropertyAsBool(pstr, propval == JSVAL_TRUE ? true : false);
+           } else if (JSVAL_IS_INT(propval)) {
+             contextProps->SetPropertyAsInt32(pstr, JSVAL_TO_INT(propval));
+           } else if (JSVAL_IS_DOUBLE(propval)) {
+             contextProps->SetPropertyAsDouble(pstr, JSVAL_TO_DOUBLE(propval));
+           } else if (JSVAL_IS_STRING(propval)) {
+-            JSString *propvalString = JS_ValueToString(cx, propval);
++            JSString *propvalString = JS_ValueToString(aCx, propval);
+             nsDependentJSString vstr;
+-            if (!propvalString || !vstr.init(cx, propvalString)) {
+-              JS_DestroyIdArray(cx, props);
++            if (!propvalString || !vstr.init(aCx, propvalString)) {
++              JS_DestroyIdArray(aCx, props);
+               mCurrentContext = nullptr;
+               return NS_ERROR_FAILURE;
+             }
+ 
+             contextProps->SetPropertyAsAString(pstr, vstr);
+           }
+         }
+-        JS_DestroyIdArray(cx, props);
++        JS_DestroyIdArray(aCx, props);
+       }
+     }
+ 
+     rv = UpdateContext(contextProps);
+     if (NS_FAILED(rv)) {
+       if (!forceThebes) {
+         // Try again with a Thebes context
+         forceThebes = true;
+diff --git a/dom/interfaces/html/nsIDOMHTMLCanvasElement.idl b/dom/interfaces/html/nsIDOMHTMLCanvasElement.idl
+--- a/dom/interfaces/html/nsIDOMHTMLCanvasElement.idl
++++ b/dom/interfaces/html/nsIDOMHTMLCanvasElement.idl
+@@ -57,16 +57,17 @@ interface nsIVariant;
+ 
+ [scriptable, uuid(dbbeeba1-3c20-4d9d-ac82-98b69fd819a9)]
+ interface nsIDOMHTMLCanvasElement : nsIDOMHTMLElement
+ {
+   attribute unsigned long width;
+   attribute unsigned long height;
+   attribute boolean mozOpaque;
+ 
++  [implicit_jscontext]
+   nsISupports getContext(in DOMString contextId,
+                          [optional] in jsval contextOptions);
+ 
+ 
+   // Valid calls are:
+   //  toDataURL();              -- defaults to image/png
+   //  toDataURL(type);          -- uses given type
+   //  toDataURL(type, params);  -- uses given type, and any valid parameters

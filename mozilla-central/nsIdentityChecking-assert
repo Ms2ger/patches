@@ -1,0 +1,45 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/security/manager/ssl/src/nsIdentityChecking.cpp b/security/manager/ssl/src/nsIdentityChecking.cpp
+--- a/security/manager/ssl/src/nsIdentityChecking.cpp
++++ b/security/manager/ssl/src/nsIdentityChecking.cpp
+@@ -9,16 +9,17 @@
+ #include "nsNSSComponent.h"
+ #include "mozilla/RefPtr.h"
+ #include "nsAppDirectoryServiceDefs.h"
+ #include "nsStreamUtils.h"
+ #include "nsNetUtil.h"
+ #include "nsILineInputStream.h"
+ #include "nsPromiseFlatString.h"
+ #include "nsTArray.h"
++#include "nsXULAppAPI.h"
+ 
+ #include "cert.h"
+ #include "base64.h"
+ #include "nsSSLStatus.h"
+ #include "ScopedNSSTypes.h"
+ 
+ using namespace mozilla;
+ 
+@@ -1195,18 +1196,19 @@ nsSSLStatus::GetIsExtendedValidation(boo
+   nsCOMPtr<nsIIdentityInfo> idinfo = do_QueryInterface(cert, &rv);
+ 
+   // mServerCert should never be null when this method is called because
+   // nsSSLStatus objects always have mServerCert set right after they are
+   // constructed and before they are returned. GetIsExtendedValidation should
+   // only be called in the chrome process (in e10s), and mServerCert will always
+   // implement nsIIdentityInfo in the chrome process.
+   if (!idinfo) {
+-    NS_ERROR("nsSSLStatus has null mServerCert or was called in the content "
+-             "process");
++    MOZ_ASSERT(XRE_GetProcessType() != GeckoProcessType_Default,
++               "nsSSLStatus has null mServerCert when called in the default "
++               "process");
+     return NS_ERROR_UNEXPECTED;
+   }
+ 
+   // Never allow bad certs for EV, regardless of overrides.
+   if (mHaveCertErrorBits)
+     return NS_OK;
+ 
+   return idinfo->GetIsExtendedValidation(aIsEV);

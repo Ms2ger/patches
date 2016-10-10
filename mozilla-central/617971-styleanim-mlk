@@ -1,0 +1,206 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 617971 - Remove StyleCoordToCSSValue's useless return value
+
+diff --git a/layout/style/nsStyleAnimation.cpp b/layout/style/nsStyleAnimation.cpp
+--- a/layout/style/nsStyleAnimation.cpp
++++ b/layout/style/nsStyleAnimation.cpp
+@@ -2532,34 +2532,32 @@ StyleCoordToValue(const nsStyleCoord& aC
+       break;
+     }
+     default:
+       return false;
+   }
+   return true;
+ }
+ 
+-static bool
++static void
+ StyleCoordToCSSValue(const nsStyleCoord& aCoord, nsCSSValue& aCSSValue)
+ {
+   switch (aCoord.GetUnit()) {
+     case eStyleUnit_Coord:
+       nscoordToCSSValue(aCoord.GetCoordValue(), aCSSValue);
+       break;
+     case eStyleUnit_Percent:
+       aCSSValue.SetPercentValue(aCoord.GetPercentValue());
+       break;
+     case eStyleUnit_Calc:
+       SetCalcValue(aCoord.GetCalcValue(), aCSSValue);
+       break;
+     default:
+-      NS_ABORT_IF_FALSE(false, "unexpected unit");
+-      return false;
++      MOZ_ASSUME_UNREACHABLE("unexpected unit");
+   }
+-  return true;
+ }
+ 
+ /*
+  * Assign |aOutput = aInput|, except with any non-pixel lengths
+  * replaced with the equivalent in pixels, and any non-canonical calc()
+  * expressions replaced with canonical ones.
+  */
+ static void
+@@ -2717,57 +2715,48 @@ nsStyleAnimation::ExtractComputedValue(n
+               GetDecorationStyle();
+           aComputedValue.SetIntValue(decorationStyle, eUnit_Enumerated);
+           break;
+         }
+ 
+         case eCSSProperty_border_spacing: {
+           const nsStyleTableBorder *styleTableBorder =
+             static_cast<const nsStyleTableBorder*>(styleStruct);
+-          nsAutoPtr<nsCSSValuePair> pair(new nsCSSValuePair);
+-          if (!pair) {
+-            return false;
+-          }
++          nsCSSValuePair* pair = new nsCSSValuePair;
+           nscoordToCSSValue(styleTableBorder->mBorderSpacingX, pair->mXValue);
+           nscoordToCSSValue(styleTableBorder->mBorderSpacingY, pair->mYValue);
+-          aComputedValue.SetAndAdoptCSSValuePairValue(pair.forget(),
++          aComputedValue.SetAndAdoptCSSValuePairValue(pair,
+                                                       eUnit_CSSValuePair);
+           break;
+         }
+ 
+         case eCSSProperty_transform_origin: {
+           const nsStyleDisplay *styleDisplay =
+             static_cast<const nsStyleDisplay*>(styleStruct);
+-          nsAutoPtr<nsCSSValueTriplet> triplet(new nsCSSValueTriplet);
+-          if (!triplet ||
+-              !StyleCoordToCSSValue(styleDisplay->mTransformOrigin[0],
+-                                    triplet->mXValue) ||
+-              !StyleCoordToCSSValue(styleDisplay->mTransformOrigin[1],
+-                                    triplet->mYValue) ||
+-              !StyleCoordToCSSValue(styleDisplay->mTransformOrigin[2],
+-                                    triplet->mZValue)) {
+-            return false;
+-          }
+-          aComputedValue.SetAndAdoptCSSValueTripletValue(triplet.forget(),
++          nsCSSValueTriplet* triplet = new nsCSSValueTriplet;
++          StyleCoordToCSSValue(styleDisplay->mTransformOrigin[0],
++                               triplet->mXValue);
++          StyleCoordToCSSValue(styleDisplay->mTransformOrigin[1],
++                               triplet->mYValue);
++          StyleCoordToCSSValue(styleDisplay->mTransformOrigin[2],
++                               triplet->mZValue);
++          aComputedValue.SetAndAdoptCSSValueTripletValue(triplet,
+                                                          eUnit_CSSValueTriplet);
+           break;
+         }
+ 
+         case eCSSProperty_perspective_origin: {
+           const nsStyleDisplay *styleDisplay =
+             static_cast<const nsStyleDisplay*>(styleStruct);
+-          nsAutoPtr<nsCSSValuePair> pair(new nsCSSValuePair);
+-          if (!pair ||
+-              !StyleCoordToCSSValue(styleDisplay->mPerspectiveOrigin[0],
+-                                    pair->mXValue) ||
+-              !StyleCoordToCSSValue(styleDisplay->mPerspectiveOrigin[1],
+-                                    pair->mYValue)) {
+-            return false;
+-          }
+-          aComputedValue.SetAndAdoptCSSValuePairValue(pair.forget(),
++          nsCSSValuePair* pair = new nsCSSValuePair;
++          StyleCoordToCSSValue(styleDisplay->mPerspectiveOrigin[0],
++                               pair->mXValue);
++          StyleCoordToCSSValue(styleDisplay->mPerspectiveOrigin[1],
++                               pair->mYValue);
++          aComputedValue.SetAndAdoptCSSValuePairValue(pair,
+                                                       eUnit_CSSValuePair);
+           break;
+         }
+ 
+         case eCSSProperty_stroke_dasharray: {
+           const nsStyleSVG *svg = static_cast<const nsStyleSVG*>(styleStruct);
+           NS_ABORT_IF_FALSE((svg->mStrokeDasharray != nullptr) ==
+                             (svg->mStrokeDasharrayLength != 0),
+@@ -2775,19 +2764,16 @@ nsStyleAnimation::ExtractComputedValue(n
+           nsAutoPtr<nsCSSValueList> result;
+           if (svg->mStrokeDasharray) {
+             NS_ABORT_IF_FALSE(svg->mStrokeDasharrayLength > 0,
+                               "non-null list should have positive length");
+             nsCSSValueList **resultTail = getter_Transfers(result);
+             for (uint32_t i = 0, i_end = svg->mStrokeDasharrayLength;
+                  i != i_end; ++i) {
+               nsCSSValueList *item = new nsCSSValueList;
+-              if (!item) {
+-                return false;
+-              }
+               *resultTail = item;
+               resultTail = &item->mNext;
+ 
+               const nsStyleCoord &coord = svg->mStrokeDasharray[i];
+               nsCSSValue &value = item->mValue;
+               switch (coord.GetUnit()) {
+                 case eStyleUnit_Coord:
+                   // Number means the same thing as length; we want to
+@@ -2806,19 +2792,16 @@ nsStyleAnimation::ExtractComputedValue(n
+                   break;
+                 default:
+                   NS_ABORT_IF_FALSE(false, "unexpected unit");
+                   return false;
+               }
+             }
+           } else {
+             result = new nsCSSValueList;
+-            if (!result) {
+-              return false;
+-            }
+             result->mValue.SetNoneValue();
+           }
+           aComputedValue.SetAndAdoptCSSValueListValue(result.forget(),
+                                                       eUnit_Dasharray);
+           break;
+         }
+ 
+         case eCSSProperty_font_stretch: {
+@@ -3078,24 +3061,20 @@ nsStyleAnimation::ExtractComputedValue(n
+ 
+       const nsStyleCorners *corners = static_cast<const nsStyleCorners*>(
+         StyleDataAtOffset(styleStruct, ssOffset));
+       uint8_t fullCorner = animType - eStyleAnimType_Corner_TopLeft;
+       const nsStyleCoord &horiz =
+         corners->Get(NS_FULL_TO_HALF_CORNER(fullCorner, false));
+       const nsStyleCoord &vert =
+         corners->Get(NS_FULL_TO_HALF_CORNER(fullCorner, true));
+-      nsAutoPtr<nsCSSValuePair> pair(new nsCSSValuePair);
+-      if (!pair ||
+-          !StyleCoordToCSSValue(horiz, pair->mXValue) ||
+-          !StyleCoordToCSSValue(vert, pair->mYValue)) {
+-        return false;
+-      }
+-      aComputedValue.SetAndAdoptCSSValuePairValue(pair.forget(),
+-                                                  eUnit_CSSValuePair);
++      nsCSSValuePair* pair = new nsCSSValuePair;
++      StyleCoordToCSSValue(horiz, pair->mXValue);
++      StyleCoordToCSSValue(vert, pair->mYValue);
++      aComputedValue.SetAndAdoptCSSValuePairValue(pair, eUnit_CSSValuePair);
+       return true;
+     }
+     case eStyleAnimType_nscoord:
+       aComputedValue.SetCoordValue(*static_cast<const nscoord*>(
+         StyleDataAtOffset(styleStruct, ssOffset)));
+       return true;
+     case eStyleAnimType_EnumU8:
+       aComputedValue.SetIntValue(*static_cast<const uint8_t*>(
+@@ -3185,19 +3164,16 @@ nsStyleAnimation::ExtractComputedValue(n
+           arr->Item(4).SetColorValue(shadow->mColor);
+         }
+         if (shadow->mInset) {
+           arr->Item(5).SetIntValue(NS_STYLE_BOX_SHADOW_INSET,
+                                    eCSSUnit_Enumerated);
+         }
+ 
+         nsCSSValueList *resultItem = new nsCSSValueList;
+-        if (!resultItem) {
+-          return false;
+-        }
+         resultItem->mValue.SetArrayValue(arr, eCSSUnit_Array);
+         *resultTail = resultItem;
+         resultTail = &resultItem->mNext;
+       }
+       aComputedValue.SetAndAdoptCSSValueListValue(result.forget(),
+                                                   eUnit_Shadow);
+       return true;
+     }

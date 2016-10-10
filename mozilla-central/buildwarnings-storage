@@ -1,0 +1,86 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/storage/src/Makefile.in b/storage/src/Makefile.in
+--- a/storage/src/Makefile.in
++++ b/storage/src/Makefile.in
+@@ -5,16 +5,17 @@
+ 
+ DEPTH   = @DEPTH@
+ topsrcdir = @top_srcdir@
+ srcdir    = @srcdir@
+ VPATH   = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
++FAIL_ON_WARNINGS := 1
+ MODULE_NAME      = mozStorageModule
+ FORCE_STATIC_LIB = 1
+ LIBXUL_LIBRARY = 1
+ 
+ # TODO: we do this in crashreporter and xpcom/base too, should be centralized
+ ifeq ($(OS_ARCH),Linux)
+ DEFINES += -DXP_LINUX
+ endif
+diff --git a/storage/src/mozStorageService.cpp b/storage/src/mozStorageService.cpp
+--- a/storage/src/mozStorageService.cpp
++++ b/storage/src/mozStorageService.cpp
+@@ -321,18 +321,17 @@ Service::~Service()
+     NS_WARNING("Failed to unregister sqlite vfs wrapper.");
+ 
+   // Shutdown the sqlite3 API.  Warn if shutdown did not turn out okay, but
+   // there is nothing actionable we can do in that case.
+   rc = ::sqlite3_shutdown();
+   if (rc != SQLITE_OK)
+     NS_WARNING("sqlite3 did not shutdown cleanly.");
+ 
+-  DebugOnly<bool> shutdownObserved = !sXPConnect;
+-  NS_ASSERTION(shutdownObserved, "Shutdown was not observed!");
++  NS_ASSERTION(!sXPConnect, "Shutdown was not observed!");
+ 
+   gService = nullptr;
+   delete mSqliteVFS;
+   mSqliteVFS = nullptr;
+ }
+ 
+ void
+ Service::registerConnection(Connection *aConnection)
+diff --git a/storage/src/mozStorageStatement.cpp b/storage/src/mozStorageStatement.cpp
+--- a/storage/src/mozStorageStatement.cpp
++++ b/storage/src/mozStorageStatement.cpp
+@@ -2,16 +2,17 @@
+  * vim: sw=2 ts=2 et lcs=trail\:.,tab\:>~ :
+  * This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include <limits.h>
+ #include <stdio.h>
+ 
++#include "mozilla/DebugOnly.h"
+ #include "nsError.h"
+ #include "nsMemory.h"
+ #include "nsThreadUtils.h"
+ #include "nsIClassInfoImpl.h"
+ #include "nsIProgrammingLanguage.h"
+ #include "Variant.h"
+ 
+ #include "mozIStorageError.h"
+@@ -132,17 +133,17 @@ Statement::Statement()
+ 
+ nsresult
+ Statement::initialize(Connection *aDBConnection,
+                       const nsACString &aSQLStatement)
+ {
+   NS_ASSERTION(aDBConnection, "No database connection given!");
+   NS_ASSERTION(!mDBStatement, "Statement already initialized!");
+ 
+-  sqlite3 *db = aDBConnection->GetNativeConnection();
++  DebugOnly<sqlite3*> db = aDBConnection->GetNativeConnection();
+   NS_ASSERTION(db, "We should never be called with a null sqlite3 database!");
+ 
+   int srv = aDBConnection->prepareStatement(PromiseFlatCString(aSQLStatement),
+                                             &mDBStatement);
+   if (srv != SQLITE_OK) {
+ #ifdef PR_LOGGING
+       PR_LOG(gStorageLog, PR_LOG_ERROR,
+              ("Sqlite statement prepare error: %d '%s'", srv,

@@ -1,0 +1,488 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 213324 - Remove getter_AddRefs(T*); r=ehsan
+
+diff --git a/content/base/public/nsIScriptElement.h b/content/base/public/nsIScriptElement.h
+--- a/content/base/public/nsIScriptElement.h
++++ b/content/base/public/nsIScriptElement.h
+@@ -146,17 +146,17 @@ public:
+     if (htmlScript) {
+       htmlScript->GetAsync(&async);
+     }
+     mForceAsync = !async;
+   }
+ 
+   void SetCreatorParser(nsIParser* aParser)
+   {
+-    mCreatorParser = getter_AddRefs(NS_GetWeakReference(aParser));
++    mCreatorParser = do_GetWeakReference(aParser);
+   }
+ 
+   /**
+    * Unblocks the creator parser
+    */
+   void UnblockParser()
+   {
+     nsCOMPtr<nsIParser> parser = do_QueryReferent(mCreatorParser);
+diff --git a/content/xbl/src/nsXBLPrototypeBinding.cpp b/content/xbl/src/nsXBLPrototypeBinding.cpp
+--- a/content/xbl/src/nsXBLPrototypeBinding.cpp
++++ b/content/xbl/src/nsXBLPrototypeBinding.cpp
+@@ -471,17 +471,17 @@ nsXBLPrototypeBinding::GetBaseTag(int32_
+ }
+ 
+ bool
+ nsXBLPrototypeBinding::ImplementsInterface(REFNSIID aIID) const
+ {
+   // Check our IID table.
+   if (mInterfaceTable) {
+     nsIIDKey key(aIID);
+-    nsCOMPtr<nsISupports> supports = getter_AddRefs(static_cast<nsISupports*>(mInterfaceTable->Get(&key)));
++    nsCOMPtr<nsISupports> supports = dont_AddRef(mInterfaceTable->Get(&key));
+     return supports != nullptr;
+   }
+ 
+   return false;
+ }
+ 
+ // Internal helpers ///////////////////////////////////////////////////////////////////////
+ 
+diff --git a/dom/time/TimeChangeObserver.cpp b/dom/time/TimeChangeObserver.cpp
+--- a/dom/time/TimeChangeObserver.cpp
++++ b/dom/time/TimeChangeObserver.cpp
+@@ -134,16 +134,17 @@ nsSystemTimeChangeObserver::RemoveWindow
+ 
+   if (aWindow->IsOuterWindow()) {
+     aWindow = aWindow->GetCurrentInnerWindow();
+     if (!aWindow) {
+       return NS_ERROR_FAILURE;
+     }
+   }
+ 
++  // XXX (bug 890239): Leaks.
+   mWindowListeners.RemoveElement(NS_GetWeakReference(aWindow));
+ 
+   if (mWindowListeners.IsEmpty()) {
+     UnregisterSystemClockChangeObserver(sObserver);
+     UnregisterSystemTimezoneChangeObserver(sObserver);
+   }
+ 
+   return NS_OK;
+diff --git a/image/src/imgLoader.cpp b/image/src/imgLoader.cpp
+--- a/image/src/imgLoader.cpp
++++ b/image/src/imgLoader.cpp
+@@ -955,17 +955,17 @@ NS_IMETHODIMP imgLoader::FindEntryProper
+ 
+   uri->GetSpec(spec);
+   *_retval = nullptr;
+ 
+   if (cache.Get(spec, getter_AddRefs(entry)) && entry) {
+     if (mCacheTracker && entry->HasNoProxies())
+       mCacheTracker->MarkUsed(entry);
+ 
+-    nsRefPtr<imgRequest> request = getter_AddRefs(entry->GetRequest());
++    nsRefPtr<imgRequest> request = entry->GetRequest();
+     if (request) {
+       *_retval = request->Properties();
+       NS_ADDREF(*_retval);
+     }
+   }
+ 
+   return NS_OK;
+ }
+@@ -1002,17 +1002,17 @@ bool imgLoader::PutIntoCache(nsIURI *key
+ 
+   // Check to see if this request already exists in the cache and is being
+   // loaded on a different thread. If so, don't allow this entry to be added to
+   // the cache.
+   nsRefPtr<imgCacheEntry> tmpCacheEntry;
+   if (cache.Get(spec, getter_AddRefs(tmpCacheEntry)) && tmpCacheEntry) {
+     PR_LOG(GetImgLog(), PR_LOG_DEBUG,
+            ("[this=%p] imgLoader::PutIntoCache -- Element already in the cache", nullptr));
+-    nsRefPtr<imgRequest> tmpRequest = getter_AddRefs(tmpCacheEntry->GetRequest());
++    nsRefPtr<imgRequest> tmpRequest = tmpCacheEntry->GetRequest();
+ 
+     // If it already exists, and we're putting the same key into the cache, we
+     // should remove the old version.
+     PR_LOG(GetImgLog(), PR_LOG_DEBUG,
+            ("[this=%p] imgLoader::PutIntoCache -- Replacing cached element", nullptr));
+ 
+     RemoveFromCache(key);
+   } else {
+@@ -1035,17 +1035,17 @@ bool imgLoader::PutIntoCache(nsIURI *key
+       addrv = mCacheTracker->AddObject(entry);
+ 
+     if (NS_SUCCEEDED(addrv)) {
+       imgCacheQueue &queue = GetCacheQueue(key);
+       queue.Push(entry);
+     }
+   }
+ 
+-  nsRefPtr<imgRequest> request(getter_AddRefs(entry->GetRequest()));
++  nsRefPtr<imgRequest> request = entry->GetRequest();
+   request->SetIsInCache(true);
+ 
+   return true;
+ }
+ 
+ bool imgLoader::SetHasNoProxies(nsIURI *key, imgCacheEntry *entry)
+ {
+ #if defined(PR_LOGGING)
+@@ -1404,30 +1404,30 @@ bool imgLoader::RemoveFromCache(nsIURI *
+     if (entry->HasNoProxies()) {
+       if (mCacheTracker)
+         mCacheTracker->RemoveObject(entry);
+       queue.Remove(entry);
+     }
+ 
+     entry->SetEvicted(true);
+ 
+-    nsRefPtr<imgRequest> request(getter_AddRefs(entry->GetRequest()));
++    nsRefPtr<imgRequest> request = entry->GetRequest();
+     request->SetIsInCache(false);
+ 
+     return true;
+   }
+   else
+     return false;
+ }
+ 
+ bool imgLoader::RemoveFromCache(imgCacheEntry *entry)
+ {
+   LOG_STATIC_FUNC(GetImgLog(), "imgLoader::RemoveFromCache entry");
+ 
+-  nsRefPtr<imgRequest> request(getter_AddRefs(entry->GetRequest()));
++  nsRefPtr<imgRequest> request = entry->GetRequest();
+   if (request) {
+     nsCOMPtr<nsIURI> key;
+     if (NS_SUCCEEDED(request->GetURI(getter_AddRefs(key))) && key) {
+       imgCacheTable &cache = GetCache(key);
+       imgCacheQueue &queue = GetCacheQueue(key);
+       nsAutoCString spec;
+       key->GetSpec(spec);
+ 
+@@ -1620,17 +1620,17 @@ nsresult imgLoader::LoadImage(nsIURI *aU
+   // for correctly dealing with image load requests that are a result
+   // of post data.
+   imgCacheTable &cache = GetCache(aURI);
+ 
+   if (cache.Get(spec, getter_AddRefs(entry)) && entry) {
+     if (ValidateEntry(entry, aURI, aInitialDocumentURI, aReferrerURI,
+                       aLoadGroup, aObserver, aCX, requestFlags, true,
+                       _retval, aPolicy, aLoadingPrincipal, corsmode)) {
+-      request = getter_AddRefs(entry->GetRequest());
++      request = entry->GetRequest();
+ 
+       // If this entry has no proxies, its request has no reference to the entry.
+       if (entry->HasNoProxies()) {
+         LOG_FUNC_WITH_PARAM(GetImgLog(), "imgLoader::LoadImage() adding proxyless entry", "uri", spec.get());
+         NS_ABORT_IF_FALSE(!request->HasCacheEntry(), "Proxyless entry's request has cache entry!");
+         request->SetCacheEntry(entry);
+ 
+         if (mCacheTracker)
+@@ -1846,30 +1846,30 @@ nsresult imgLoader::LoadImageWithChannel
+       // it says that the entry isn't valid any more, we'll only use the entry
+       // we're getting if the channel is loading from the cache anyways.
+       //
+       // XXX -- should this be changed? it's pretty much verbatim from the old
+       // code, but seems nonsensical.
+       if (ValidateEntry(entry, uri, nullptr, nullptr, nullptr, aObserver, aCX,
+                         requestFlags, false, nullptr, nullptr, nullptr,
+                         imgIRequest::CORS_NONE)) {
+-        request = getter_AddRefs(entry->GetRequest());
++        request = entry->GetRequest();
+       } else {
+         nsCOMPtr<nsICachingChannel> cacheChan(do_QueryInterface(channel));
+         bool bUseCacheCopy;
+ 
+         if (cacheChan)
+           cacheChan->IsFromCache(&bUseCacheCopy);
+         else
+           bUseCacheCopy = false;
+ 
+-        if (!bUseCacheCopy)
++        if (!bUseCacheCopy) {
+           entry = nullptr;
+-        else {
+-          request = getter_AddRefs(entry->GetRequest());
++        } else {
++          request = entry->GetRequest();
+         }
+       }
+ 
+       if (request && entry) {
+         // If this entry has no proxies, its request has no reference to the entry.
+         if (entry->HasNoProxies()) {
+           LOG_FUNC_WITH_PARAM(GetImgLog(), "imgLoader::LoadImageWithChannel() adding proxyless entry", "uri", spec.get());
+           NS_ABORT_IF_FALSE(!request->HasCacheEntry(), "Proxyless entry's request has cache entry!");
+diff --git a/js/jsd/jsd_xpc.cpp b/js/jsd/jsd_xpc.cpp
+--- a/js/jsd/jsd_xpc.cpp
++++ b/js/jsd/jsd_xpc.cpp
+@@ -497,17 +497,17 @@ jsds_ErrorHookProc (JSDContext *jsdc, JS
+     
+     running = true;
+     
+     nsCOMPtr<jsdIValue> val;
+     if (JS_IsExceptionPending(cx)) {
+         jsval jv;
+         JS_GetPendingException(cx, &jv);
+         JSDValue *jsdv = JSD_NewValue (jsdc, jv);
+-        val = getter_AddRefs(jsdValue::FromPtr(jsdc, jsdv));
++        val = dont_AddRef(jsdValue::FromPtr(jsdc, jsdv));
+     }
+     
+     nsAutoCString fileName;
+     uint32_t    line;
+     uint32_t    pos;
+     uint32_t    flags;
+     uint32_t    errnum;
+     bool        rval;
+@@ -562,18 +562,17 @@ jsds_CallHookProc (JSDContext* jsdc, JSD
+     if (!hook)
+         return JS_TRUE;
+ 
+     if (!jsds_FilterHook (jsdc, jsdthreadstate))
+         return JS_FALSE;
+ 
+     JSDStackFrameInfo *native_frame = JSD_GetStackFrame (jsdc, jsdthreadstate);
+     nsCOMPtr<jsdIStackFrame> frame =
+-        getter_AddRefs(jsdStackFrame::FromPtr(jsdc, jsdthreadstate,
+-                                              native_frame));
++        dont_AddRef(jsdStackFrame::FromPtr(jsdc, jsdthreadstate, native_frame));
+     gJsds->DoPause(nullptr, true);
+     hook->OnCall(frame, type);    
+     gJsds->DoUnPause(nullptr, true);
+     jsdStackFrame::InvalidateAll();
+ 
+     return JS_TRUE;
+ }
+ 
+@@ -608,34 +607,33 @@ jsds_ExecutionHookProc (JSDContext* jsdc
+             }
+             break;
+         case JSD_HOOK_THROW:
+         {
+             hook_rv = JSD_HOOK_RETURN_CONTINUE_THROW;
+             gJsds->GetThrowHook(getter_AddRefs(hook));
+             if (hook) {
+                 JSDValue *jsdv = JSD_GetException (jsdc, jsdthreadstate);
+-                js_rv = getter_AddRefs(jsdValue::FromPtr (jsdc, jsdv));
++                js_rv = dont_AddRef(jsdValue::FromPtr (jsdc, jsdv));
+             }
+             break;
+         }
+         default:
+             NS_ASSERTION (0, "Unknown hook type.");
+     }
+ 
+     if (!hook)
+         return hook_rv;
+     
+     if (!jsds_FilterHook (jsdc, jsdthreadstate))
+         return JSD_HOOK_RETURN_CONTINUE;
+     
+     JSDStackFrameInfo *native_frame = JSD_GetStackFrame (jsdc, jsdthreadstate);
+     nsCOMPtr<jsdIStackFrame> frame =
+-        getter_AddRefs(jsdStackFrame::FromPtr(jsdc, jsdthreadstate,
+-                                              native_frame));
++        dont_AddRef(jsdStackFrame::FromPtr(jsdc, jsdthreadstate, native_frame));
+     gJsds->DoPause(nullptr, true);
+     jsdIValue *inout_rv = js_rv;
+     NS_IF_ADDREF(inout_rv);
+     hook->OnExecute (frame, type, &inout_rv, &hook_rv);
+     js_rv = inout_rv;
+     NS_IF_RELEASE(inout_rv);
+     gJsds->DoUnPause(nullptr, true);
+     jsdStackFrame::InvalidateAll();
+@@ -667,17 +665,17 @@ jsds_ScriptHookProc (JSDContext* jsdc, J
+ 
+         /* a script is being created */
+         if (!hook) {
+             /* nobody cares, just exit */
+             return;
+         }
+             
+         nsCOMPtr<jsdIScript> script = 
+-            getter_AddRefs(jsdScript::FromPtr(jsdc, jsdscript));
++            dont_AddRef(jsdScript::FromPtr(jsdc, jsdscript));
+ #ifdef CAUTIOUS_SCRIPTHOOK
+         JS_UNKEEP_ATOMS(rt);
+ #endif
+         gJsds->DoPause(nullptr, true);
+         hook->OnScriptCreated (script);
+         gJsds->DoUnPause(nullptr, true);
+ #ifdef CAUTIOUS_SCRIPTHOOK
+         JS_KEEP_ATOMS(rt);
+@@ -2676,17 +2674,17 @@ jsdService::EnumerateContexts (jsdIConte
+         return NS_OK;
+     
+     JSContext *iter = NULL;
+     JSContext *cx;
+ 
+     while ((cx = JS_ContextIterator (mRuntime, &iter)))
+     {
+         nsCOMPtr<jsdIContext> jsdicx = 
+-            getter_AddRefs(jsdContext::FromPtr(mCx, cx));
++            dont_AddRef(jsdContext::FromPtr(mCx, cx));
+         if (jsdicx)
+         {
+             if (NS_FAILED(enumerator->EnumerateContext(jsdicx)))
+                 break;
+         }
+     }
+ 
+     return NS_OK;
+@@ -2699,17 +2697,17 @@ jsdService::EnumerateScripts (jsdIScript
+     
+     JSDScript *script;
+     JSDScript *iter = NULL;
+     nsresult rv = NS_OK;
+     
+     JSD_LockScriptSubsystem(mCx);
+     while((script = JSD_IterateScripts(mCx, &iter))) {
+         nsCOMPtr<jsdIScript> jsdis =
+-            getter_AddRefs(jsdScript::FromPtr(mCx, script));
++            dont_AddRef(jsdScript::FromPtr(mCx, script));
+         rv = enumerator->EnumerateScript (jsdis);
+         if (NS_FAILED(rv))
+             break;
+     }
+     JSD_UnlockScriptSubsystem(mCx);
+ 
+     return rv;
+ }
+diff --git a/widget/xpwidgets/nsTransferable.cpp b/widget/xpwidgets/nsTransferable.cpp
+--- a/widget/xpwidgets/nsTransferable.cpp
++++ b/widget/xpwidgets/nsTransferable.cpp
+@@ -94,45 +94,45 @@ DataStruct::GetData ( nsISupports** aDat
+   *aData = mData;
+   if ( mData )
+     NS_ADDREF(*aData); 
+   *aDataLen = mDataLen;
+ }
+ 
+ 
+ //-------------------------------------------------------------------------
+-nsIFile*
+-DataStruct::GetFileSpec(const char * aFileName)
++already_AddRefed<nsIFile>
++DataStruct::GetFileSpec(const char* aFileName)
+ {
+-  nsIFile* cacheFile;
+-  NS_GetSpecialDirectory(NS_OS_TEMP_DIR, &cacheFile);
++  nsCOMPtr<nsIFile> cacheFile;
++  NS_GetSpecialDirectory(NS_OS_TEMP_DIR, getter_AddRefs(cacheFile));
+   
+-  if (cacheFile == nullptr)
++  if (!cacheFile)
+     return nullptr;
+ 
+   // if the param aFileName contains a name we should use that
+   // because the file probably already exists
+   // otherwise create a unique name
+   if (!aFileName) {
+     cacheFile->AppendNative(NS_LITERAL_CSTRING("clipboardcache"));
+     cacheFile->CreateUnique(nsIFile::NORMAL_FILE_TYPE, 0600);
+   } else {
+     cacheFile->AppendNative(nsDependentCString(aFileName));
+   }
+   
+-  return cacheFile;
++  return cacheFile.forget();
+ }
+ 
+ 
+ //-------------------------------------------------------------------------
+ nsresult
+ DataStruct::WriteCache(nsISupports* aData, uint32_t aDataLen)
+ {
+   // Get a new path and file to the temp directory
+-  nsCOMPtr<nsIFile> cacheFile ( getter_AddRefs(GetFileSpec(mCacheFileName)) );
++  nsCOMPtr<nsIFile> cacheFile = GetFileSpec(mCacheFileName);
+   if (cacheFile) {
+     // remember the file name
+     if (!mCacheFileName) {
+       nsXPIDLCString fName;
+       cacheFile->GetNativeLeafName(fName);
+       mCacheFileName = nsCRT::strdup(fName);
+     }
+ 
+@@ -163,17 +163,17 @@ DataStruct::WriteCache(nsISupports* aDat
+ nsresult
+ DataStruct::ReadCache(nsISupports** aData, uint32_t* aDataLen)
+ {
+   // if we don't have a cache filename we are out of luck
+   if (!mCacheFileName)
+     return NS_ERROR_FAILURE;
+ 
+   // get the path and file name
+-  nsCOMPtr<nsIFile> cacheFile ( getter_AddRefs(GetFileSpec(mCacheFileName)) );
++  nsCOMPtr<nsIFile> cacheFile = GetFileSpec(mCacheFileName);
+   bool exists;
+   if ( cacheFile && NS_SUCCEEDED(cacheFile->Exists(&exists)) && exists ) {
+     // get the size of the file
+     int64_t fileSize;
+     int64_t max32 = 0xFFFFFFFF;
+     cacheFile->GetFileSize(&fileSize);
+     if (fileSize > max32)
+       return NS_ERROR_OUT_OF_MEMORY;
+diff --git a/widget/xpwidgets/nsTransferable.h b/widget/xpwidgets/nsTransferable.h
+--- a/widget/xpwidgets/nsTransferable.h
++++ b/widget/xpwidgets/nsTransferable.h
+@@ -24,17 +24,17 @@ struct DataStruct
+ {
+   DataStruct ( const char* aFlavor )
+     : mDataLen(0), mFlavor(aFlavor), mCacheFileName(nullptr) { }
+   ~DataStruct();
+   
+   const nsCString& GetFlavor() const { return mFlavor; }
+   void SetData( nsISupports* inData, uint32_t inDataLen );
+   void GetData( nsISupports** outData, uint32_t *outDataLen );
+-  nsIFile * GetFileSpec(const char * aFileName);
++  already_AddRefed<nsIFile> GetFileSpec(const char* aFileName);
+   bool IsDataAvailable() const { return (mData && mDataLen > 0) || (!mData && mCacheFileName); }
+   
+ protected:
+ 
+   enum {
+     // The size of data over which we write the data to disk rather than
+     // keep it around in memory.
+     kLargeDatasetSize = 1000000        // 1 million bytes
+diff --git a/xpcom/glue/nsCOMPtr.h b/xpcom/glue/nsCOMPtr.h
+--- a/xpcom/glue/nsCOMPtr.h
++++ b/xpcom/glue/nsCOMPtr.h
+@@ -215,36 +215,16 @@ struct already_AddRefed
+     }
+ 
+     T* mRawPtr;
+   };
+ 
+ template <class T>
+ inline
+ const already_AddRefed<T>
+-getter_AddRefs( T* aRawPtr )
+-    /*
+-      ...makes typing easier, because it deduces the template type, e.g., 
+-      you write |dont_AddRef(fooP)| instead of |already_AddRefed<IFoo>(fooP)|.
+-    */
+-  {
+-    return already_AddRefed<T>(aRawPtr);
+-  }
+-
+-template <class T>
+-inline
+-const already_AddRefed<T>
+-getter_AddRefs( const already_AddRefed<T> aAlreadyAddRefedPtr )
+-  {
+-    return aAlreadyAddRefedPtr;
+-  }
+-
+-template <class T>
+-inline
+-const already_AddRefed<T>
+ dont_AddRef( T* aRawPtr )
+   {
+     return already_AddRefed<T>(aRawPtr);
+   }
+ 
+ template <class T>
+ inline
+ const already_AddRefed<T>

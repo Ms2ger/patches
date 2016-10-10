@@ -1,0 +1,171 @@
+* * *
+
+diff --git a/content/html/content/src/nsHTMLLIElement.cpp b/content/html/content/src/nsHTMLLIElement.cpp
+--- a/content/html/content/src/nsHTMLLIElement.cpp
++++ b/content/html/content/src/nsHTMLLIElement.cpp
+@@ -117,10 +117,10 @@
+ };
+ 
+ static const nsAttrValue::EnumTable kOrderedListItemTypeTable[] = {
+-  { "A", NS_STYLE_LIST_STYLE_OLD_UPPER_ALPHA },
+-  { "a", NS_STYLE_LIST_STYLE_OLD_LOWER_ALPHA },
+-  { "I", NS_STYLE_LIST_STYLE_OLD_UPPER_ROMAN },
+-  { "i", NS_STYLE_LIST_STYLE_OLD_LOWER_ROMAN },
++  { "A", NS_STYLE_LIST_STYLE_UPPER_ALPHA },
++  { "a", NS_STYLE_LIST_STYLE_LOWER_ALPHA },
++  { "I", NS_STYLE_LIST_STYLE_UPPER_ROMAN },
++  { "i", NS_STYLE_LIST_STYLE_LOWER_ROMAN },
+   { "1", NS_STYLE_LIST_STYLE_DECIMAL },
+   { 0 }
+ };
+diff --git a/content/html/content/src/nsHTMLOListElement.cpp b/content/html/content/src/nsHTMLOListElement.cpp
+--- a/content/html/content/src/nsHTMLOListElement.cpp
++++ b/content/html/content/src/nsHTMLOListElement.cpp
+@@ -131,28 +131,22 @@
+ NS_IMPL_STRING_ATTR(nsHTMLSharedListElement, Type, type)
+ 
+ 
+-nsAttrValue::EnumTable kListTypeTable[] = {
+-  { "none", NS_STYLE_LIST_STYLE_NONE },
+-  { "disc", NS_STYLE_LIST_STYLE_DISC },
+-  { "circle", NS_STYLE_LIST_STYLE_CIRCLE },
+-  { "round", NS_STYLE_LIST_STYLE_CIRCLE },
+-  { "square", NS_STYLE_LIST_STYLE_SQUARE },
+-  { "decimal", NS_STYLE_LIST_STYLE_DECIMAL },
+-  { "lower-roman", NS_STYLE_LIST_STYLE_LOWER_ROMAN },
+-  { "upper-roman", NS_STYLE_LIST_STYLE_UPPER_ROMAN },
+-  { "lower-alpha", NS_STYLE_LIST_STYLE_LOWER_ALPHA },
+-  { "upper-alpha", NS_STYLE_LIST_STYLE_UPPER_ALPHA },
++nsAttrValue::EnumTable kOListTypeTable[] = {
++  { "1", NS_STYLE_LIST_STYLE_DECIMAL },
++  { "A", NS_STYLE_LIST_STYLE_UPPER_ALPHA },
++  { "a", NS_STYLE_LIST_STYLE_LOWER_ALPHA },
++  { "I", NS_STYLE_LIST_STYLE_UPPER_ROMAN },
++  { "i", NS_STYLE_LIST_STYLE_LOWER_ROMAN },
+   { 0 }
+ };
+ 
+-nsAttrValue::EnumTable kOldListTypeTable[] = {
+-  { "1", NS_STYLE_LIST_STYLE_OLD_DECIMAL },
+-  { "A", NS_STYLE_LIST_STYLE_OLD_UPPER_ALPHA },
+-  { "a", NS_STYLE_LIST_STYLE_OLD_LOWER_ALPHA },
+-  { "I", NS_STYLE_LIST_STYLE_OLD_UPPER_ROMAN },
+-  { "i", NS_STYLE_LIST_STYLE_OLD_LOWER_ROMAN },
++nsAttrValue::EnumTable kUListTypeTable[] = {
++  { "disc", NS_STYLE_LIST_STYLE_DISC },
++  { "circle", NS_STYLE_LIST_STYLE_CIRCLE },
++  { "square", NS_STYLE_LIST_STYLE_SQUARE },
+   { 0 }
+ };
++
+ 
+ bool
+ nsHTMLSharedListElement::ParseAttribute(int32_t aNamespaceID,
+@@ -161,15 +155,17 @@
+                                         nsAttrValue& aResult)
+ {
+   if (aNamespaceID == kNameSpaceID_None) {
+-    if (mNodeInfo->Equals(nsGkAtoms::ol) ||
+-        mNodeInfo->Equals(nsGkAtoms::ul)) {
+-      if (aAttribute == nsGkAtoms::type) {
+-        return aResult.ParseEnumValue(aValue, kListTypeTable, false) ||
+-               aResult.ParseEnumValue(aValue, kOldListTypeTable, true);
++    if (aAttribute == nsGkAtoms::type) {
++      if (mNodeInfo->Equals(nsGkAtoms::ol)) {
++        return aResult.ParseEnumValue(aValue, kOListTypeTable, true);
+       }
+-      if (aAttribute == nsGkAtoms::start) {
+-        return aResult.ParseIntValue(aValue);
++      if (mNodeInfo->Equals(nsGkAtoms::ul)) {
++        return aResult.ParseEnumValue(aValue, kOListTypeTable, false);
+       }
++    }
++    if (aAttribute == nsGkAtoms::start &&
++        (mNodeInfo->Equals(nsGkAtoms::ol) || mNodeInfo->Equals(nsGkAtoms::ul))) {
++      return aResult.ParseIntValue(aValue);
+     }
+   }
+ 
+diff --git a/layout/base/nsStyleConsts.h b/layout/base/nsStyleConsts.h
+--- a/layout/base/nsStyleConsts.h
++++ b/layout/base/nsStyleConsts.h
+@@ -537,11 +537,6 @@
+ #define NS_STYLE_LIST_STYLE_KATAKANA              16
+ #define NS_STYLE_LIST_STYLE_HIRAGANA_IROHA        17
+ #define NS_STYLE_LIST_STYLE_KATAKANA_IROHA        18
+-#define NS_STYLE_LIST_STYLE_OLD_LOWER_ROMAN       19
+-#define NS_STYLE_LIST_STYLE_OLD_UPPER_ROMAN       20
+-#define NS_STYLE_LIST_STYLE_OLD_LOWER_ALPHA       21
+-#define NS_STYLE_LIST_STYLE_OLD_UPPER_ALPHA       22
+-#define NS_STYLE_LIST_STYLE_OLD_DECIMAL           23
+ #define NS_STYLE_LIST_STYLE_MOZ_CJK_HEAVENLY_STEM     24
+ #define NS_STYLE_LIST_STYLE_MOZ_CJK_EARTHLY_BRANCH    25
+ #define NS_STYLE_LIST_STYLE_MOZ_TRAD_CHINESE_INFORMAL 26
+diff --git a/layout/generic/nsBulletFrame.cpp b/layout/generic/nsBulletFrame.cpp
+--- a/layout/generic/nsBulletFrame.cpp
++++ b/layout/generic/nsBulletFrame.cpp
+@@ -295,16 +295,11 @@
+     break;
+ 
+   case NS_STYLE_LIST_STYLE_DECIMAL:
+-  case NS_STYLE_LIST_STYLE_OLD_DECIMAL:
+   case NS_STYLE_LIST_STYLE_DECIMAL_LEADING_ZERO:
+   case NS_STYLE_LIST_STYLE_LOWER_ROMAN:
+   case NS_STYLE_LIST_STYLE_UPPER_ROMAN:
+   case NS_STYLE_LIST_STYLE_LOWER_ALPHA:
+   case NS_STYLE_LIST_STYLE_UPPER_ALPHA:
+-  case NS_STYLE_LIST_STYLE_OLD_LOWER_ROMAN:
+-  case NS_STYLE_LIST_STYLE_OLD_UPPER_ROMAN:
+-  case NS_STYLE_LIST_STYLE_OLD_LOWER_ALPHA:
+-  case NS_STYLE_LIST_STYLE_OLD_UPPER_ALPHA:
+   case NS_STYLE_LIST_STYLE_LOWER_GREEK:
+   case NS_STYLE_LIST_STYLE_HEBREW:
+   case NS_STYLE_LIST_STYLE_ARMENIAN:
+@@ -1018,7 +1013,6 @@
+       break;
+ 
+     case NS_STYLE_LIST_STYLE_DECIMAL:
+-    case NS_STYLE_LIST_STYLE_OLD_DECIMAL:
+     default: // CSS2 say "A users  agent that does not recognize a numbering system
+       // should use 'decimal'
+       success = DecimalToText(aOrdinal, result);
+@@ -1029,23 +1023,19 @@
+       break;
+ 
+     case NS_STYLE_LIST_STYLE_LOWER_ROMAN:
+-    case NS_STYLE_LIST_STYLE_OLD_LOWER_ROMAN:
+       success = RomanToText(aOrdinal, result,
+                             gLowerRomanCharsA, gLowerRomanCharsB);
+       break;
+     case NS_STYLE_LIST_STYLE_UPPER_ROMAN:
+-    case NS_STYLE_LIST_STYLE_OLD_UPPER_ROMAN:
+       success = RomanToText(aOrdinal, result,
+                             gUpperRomanCharsA, gUpperRomanCharsB);
+       break;
+ 
+     case NS_STYLE_LIST_STYLE_LOWER_ALPHA:
+-    case NS_STYLE_LIST_STYLE_OLD_LOWER_ALPHA:
+       success = CharListToText(aOrdinal, result, gLowerAlphaChars, ALPHA_SIZE);
+       break;
+ 
+     case NS_STYLE_LIST_STYLE_UPPER_ALPHA:
+-    case NS_STYLE_LIST_STYLE_OLD_UPPER_ALPHA:
+       success = CharListToText(aOrdinal, result, gUpperAlphaChars, ALPHA_SIZE);
+       break;
+ 
+@@ -1323,15 +1313,10 @@
+     default:
+     case NS_STYLE_LIST_STYLE_DECIMAL_LEADING_ZERO:
+     case NS_STYLE_LIST_STYLE_DECIMAL:
+-    case NS_STYLE_LIST_STYLE_OLD_DECIMAL:
+     case NS_STYLE_LIST_STYLE_LOWER_ROMAN:
+     case NS_STYLE_LIST_STYLE_UPPER_ROMAN:
+     case NS_STYLE_LIST_STYLE_LOWER_ALPHA:
+     case NS_STYLE_LIST_STYLE_UPPER_ALPHA:
+-    case NS_STYLE_LIST_STYLE_OLD_LOWER_ROMAN:
+-    case NS_STYLE_LIST_STYLE_OLD_UPPER_ROMAN:
+-    case NS_STYLE_LIST_STYLE_OLD_LOWER_ALPHA:
+-    case NS_STYLE_LIST_STYLE_OLD_UPPER_ALPHA:
+     case NS_STYLE_LIST_STYLE_KATAKANA:
+     case NS_STYLE_LIST_STYLE_HIRAGANA:
+     case NS_STYLE_LIST_STYLE_KATAKANA_IROHA:

@@ -1,0 +1,837 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 764367 - Fix build warnings in accessible/; r=?tbsaunde
+
+diff --git a/accessible/Makefile.in b/accessible/Makefile.in
+new file mode 100644
+--- /dev/null
++++ b/accessible/Makefile.in
+@@ -0,0 +1,14 @@
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++DEPTH = @DEPTH@
++topsrcdir = @top_srcdir@
++srcdir = @srcdir@
++VPATH = @srcdir@
++
++include $(DEPTH)/config/autoconf.mk
++
++FAIL_ON_WARNINGS := 1
++
++include $(topsrcdir)/config/rules.mk
+diff --git a/accessible/public/nsIAccessible.idl b/accessible/public/nsIAccessible.idl
+--- a/accessible/public/nsIAccessible.idl
++++ b/accessible/public/nsIAccessible.idl
+@@ -162,16 +162,17 @@ interface nsIAccessible : nsISupports
+    * Returns grouping information. Used for tree items, list items, tab panel
+    * labels, radio buttons, etc. Also used for collectons of non-text objects.
+    *
+    * @param groupLevel - 1-based, similar to ARIA 'level' property
+    * @param similarItemsInGroup - 1-based, similar to ARIA 'setsize' property,
+    *                              inclusive of the current item
+    * @param positionInGroup - 1-based, similar to ARIA 'posinset' property
+    */
++  [binaryname(ScriptableGroupPosition)]
+   void groupPosition(out long aGroupLevel, out long aSimilarItemsInGroup,
+                      out long aPositionInGroup);
+ 
+   /**
+    * Accessible child which contains the coordinate at (x, y) in screen pixels.
+    * If the point is in the current accessible but not in a child, the
+    * current accessible will be returned.
+    * If the point is in neither the current accessible or a child, then
+diff --git a/accessible/src/Makefile.in b/accessible/src/Makefile.in
+--- a/accessible/src/Makefile.in
++++ b/accessible/src/Makefile.in
+@@ -1,16 +1,17 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ DEPTH = @DEPTH@
+ topsrcdir = @top_srcdir@
+ srcdir = @srcdir@
+ VPATH = @srcdir@
++FAIL_ON_WARNINGS := 1
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ A11Y_LOG = 0
+ ifdef MOZ_DEBUG
+   A11Y_LOG = 1
+ endif
+ ifeq (,$(filter aurora beta release esr,$(MOZ_UPDATE_CHANNEL)))
+diff --git a/accessible/src/atk/Makefile.in b/accessible/src/atk/Makefile.in
+--- a/accessible/src/atk/Makefile.in
++++ b/accessible/src/atk/Makefile.in
+@@ -4,16 +4,17 @@
+ 
+ DEPTH = @DEPTH@
+ topsrcdir = @top_srcdir@
+ srcdir = @srcdir@
+ VPATH = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
++FAIL_ON_WARNINGS := 1
+ EXPORT_LIBRARY = ..
+ LIBXUL_LIBRARY = 1
+ 
+ # we want to force the creation of a static lib.
+ FORCE_STATIC_LIB = 1
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+diff --git a/accessible/src/base/AccEvent.cpp b/accessible/src/base/AccEvent.cpp
+--- a/accessible/src/base/AccEvent.cpp
++++ b/accessible/src/base/AccEvent.cpp
+@@ -87,17 +87,17 @@ uint32_t
+ AccReorderEvent::IsShowHideEventTarget(const Accessible* aTarget) const
+ {
+   uint32_t count = mDependentEvents.Length();
+   for (uint32_t index = count - 1; index < count; index--) {
+     if (mDependentEvents[index]->mAccessible == aTarget) {
+       uint32_t eventType = mDependentEvents[index]->mEventType;
+       if (eventType == nsIAccessibleEvent::EVENT_SHOW ||
+           eventType == nsIAccessibleEvent::EVENT_HIDE) {
+-        return mDependentEvents[index]->mEventType;
++        return eventType;
+       }
+     }
+   }
+ 
+   return 0;
+ }
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+diff --git a/accessible/src/base/AccGroupInfo.cpp b/accessible/src/base/AccGroupInfo.cpp
+--- a/accessible/src/base/AccGroupInfo.cpp
++++ b/accessible/src/base/AccGroupInfo.cpp
+@@ -186,17 +186,17 @@ AccGroupInfo::NextItemTo(Accessible* aIt
+     return nullptr;
+ 
+   // If the item in middle of the group then search next item in siblings.
+   if (groupInfo->PosInSet() >= groupInfo->SetSize())
+     return nullptr;
+ 
+   Accessible* parent = aItem->Parent();
+   uint32_t childCount = parent->ChildCount();
+-  for (int32_t idx = aItem->IndexInParent() + 1; idx < childCount; idx++) {
++  for (uint32_t idx = aItem->IndexInParent() + 1; idx < childCount; idx++) {
+     Accessible* nextItem = parent->GetChildAt(idx);
+     AccGroupInfo* nextGroupInfo = nextItem->GetGroupInfo();
+     if (nextGroupInfo &&
+         nextGroupInfo->ConceptualParent() == groupInfo->ConceptualParent()) {
+       return nextItem;
+     }
+   }
+ 
+diff --git a/accessible/src/base/EventQueue.cpp b/accessible/src/base/EventQueue.cpp
+--- a/accessible/src/base/EventQueue.cpp
++++ b/accessible/src/base/EventQueue.cpp
+@@ -54,17 +54,17 @@ EventQueue::CoalesceEvents()
+ 
+   switch(tailEvent->mEventRule) {
+     case AccEvent::eCoalesceReorder:
+       CoalesceReorderEvents(tailEvent);
+       break; // case eCoalesceReorder
+ 
+     case AccEvent::eCoalesceMutationTextChange:
+     {
+-      for (uint32_t index = tail - 1; index < tail; index--) {
++      for (int32_t index = tail - 1; index >= 0; index--) {
+         AccEvent* thisEvent = mEvents[index];
+         if (thisEvent->mEventRule != tailEvent->mEventRule)
+           continue;
+ 
+         // We don't currently coalesce text change events from show/hide events.
+         if (thisEvent->mEventType != tailEvent->mEventType)
+           continue;
+ 
+@@ -92,30 +92,30 @@ EventQueue::CoalesceEvents()
+         CoalesceTextChangeEventsFor(tailShowEvent, thisShowEvent);
+         break;
+       }
+     } break; // case eCoalesceMutationTextChange
+ 
+     case AccEvent::eCoalesceOfSameType:
+     {
+       // Coalesce old events by newer event.
+-      for (uint32_t index = tail - 1; index < tail; index--) {
++      for (int32_t index = tail - 1; index >= 0; index--) {
+         AccEvent* accEvent = mEvents[index];
+         if (accEvent->mEventType == tailEvent->mEventType &&
+           accEvent->mEventRule == tailEvent->mEventRule) {
+           accEvent->mEventRule = AccEvent::eDoNotEmit;
+           return;
+         }
+       }
+     } break; // case eCoalesceOfSameType
+ 
+     case AccEvent::eCoalesceSelectionChange:
+     {
+       AccSelChangeEvent* tailSelChangeEvent = downcast_accEvent(tailEvent);
+-      for (uint32_t index = tail - 1; index < tail; index--) {
++      for (int32_t index = tail - 1; index >= 0; index--) {
+         AccEvent* thisEvent = mEvents[index];
+         if (thisEvent->mEventRule == tailEvent->mEventRule) {
+           AccSelChangeEvent* thisSelChangeEvent =
+             downcast_accEvent(thisEvent);
+ 
+           // Coalesce selection change events within same control.
+           if (tailSelChangeEvent->mWidget == thisSelChangeEvent->mWidget) {
+             CoalesceSelChangeEvents(tailSelChangeEvent, thisSelChangeEvent, index);
+@@ -126,17 +126,17 @@ EventQueue::CoalesceEvents()
+ 
+     } break; // eCoalesceSelectionChange
+ 
+     case AccEvent::eCoalesceStateChange:
+     {
+       // If state change event is duped then ignore previous event. If state
+       // change event is opposite to previous event then no event is emitted
+       // (accessible state wasn't changed).
+-      for (uint32_t index = tail - 1; index < tail; index--) {
++      for (int32_t index = tail - 1; index >= 0; index--) {
+         AccEvent* thisEvent = mEvents[index];
+         if (thisEvent->mEventRule != AccEvent::eDoNotEmit &&
+             thisEvent->mEventType == tailEvent->mEventType &&
+             thisEvent->mAccessible == tailEvent->mAccessible) {
+           AccStateChangeEvent* thisSCEvent = downcast_accEvent(thisEvent);
+           AccStateChangeEvent* tailSCEvent = downcast_accEvent(tailEvent);
+           if (thisSCEvent->mState == tailSCEvent->mState) {
+             thisEvent->mEventRule = AccEvent::eDoNotEmit;
+@@ -147,17 +147,17 @@ EventQueue::CoalesceEvents()
+       }
+       break; // eCoalesceStateChange
+     }
+ 
+     case AccEvent::eRemoveDupes:
+     {
+       // Check for repeat events, coalesce newly appended event by more older
+       // event.
+-      for (uint32_t index = tail - 1; index < tail; index--) {
++      for (int32_t index = tail - 1; index >= 0; index--) {
+         AccEvent* accEvent = mEvents[index];
+         if (accEvent->mEventType == tailEvent->mEventType &&
+           accEvent->mEventRule == tailEvent->mEventRule &&
+           accEvent->mAccessible == tailEvent->mAccessible) {
+           tailEvent->mEventRule = AccEvent::eDoNotEmit;
+           return;
+         }
+       }
+diff --git a/accessible/src/base/Makefile.in b/accessible/src/base/Makefile.in
+--- a/accessible/src/base/Makefile.in
++++ b/accessible/src/base/Makefile.in
+@@ -4,16 +4,17 @@
+ 
+ DEPTH = @DEPTH@
+ topsrcdir = @top_srcdir@
+ srcdir = @srcdir@
+ VPATH = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
++FAIL_ON_WARNINGS := 1
+ LIBXUL_LIBRARY = 1
+ 
+ # we don't want the shared lib, but we want to force the creation of a static lib.
+ FORCE_STATIC_LIB = 1
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+ LOCAL_INCLUDES += \
+diff --git a/accessible/src/base/TextAttrs.cpp b/accessible/src/base/TextAttrs.cpp
+--- a/accessible/src/base/TextAttrs.cpp
++++ b/accessible/src/base/TextAttrs.cpp
+@@ -837,20 +837,20 @@ TextAttrsMgr::TextPosTextAttr::
+       float percentValue = styleCoord.GetPercentValue();
+       return percentValue > 0 ?
+         eTextPosSuper :
+         (percentValue < 0 ? eTextPosSub : eTextPosBaseline);
+     }
+ 
+     case eStyleUnit_Coord:
+     {
+-       nscoord coordValue = styleCoord.GetCoordValue();
+-       return coordValue > 0 ?
+-         eTextPosSuper :
+-         (coordValue < 0 ? eTextPosSub : eTextPosBaseline);
++      nscoord coordValue = styleCoord.GetCoordValue();
++      return coordValue > 0
++             ? eTextPosSuper
++             : (coordValue < 0 ? eTextPosSub : eTextPosBaseline);
+     }
+ 
+     case eStyleUnit_Null:
+     case eStyleUnit_Normal:
+     case eStyleUnit_Auto:
+     case eStyleUnit_None:
+     case eStyleUnit_Factor:
+     case eStyleUnit_Degree:
+diff --git a/accessible/src/generic/ARIAGridAccessible.cpp b/accessible/src/generic/ARIAGridAccessible.cpp
+--- a/accessible/src/generic/ARIAGridAccessible.cpp
++++ b/accessible/src/generic/ARIAGridAccessible.cpp
+@@ -6,16 +6,17 @@
+ #include "ARIAGridAccessible-inl.h"
+ 
+ #include "Accessible-inl.h"
+ #include "AccIterator.h"
+ #include "nsAccUtils.h"
+ #include "Role.h"
+ #include "States.h"
+ 
++#include "mozilla/Util.h"
+ #include "nsIMutableArray.h"
+ #include "nsComponentManagerUtils.h"
+ 
+ using namespace mozilla;
+ using namespace mozilla::a11y;
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ // ARIAGridAccessible
+@@ -350,17 +351,17 @@ ARIAGridAccessible::SelectedRowIndices(n
+ }
+ 
+ void
+ ARIAGridAccessible::SelectRow(uint32_t aRowIdx)
+ {
+   AccIterator rowIter(this, filters::GetRow);
+ 
+   Accessible* row = nullptr;
+-  for (int32_t rowIdx = 0; (row = rowIter.Next()); rowIdx++) {
++  for (uint32_t rowIdx = 0; (row = rowIter.Next()); rowIdx++) {
+     DebugOnly<nsresult> rv = SetARIASelected(row, rowIdx == aRowIdx);
+     NS_ASSERTION(NS_SUCCEEDED(rv), "SetARIASelected() Shouldn't fail!");
+   }
+ }
+ 
+ void
+ ARIAGridAccessible::SelectCol(uint32_t aColIdx)
+ {
+diff --git a/accessible/src/generic/Accessible.cpp b/accessible/src/generic/Accessible.cpp
+--- a/accessible/src/generic/Accessible.cpp
++++ b/accessible/src/generic/Accessible.cpp
+@@ -1456,19 +1456,19 @@ Accessible::GroupPosition()
+         groupPos.setSize = setSize;
+     }
+   }
+ 
+   return groupPos;
+ }
+ 
+ NS_IMETHODIMP
+-Accessible::GroupPosition(int32_t* aGroupLevel,
+-                          int32_t* aSimilarItemsInGroup,
+-                          int32_t* aPositionInGroup)
++Accessible::ScriptableGroupPosition(int32_t* aGroupLevel,
++                                    int32_t* aSimilarItemsInGroup,
++                                    int32_t* aPositionInGroup)
+ {
+   NS_ENSURE_ARG_POINTER(aGroupLevel);
+   *aGroupLevel = 0;
+ 
+   NS_ENSURE_ARG_POINTER(aSimilarItemsInGroup);
+   *aSimilarItemsInGroup = 0;
+ 
+   NS_ENSURE_ARG_POINTER(aPositionInGroup);
+@@ -2243,17 +2243,17 @@ void
+ Accessible::DoCommand(nsIContent *aContent, uint32_t aActionIndex)
+ {
+   class Runnable MOZ_FINAL : public nsRunnable
+   {
+   public:
+     Runnable(Accessible* aAcc, nsIContent* aContent, uint32_t aIdx) :
+       mAcc(aAcc), mContent(aContent), mIdx(aIdx) { }
+ 
+-    NS_IMETHOD Run()
++    nsresult Run()
+     {
+       if (mAcc)
+         mAcc->DispatchClickEvent(mContent, mIdx);
+ 
+       return NS_OK;
+     }
+ 
+     void Revoke()
+@@ -3078,17 +3078,19 @@ void
+ Accessible::CacheChildren()
+ {
+   DocAccessible* doc = Document();
+   NS_ENSURE_TRUE_VOID(doc);
+ 
+   TreeWalker walker(this, mContent);
+ 
+   Accessible* child = nullptr;
+-  while ((child = walker.NextChild()) && AppendChild(child));
++  while ((child = walker.NextChild()) && AppendChild(child)) {
++    continue;
++  }
+ }
+ 
+ void
+ Accessible::TestChildCache(Accessible* aCachedChild) const
+ {
+ #ifdef DEBUG
+   int32_t childCount = mChildren.Length();
+   if (childCount == 0) {
+diff --git a/accessible/src/generic/DocAccessible.cpp b/accessible/src/generic/DocAccessible.cpp
+--- a/accessible/src/generic/DocAccessible.cpp
++++ b/accessible/src/generic/DocAccessible.cpp
+@@ -1268,17 +1268,18 @@ Accessible*
+ DocAccessible::GetAccessibleOrContainer(nsINode* aNode)
+ {
+   if (!aNode || !aNode->IsInDoc())
+     return nullptr;
+ 
+   nsINode* currNode = aNode;
+   Accessible* accessible = nullptr;
+   while (!(accessible = GetAccessible(currNode)) &&
+-         (currNode = currNode->GetParentNode()));
++         (currNode = currNode->GetParentNode()))
++    continue;
+ 
+   return accessible;
+ }
+ 
+ bool
+ DocAccessible::BindToDocument(Accessible* aAccessible,
+                               nsRoleMapEntry* aRoleMapEntry)
+ {
+@@ -1417,17 +1418,19 @@ DocAccessible::CacheChildren()
+   // some web pages tend to insert elements under it rather than document body.
+   dom::Element* rootElm = mDocumentNode->GetRootElement();
+   if (!rootElm)
+     return;
+ 
+   TreeWalker walker(this, rootElm);
+ 
+   Accessible* child = nullptr;
+-  while ((child = walker.NextChild()) && AppendChild(child));
++  while ((child = walker.NextChild()) && AppendChild(child)) {
++    continue;
++  }
+ }
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ // Protected members
+ 
+ void
+ DocAccessible::NotifyOfLoading(bool aIsReloading)
+ {
+diff --git a/accessible/src/generic/HyperTextAccessible.cpp b/accessible/src/generic/HyperTextAccessible.cpp
+--- a/accessible/src/generic/HyperTextAccessible.cpp
++++ b/accessible/src/generic/HyperTextAccessible.cpp
+@@ -537,17 +537,17 @@ HyperTextAccessible::DOMPointToHypertext
+           // Case #1: this accessible has no children and thus has empty text,
+           // we can only be at hypertext offset 0.
+           *aHyperTextOffset = 0;
+           return nullptr;
+         }
+ 
+         // Case #2: there are no children, we're at this node.
+         findNode = aNode;
+-      } else if (aNodeOffset == aNode->GetChildCount()) {
++      } else if (aNodeOffset == static_cast<int32_t>(aNode->GetChildCount())) {
+         // Case #3: we're after the last child, get next node to this one.
+         for (nsINode* tmpNode = aNode;
+              !findNode && tmpNode && tmpNode != mContent;
+              tmpNode = tmpNode->GetParent()) {
+           findNode = tmpNode->GetNextSibling();
+         }
+       }
+     }
+@@ -788,17 +788,17 @@ HyperTextAccessible::FindBoundary(int32_
+ {
+   // Convert hypertext offset to frame-relative offset.
+   int32_t offsetInFrame = aOffset, notUsedOffset = aOffset;
+   nsRefPtr<Accessible> accAtOffset;
+   nsIFrame* frameAtOffset =
+     GetPosAndText(offsetInFrame, notUsedOffset, nullptr, nullptr,
+                   nullptr, getter_AddRefs(accAtOffset));
+   if (!frameAtOffset) {
+-    if (aOffset == CharacterCount()) {
++    if (aOffset == static_cast<int32_t>(CharacterCount())) {
+       // Asking for start of line, while on last character.
+       if (accAtOffset)
+         frameAtOffset = accAtOffset->GetFrame();
+     }
+     NS_ASSERTION(frameAtOffset, "No start frame for text getting!");
+     if (!frameAtOffset)
+       return -1;
+ 
+@@ -1013,17 +1013,17 @@ HyperTextAccessible::GetTextBeforeOffset
+     case BOUNDARY_CHAR:
+       GetCharAt(offset, eGetBefore, aText, aStartOffset, aEndOffset);
+       return NS_OK;
+ 
+     case BOUNDARY_WORD_START: {
+       // If the offset is a word start (except text length offset) then move
+       // backward to find a start offset (end offset is the given offset).
+       // Otherwise move backward twice to find both start and end offsets.
+-      if (offset == CharacterCount()) {
++      if (static_cast<uint32_t>(offset) == CharacterCount()) {
+         *aEndOffset = FindWordBoundary(offset, eDirPrevious, eStartWord);
+         *aStartOffset = FindWordBoundary(*aEndOffset, eDirPrevious, eStartWord);
+       } else {
+         *aStartOffset = FindWordBoundary(offset, eDirPrevious, eStartWord);
+         *aEndOffset = FindWordBoundary(*aStartOffset, eDirNext, eStartWord);
+         if (*aEndOffset != offset) {
+           *aEndOffset = *aStartOffset;
+           *aStartOffset = FindWordBoundary(*aEndOffset, eDirPrevious, eStartWord);
+@@ -1926,17 +1926,17 @@ HyperTextAccessible::GetSelectionBounds(
+   NS_ENSURE_ARG_POINTER(aStartOffset);
+   NS_ENSURE_ARG_POINTER(aEndOffset);
+   *aStartOffset = *aEndOffset = 0;
+ 
+   nsTArray<nsRange*> ranges;
+   GetSelectionDOMRanges(nsISelectionController::SELECTION_NORMAL, &ranges);
+ 
+   uint32_t rangeCount = ranges.Length();
+-  if (aSelectionNum < 0 || aSelectionNum >= rangeCount)
++  if (aSelectionNum < 0 || uint32_t(aSelectionNum) >= rangeCount)
+     return NS_ERROR_INVALID_ARG;
+ 
+   nsRange* range = ranges[aSelectionNum];
+ 
+   // Get start and end points.
+   nsINode* startNode = range->GetStartParent();
+   nsINode* endNode = range->GetEndParent();
+   int32_t startOffset = range->StartOffset(), endOffset = range->EndOffset();
+@@ -1988,27 +1988,27 @@ HyperTextAccessible::SetSelectionBounds(
+     frameSelection->GetSelection(nsISelectionController::SELECTION_NORMAL);
+   NS_ENSURE_STATE(domSel);
+ 
+   uint32_t rangeCount = domSel->GetRangeCount();
+   if (rangeCount < static_cast<uint32_t>(aSelectionNum))
+     return NS_ERROR_INVALID_ARG;
+ 
+   nsRefPtr<nsRange> range;
+-  if (aSelectionNum == rangeCount)
++  if (static_cast<uint32_t>(aSelectionNum) == rangeCount)
+     range = new nsRange(mContent);
+   else
+     range = domSel->GetRangeAt(aSelectionNum);
+ 
+   nsresult rv = HypertextOffsetsToDOMRange(startOffset, endOffset, range);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   // If new range was created then add it, otherwise notify selection listeners
+   // that existing selection range was changed.
+-  if (aSelectionNum == rangeCount)
++  if (static_cast<uint32_t>(aSelectionNum) == rangeCount)
+     return domSel->AddRange(range);
+ 
+   domSel->RemoveRange(range);
+   domSel->AddRange(range);
+   return NS_OK;
+ }
+ 
+ /*
+diff --git a/accessible/src/generic/Makefile.in b/accessible/src/generic/Makefile.in
+--- a/accessible/src/generic/Makefile.in
++++ b/accessible/src/generic/Makefile.in
+@@ -4,16 +4,17 @@
+ 
+ DEPTH = @DEPTH@
+ topsrcdir = @top_srcdir@
+ srcdir = @srcdir@
+ VPATH = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
++FAIL_ON_WARNINGS := 1
+ LIBXUL_LIBRARY = 1
+ 
+ # we don't want the shared lib, but we want to force the creation of a static lib.
+ FORCE_STATIC_LIB = 1
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+ LOCAL_INCLUDES = \
+diff --git a/accessible/src/html/HTMLFormControlAccessible.cpp b/accessible/src/html/HTMLFormControlAccessible.cpp
+--- a/accessible/src/html/HTMLFormControlAccessible.cpp
++++ b/accessible/src/html/HTMLFormControlAccessible.cpp
+@@ -155,17 +155,17 @@ HTMLRadioButtonAccessible::GetPositionAn
+   nsRefPtr<nsContentList> inputElms;
+ 
+   nsCOMPtr<nsIFormControl> formControlNode(do_QueryInterface(mContent));
+   dom::Element* formElm = formControlNode->GetFormElement();
+   if (formElm)
+     inputElms = NS_GetContentList(formElm, namespaceId, tagName);
+   else
+     inputElms = NS_GetContentList(mContent->OwnerDoc(), namespaceId, tagName);
+-  NS_ENSURE_TRUE_VOID(inputElms);
++  MOZ_ASSERT(inputElms);
+ 
+   uint32_t inputCount = inputElms->Length(false);
+ 
+   // Compute posinset and setsize.
+   int32_t indexOf = 0;
+   int32_t count = 0;
+ 
+   for (uint32_t index = 0; index < inputCount; index++) {
+diff --git a/accessible/src/html/HTMLTableAccessible.cpp b/accessible/src/html/HTMLTableAccessible.cpp
+--- a/accessible/src/html/HTMLTableAccessible.cpp
++++ b/accessible/src/html/HTMLTableAccessible.cpp
+@@ -384,17 +384,19 @@ HTMLTableAccessible::CacheChildren()
+   // accessibles for the other captions, since only the first is actually
+   // visible.
+   TreeWalker walker(this, mContent);
+ 
+   Accessible* child = nullptr;
+   while ((child = walker.NextChild())) {
+     if (child->Role() == roles::CAPTION) {
+       InsertChildAt(0, child);
+-      while ((child = walker.NextChild()) && AppendChild(child));
++      while ((child = walker.NextChild()) && AppendChild(child)) {
++        continue;
++      }
+       break;
+     }
+     AppendChild(child);
+   }
+ }
+ 
+ role
+ HTMLTableAccessible::NativeRole()
+diff --git a/accessible/src/html/Makefile.in b/accessible/src/html/Makefile.in
+--- a/accessible/src/html/Makefile.in
++++ b/accessible/src/html/Makefile.in
+@@ -5,16 +5,17 @@
+ 
+ DEPTH = @DEPTH@
+ topsrcdir = @top_srcdir@
+ srcdir = @srcdir@
+ VPATH = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
++FAIL_ON_WARNINGS := 1
+ LIBXUL_LIBRARY = 1
+ 
+ # we don't want the shared lib, but we want to force the creation of a static lib.
+ FORCE_STATIC_LIB = 1
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+ LOCAL_INCLUDES = \
+diff --git a/accessible/src/other/Makefile.in b/accessible/src/other/Makefile.in
+--- a/accessible/src/other/Makefile.in
++++ b/accessible/src/other/Makefile.in
+@@ -4,16 +4,17 @@
+ 
+ DEPTH = @DEPTH@
+ topsrcdir = @top_srcdir@
+ srcdir = @srcdir@
+ VPATH = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
++FAIL_ON_WARNINGS := 1
+ EXPORT_LIBRARY = ..
+ LIBXUL_LIBRARY = 1
+ 
+ # we don't want the shared lib, but we want to force the creation of a static lib.
+ FORCE_STATIC_LIB = 1
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+diff --git a/accessible/src/xpcom/Makefile.in b/accessible/src/xpcom/Makefile.in
+--- a/accessible/src/xpcom/Makefile.in
++++ b/accessible/src/xpcom/Makefile.in
+@@ -6,16 +6,17 @@
+ DEPTH = @DEPTH@
+ topsrcdir = @top_srcdir@
+ srcdir = @srcdir@
+ VPATH = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ LIBXUL_LIBRARY = 1
++FAIL_ON_WARNINGS := 1
+ 
+ # we don't want the shared lib, but we want to force the creation of a static lib.
+ FORCE_STATIC_LIB = 1
+ 
+ EXTRA_MDDEPEND_FILES = xpcAccEvents.pp
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+diff --git a/accessible/src/xul/Makefile.in b/accessible/src/xul/Makefile.in
+--- a/accessible/src/xul/Makefile.in
++++ b/accessible/src/xul/Makefile.in
+@@ -5,16 +5,17 @@
+ 
+ DEPTH = @DEPTH@
+ topsrcdir = @top_srcdir@
+ srcdir = @srcdir@
+ VPATH = @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
++FAIL_ON_WARNINGS := 1
+ LIBXUL_LIBRARY = 1
+ 
+ # we don't want the shared lib, but we want to force the creation of a static lib.
+ FORCE_STATIC_LIB = 1
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+ LOCAL_INCLUDES = \
+diff --git a/accessible/src/xul/XULFormControlAccessible.cpp b/accessible/src/xul/XULFormControlAccessible.cpp
+--- a/accessible/src/xul/XULFormControlAccessible.cpp
++++ b/accessible/src/xul/XULFormControlAccessible.cpp
+@@ -815,17 +815,19 @@ XULTextFieldAccessible::CacheChildren()
+   // input element.
+   nsCOMPtr<nsIContent> inputContent(GetInputField());
+   if (!inputContent)
+     return;
+ 
+   TreeWalker walker(this, inputContent);
+ 
+   Accessible* child = nullptr;
+-  while ((child = walker.NextChild()) && AppendChild(child));
++  while ((child = walker.NextChild()) && AppendChild(child)) {
++    continue;
++  }
+ }
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ // XULTextFieldAccessible: HyperTextAccessible protected
+ 
+ already_AddRefed<nsFrameSelection>
+ XULTextFieldAccessible::FrameSelection()
+ {
+diff --git a/accessible/src/xul/XULListboxAccessible.cpp b/accessible/src/xul/XULListboxAccessible.cpp
+--- a/accessible/src/xul/XULListboxAccessible.cpp
++++ b/accessible/src/xul/XULListboxAccessible.cpp
+@@ -7,26 +7,28 @@
+ 
+ #include "Accessible-inl.h"
+ #include "nsAccessibilityService.h"
+ #include "nsAccUtils.h"
+ #include "DocAccessible.h"
+ #include "Role.h"
+ #include "States.h"
+ 
++#include "mozilla/DebugOnly.h"
+ #include "nsComponentManagerUtils.h"
+ #include "nsIAutoCompleteInput.h"
+ #include "nsIAutoCompletePopup.h"
+ #include "nsIDOMXULMenuListElement.h"
+ #include "nsIDOMXULMultSelectCntrlEl.h"
+ #include "nsIDOMNodeList.h"
+ #include "nsIDOMXULPopupElement.h"
+ #include "nsIDOMXULSelectCntrlItemEl.h"
+ #include "nsIMutableArray.h"
+ 
++using namespace mozilla;
+ using namespace mozilla::a11y;
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ // XULColumAccessible
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+ XULColumAccessible::
+   XULColumAccessible(nsIContent* aContent, DocAccessible* aDoc) :
+@@ -274,17 +276,17 @@ XULListboxAccessible::IsColSelected(uint
+     do_QueryInterface(mContent);
+   NS_ASSERTION(control,
+                "Doesn't implement nsIDOMXULMultiSelectControlElement.");
+ 
+   int32_t selectedrowCount = 0;
+   nsresult rv = control->GetSelectedCount(&selectedrowCount);
+   NS_ENSURE_SUCCESS(rv, false);
+ 
+-  return selectedrowCount == RowCount();
++  return selectedrowCount == int32_t(RowCount());
+ }
+ 
+ bool
+ XULListboxAccessible::IsRowSelected(uint32_t aRowIdx)
+ {
+   nsCOMPtr<nsIDOMXULSelectControlElement> control =
+     do_QueryInterface(mContent);
+   NS_ASSERTION(control,
+@@ -332,17 +334,17 @@ XULListboxAccessible::SelectedColCount()
+     do_QueryInterface(mContent);
+   NS_ASSERTION(control,
+                "Doesn't implement nsIDOMXULMultiSelectControlElement.");
+ 
+   int32_t selectedRowCount = 0;
+   nsresult rv = control->GetSelectedCount(&selectedRowCount);
+   NS_ENSURE_SUCCESS(rv, 0);
+ 
+-  return selectedRowCount > 0 && selectedRowCount == RowCount() ? ColCount() : 0;
++  return selectedRowCount > 0 && selectedRowCount == int32_t(RowCount()) ? ColCount() : 0;
+ }
+ 
+ uint32_t
+ XULListboxAccessible::SelectedRowCount()
+ {
+   nsCOMPtr<nsIDOMXULMultiSelectControlElement> control =
+     do_QueryInterface(mContent);
+   NS_ASSERTION(control,
+diff --git a/accessible/src/xul/XULTreeAccessible.h b/accessible/src/xul/XULTreeAccessible.h
+--- a/accessible/src/xul/XULTreeAccessible.h
++++ b/accessible/src/xul/XULTreeAccessible.h
+@@ -130,16 +130,17 @@ protected:
+   0x443c,                                             \
+   { 0x94, 0x0b, 0xb1, 0xe6, 0xb0, 0x83, 0x1d, 0xfc }  \
+ }
+ 
+ class XULTreeItemAccessibleBase : public AccessibleWrap
+ {
+ public:
+   using Accessible::GetParent;
++  using Accessible::GroupPosition;
+ 
+   XULTreeItemAccessibleBase(nsIContent* aContent, DocAccessible* aDoc,
+                             Accessible* aParent, nsITreeBoxObject* aTree,
+                             nsITreeView* aTreeView, int32_t aRow);
+ 
+   // nsISupports and cycle collection
+   NS_DECL_ISUPPORTS_INHERITED
+   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(XULTreeItemAccessibleBase,
+diff --git a/accessible/src/xul/XULTreeGridAccessible.cpp b/accessible/src/xul/XULTreeGridAccessible.cpp
+--- a/accessible/src/xul/XULTreeGridAccessible.cpp
++++ b/accessible/src/xul/XULTreeGridAccessible.cpp
+@@ -58,17 +58,17 @@ XULTreeGridAccessible::SelectedColCount(
+ {
+   // If all the row has been selected, then all the columns are selected,
+   // because we can't select a column alone.
+ 
+   int32_t selectedRowCount = 0;
+   nsresult rv = GetSelectionCount(&selectedRowCount);
+   NS_ENSURE_SUCCESS(rv, 0);
+ 
+-  return selectedRowCount > 0 && selectedRowCount == RowCount() ? ColCount() : 0;
++  return selectedRowCount > 0 && selectedRowCount == int32_t(RowCount()) ? ColCount() : 0;
+ }
+ 
+ uint32_t
+ XULTreeGridAccessible::SelectedRowCount()
+ {
+   int32_t selectedRowCount = 0;
+   nsresult rv = GetSelectionCount(&selectedRowCount);
+   NS_ENSURE_SUCCESS(rv, 0);
+@@ -162,17 +162,17 @@ XULTreeGridAccessible::IsColSelected(uin
+ {
+   // If all the row has been selected, then all the columns are selected.
+   // Because we can't select a column alone.
+ 
+   int32_t selectedrowCount = 0;
+   nsresult rv = GetSelectionCount(&selectedrowCount);
+   NS_ENSURE_SUCCESS(rv, false);
+ 
+-  return selectedrowCount == RowCount();
++  return selectedrowCount == int32_t(RowCount());
+ }
+ 
+ bool
+ XULTreeGridAccessible::IsRowSelected(uint32_t aRowIdx)
+ {
+   if (!mTreeView)
+     return false;
+ 

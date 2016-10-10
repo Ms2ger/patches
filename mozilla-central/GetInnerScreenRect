@@ -1,0 +1,102 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -4285,64 +4285,62 @@ nsGlobalWindow::GetScreenX(int32_t* aScr
+ 
+   NS_ENSURE_SUCCESS(treeOwnerAsWin->GetPosition(&x, &y),
+                     NS_ERROR_FAILURE);
+ 
+   *aScreenX = DevToCSSIntPixels(x);
+   return NS_OK;
+ }
+ 
+-nsRect
++CSSRect
+ nsGlobalWindow::GetInnerScreenRect()
+ {
+   MOZ_ASSERT(IsOuterWindow());
+ 
+   if (!mDocShell) {
+-    return nsRect();
++    return CSSRect();
+   }
+ 
+   nsGlobalWindow* rootWindow =
+     static_cast<nsGlobalWindow*>(GetPrivateRoot());
+   if (rootWindow) {
+     rootWindow->FlushPendingNotifications(Flush_Layout);
+   }
+ 
+   if (!mDocShell) {
+-    return nsRect();
++    return CSSRect();
+   }
+ 
+   nsCOMPtr<nsIPresShell> presShell = mDocShell->GetPresShell();
+   if (!presShell) {
+-    return nsRect();
++    return CSSRect();
+   }
+   nsIFrame* rootFrame = presShell->GetRootFrame();
+   if (!rootFrame) {
+-    return nsRect();
+-  }
+-
+-  return rootFrame->GetScreenRectInAppUnits();
++    return CSSRect();
++  }
++
++  return CSSRect::FromAppUnits(rootFrame->GetScreenRectInAppUnits());
+ }
+ 
+ NS_IMETHODIMP
+ nsGlobalWindow::GetMozInnerScreenX(float* aScreenX)
+ {
+   FORWARD_TO_OUTER(GetMozInnerScreenX, (aScreenX), NS_ERROR_NOT_INITIALIZED);
+ 
+-  nsRect r = GetInnerScreenRect();
+-  *aScreenX = nsPresContext::AppUnitsToFloatCSSPixels(r.x);
++  *aScreenX = GetInnerScreenRect().x;
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsGlobalWindow::GetMozInnerScreenY(float* aScreenY)
+ {
+   FORWARD_TO_OUTER(GetMozInnerScreenY, (aScreenY), NS_ERROR_NOT_INITIALIZED);
+ 
+-  nsRect r = GetInnerScreenRect();
+-  *aScreenY = nsPresContext::AppUnitsToFloatCSSPixels(r.y);
++  *aScreenY = GetInnerScreenRect().y;
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsGlobalWindow::GetDevicePixelRatio(float* aRatio)
+ {
+   FORWARD_TO_OUTER(GetDevicePixelRatio, (aRatio), NS_ERROR_NOT_INITIALIZED);
+ 
+diff --git a/dom/base/nsGlobalWindow.h b/dom/base/nsGlobalWindow.h
+--- a/dom/base/nsGlobalWindow.h
++++ b/dom/base/nsGlobalWindow.h
+@@ -1024,17 +1024,17 @@ protected:
+   // Outer windows only.
+   nsresult GetInnerSize(mozilla::CSSIntSize& aSize);
+ 
+   // Outer windows only.
+   nsresult GetOuterSize(nsIntSize* aSizeCSSPixels);
+   // Outer windows only.
+   nsresult SetOuterSize(int32_t aLengthCSSPixels, bool aIsWidth);
+   // Outer windows only.
+-  nsRect GetInnerScreenRect();
++  mozilla::CSSRect GetInnerScreenRect();
+ 
+   void ScrollTo(const mozilla::CSSIntPoint& aScroll);
+ 
+   bool IsFrame()
+   {
+     return GetParentInternal() != nullptr;
+   }
+ 

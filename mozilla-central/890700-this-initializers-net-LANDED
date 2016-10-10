@@ -1,0 +1,170 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 890700 - Use MOZ_THIS_IN_INITIALIZER_LIST in netwerk/; r=bsmith
+
+diff --git a/netwerk/base/src/nsSocketTransport2.cpp b/netwerk/base/src/nsSocketTransport2.cpp
+--- a/netwerk/base/src/nsSocketTransport2.cpp
++++ b/netwerk/base/src/nsSocketTransport2.cpp
+@@ -3,17 +3,18 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifdef MOZ_LOGGING
+ #define FORCE_PR_LOG
+ #endif
+ 
+ #include "nsSocketTransport2.h"
+-#include "base/compiler_specific.h"
++
++#include "mozilla/Attributes.h"
+ #include "nsAtomicRefcnt.h"
+ #include "nsIOService.h"
+ #include "nsStreamUtils.h"
+ #include "nsNetSegmentUtils.h"
+ #include "nsNetAddr.h"
+ #include "nsTransportUtils.h"
+ #include "nsProxyInfo.h"
+ #include "nsNetCID.h"
+@@ -680,18 +681,18 @@ nsSocketTransport::nsSocketTransport()
+     , mInputClosed(true)
+     , mOutputClosed(true)
+     , mResolving(false)
+     , mNetAddrIsSet(false)
+     , mLock("nsSocketTransport.mLock")
+     , mFD(nullptr)
+     , mFDref(0)
+     , mFDconnected(false)
+-    , ALLOW_THIS_IN_INITIALIZER_LIST(mInput(this))
+-    , ALLOW_THIS_IN_INITIALIZER_LIST(mOutput(this))
++    , mInput(MOZ_THIS_IN_INITIALIZER_LIST())
++    , mOutput(MOZ_THIS_IN_INITIALIZER_LIST())
+     , mQoSBits(0x00)
+ {
+     SOCKET_LOG(("creating nsSocketTransport @%x\n", this));
+ 
+     NS_ADDREF(gSocketTransportService);
+ 
+     mTimeouts[TIMEOUT_CONNECT]    = UINT16_MAX; // no timeout
+     mTimeouts[TIMEOUT_READ_WRITE] = UINT16_MAX; // no timeout
+diff --git a/netwerk/protocol/http/HttpChannelChild.cpp b/netwerk/protocol/http/HttpChannelChild.cpp
+--- a/netwerk/protocol/http/HttpChannelChild.cpp
++++ b/netwerk/protocol/http/HttpChannelChild.cpp
+@@ -13,33 +13,33 @@
+ #include "mozilla/net/NeckoChild.h"
+ #include "mozilla/net/HttpChannelChild.h"
+ 
+ #include "nsStringStream.h"
+ #include "nsHttpHandler.h"
+ #include "nsMimeTypes.h"
+ #include "nsNetUtil.h"
+ #include "nsSerializationHelper.h"
+-#include "base/compiler_specific.h"
++#include "mozilla/Attributes.h"
+ #include "mozilla/ipc/InputStreamUtils.h"
+ #include "mozilla/ipc/URIUtils.h"
+ #include "mozilla/net/DNS.h"
+ 
+ using namespace mozilla::dom;
+ using namespace mozilla::ipc;
+ 
+ namespace mozilla {
+ namespace net {
+ 
+ //-----------------------------------------------------------------------------
+ // HttpChannelChild
+ //-----------------------------------------------------------------------------
+ 
+ HttpChannelChild::HttpChannelChild()
+-  : ALLOW_THIS_IN_INITIALIZER_LIST(HttpAsyncAborter<HttpChannelChild>(this))
++  : HttpAsyncAborter<HttpChannelChild>(MOZ_THIS_IN_INITIALIZER_LIST())
+   , mIsFromCache(false)
+   , mCacheEntryAvailable(false)
+   , mCacheExpirationTime(nsICache::NO_EXPIRATION_TIME)
+   , mSendResumeAt(false)
+   , mIPCOpen(false)
+   , mKeptAlive(false)
+ {
+   LOG(("Creating HttpChannelChild @%x\n", this));
+diff --git a/netwerk/protocol/http/nsHttpAuthCache.cpp b/netwerk/protocol/http/nsHttpAuthCache.cpp
+--- a/netwerk/protocol/http/nsHttpAuthCache.cpp
++++ b/netwerk/protocol/http/nsHttpAuthCache.cpp
+@@ -2,18 +2,20 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ // HttpLog.h should generally be included first
+ #include "HttpLog.h"
+ 
+ #include "nsHttpAuthCache.h"
++
+ #include <stdlib.h>
+-#include "base/compiler_specific.h"
++
++#include "mozilla/Attributes.h"
+ #include "nsHttp.h"
+ #include "nsString.h"
+ #include "nsCRT.h"
+ #include "prprf.h"
+ #include "mozIApplicationClearPrivateDataParams.h"
+ #include "nsIObserverService.h"
+ #include "mozilla/Services.h"
+ #include "nsNetUtil.h"
+@@ -49,17 +51,17 @@ StrEquivalent(const PRUnichar *a, const 
+ }
+ 
+ //-----------------------------------------------------------------------------
+ // nsHttpAuthCache <public>
+ //-----------------------------------------------------------------------------
+ 
+ nsHttpAuthCache::nsHttpAuthCache()
+     : mDB(nullptr)
+-    , ALLOW_THIS_IN_INITIALIZER_LIST(mObserver(new AppDataClearObserver(this)))
++    , mObserver(new AppDataClearObserver(MOZ_THIS_IN_INITIALIZER_LIST()))
+ {
+     nsCOMPtr<nsIObserverService> obsSvc = mozilla::services::GetObserverService();
+     if (obsSvc) {
+         obsSvc->AddObserver(mObserver, "webapps-clear-data", false);
+     }
+ }
+ 
+ nsHttpAuthCache::~nsHttpAuthCache()
+diff --git a/netwerk/protocol/http/nsHttpChannel.cpp b/netwerk/protocol/http/nsHttpChannel.cpp
+--- a/netwerk/protocol/http/nsHttpChannel.cpp
++++ b/netwerk/protocol/http/nsHttpChannel.cpp
+@@ -31,17 +31,16 @@
+ #include "nsDNSPrefetch.h"
+ #include "nsChannelClassifier.h"
+ #include "nsIRedirectResultListener.h"
+ #include "mozilla/TimeStamp.h"
+ #include "nsError.h"
+ #include "nsAlgorithm.h"
+ #include "GeckoProfiler.h"
+ #include "nsIConsoleService.h"
+-#include "base/compiler_specific.h"
+ #include "NullHttpTransaction.h"
+ #include "mozilla/Attributes.h"
+ #include "mozilla/VisualEventTracer.h"
+ #include "nsISSLSocketControl.h"
+ #include "sslt.h"
+ #include "nsContentUtils.h"
+ #include "nsIPermissionManager.h"
+ #include "nsIPrincipal.h"
+@@ -292,17 +291,17 @@ private:
+ 
+ NS_IMPL_ISUPPORTS_INHERITED1(HttpCacheQuery, nsRunnable, nsICacheListener)
+ 
+ //-----------------------------------------------------------------------------
+ // nsHttpChannel <public>
+ //-----------------------------------------------------------------------------
+ 
+ nsHttpChannel::nsHttpChannel()
+-    : ALLOW_THIS_IN_INITIALIZER_LIST(HttpAsyncAborter<nsHttpChannel>(this))
++    : HttpAsyncAborter<nsHttpChannel>(MOZ_THIS_IN_INITIALIZER_LIST())
+     , mLogicalOffset(0)
+     , mCacheAccess(0)
+     , mCacheEntryDeviceTelemetryID(UNKNOWN_DEVICE)
+     , mPostID(0)
+     , mRequestTime(0)
+     , mOnCacheEntryAvailableCallback(nullptr)
+     , mOfflineCacheAccess(0)
+     , mOfflineCacheLastModifiedTime(0)

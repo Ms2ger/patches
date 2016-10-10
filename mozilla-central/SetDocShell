@@ -1,0 +1,210 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/docshell/base/nsDocShell.cpp b/docshell/base/nsDocShell.cpp
+--- a/docshell/base/nsDocShell.cpp
++++ b/docshell/base/nsDocShell.cpp
+@@ -11584,21 +11584,20 @@ nsDocShell::EnsureScriptEnvironment()
+         nsresult rv = mTreeOwner->GetPrimaryContentShell(getter_AddRefs(primaryItem));
+         NS_ENSURE_SUCCESS(rv, rv);
+         isModalContentWindow = (primaryItem == this);
+     }
+ 
+     // If our window is modal and we're not opened as chrome, make
+     // this window a modal content window.
+     mScriptGlobal =
+-        NS_NewScriptGlobalObject(mItemType == typeChrome, isModalContentWindow);
++        NS_NewScriptGlobalObject(this, mItemType == typeChrome,
++                                 isModalContentWindow);
+     MOZ_ASSERT(mScriptGlobal);
+ 
+-    mScriptGlobal->SetDocShell(this);
+-
+     // Ensure the script object is set up to run script.
+     return mScriptGlobal->EnsureScriptEnvironment();
+ }
+ 
+ 
+ NS_IMETHODIMP
+ nsDocShell::EnsureEditorData()
+ {
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -2669,56 +2669,50 @@ nsGlobalWindow::InnerSetNewDocument(nsID
+ 
+   // Clear our mutation bitfield.
+   mMutationBits = 0;
+ }
+ 
+ void
+ nsGlobalWindow::SetDocShell(nsIDocShell* aDocShell)
+ {
+-  NS_ASSERTION(IsOuterWindow(), "Uh, SetDocShell() called on inner window!");
+   MOZ_ASSERT(aDocShell);
+-
+-  if (aDocShell == mDocShell) {
+-    return;
+-  }
++  MOZ_ASSERT(IsOuterWindow());
++  MOZ_ASSERT(!mDocShell);
++  MOZ_ASSERT(!mNavigator);
++  MOZ_ASSERT(!mFrames);
+ 
+   mDocShell = aDocShell; // Weak Reference
+ 
+-  NS_ASSERTION(!mNavigator, "Non-null mNavigator in outer window!");
+-
+-  if (mFrames) {
+-    mFrames->SetDocShell(aDocShell);
+-  }
+-
+   // Get our enclosing chrome shell and retrieve its global window impl, so
+   // that we can do some forwarding to the chrome document.
+   nsCOMPtr<nsIDOMEventTarget> chromeEventHandler;
+   mDocShell->GetChromeEventHandler(getter_AddRefs(chromeEventHandler));
+   mChromeEventHandler = do_QueryInterface(chromeEventHandler);
+   if (!mChromeEventHandler) {
+     // We have no chrome event handler. If we have a parent,
+     // get our chrome event handler from the parent. If
+     // we don't have a parent, then we need to make a new
+     // window root object that will function as a chrome event
+     // handler and receive all events that occur anywhere inside
+     // our window.
+-    nsCOMPtr<nsIDOMWindow> parentWindow;
+-    GetParent(getter_AddRefs(parentWindow));
+-    if (parentWindow.get() != static_cast<nsIDOMWindow*>(this)) {
+-      nsCOMPtr<nsPIDOMWindow> piWindow(do_QueryInterface(parentWindow));
++    nsCOMPtr<nsIDocShell> parent;
++    mDocShell->GetSameTypeParentIgnoreBrowserAndAppBoundaries
++      (getter_AddRefs(parent));
++    if (parent) {
++      nsCOMPtr<nsPIDOMWindow> piWindow = do_GetInterface(parent);
++      MOZ_ASSERT(piWindow);
+       mChromeEventHandler = piWindow->GetChromeEventHandler();
+-    }
+-    else {
++    } else {
+       mChromeEventHandler = NS_NewWindowRoot(this);
+     }
+   }
+ 
+   bool docShellActive;
+-  mDocShell->GetIsActive(&docShellActive);
++  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(mDocShell->GetIsActive(&docShellActive)));
+   mIsBackground = !docShellActive;
+ }
+ 
+ void
+ nsGlobalWindow::DetachFromDocShell()
+ {
+   NS_ASSERTION(IsOuterWindow(), "Uh, DetachFromDocShell() called on inner window!");
+ 
+@@ -3465,21 +3459,20 @@ nsGlobalWindow::GetRealParent(nsIDOMWind
+   if (!mDocShell) {
+     return NS_OK;
+   }
+ 
+   nsCOMPtr<nsIDocShell> parent;
+   mDocShell->GetSameTypeParentIgnoreBrowserAndAppBoundaries(getter_AddRefs(parent));
+ 
+   if (parent) {
+-    nsCOMPtr<nsIScriptGlobalObject> globalObject(do_GetInterface(parent));
+-    NS_ENSURE_SUCCESS(CallQueryInterface(globalObject.get(), aParent),
+-                      NS_ERROR_FAILURE);
+-  }
+-  else {
++    nsCOMPtr<nsIDOMWindow> parentWindow = do_GetInterface(parent);
++    NS_ENSURE_TRUE(parentWindow, NS_ERROR_FAILURE);
++    parentWindow.forget(aParent);
++  } else {
+     *aParent = static_cast<nsIDOMWindow*>(this);
+     NS_ADDREF(*aParent);
+   }
+   return NS_OK;
+ }
+ 
+ /**
+  * GetScriptableTop is called when script reads window.top.
+diff --git a/dom/base/nsGlobalWindow.h b/dom/base/nsGlobalWindow.h
+--- a/dom/base/nsGlobalWindow.h
++++ b/dom/base/nsGlobalWindow.h
+@@ -430,17 +430,21 @@ public:
+   virtual NS_HIDDEN_(nsresult) FireDelayedDOMEvents();
+   virtual NS_HIDDEN_(bool) IsFrozen() const
+   {
+     return mIsFrozen;
+   }
+ 
+   virtual NS_HIDDEN_(bool) WouldReuseInnerWindow(nsIDocument *aNewDocument);
+ 
+-  virtual NS_HIDDEN_(void) SetDocShell(nsIDocShell* aDocShell);
++  /**
++   * Set the docshell in the window.  Must not be called with a null docshell
++   * (use DetachFromDocShell for that).
++   */
++  void SetDocShell(nsIDocShell* aDocShell);
+   virtual void DetachFromDocShell();
+   virtual NS_HIDDEN_(nsresult) SetNewDocument(nsIDocument *aDocument,
+                                               nsISupports *aState,
+                                               bool aForceReuseInnerWindow);
+   void DispatchDOMWindowCreated();
+   virtual NS_HIDDEN_(void) SetOpenerWindow(nsIDOMWindow* aOpener,
+                                            bool aOriginalOpener);
+   // Outer windows only.
+@@ -1355,24 +1359,28 @@ public:
+ 
+ protected:
+   // For use by outer windows only.
+   nsRefPtr<DialogValueHolder> mReturnValue;
+ };
+ 
+ /* factory function */
+ inline already_AddRefed<nsGlobalWindow>
+-NS_NewScriptGlobalObject(bool aIsChrome, bool aIsModalContentWindow)
++NS_NewScriptGlobalObject(nsIDocShell* aDocShell, bool aIsChrome,
++                         bool aIsModalContentWindow)
+ {
++  MOZ_ASSERT(aDocShell);
++
+   nsRefPtr<nsGlobalWindow> global;
+-
+   if (aIsChrome) {
+     global = new nsGlobalChromeWindow(nullptr);
+   } else if (aIsModalContentWindow) {
+     global = new nsGlobalModalWindow(nullptr);
+   } else {
+     global = new nsGlobalWindow(nullptr);
+   }
+ 
++  global->SetDocShell(aDocShell);
++
+   return global.forget();
+ }
+ 
+ #endif /* nsGlobalWindow_h___ */
+diff --git a/dom/base/nsPIDOMWindow.h b/dom/base/nsPIDOMWindow.h
+--- a/dom/base/nsPIDOMWindow.h
++++ b/dom/base/nsPIDOMWindow.h
+@@ -365,22 +365,16 @@ public:
+     if (mOuterWindow) {
+       return mOuterWindow->mDocShell;
+     }
+ 
+     return mDocShell;
+   }
+ 
+   /**
+-   * Set the docshell in the window.  Must not be called with a null docshell
+-   * (use DetachFromDocShell for that).
+-   */
+-  virtual void SetDocShell(nsIDocShell *aDocShell) = 0;
+-
+-  /**
+    * Detach an outer window from its docshell.
+    */
+   virtual void DetachFromDocShell() = 0;
+ 
+   /**
+    * Set a new document in the window. Calling this method will in
+    * most cases create a new inner window. If this method is called on
+    * an inner window the call will be forewarded to the outer window,

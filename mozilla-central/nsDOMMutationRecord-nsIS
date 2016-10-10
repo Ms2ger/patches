@@ -1,0 +1,116 @@
+diff --git a/content/base/src/nsDOMMutationObserver.cpp b/content/base/src/nsDOMMutationObserver.cpp
+--- a/content/base/src/nsDOMMutationObserver.cpp
++++ b/content/base/src/nsDOMMutationObserver.cpp
+@@ -39,23 +39,18 @@ nsINodeList*
+ nsDOMMutationRecord::RemovedNodes()
+ {
+   if (!mRemovedNodes) {
+     mRemovedNodes = new nsSimpleContentList(mTarget);
+   }
+   return mRemovedNodes;
+ }
+ 
+-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDOMMutationRecord)
+-  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
+-  NS_INTERFACE_MAP_ENTRY(nsISupports)
+-NS_INTERFACE_MAP_END
+-
+-NS_IMPL_CYCLE_COLLECTING_ADDREF(nsDOMMutationRecord)
+-NS_IMPL_CYCLE_COLLECTING_RELEASE(nsDOMMutationRecord)
++NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(nsDOMMutationRecord, AddRef)
++NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(nsDOMMutationRecord, Release)
+ 
+ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_6(nsDOMMutationRecord,
+                                         mTarget,
+                                         mPreviousSibling, mNextSibling,
+                                         mAddedNodes, mRemovedNodes,
+                                         mOwner)
+ 
+ // Observer
+diff --git a/content/base/src/nsDOMMutationObserver.h b/content/base/src/nsDOMMutationObserver.h
+--- a/content/base/src/nsDOMMutationObserver.h
++++ b/content/base/src/nsDOMMutationObserver.h
+@@ -1,10 +1,10 @@
+ /* -*- Mode: C++; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 8; -*- */
+-/* vim: set sw=4 ts=8 et tw=80 : */
++/* vim: set sw=2 ts=8 et tw=80 : */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef nsDOMMutationObserver_h
+ #define nsDOMMutationObserver_h
+ 
+ #include "mozilla/Attributes.h"
+@@ -21,43 +21,42 @@
+ #include "nsClassHashtable.h"
+ #include "nsNodeUtils.h"
+ #include "nsIDOMMutationEvent.h"
+ #include "nsWrapperCache.h"
+ #include "mozilla/dom/MutationObserverBinding.h"
+ 
+ class nsDOMMutationObserver;
+ 
+-class nsDOMMutationRecord : public nsISupports,
+-                            public nsWrapperCache
++class nsDOMMutationRecord : public nsWrapperCache
+ {
+ public:
+   nsDOMMutationRecord(const nsAString& aType, nsISupports* aOwner)
+-  : mType(aType), mOwner(aOwner)
++    : mType(aType), mOwner(aOwner)
+   {
+-    mAttrName.SetIsVoid(PR_TRUE);
+-    mAttrNamespace.SetIsVoid(PR_TRUE);
+-    mPrevValue.SetIsVoid(PR_TRUE);
++    mAttrName.SetIsVoid(true);
++    mAttrNamespace.SetIsVoid(true);
++    mPrevValue.SetIsVoid(true);
+     SetIsDOMBinding();
+   }
+   virtual ~nsDOMMutationRecord() {}
+ 
+   nsISupports* GetParentObject() const
+   {
+     return mOwner;
+   }
+ 
+   virtual JSObject* WrapObject(JSContext* aCx,
+                                JS::Handle<JSObject*> aScope) MOZ_OVERRIDE
+   {
+     return mozilla::dom::MutationRecordBinding::Wrap(aCx, aScope, this);
+   }
+ 
+-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsDOMMutationRecord)
++  NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(nsDOMMutationRecord)
++  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(nsDOMMutationRecord)
+ 
+   void GetType(nsString& aRetVal) const
+   {
+     aRetVal = mType;
+   }
+ 
+   nsINode* GetTarget() const
+   {
+diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
+--- a/dom/bindings/Bindings.conf
++++ b/dom/bindings/Bindings.conf
+@@ -674,16 +674,17 @@ DOMInterfaces = {
+ },
+ 
+ 'MutationObserver': {
+     'nativeType': 'nsDOMMutationObserver',
+ },
+ 
+ 'MutationRecord': {
+     'nativeType': 'nsDOMMutationRecord',
++    'nativeOwnership': 'refcounted',
+     'headerFile': 'nsDOMMutationObserver.h',
+     'resultNotAddRefed': [ 'target', 'addedNodes', 'removedNodes',
+                            'previousSibling', 'nextSibling' ]
+ },
+ 
+ 'Node': {
+     'nativeType': 'nsINode',
+     'concrete': False,

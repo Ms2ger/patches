@@ -1,0 +1,656 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 878600 - Move WorkerLocation to WebIDL; r=khuey
+
+diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
+--- a/dom/bindings/Bindings.conf
++++ b/dom/bindings/Bindings.conf
+@@ -1285,16 +1285,22 @@ DOMInterfaces = {
+     'concrete': False
+ },
+ {
+     # We need a worker descriptor for WindowProxy because EventTarget exists in
+     # workers.  But it's an external interface, so it'll just map to JSObject*.
+     'workers': True
+ }],
+ 
++'WorkerLocation': {
++    'headerFile': 'mozilla/dom/workers/bindings/Location.h',
++    'castable': True,
++    'workers': True,
++},
++
+ 'WorkerNavigator': {
+     'headerFile': 'mozilla/dom/workers/bindings/Navigator.h',
+     'castable': True,
+     'workers': True,
+ },
+ 
+ 'XMLHttpRequest': [
+ {
+diff --git a/dom/webidl/URLUtilsReadOnly.webidl b/dom/webidl/URLUtilsReadOnly.webidl
+new file mode 100644
+--- /dev/null
++++ b/dom/webidl/URLUtilsReadOnly.webidl
+@@ -0,0 +1,28 @@
++/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ *
++ * The origin of this IDL file is
++ * http://url.spec.whatwg.org/#urlutils
++ *
++ * To the extent possible under law, the editors have waived all copyright
++ * and related or neighboring rights to this work. In addition, as of 21
++ * May 2013, the editors have made this specification available under
++ * the Open Web Foundation Agreement Version 1.0, which is available at
++ * http://www.openwebfoundation.org/legal/the-owf-1-0-agreements/owfa-1-0.
++ */
++
++[NoInterfaceObject]
++interface URLUtilsReadOnly {
++  stringifier;
++  readonly attribute DOMString href;
++
++  readonly attribute DOMString protocol;
++  readonly attribute DOMString host;
++  readonly attribute DOMString hostname;
++  readonly attribute DOMString port;
++  readonly attribute DOMString pathname;
++  readonly attribute DOMString search;
++  readonly attribute DOMString hash;
++};
+diff --git a/dom/webidl/WebIDL.mk b/dom/webidl/WebIDL.mk
+--- a/dom/webidl/WebIDL.mk
++++ b/dom/webidl/WebIDL.mk
+@@ -340,26 +340,28 @@ webidl_files = \
+   TimeEvent.webidl \
+   TimeRanges.webidl \
+   Touch.webidl \
+   TouchEvent.webidl \
+   TransitionEvent.webidl \
+   TreeColumns.webidl \
+   TreeWalker.webidl \
+   UIEvent.webidl \
++  UndoManager.webidl \
++  URLUtilsReadOnly.webidl \
++  URLUtils.webidl \
+   URL.webidl \
+   ValidityState.webidl \
++  VideoStreamTrack.webidl \
++  WaveShaperNode.webidl \
+   WebComponents.webidl \
+   WebSocket.webidl \
+   WheelEvent.webidl \
+-  UndoManager.webidl \
+-  URLUtils.webidl \
+-  VideoStreamTrack.webidl \
+-  WaveShaperNode.webidl \
+   Window.webidl \
++  WorkerLocation.webidl \
+   WorkerNavigator.webidl \
+   XMLDocument.webidl \
+   XMLHttpRequest.webidl \
+   XMLHttpRequestEventTarget.webidl \
+   XMLHttpRequestUpload.webidl \
+   XMLSerializer.webidl \
+   XMLStylesheetProcessingInstruction.webidl \
+   XPathEvaluator.webidl \
+diff --git a/dom/webidl/WorkerLocation.webidl b/dom/webidl/WorkerLocation.webidl
+new file mode 100644
+--- /dev/null
++++ b/dom/webidl/WorkerLocation.webidl
+@@ -0,0 +1,16 @@
++/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ *
++ * The origin of this IDL file is
++ * http://www.whatwg.org/html/#worker-locations
++ *
++ * © Copyright 2004-2011 Apple Computer, Inc., Mozilla Foundation, and Opera
++ * Software ASA.
++ * You are granted a license to use, reproduce and create derivative works of
++ * this document.
++ */
++
++interface WorkerLocation { };
++WorkerLocation implements URLUtilsReadOnly;
+diff --git a/dom/workers/DOMBindingInlines.h b/dom/workers/DOMBindingInlines.h
+--- a/dom/workers/DOMBindingInlines.h
++++ b/dom/workers/DOMBindingInlines.h
+@@ -7,26 +7,28 @@
+ #define mozilla_dom_workers_dombindinginlines_h__
+ 
+ #include "mozilla/dom/FileReaderSyncBinding.h"
+ #include "mozilla/dom/ImageDataBinding.h"
+ #include "mozilla/dom/TextDecoderBinding.h"
+ #include "mozilla/dom/TextEncoderBinding.h"
+ #include "mozilla/dom/XMLHttpRequestBinding.h"
+ #include "mozilla/dom/XMLHttpRequestUploadBinding.h"
++#include "mozilla/dom/WorkerLocationBinding.h"
+ #include "mozilla/dom/WorkerNavigatorBinding.h"
+ 
+ BEGIN_WORKERS_NAMESPACE
+ 
+ class FileReaderSync;
+ class ImageData;
+ class TextDecoder;
+ class TextEncoder;
+ class XMLHttpRequest;
+ class XMLHttpRequestUpload;
++class WorkerLocation;
+ class WorkerNavigator;
+ 
+ namespace {
+ 
+ template <class T>
+ struct WrapPrototypeTraits
+ { };
+ 
+@@ -52,16 +54,17 @@ struct WrapPrototypeTraits
+   };
+ 
+ SPECIALIZE_PROTO_TRAITS(FileReaderSync)
+ SPECIALIZE_PROTO_TRAITS(ImageData)
+ SPECIALIZE_PROTO_TRAITS(TextDecoder)
+ SPECIALIZE_PROTO_TRAITS(TextEncoder)
+ SPECIALIZE_PROTO_TRAITS(XMLHttpRequest)
+ SPECIALIZE_PROTO_TRAITS(XMLHttpRequestUpload)
++SPECIALIZE_PROTO_TRAITS(WorkerLocation)
+ SPECIALIZE_PROTO_TRAITS(WorkerNavigator)
+ 
+ #undef SPECIALIZE_PROTO_TRAITS
+ 
+ } // anonymous namespace
+ 
+ template <class T>
+ inline JSObject*
+diff --git a/dom/workers/Location.cpp b/dom/workers/Location.cpp
+--- a/dom/workers/Location.cpp
++++ b/dom/workers/Location.cpp
+@@ -1,208 +1,48 @@
+ /* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "Location.h"
+ 
+-#include "jsapi.h"
+-#include "jsfriendapi.h"
++#include "DOMBindingInlines.h"
+ 
+ #include "nsTraceRefcnt.h"
+ 
+-#define PROPERTY_FLAGS \
+-  (JSPROP_ENUMERATE | JSPROP_SHARED)
++BEGIN_WORKERS_NAMESPACE
+ 
+-USING_WORKERS_NAMESPACE
++/* static */ already_AddRefed<WorkerLocation>
++WorkerLocation::Create(JSContext* aCx, JS::Handle<JSObject*> aGlobal,
++                       WorkerPrivate::LocationInfo& aInfo)
++{
++  nsRefPtr<WorkerLocation> location =
++    new WorkerLocation(aCx,
++                       NS_ConvertUTF8toUTF16(aInfo.mHref),
++                       NS_ConvertUTF8toUTF16(aInfo.mProtocol),
++                       NS_ConvertUTF8toUTF16(aInfo.mHost),
++                       NS_ConvertUTF8toUTF16(aInfo.mHostname),
++                       NS_ConvertUTF8toUTF16(aInfo.mPort),
++                       NS_ConvertUTF8toUTF16(aInfo.mPathname),
++                       NS_ConvertUTF8toUTF16(aInfo.mSearch),
++                       NS_ConvertUTF8toUTF16(aInfo.mHash));
+ 
+-namespace {
+-
+-class Location
+-{
+-  static JSClass sClass;
+-  static const JSPropertySpec sProperties[];
+-  static const JSFunctionSpec sFunctions[];
+-
+-  enum SLOT {
+-    SLOT_href = 0,
+-    SLOT_protocol,
+-    SLOT_host,
+-    SLOT_hostname,
+-    SLOT_port,
+-    SLOT_pathname,
+-    SLOT_search,
+-    SLOT_hash,
+-
+-    SLOT_COUNT
+-  };
+-
+-public:
+-  static JSObject*
+-  InitClass(JSContext* aCx, JSObject* aObj)
+-  {
+-    return JS_InitClass(aCx, aObj, NULL, &sClass, Construct, 0, sProperties,
+-                        sFunctions, NULL, NULL);
++  if (!Wrap(aCx, aGlobal, location)) {
++    return nullptr;
+   }
+ 
+-  static JSObject*
+-  Create(JSContext* aCx, JS::Handle<JSString*> aHref, JS::Handle<JSString*> aProtocol,
+-         JS::Handle<JSString*> aHost, JS::Handle<JSString*> aHostname,
+-         JS::Handle<JSString*> aPort, JS::Handle<JSString*> aPathname,
+-         JS::Handle<JSString*> aSearch, JS::Handle<JSString*> aHash)
+-  {
+-    JSObject* obj = JS_NewObject(aCx, &sClass, NULL, NULL);
+-    if (!obj) {
+-      return NULL;
+-    }
+-
+-    jsval empty = JS_GetEmptyStringValue(aCx);
+-
+-    JS_SetReservedSlot(obj, SLOT_href,
+-                       aHref ? STRING_TO_JSVAL(aHref) : empty);
+-    JS_SetReservedSlot(obj, SLOT_protocol,
+-                       aProtocol ? STRING_TO_JSVAL(aProtocol) : empty);
+-    JS_SetReservedSlot(obj, SLOT_host,
+-                       aHost ? STRING_TO_JSVAL(aHost) : empty);
+-    JS_SetReservedSlot(obj, SLOT_hostname,
+-                       aHostname ? STRING_TO_JSVAL(aHostname) : empty);
+-    JS_SetReservedSlot(obj, SLOT_port,
+-                       aPort ? STRING_TO_JSVAL(aPort) : empty);
+-    JS_SetReservedSlot(obj, SLOT_pathname,
+-                       aPathname ? STRING_TO_JSVAL(aPathname) : empty);
+-    JS_SetReservedSlot(obj, SLOT_search,
+-                       aSearch ? STRING_TO_JSVAL(aSearch) : empty);
+-    JS_SetReservedSlot(obj, SLOT_hash,
+-                       aHash ? STRING_TO_JSVAL(aHash) : empty);
+-
+-    Location* priv = new Location();
+-    JS_SetPrivate(obj, priv);
+-
+-    return obj;
+-  }
+-
+-private:
+-  Location()
+-  {
+-    MOZ_COUNT_CTOR(mozilla::dom::workers::Location);
+-  }
+-
+-  ~Location()
+-  {
+-    MOZ_COUNT_DTOR(mozilla::dom::workers::Location);
+-  }
+-
+-  static JSBool
+-  Construct(JSContext* aCx, unsigned aArgc, jsval* aVp)
+-  {
+-    JS_ReportErrorNumber(aCx, js_GetErrorMessage, NULL, JSMSG_WRONG_CONSTRUCTOR,
+-                         sClass.name);
+-    return false;
+-  }
+-
+-  static void
+-  Finalize(JSFreeOp* aFop, JSObject* aObj)
+-  {
+-    JS_ASSERT(JS_GetClass(aObj) == &sClass);
+-    delete static_cast<Location*>(JS_GetPrivate(aObj));
+-  }
+-
+-  static JSBool
+-  ToString(JSContext* aCx, unsigned aArgc, jsval* aVp)
+-  {
+-    JSObject* obj = JS_THIS_OBJECT(aCx, aVp);
+-    if (!obj) {
+-      return false;
+-    }
+-
+-    JSClass* classPtr = JS_GetClass(obj);
+-    if (classPtr != &sClass) {
+-      JS_ReportErrorNumber(aCx, js_GetErrorMessage, NULL,
+-                           JSMSG_INCOMPATIBLE_PROTO, sClass.name, "toString",
+-                           classPtr);
+-      return false;
+-    }
+-
+-    jsval href = JS_GetReservedSlot(obj, SLOT_href);
+-
+-    JS_SET_RVAL(aCx, aVp, href);
+-    return true;
+-  }
+-
+-  static JSBool
+-  GetProperty(JSContext* aCx, JS::Handle<JSObject*> aObj, JS::Handle<jsid> aIdval,
+-              JS::MutableHandle<JS::Value> aVp)
+-  {
+-    JSClass* classPtr = JS_GetClass(aObj);
+-    if (classPtr != &sClass) {
+-      JS_ReportErrorNumber(aCx, js_GetErrorMessage, NULL,
+-                           JSMSG_INCOMPATIBLE_PROTO, sClass.name, "GetProperty",
+-                           classPtr->name);
+-      return false;
+-    }
+-
+-    JS_ASSERT(JSID_IS_INT(aIdval));
+-    JS_ASSERT(JSID_TO_INT(aIdval) >= 0 && JSID_TO_INT(aIdval) < SLOT_COUNT);
+-
+-    aVp.set(JS_GetReservedSlot(aObj, JSID_TO_INT(aIdval)));
+-    return true;
+-  }
+-};
+-
+-JSClass Location::sClass = {
+-  "WorkerLocation",
+-  JSCLASS_HAS_PRIVATE | JSCLASS_HAS_RESERVED_SLOTS(SLOT_COUNT),
+-  JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
+-  JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, Finalize
+-};
+-
+-const JSPropertySpec Location::sProperties[] = {
+-  { "href", SLOT_href, PROPERTY_FLAGS, JSOP_WRAPPER(GetProperty),
+-    JSOP_WRAPPER(js_GetterOnlyPropertyStub) },
+-  { "protocol", SLOT_protocol, PROPERTY_FLAGS, JSOP_WRAPPER(GetProperty),
+-    JSOP_WRAPPER(js_GetterOnlyPropertyStub) },
+-  { "host", SLOT_host, PROPERTY_FLAGS, JSOP_WRAPPER(GetProperty),
+-    JSOP_WRAPPER(js_GetterOnlyPropertyStub) },
+-  { "hostname", SLOT_hostname, PROPERTY_FLAGS, JSOP_WRAPPER(GetProperty),
+-    JSOP_WRAPPER(js_GetterOnlyPropertyStub) },
+-  { "port", SLOT_port, PROPERTY_FLAGS, JSOP_WRAPPER(GetProperty),
+-    JSOP_WRAPPER(js_GetterOnlyPropertyStub) },
+-  { "pathname", SLOT_pathname, PROPERTY_FLAGS, JSOP_WRAPPER(GetProperty),
+-    JSOP_WRAPPER(js_GetterOnlyPropertyStub) },
+-  { "search", SLOT_search, PROPERTY_FLAGS, JSOP_WRAPPER(GetProperty),
+-    JSOP_WRAPPER(js_GetterOnlyPropertyStub) },
+-  { "hash", SLOT_hash, PROPERTY_FLAGS, JSOP_WRAPPER(GetProperty),
+-    JSOP_WRAPPER(js_GetterOnlyPropertyStub) },
+-  { 0, 0, 0, JSOP_NULLWRAPPER, JSOP_NULLWRAPPER }
+-};
+-
+-const JSFunctionSpec Location::sFunctions[] = {
+-  JS_FN("toString", ToString, 0, 0),
+-  JS_FS_END
+-};
+-
+-} // anonymous namespace
+-
+-BEGIN_WORKERS_NAMESPACE
+-
+-namespace location {
+-
+-bool
+-InitClass(JSContext* aCx, JSObject* aGlobal)
+-{
+-  return !!Location::InitClass(aCx, aGlobal);
++  return location.forget();
+ }
+ 
+-JSObject*
+-Create(JSContext* aCx,
+-       JS::Handle<JSString*> aHref, JS::Handle<JSString*> aProtocol,
+-       JS::Handle<JSString*> aHost, JS::Handle<JSString*> aHostname,
+-       JS::Handle<JSString*> aPort, JS::Handle<JSString*> aPathname,
+-       JS::Handle<JSString*> aSearch, JS::Handle<JSString*> aHash)
++void
++WorkerLocation::_trace(JSTracer* aTrc)
+ {
+-  return Location::Create(aCx, aHref, aProtocol, aHost, aHostname, aPort,
+-                          aPathname, aSearch, aHash);
++  DOMBindingBase::_trace(aTrc);
+ }
+ 
+-} // namespace location
++void
++WorkerLocation::_finalize(JSFreeOp* aFop)
++{
++  DOMBindingBase::_finalize(aFop);
++}
+ 
+ END_WORKERS_NAMESPACE
+diff --git a/dom/workers/Location.h b/dom/workers/Location.h
+--- a/dom/workers/Location.h
++++ b/dom/workers/Location.h
+@@ -2,29 +2,106 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_workers_location_h__
+ #define mozilla_dom_workers_location_h__
+ 
+ #include "Workers.h"
++#include "DOMBindingBase.h"
++#include "WorkerPrivate.h"
+ 
+ #include "jspubtd.h"
+ 
+ BEGIN_WORKERS_NAMESPACE
+ 
+-namespace location {
++class WorkerLocation MOZ_FINAL : public DOMBindingBase
++{
++  nsString mHref;
++  nsString mProtocol;
++  nsString mHost;
++  nsString mHostname;
++  nsString mPort;
++  nsString mPathname;
++  nsString mSearch;
++  nsString mHash;
+ 
+-bool
+-InitClass(JSContext* aCx, JSObject* aGlobal);
++  WorkerLocation(JSContext* aCx,
++                 const nsAString& aHref,
++                 const nsAString& aProtocol,
++                 const nsAString& aHost,
++                 const nsAString& aHostname,
++                 const nsAString& aPort,
++                 const nsAString& aPathname,
++                 const nsAString& aSearch,
++                 const nsAString& aHash)
++    : DOMBindingBase(aCx)
++    , mHref(aHref)
++    , mProtocol(aProtocol)
++    , mHost(aHost)
++    , mHostname(aHostname)
++    , mPort(aPort)
++    , mPathname(aPathname)
++    , mSearch(aSearch)
++    , mHash(aHash)
++  {
++    MOZ_COUNT_CTOR(mozilla::dom::workers::WorkerLocation);
++  }
+ 
+-JSObject*
+-Create(JSContext* aCx, JS::Handle<JSString*> aHref, JS::Handle<JSString*> aProtocol,
+-       JS::Handle<JSString*> aHost, JS::Handle<JSString*> aHostname,
+-       JS::Handle<JSString*> aPort, JS::Handle<JSString*> aPathname,
+-       JS::Handle<JSString*> aSearch, JS::Handle<JSString*> aHash);
++public:
++  static already_AddRefed<WorkerLocation>
++  Create(JSContext* aCx, JS::Handle<JSObject*> aGlobal,
++         WorkerPrivate::LocationInfo& aInfo);
+ 
+-} // namespace location
++  virtual void
++  _trace(JSTracer* aTrc) MOZ_OVERRIDE;
++
++  virtual void
++  _finalize(JSFreeOp* aFop) MOZ_OVERRIDE;
++
++  ~WorkerLocation()
++  {
++    MOZ_COUNT_DTOR(mozilla::dom::workers::WorkerLocation);
++  }
++
++  void Stringify(nsString& aHref) const
++  {
++    aHref = mHref;
++  }
++  void GetHref(nsString& aHref) const
++  {
++    aHref = mHref;
++  }
++  void GetProtocol(nsString& aProtocol) const
++  {
++    aProtocol = mProtocol;
++  }
++  void GetHost(nsString& aHost) const
++  {
++    aHost = mHost;
++  }
++  void GetHostname(nsString& aHostname) const
++  {
++    aHostname = mHostname;
++  }
++  void GetPort(nsString& aPort) const
++  {
++    aPort = mPort;
++  }
++  void GetPathname(nsString& aPathname) const
++  {
++    aPathname = mPathname;
++  }
++  void GetSearch(nsString& aSearch) const
++  {
++    aSearch = mSearch;
++  }
++  void GetHash(nsString& aHash) const
++  {
++    aHash = mHash;
++  }
++
++};
+ 
+ END_WORKERS_NAMESPACE
+ 
+ #endif // mozilla_dom_workers_location_h__
+diff --git a/dom/workers/WorkerScope.cpp b/dom/workers/WorkerScope.cpp
+--- a/dom/workers/WorkerScope.cpp
++++ b/dom/workers/WorkerScope.cpp
+@@ -14,16 +14,17 @@
+ #include "mozilla/dom/BindingUtils.h"
+ #include "mozilla/dom/FileReaderSyncBinding.h"
+ #include "mozilla/dom/ImageDataBinding.h"
+ #include "mozilla/dom/TextDecoderBinding.h"
+ #include "mozilla/dom/TextEncoderBinding.h"
+ #include "mozilla/dom/XMLHttpRequestBinding.h"
+ #include "mozilla/dom/XMLHttpRequestUploadBinding.h"
+ #include "mozilla/dom/URLBinding.h"
++#include "mozilla/dom/WorkerLocationBinding.h"
+ #include "mozilla/dom/WorkerNavigatorBinding.h"
+ #include "mozilla/OSFileConstants.h"
+ #include "nsTraceRefcnt.h"
+ #include "xpcpublic.h"
+ 
+ #ifdef ANDROID
+ #include <android/log.h>
+ #endif
+@@ -228,51 +229,25 @@ private:
+   {
+     WorkerGlobalScope* scope =
+       GetInstancePrivate(aCx, aObj, sProperties[SLOT_location].name);
+     if (!scope) {
+       return false;
+     }
+ 
+     if (JSVAL_IS_VOID(scope->mSlots[SLOT_location])) {
+-      JS::Rooted<JSString*> href(aCx), protocol(aCx), host(aCx), hostname(aCx);
+-      JS::Rooted<JSString*> port(aCx), pathname(aCx), search(aCx), hash(aCx);
+-
+       WorkerPrivate::LocationInfo& info = scope->mWorker->GetLocationInfo();
+ 
+-#define COPY_STRING(_jsstr, _cstr)                                             \
+-  if (info. _cstr .IsEmpty()) {                                                \
+-    _jsstr = NULL;                                                             \
+-  }                                                                            \
+-  else {                                                                       \
+-    if (!(_jsstr = JS_NewStringCopyN(aCx, info. _cstr .get(),                  \
+-                                     info. _cstr .Length()))) {                \
+-      return false;                                                            \
+-    }                                                                          \
+-    info. _cstr .Truncate();                                                   \
+-  }
+-
+-      COPY_STRING(href, mHref);
+-      COPY_STRING(protocol, mProtocol);
+-      COPY_STRING(host, mHost);
+-      COPY_STRING(hostname, mHostname);
+-      COPY_STRING(port, mPort);
+-      COPY_STRING(pathname, mPathname);
+-      COPY_STRING(search, mSearch);
+-      COPY_STRING(hash, mHash);
+-
+-#undef COPY_STRING
+-
+-      JSObject* location = location::Create(aCx, href, protocol, host, hostname,
+-                                            port, pathname, search, hash);
++      nsRefPtr<WorkerLocation> location =
++        WorkerLocation::Create(aCx, aObj, info);
+       if (!location) {
+         return false;
+       }
+ 
+-      scope->mSlots[SLOT_location] = OBJECT_TO_JSVAL(location);
++      scope->mSlots[SLOT_location] = OBJECT_TO_JSVAL(location->GetJSObject());
+     }
+ 
+     aVp.set(scope->mSlots[SLOT_location]);
+     return true;
+   }
+ 
+   static JSBool
+   UnwrapErrorEvent(JSContext* aCx, unsigned aArgc, jsval* aVp)
+@@ -1031,29 +1006,29 @@ CreateDedicatedWorkerGlobalScope(JSConte
+         !DefineOSFileConstants(aCx, global)) {
+       return NULL;
+     }
+   }
+ 
+   // Init other classes we care about.
+   if (!events::InitClasses(aCx, global, false) ||
+       !file::InitClasses(aCx, global) ||
+-      !exceptions::InitClasses(aCx, global) ||
+-      !location::InitClass(aCx, global)) {
++      !exceptions::InitClasses(aCx, global)) {
+     return NULL;
+   }
+ 
+   // Init other paris-bindings.
+   if (!FileReaderSyncBinding_workers::GetConstructorObject(aCx, global) ||
+       !ImageDataBinding_workers::GetConstructorObject(aCx, global) ||
+       !TextDecoderBinding_workers::GetConstructorObject(aCx, global) ||
+       !TextEncoderBinding_workers::GetConstructorObject(aCx, global) ||
+       !XMLHttpRequestBinding_workers::GetConstructorObject(aCx, global) ||
+       !XMLHttpRequestUploadBinding_workers::GetConstructorObject(aCx, global) ||
+       !URLBinding_workers::GetConstructorObject(aCx, global) ||
++      !WorkerLocationBinding_workers::GetConstructorObject(aCx, global) ||
+       !WorkerNavigatorBinding_workers::GetConstructorObject(aCx, global)) {
+     return NULL;
+   }
+ 
+   if (!JS_DefineProfilingFunctions(aCx, global)) {
+     return NULL;
+   }
+ 
+diff --git a/dom/workers/moz.build b/dom/workers/moz.build
+--- a/dom/workers/moz.build
++++ b/dom/workers/moz.build
+@@ -15,16 +15,17 @@ EXPORTS.mozilla.dom.workers += [
+ 
+ # Stuff needed for the bindings, not really public though.
+ EXPORTS.mozilla.dom.workers.bindings += [
+     'DOMBindingBase.h',
+     'EventListenerManager.h',
+     'EventTarget.h',
+     'FileReaderSync.h',
+     'ImageData.h',
++    'Location.h',
+     'Navigator.h',
+     'TextDecoder.h',
+     'TextEncoder.h',
+     'URL.h',
+     'WorkerFeature.h',
+     'XMLHttpRequest.h',
+     'XMLHttpRequestEventTarget.h',
+     'XMLHttpRequestUpload.h',

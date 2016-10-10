@@ -1,0 +1,151 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/content/src/nsHTMLProgressElement.cpp b/content/html/content/src/nsHTMLProgressElement.cpp
+--- a/content/html/content/src/nsHTMLProgressElement.cpp
++++ b/content/html/content/src/nsHTMLProgressElement.cpp
+@@ -81,16 +81,17 @@ protected:
+   /**
+    * Returns whethem the progress element is in the indeterminate state.
+    * A progress element is in the indeterminate state if its value is ommited
+    * or is not a floating point number..
+    *
+    * @return whether the progress element is in the indeterminate state.
+    */
+   bool IsIndeterminate() const;
++  double Max();
+ 
+   static const double kIndeterminatePosition;
+   static const double kDefaultValue;
+   static const double kDefaultMax;
+ };
+ 
+ const double nsHTMLProgressElement::kIndeterminatePosition = -1.0;
+ const double nsHTMLProgressElement::kDefaultValue          =  0.0;
+@@ -174,69 +175,53 @@ nsHTMLProgressElement::GetValue(double* 
+ {
+   const nsAttrValue* attrValue = mAttrsAndChildren.GetAttr(nsGkAtoms::value);
+   if (!attrValue || attrValue->Type() != nsAttrValue::eDoubleValue ||
+       attrValue->GetDoubleValue() < 0.0) {
+     *aValue = kDefaultValue;
+     return NS_OK;
+   }
+ 
+-  *aValue = attrValue->GetDoubleValue();
+-
+-  double max;
+-  GetMax(&max);
+-
+-  *aValue = PR_MIN(*aValue, max);
+-
++  *aValue = NS_MIN(attrValue->GetDoubleValue(), Max());
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsHTMLProgressElement::SetValue(double aValue)
+ {
+   return SetDoubleAttr(nsGkAtoms::value, aValue);
+ }
+ 
+-NS_IMETHODIMP
+-nsHTMLProgressElement::GetMax(double* aValue)
+-{
+-  const nsAttrValue* attrMax = mAttrsAndChildren.GetAttr(nsGkAtoms::max);
+-  if (attrMax && attrMax->Type() == nsAttrValue::eDoubleValue &&
+-      attrMax->GetDoubleValue() > 0.0) {
+-    *aValue = attrMax->GetDoubleValue();
+-  } else {
+-    *aValue = kDefaultMax;
+-  }
+-
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+-nsHTMLProgressElement::SetMax(double aValue)
+-{
+-  return SetDoubleAttr(nsGkAtoms::max, aValue);
+-}
++NS_IMPL_DOUBLE_ATTR_DEFAULT_VALUE(nsHTMLProgressElement, Max, max, kDefaultMax)
+ 
+ NS_IMETHODIMP
+ nsHTMLProgressElement::GetPosition(double* aPosition)
+ {
+   if (IsIndeterminate()) {
+     *aPosition = kIndeterminatePosition;
+     return NS_OK;
+   }
+ 
+   double value;
+-  double max;
+   GetValue(&value);
+-  GetMax(&max);
+ 
+-  *aPosition = value / max;
++  *aPosition = value / Max();
+ 
+   return NS_OK;
+ }
+ 
+ bool
+ nsHTMLProgressElement::IsIndeterminate() const
+ {
+   const nsAttrValue* attrValue = mAttrsAndChildren.GetAttr(nsGkAtoms::value);
+   return !attrValue || attrValue->Type() != nsAttrValue::eDoubleValue;
+ }
+ 
++double
++nsHTMLProgressElement::Max()
++{
++  double max;
++  GetMax(&max);
++  if (max <= 0.0) {
++    max = 1.0;
++  }
++  return max;
++}
+diff --git a/content/html/content/test/test_bug514437.html b/content/html/content/test/test_bug514437.html
+--- a/content/html/content/test/test_bug514437.html
++++ b/content/html/content/test/test_bug514437.html
+@@ -104,35 +104,31 @@ function checkValueAttribute()
+     checkAttribute(element, 'value', test[0], test[1]);
+ 
+     element.removeAttribute('max');
+   }
+ }
+ 
+ function checkMaxAttribute()
+ {
+-  var tests = [
++  var element = document.createElement('progress');
++  [
+     // max default value is 1.0.
+     [ null, 1.0 ],
+-    // If value <= 0.0, 1.0 is used instead.
+-    [  0.0, 1.0 ],
+-    [ -1.0, 1.0 ],
+     // Regular reflection.
++    [ -1.0 ],
++    [  0.0 ],
+     [  0.5 ],
+     [  1.0 ],
+     [  2.0 ],
+     // Check double-precision value.
+     [  0.234567898765432 ],
+-  ];
+-
+-  var element = document.createElement('progress');
+-
+-  for each(var test in tests) {
++  ].forEach(function(test) {
+     checkAttribute(element, 'max', test[0], test[1]);
+-  }
++  })
+ }
+ 
+ function checkPositionAttribute()
+ {
+   function checkPositionValue(aElement, aValue, aMax, aExpected) {
+     if (aValue != null) {
+       aElement.setAttribute('value', aValue);
+     } else {

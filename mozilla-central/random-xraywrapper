@@ -1,0 +1,116 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/wrappers/XrayWrapper.cpp b/js/xpconnect/wrappers/XrayWrapper.cpp
+--- a/js/xpconnect/wrappers/XrayWrapper.cpp
++++ b/js/xpconnect/wrappers/XrayWrapper.cpp
+@@ -655,30 +655,22 @@ XPCWrappedNativeXrayTraits::resolveDOMCo
+     }
+ 
+     if (pobj && !JS_GetPropertyDescriptorById(cx, holder, id, 0, desc))
+         return false;
+ 
+     return true;
+ }
+ 
+-template <typename T>
+-static T*
+-As(JSObject *wrapper)
++static nsGlobalWindow*
++AsWindow(JSObject *wrapper)
+ {
+     XPCWrappedNative *wn = XPCWrappedNativeXrayTraits::getWN(wrapper);
+-    nsCOMPtr<T> native = do_QueryWrappedNative(wn);
+-    return native;
+-}
+-
+-template <typename T>
+-static bool
+-Is(JSObject *wrapper)
+-{
+-    return !!As<T>(wrapper);
++    nsCOMPtr<nsPIDOMWindow> window = do_QueryWrappedNative(wn);
++    return static_cast<nsGlobalWindow*>(window.get());
+ }
+ 
+ static nsQueryInterface
+ do_QueryInterfaceNative(JSContext* cx, HandleObject wrapper);
+ 
+ void
+ XPCWrappedNativeXrayTraits::preserveWrapper(JSObject *target)
+ {
+@@ -828,18 +820,17 @@ XPCWrappedNativeXrayTraits::resolveOwnPr
+     bool ok = XrayTraits::resolveOwnProperty(cx, jsWrapper, wrapper, holder,
+                                              id, desc, flags);
+     if (!ok || desc->obj)
+         return ok;
+ 
+     // Check for indexed access on a window.
+     int32_t index = GetArrayIndexFromId(cx, id);
+     if (IsArrayIndex(index)) {
+-        nsGlobalWindow* win =
+-            static_cast<nsGlobalWindow*>(As<nsPIDOMWindow>(wrapper));
++        nsGlobalWindow* win = AsWindow(wrapper);
+         // Note: As() unwraps outer windows to get to the inner window.
+         if (win) {
+             bool unused;
+             nsCOMPtr<nsIDOMWindow> subframe = win->IndexedGetter(index, unused);
+             if (subframe) {
+                 nsGlobalWindow* global = static_cast<nsGlobalWindow*>(subframe.get());
+                 global->EnsureInnerWindow();
+                 JSObject* obj = global->FastGetGlobalJSObject();
+@@ -918,17 +909,17 @@ XPCWrappedNativeXrayTraits::defineProper
+         *defined = true;
+         return JS_DefinePropertyById(cx, holder, id, desc->value, desc->getter, desc->setter,
+                                      desc->attrs);
+     }
+ 
+     // Check for an indexed property on a Window.  If that's happening, do
+     // nothing but claim we defined it so it won't get added as an expando.
+     int32_t index = GetArrayIndexFromId(cx, id);
+-    if (IsArrayIndex(index) && Is<nsIDOMWindow>(wrapper)) {
++    if (IsArrayIndex(index) && AsWindow(wrapper)) {
+         *defined = true;
+         return true;
+     }
+ 
+     return true;
+ }
+ 
+ bool
+@@ -1396,17 +1387,17 @@ XrayWrapper<Base, Traits>::getPropertyDe
+     // We need to handle named access on the Window somewhere other than
+     // Traits::resolveOwnProperty, because per spec it happens on the Global
+     // Scope Polluter and thus the resulting properties are non-|own|. However,
+     // we're set up (above) to cache (on the holder) anything that comes out of
+     // resolveNativeProperty, which we don't want for something dynamic like
+     // named access. So we just handle it separately here.
+     nsGlobalWindow *win;
+     if (!desc->obj && Traits::Type == XrayForWrappedNative && JSID_IS_STRING(id) &&
+-        (win = static_cast<nsGlobalWindow*>(As<nsPIDOMWindow>(wrapper))))
++        (win = AsWindow(wrapper)))
+     {
+         nsDependentJSString name(id);
+         nsCOMPtr<nsIDOMWindow> childDOMWin = win->GetChildWindow(name);
+         if (childDOMWin) {
+             nsGlobalWindow *cwin = static_cast<nsGlobalWindow*>(childDOMWin.get());
+             JSObject *childObj = cwin->FastGetGlobalJSObject();
+             if (MOZ_UNLIKELY(!childObj))
+                 return xpc::Throw(cx, NS_ERROR_FAILURE);
+@@ -1785,16 +1776,17 @@ template class SCPermissiveXrayXPCWN;
+ template<>
+ SCSecurityXrayXPCWN SCSecurityXrayXPCWN::singleton(0);
+ template class SCSecurityXrayXPCWN;
+ 
+ template<>
+ SCPermissiveXrayDOM SCPermissiveXrayDOM::singleton(0);
+ template class SCPermissiveXrayDOM;
+ 
++// XXX This only needs to handle nsIContent.
+ static nsQueryInterface
+ do_QueryInterfaceNative(JSContext* cx, HandleObject wrapper)
+ {
+     nsISupports* nativeSupports;
+     if (IsWrapper(wrapper) && WrapperFactory::IsXrayWrapper(wrapper)) {
+         RootedObject target(cx, XrayTraits::getTargetObject(wrapper));
+         if (GetXrayType(target) == XrayForDOMObject) {
+             nativeSupports = UnwrapDOMObjectToISupports(target);

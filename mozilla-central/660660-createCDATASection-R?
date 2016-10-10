@@ -1,0 +1,92 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 660660 - Part b: Remove document.createCDATASection; r=?sicking
+
+diff --git a/content/base/src/nsDocument.cpp b/content/base/src/nsDocument.cpp
+--- a/content/base/src/nsDocument.cpp
++++ b/content/base/src/nsDocument.cpp
+@@ -75,17 +75,16 @@
+ #include "nsDOMAttribute.h"
+ #include "nsIDOMDOMStringList.h"
+ #include "nsIDOMDOMImplementation.h"
+ #include "nsIDOMDocumentXBL.h"
+ #include "mozilla/FunctionTimer.h"
+ #include "nsGenericElement.h"
+ #include "nsGenericHTMLElement.h"
+ #include "nsIDOMEventGroup.h"
+-#include "nsIDOMCDATASection.h"
+ #include "nsIDOMProcessingInstruction.h"
+ #include "nsDOMString.h"
+ #include "nsNodeUtils.h"
+ #include "nsLayoutUtils.h" // for GetFrameForPoint
+ #include "nsIFrame.h"
+ #include "nsITabChild.h"
+ 
+ #include "nsRange.h"
+@@ -4426,45 +4425,16 @@ nsDocument::CreateComment(const nsAStrin
+ 
+     rv = CallQueryInterface(comment, aReturn);
+   }
+ 
+   return rv;
+ }
+ 
+ NS_IMETHODIMP
+-nsDocument::CreateCDATASection(const nsAString& aData,
+-                               nsIDOMCDATASection** aReturn)
+-{
+-  NS_ENSURE_ARG_POINTER(aReturn);
+-  *aReturn = nullptr;
+-
+-  if (IsHTML()) {
+-    return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
+-  }
+-
+-  if (FindInReadable(NS_LITERAL_STRING("]]>"), aData)) {
+-    return NS_ERROR_DOM_INVALID_CHARACTER_ERR;
+-  }
+-
+-  nsCOMPtr<nsIContent> content;
+-  nsresult rv = NS_NewXMLCDATASection(getter_AddRefs(content),
+-                                      mNodeInfoManager);
+-
+-  if (NS_SUCCEEDED(rv)) {
+-    // Don't notify; this node is still being created.
+-    content->SetText(aData, false);
+-
+-    rv = CallQueryInterface(content, aReturn);
+-  }
+-
+-  return rv;
+-}
+-
+-NS_IMETHODIMP
+ nsDocument::CreateProcessingInstruction(const nsAString& aTarget,
+                                         const nsAString& aData,
+                                         nsIDOMProcessingInstruction** aReturn)
+ {
+   *aReturn = nullptr;
+ 
+   // There are no PIs for HTML
+   if (IsHTML()) {
+diff --git a/dom/interfaces/core/nsIDOMDocument.idl b/dom/interfaces/core/nsIDOMDocument.idl
+--- a/dom/interfaces/core/nsIDOMDocument.idl
++++ b/dom/interfaces/core/nsIDOMDocument.idl
+@@ -68,18 +68,16 @@ interface nsIDOMDocument : nsIDOMNode
+   readonly attribute nsIDOMDocumentType         doctype;
+   readonly attribute nsIDOMDOMImplementation    implementation;
+   readonly attribute nsIDOMElement              documentElement;
+   nsIDOMElement                 createElement(in DOMString tagName)
+                                   raises(DOMException);
+   nsIDOMDocumentFragment        createDocumentFragment();
+   nsIDOMText                    createTextNode(in DOMString data);
+   nsIDOMComment                 createComment(in DOMString data);
+-  nsIDOMCDATASection            createCDATASection(in DOMString data)
+-                                  raises(DOMException);
+   nsIDOMProcessingInstruction   createProcessingInstruction(in DOMString target, 
+                                                             in DOMString data)
+                                   raises(DOMException);
+   nsIDOMAttr                    createAttribute(in DOMString name)
+                                   raises(DOMException);
+   nsIDOMNodeList                getElementsByTagName(in DOMString tagname);
+ 
+   // Introduced in DOM Level 2:

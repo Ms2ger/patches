@@ -1,0 +1,94 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/interfaces/base/Makefile.in b/dom/interfaces/base/Makefile.in
+--- a/dom/interfaces/base/Makefile.in
++++ b/dom/interfaces/base/Makefile.in
+@@ -86,8 +86,13 @@ XPIDLSRCS =					\
+ 	nsIDOMGlobalPropertyInitializer.idl	\
+ 	nsIStructuredCloneContainer.idl		\
+ 	nsIDOMPerformance.idl			\
+ 	nsIDOMPerformanceTiming.idl		\
+ 	nsIDOMPerformanceNavigation.idl		\
+ 	$(NULL)
+ 
+ include $(topsrcdir)/config/rules.mk
++
++export::
++nsIDOMWindow.idl: $(srcdir)/nsIDOMWindow.idl.in Makefile
++	cpp -I$(topsrcdir)/content/events/public/ \
++	$(srcdir)/nsIDOMWindow.idl.in nsIDOMWindow.idl
+diff --git a/dom/interfaces/base/nsIDOMWindow.idl b/dom/interfaces/base/nsIDOMWindow.idl.in
+rename from dom/interfaces/base/nsIDOMWindow.idl
+rename to dom/interfaces/base/nsIDOMWindow.idl.in
+--- a/dom/interfaces/base/nsIDOMWindow.idl
++++ b/dom/interfaces/base/nsIDOMWindow.idl.in
+@@ -34,17 +34,17 @@
+  * use your version of this file under the terms of the MPL, indicate your
+  * decision by deleting the provisions above and replace them with the notice
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+-#include "domstubs.idl"
++//#include "domstubs.idl"
+ 
+ interface nsIAnimationFrameListener;
+ interface nsIControllers;
+ interface nsIDOMBlob;
+ interface nsIDOMLocation;
+ interface nsIDOMMediaQueryList;
+ interface nsIDOMOfflineResourceList;
+ interface nsIDOMPerformance;
+@@ -429,44 +429,22 @@ interface nsIDOMWindow : nsISupports
+    * @see <http://dev.w3.org/2006/webapi/FileAPI/#creating-revoking>
+    */
+   readonly attribute nsIDOMMozURLProperty URL;
+ 
+   /**
+    * Global storage, accessible by domain.
+    */
+   readonly attribute nsIDOMStorageList globalStorage;
+-
+-  /**
+-   * HTML5 event attributes that only apply to windows and <body>/<frameset>
+-   */
+-  [implicit_jscontext] attribute jsval onafterprint;
+-  [implicit_jscontext] attribute jsval onbeforeprint;
+-  [implicit_jscontext] attribute jsval onbeforeunload;
+-  [implicit_jscontext] attribute jsval onhashchange;
+-  [implicit_jscontext] attribute jsval onmessage;
+-  [implicit_jscontext] attribute jsval onoffline;
+-  [implicit_jscontext] attribute jsval ononline;
+-  [implicit_jscontext] attribute jsval onpopstate;
+-  [implicit_jscontext] attribute jsval onpagehide;
+-  [implicit_jscontext] attribute jsval onpageshow;
+-  // Not supported yet
+-  // [implicit_jscontext] attribute jsval onredo;
+-  [implicit_jscontext] attribute jsval onresize;
+-  // Not supported yet
+-  // [implicit_jscontext] attribute jsval onstorage;
+-  // Not supported yet
+-  // [implicit_jscontext] attribute jsval onundo;
+-  [implicit_jscontext] attribute jsval onunload;
+-
+-  /**
+-   * Non-HTML5 window-specific event attributes
+-   */
+-  [implicit_jscontext] attribute jsval ondevicemotion;
+-  [implicit_jscontext] attribute jsval ondeviceorientation;
++#define EVENT(_, __, ___, ____)
++#define WINDOW_ONLY_EVENT(_name, _, __, ___) \
++  [implicit_jscontext] attribute jsval on ## _name;
++#include "nsEventNameList.h"
++#undef WINDOW_ONLY_EVENT
++#undef EVENT
+ };
+ 
+ [scriptable, uuid(2146c906-57f7-486c-a1b4-8cdb57ef577f)]
+ interface nsIDOMWindowPerformance : nsISupports
+ {
+   /**
+    * A namespace to hold performance related data and statistics.
+    */

@@ -1,0 +1,2281 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/accessible/src/base/nsDocAccessible.h b/accessible/src/base/nsDocAccessible.h
+--- a/accessible/src/base/nsDocAccessible.h
++++ b/accessible/src/base/nsDocAccessible.h
+@@ -50,17 +50,16 @@
+ #include "nsIDocument.h"
+ #include "nsIDocumentObserver.h"
+ #include "nsIEditor.h"
+ #include "nsIObserver.h"
+ #include "nsIScrollPositionListener.h"
+ #include "nsITimer.h"
+ #include "nsIWeakReference.h"
+ #include "nsCOMArray.h"
+-#include "nsIDocShellTreeNode.h"
+ 
+ class nsIScrollableView;
+ 
+ const uint32_t kDefaultCacheSize = 256;
+ 
+ #define NS_DOCACCESSIBLE_IMPL_CID                       \
+ {  /* 5641921c-a093-4292-9dca-0b51813db57d */           \
+   0x5641921c,                                           \
+diff --git a/accessible/src/base/nsRootAccessible.cpp b/accessible/src/base/nsRootAccessible.cpp
+--- a/accessible/src/base/nsRootAccessible.cpp
++++ b/accessible/src/base/nsRootAccessible.cpp
+@@ -44,17 +44,16 @@
+ #include "nsAccUtils.h"
+ #include "nsCoreUtils.h"
+ #include "nsRelUtils.h"
+ 
+ #include "mozilla/dom/Element.h"
+ #include "nsHTMLSelectAccessible.h"
+ #include "nsIDocShell.h"
+ #include "nsIDocShellTreeItem.h"
+-#include "nsIDocShellTreeNode.h"
+ #include "nsIDocShellTreeOwner.h"
+ #include "nsIDOMElement.h"
+ #include "nsIDOMEventListener.h"
+ #include "nsIDOMEventTarget.h"
+ #include "nsIDOMDataContainerEvent.h"
+ #include "nsIDOMXULMenuListElement.h"
+ #include "nsIDOMXULMultSelectCntrlEl.h"
+ #include "nsIDOMXULSelectCntrlItemEl.h"
+@@ -798,28 +797,29 @@ nsRootAccessible::GetContentDocShell(nsI
+         break; // Don't check past original root accessible we started with
+ 
+       parent = parent->GetParent();
+     }
+ 
+     NS_ADDREF(aStart);
+     return aStart;
+   }
+-  nsCOMPtr<nsIDocShellTreeNode> treeNode(do_QueryInterface(aStart));
++
+   if (treeNode) {
+     int32_t subDocuments;
+-    treeNode->GetChildCount(&subDocuments);
++    aStart->GetChildCount(&subDocuments);
+     for (int32_t count = 0; count < subDocuments; count ++) {
+-      nsCOMPtr<nsIDocShellTreeItem> treeItemChild, contentTreeItem;
++      nsCOMPtr<nsIDocShellTreeItem> treeItemChild;
+       treeNode->GetChildAt(count, getter_AddRefs(treeItemChild));
+       NS_ENSURE_TRUE(treeItemChild, nullptr);
+-      contentTreeItem = GetContentDocShell(treeItemChild);
++
++      nsCOMPtr<nsIDocShellTreeItem> contentTreeItem =
++        GetContentDocShell(treeItemChild);
+       if (contentTreeItem) {
+-        NS_ADDREF(aStart = contentTreeItem);
+-        return aStart;
++        return contentTreeItem.forget();
+       }
+     }
+   }
+   return nullptr;
+ }
+ 
+ // nsIAccessible method
+ NS_IMETHODIMP
+diff --git a/accessible/src/msaa/nsDocAccessibleWrap.cpp b/accessible/src/msaa/nsDocAccessibleWrap.cpp
+--- a/accessible/src/msaa/nsDocAccessibleWrap.cpp
++++ b/accessible/src/msaa/nsDocAccessibleWrap.cpp
+@@ -40,17 +40,16 @@
+ 
+ #include "nsDocAccessibleWrap.h"
+ #include "ISimpleDOMDocument_i.c"
+ #include "nsIAccessibilityService.h"
+ #include "nsRootAccessible.h"
+ #include "nsWinUtils.h"
+ 
+ #include "nsIDocShell.h"
+-#include "nsIDocShellTreeNode.h"
+ #include "nsIFrame.h"
+ #include "nsIInterfaceRequestorUtils.h"
+ #include "nsISelectionController.h"
+ #include "nsIServiceManager.h"
+ #include "nsIURI.h"
+ #include "nsIViewManager.h"
+ #include "nsIWebNavigation.h"
+ 
+diff --git a/browser/base/content/browser.js b/browser/base/content/browser.js
+--- a/browser/base/content/browser.js
++++ b/browser/base/content/browser.js
+@@ -377,19 +377,19 @@ const gSessionHistoryObserver = {
+ function findChildShell(aDocument, aDocShell, aSoughtURI) {
+   aDocShell.QueryInterface(Components.interfaces.nsIWebNavigation);
+   aDocShell.QueryInterface(Components.interfaces.nsIInterfaceRequestor);
+   var doc = aDocShell.getInterface(Components.interfaces.nsIDOMDocument);
+   if ((aDocument && doc == aDocument) ||
+       (aSoughtURI && aSoughtURI.spec == aDocShell.currentURI.spec))
+     return aDocShell;
+ 
+-  var node = aDocShell.QueryInterface(Components.interfaces.nsIDocShellTreeNode);
+-  for (var i = 0; i < node.childCount; ++i) {
+-    var docShell = node.getChildAt(i);
++  var item = aDocShell.QueryInterface(Components.interfaces.nsIDocShellTreeItem);
++  for (var i = 0; i < item.childCount; ++i) {
++    var docShell = item.getChildAt(i);
+     docShell = findChildShell(aDocument, docShell, aSoughtURI);
+     if (docShell)
+       return docShell;
+   }
+   return null;
+ }
+ 
+ var gPopupBlockerObserver = {
+@@ -641,19 +641,19 @@ var gPopupBlockerObserver = {
+ };
+ 
+ const gXPInstallObserver = {
+   _findChildShell: function (aDocShell, aSoughtShell)
+   {
+     if (aDocShell == aSoughtShell)
+       return aDocShell;
+ 
+-    var node = aDocShell.QueryInterface(Components.interfaces.nsIDocShellTreeNode);
+-    for (var i = 0; i < node.childCount; ++i) {
+-      var docShell = node.getChildAt(i);
++    var item = aDocShell.QueryInterface(Components.interfaces.nsIDocShellTreeItem);
++    for (var i = 0; i < item.childCount; ++i) {
++      var docShell = item.getChildAt(i);
+       docShell = this._findChildShell(docShell, aSoughtShell);
+       if (docShell == aSoughtShell)
+         return docShell;
+     }
+     return null;
+   },
+ 
+   _getBrowser: function (aDocShell)
+diff --git a/content/base/src/nsCCUncollectableMarker.cpp b/content/base/src/nsCCUncollectableMarker.cpp
+--- a/content/base/src/nsCCUncollectableMarker.cpp
++++ b/content/base/src/nsCCUncollectableMarker.cpp
+@@ -97,17 +97,17 @@ MarkContentViewer(nsIContentViewer* aVie
+   nsCOMPtr<nsIDOMDocument> domDoc;
+   aViewer->GetDOMDocument(getter_AddRefs(domDoc));
+   nsCOMPtr<nsIDocument> doc = do_QueryInterface(domDoc);
+   if (doc) {
+     doc->MarkUncollectableForCCGeneration(nsCCUncollectableMarker::sGeneration);
+   }
+ }
+ 
+-void MarkDocShell(nsIDocShellTreeNode* aNode);
++void MarkDocShell(nsIDocShellTreeItem* aItem);
+ 
+ void
+ MarkSHEntry(nsISHEntry* aSHEntry)
+ {
+   if (!aSHEntry) {
+     return;
+   }
+ 
+@@ -129,60 +129,60 @@ MarkSHEntry(nsISHEntry* aSHEntry)
+     nsCOMPtr<nsISHEntry> childEntry;
+     shCont->GetChildAt(i, getter_AddRefs(childEntry));
+     MarkSHEntry(childEntry);
+   }
+   
+ }
+ 
+ void
+-MarkDocShell(nsIDocShellTreeNode* aNode)
++MarkDocShell(nsIDocShellTreeItem* aItem)
+ {
+-  nsCOMPtr<nsIDocShell> shell = do_QueryInterface(aNode);
++  nsCOMPtr<nsIDocShell> shell = do_QueryInterface(aItem);
+   if (!shell) {
+     return;
+   }
+ 
+   nsCOMPtr<nsIContentViewer> cview;
+   shell->GetContentViewer(getter_AddRefs(cview));
+   MarkContentViewer(cview);
+ 
+   nsCOMPtr<nsIWebNavigation> webNav = do_QueryInterface(shell);
+   nsCOMPtr<nsISHistory> history;
+   webNav->GetSessionHistory(getter_AddRefs(history));
+   if (history) {
+-    int32_t i, historyCount;
++    int32_t historyCount;
+     history->GetCount(&historyCount);
+-    for (i = 0; i < historyCount; ++i) {
++    for (int32_t i = 0; i < historyCount; ++i) {
+       nsCOMPtr<nsIHistoryEntry> historyEntry;
+       history->GetEntryAtIndex(i, false, getter_AddRefs(historyEntry));
+       nsCOMPtr<nsISHEntry> shEntry = do_QueryInterface(historyEntry);
+ 
+       MarkSHEntry(shEntry);
+     }
+   }
+ 
+-  int32_t i, childCount;
+-  aNode->GetChildCount(&childCount);
+-  for (i = 0; i < childCount; ++i) {
++  int32_t childCount;
++  aItem->GetChildCount(&childCount);
++  for (int32_t i = 0; i < childCount; ++i) {
+     nsCOMPtr<nsIDocShellTreeItem> child;
+-    aNode->GetChildAt(i, getter_AddRefs(child));
++    aItem->GetChildAt(i, getter_AddRefs(child));
+     MarkDocShell(child);
+   }
+ }
+ 
+ void
+ MarkWindowList(nsISimpleEnumerator* aWindowList)
+ {
+   nsCOMPtr<nsISupports> iter;
+   while (NS_SUCCEEDED(aWindowList->GetNext(getter_AddRefs(iter))) &&
+          iter) {
+     nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(iter);
+     if (window) {
+-      nsCOMPtr<nsIDocShellTreeNode> rootDocShell =
++      nsCOMPtr<nsIDocShellTreeItem> rootDocShell =
+         do_QueryInterface(window->GetDocShell());
+ 
+       MarkDocShell(rootDocShell);
+     }
+   }
+ }
+ 
+ nsresult
+diff --git a/content/base/src/nsContentUtils.cpp b/content/base/src/nsContentUtils.cpp
+--- a/content/base/src/nsContentUtils.cpp
++++ b/content/base/src/nsContentUtils.cpp
+@@ -5548,24 +5548,24 @@ nsContentUtils::FlushLayoutForTree(nsIDO
+ 
+     nsCOMPtr<nsIDOMDocument> domDoc;
+     aWindow->GetDocument(getter_AddRefs(domDoc));
+     nsCOMPtr<nsIDocument> doc = do_QueryInterface(domDoc);
+     if (doc) {
+         doc->FlushPendingNotifications(Flush_Layout);
+     }
+ 
+-    nsCOMPtr<nsIDocShellTreeNode> node =
++    nsCOMPtr<nsIDocShellTreeItem> item =
+         do_QueryInterface(piWin->GetDocShell());
+     if (node) {
+-        int32_t i = 0, i_end;
+-        node->GetChildCount(&i_end);
+-        for (; i < i_end; ++i) {
++        int32_t i_end;
++        item->GetChildCount(&i_end);
++        for (int32_t i = 0; i < i_end; ++i) {
+             nsCOMPtr<nsIDocShellTreeItem> item;
+-            node->GetChildAt(i, getter_AddRefs(item));
++            item->GetChildAt(i, getter_AddRefs(item));
+             nsCOMPtr<nsIDOMWindow> win = do_GetInterface(item);
+             if (win) {
+                 FlushLayoutForTree(win);
+             }
+         }
+     }
+ }
+ 
+diff --git a/content/base/src/nsFrameLoader.cpp b/content/base/src/nsFrameLoader.cpp
+--- a/content/base/src/nsFrameLoader.cpp
++++ b/content/base/src/nsFrameLoader.cpp
+@@ -57,17 +57,16 @@
+ #include "nsIDocument.h"
+ #include "nsIDOMDocument.h"
+ #include "nsIDOMWindow.h"
+ #include "nsPIDOMWindow.h"
+ #include "nsIWebNavigation.h"
+ #include "nsIWebProgress.h"
+ #include "nsIDocShell.h"
+ #include "nsIDocShellTreeItem.h"
+-#include "nsIDocShellTreeNode.h"
+ #include "nsIDocShellTreeOwner.h"
+ #include "nsIDocShellLoadInfo.h"
+ #include "nsIBaseWindow.h"
+ #include "nsContentUtils.h"
+ #include "nsIXPConnect.h"
+ #include "nsIJSContextStack.h"
+ #include "nsUnicharUtils.h"
+ #include "nsIScriptGlobalObject.h"
+@@ -658,67 +657,63 @@ SetTreeOwnerAndChromeEventHandlerOnDocsh
+  * @param aParentType the nsIDocShellTreeItem::GetType of our parent docshell
+  * @param aParentNode if non-null, the docshell we should be added as a child to
+  *
+  * @return whether aItem is top-level content
+  */
+ static bool
+ AddTreeItemToTreeOwner(nsIDocShellTreeItem* aItem, nsIContent* aOwningContent,
+                        nsIDocShellTreeOwner* aOwner, int32_t aParentType,
+-                       nsIDocShellTreeNode* aParentNode)
++                       nsIDocShellTreeItem* aParentItem)
+ {
+   NS_PRECONDITION(aItem, "Must have docshell treeitem");
+   NS_PRECONDITION(aOwningContent, "Must have owning content");
+   
+   nsAutoString value;
+-  bool isContent = false;
+-
+   if (aOwningContent->IsXUL()) {
+       aOwningContent->GetAttr(kNameSpaceID_None, nsGkAtoms::type, value);
+   }
+ 
+   // we accept "content" and "content-xxx" values.
+   // at time of writing, we expect "xxx" to be "primary" or "targetable", but
+   // someday it might be an integer expressing priority or something else.
+ 
+-  isContent = value.LowerCaseEqualsLiteral("content") ||
++  bool isContent = value.LowerCaseEqualsLiteral("content") ||
+     StringBeginsWith(value, NS_LITERAL_STRING("content-"),
+                      nsCaseInsensitiveStringComparator());
+ 
+   if (isContent) {
+     // The web shell's type is content.
+ 
+     aItem->SetItemType(nsIDocShellTreeItem::typeContent);
+   } else {
+     // Inherit our type from our parent docshell.  If it is
+     // chrome, we'll be chrome.  If it is content, we'll be
+     // content.
+ 
+     aItem->SetItemType(aParentType);
+   }
+ 
+   // Now that we have our type set, add ourselves to the parent, as needed.
+-  if (aParentNode) {
+-    aParentNode->AddChild(aItem);
++  if (aParentItem) {
++    aParentItem->AddChild(aItem);
+   }
+ 
+-  bool retval = false;
+   if (aParentType == nsIDocShellTreeItem::typeChrome && isContent) {
+-    retval = true;
+-
+     bool is_primary = value.LowerCaseEqualsLiteral("content-primary");
+ 
+     if (aOwner) {
+       bool is_targetable = is_primary ||
+         value.LowerCaseEqualsLiteral("content-targetable");
+       aOwner->ContentShellAdded(aItem, is_primary, is_targetable, value);
+     }
++    return true;
+   }
+ 
+-  return retval;
++  return false;
+ }
+ 
+ static bool
+ AllDescendantsOfType(nsIDocShellTreeItem* aParentItem, int32_t aType)
+ {
+   int32_t childCount = 0;
+   aParentItem->GetChildCount(&childCount);
+ 
+@@ -1429,24 +1424,20 @@ nsFrameLoader::MaybeCreateDocShell()
+   if (!frameName.IsEmpty()) {
+     docShellAsItem->SetName(frameName.get());
+   }
+ 
+   // If our container is a web-shell, inform it that it has a new
+   // child. If it's not a web-shell then some things will not operate
+   // properly.
+ 
+-  nsCOMPtr<nsIDocShellTreeNode> parentAsNode(do_QueryInterface(parentAsWebNav));
+-  if (parentAsNode) {
++  nsCOMPtr<nsIDocShellTreeItem> parentAsItem = do_QueryInterface(parentAsWebNav);
++  if (parentAsItem) {
+     // Note: This logic duplicates a lot of logic in
+     // nsSubDocumentFrame::AttributeChanged.  We should fix that.
+-
+-    nsCOMPtr<nsIDocShellTreeItem> parentAsItem =
+-      do_QueryInterface(parentAsNode);
+-
+     int32_t parentType;
+     parentAsItem->GetItemType(&parentType);
+ 
+     // XXXbz why is this in content code, exactly?  We should handle
+     // this some other way.....  Not sure how yet.
+     nsCOMPtr<nsIDocShellTreeOwner> parentTreeOwner;
+     parentAsItem->GetTreeOwner(getter_AddRefs(parentTreeOwner));
+     NS_ENSURE_STATE(parentTreeOwner);
+@@ -1461,17 +1452,17 @@ nsFrameLoader::MaybeCreateDocShell()
+     if (parentType == nsIDocShellTreeItem::typeChrome) {
+       // Our parent shell is a chrome shell. It is therefore our nearest
+       // enclosing chrome shell.
+ 
+       chromeEventHandler = do_QueryInterface(mOwnerContent);
+       NS_ASSERTION(chromeEventHandler,
+                    "This mContent should implement this.");
+     } else {
+-      nsCOMPtr<nsIDocShell> parentShell(do_QueryInterface(parentAsNode));
++      nsCOMPtr<nsIDocShell> parentShell = do_QueryInterface(parentAsItem);
+ 
+       // Our parent shell is a content shell. Get the chrome event
+       // handler from it and use that for our shell as well.
+ 
+       parentShell->GetChromeEventHandler(getter_AddRefs(chromeEventHandler));
+     }
+ 
+     mDocShell->SetChromeEventHandler(chromeEventHandler);
+diff --git a/content/canvas/src/DocumentRendererChild.cpp b/content/canvas/src/DocumentRendererChild.cpp
+--- a/content/canvas/src/DocumentRendererChild.cpp
++++ b/content/canvas/src/DocumentRendererChild.cpp
+@@ -36,18 +36,17 @@
+ 
+ #include "base/basictypes.h"
+ 
+ #include "gfxImageSurface.h"
+ #include "gfxPattern.h"
+ #include "nsPIDOMWindow.h"
+ #include "nsIDOMWindow.h"
+ #include "nsIDOMDocument.h"
+-#include "nsIDocShellTreeNode.h"
+-#include "nsIDocShellTreeItem.h"
++#include "nsIDocShell.h"
+ #include "nsIDocument.h"
+ #include "nsIInterfaceRequestorUtils.h"
+ #include "nsComponentManagerUtils.h"
+ #include "nsCSSParser.h"
+ #include "nsPresContext.h"
+ #include "nsCOMPtr.h"
+ #include "nsColor.h"
+ #include "gfxContext.h"
+diff --git a/content/canvas/src/nsCanvasRenderingContext2D.cpp b/content/canvas/src/nsCanvasRenderingContext2D.cpp
+--- a/content/canvas/src/nsCanvasRenderingContext2D.cpp
++++ b/content/canvas/src/nsCanvasRenderingContext2D.cpp
+@@ -76,19 +76,16 @@
+ #include "nsReadableUtils.h"
+ 
+ #include "nsColor.h"
+ #include "nsGfxCIID.h"
+ #include "nsIScriptSecurityManager.h"
+ #include "nsIDocShell.h"
+ #include "nsIDOMWindow.h"
+ #include "nsPIDOMWindow.h"
+-#include "nsIDocShell.h"
+-#include "nsIDocShellTreeItem.h"
+-#include "nsIDocShellTreeNode.h"
+ #include "nsIXPConnect.h"
+ #include "jsapi.h"
+ #include "nsDisplayList.h"
+ 
+ #include "nsTArray.h"
+ 
+ #include "imgIEncoder.h"
+ 
+diff --git a/content/canvas/src/nsCanvasRenderingContext2DAzure.cpp b/content/canvas/src/nsCanvasRenderingContext2DAzure.cpp
+--- a/content/canvas/src/nsCanvasRenderingContext2DAzure.cpp
++++ b/content/canvas/src/nsCanvasRenderingContext2DAzure.cpp
+@@ -73,19 +73,16 @@
+ #include "nsReadableUtils.h"
+ 
+ #include "nsColor.h"
+ #include "nsGfxCIID.h"
+ #include "nsIScriptSecurityManager.h"
+ #include "nsIDocShell.h"
+ #include "nsIDOMWindow.h"
+ #include "nsPIDOMWindow.h"
+-#include "nsIDocShell.h"
+-#include "nsIDocShellTreeItem.h"
+-#include "nsIDocShellTreeNode.h"
+ #include "nsIXPConnect.h"
+ #include "jsapi.h"
+ #include "nsDisplayList.h"
+ 
+ #include "nsTArray.h"
+ 
+ #include "imgIEncoder.h"
+ 
+diff --git a/content/events/src/nsEventStateManager.cpp b/content/events/src/nsEventStateManager.cpp
+--- a/content/events/src/nsEventStateManager.cpp
++++ b/content/events/src/nsEventStateManager.cpp
+@@ -72,17 +72,16 @@
+ #include "nsIViewManager.h"
+ #include "nsISelection.h"
+ #include "nsFrameSelection.h"
+ #include "nsIPrivateDOMEvent.h"
+ #include "nsPIDOMWindow.h"
+ #include "nsPIWindowRoot.h"
+ #include "nsIEnumerator.h"
+ #include "nsIDocShellTreeItem.h"
+-#include "nsIDocShellTreeNode.h"
+ #include "nsIWebNavigation.h"
+ #include "nsIContentViewer.h"
+ #ifdef MOZ_XUL
+ #include "nsXULPopupManager.h"
+ #endif
+ #include "nsFrameManager.h"
+ 
+ #include "nsIServiceManager.h"
+@@ -1530,17 +1529,17 @@ nsEventStateManager::HandleAccessKey(nsP
+       return;
+     }
+   }
+ 
+   // after the local accesskey handling
+   if (nsEventStatus_eConsumeNoDefault != *aStatus) {
+     // checking all sub docshells
+ 
+-    nsCOMPtr<nsIDocShellTreeNode> docShell(do_QueryInterface(pcContainer));
++    nsCOMPtr<nsIDocShellTreeItem> docShell = do_QueryInterface(pcContainer);
+     if (!docShell) {
+       NS_WARNING("no docShellTreeNode for presContext");
+       return;
+     }
+ 
+     int32_t childCount;
+     docShell->GetChildCount(&childCount);
+     for (int32_t counter = 0; counter < childCount; counter++) {
+@@ -1560,18 +1559,17 @@ nsEventStateManager::HandleAccessKey(nsP
+         // iframes, docshells in transition between documents, etc).
+         if (!subPS) {
+           // Oh, well.  Just move on to the next child
+           continue;
+         }
+ 
+         nsPresContext *subPC = subPS->GetPresContext();
+ 
+-        nsEventStateManager* esm =
+-          static_cast<nsEventStateManager *>(subPC->EventStateManager());
++        nsEventStateManager* esm = subPC->EventStateManager();
+ 
+         if (esm)
+           esm->HandleAccessKey(subPC, aEvent, aStatus, nullptr,
+                                eAccessKeyProcessingDown, aModifierMask);
+ 
+         if (nsEventStatus_eConsumeNoDefault == *aStatus)
+           break;
+       }
+@@ -1593,18 +1591,17 @@ nsEventStateManager::HandleAccessKey(nsP
+       nsCOMPtr<nsIPresShell> parentPS;
+ 
+       parentDS->GetPresShell(getter_AddRefs(parentPS));
+       NS_ASSERTION(parentPS, "Our PresShell exists but the parent's does not?");
+ 
+       nsPresContext *parentPC = parentPS->GetPresContext();
+       NS_ASSERTION(parentPC, "PresShell without PresContext");
+ 
+-      nsEventStateManager* esm =
+-        static_cast<nsEventStateManager *>(parentPC->EventStateManager());
++      nsEventStateManager* esm = parentPC->EventStateManager();
+ 
+       if (esm)
+         esm->HandleAccessKey(parentPC, aEvent, aStatus, docShell,
+                              eAccessKeyProcessingUp, aModifierMask);
+     }
+   }// if end. bubble up process
+ }// end of HandleAccessKey
+ 
+diff --git a/content/events/src/nsEventStateManager.h b/content/events/src/nsEventStateManager.h
+--- a/content/events/src/nsEventStateManager.h
++++ b/content/events/src/nsEventStateManager.h
+@@ -55,17 +55,16 @@
+ #include "nsIMarkupDocumentViewer.h"
+ #include "nsIScrollableFrame.h"
+ #include "nsFocusManager.h"
+ #include "nsIDocument.h"
+ #include "nsEventStates.h"
+ 
+ class nsIPresShell;
+ class nsIDocShell;
+-class nsIDocShellTreeNode;
+ class nsIDocShellTreeItem;
+ class imgIContainer;
+ class nsDOMDataTransfer;
+ 
+ namespace mozilla {
+ namespace dom {
+ class TabParent;
+ }
+diff --git a/docshell/base/Makefile.in b/docshell/base/Makefile.in
+--- a/docshell/base/Makefile.in
++++ b/docshell/base/Makefile.in
+@@ -58,17 +58,16 @@ SDK_XPIDLSRCS = \
+   nsIClipboardCommands.idl \
+   $(NULL)
+ 
+ XPIDLSRCS = \
+   nsCDefaultURIFixup.idl \
+   nsIDocShell.idl \
+   nsIDocShellLoadInfo.idl \
+   nsIDocShellTreeItem.idl \
+-  nsIDocShellTreeNode.idl \
+   nsIDocShellTreeOwner.idl \
+   nsIDocShellHistory.idl \
+   nsIGlobalHistory2.idl \
+   nsIGlobalHistory3.idl \
+   nsIMarkupDocumentViewer.idl \
+   nsIScrollable.idl \
+   nsITextScroll.idl \
+   nsIWebNavigation.idl \
+diff --git a/docshell/base/nsDocShell.cpp b/docshell/base/nsDocShell.cpp
+--- a/docshell/base/nsDocShell.cpp
++++ b/docshell/base/nsDocShell.cpp
+@@ -873,17 +873,16 @@ nsDocShell::DestroyChildren()
+ //*****************************************************************************   
+ 
+ NS_IMPL_ADDREF_INHERITED(nsDocShell, nsDocLoader)
+ NS_IMPL_RELEASE_INHERITED(nsDocShell, nsDocLoader)
+ 
+ NS_INTERFACE_MAP_BEGIN(nsDocShell)
+     NS_INTERFACE_MAP_ENTRY(nsIDocShell)
+     NS_INTERFACE_MAP_ENTRY(nsIDocShellTreeItem)
+-    NS_INTERFACE_MAP_ENTRY(nsIDocShellTreeNode)
+     NS_INTERFACE_MAP_ENTRY(nsIDocShellHistory)
+     NS_INTERFACE_MAP_ENTRY(nsIWebNavigation)
+     NS_INTERFACE_MAP_ENTRY(nsIBaseWindow)
+     NS_INTERFACE_MAP_ENTRY(nsIScrollable)
+     NS_INTERFACE_MAP_ENTRY(nsITextScroll)
+     NS_INTERFACE_MAP_ENTRY(nsIDocCharset)
+     NS_INTERFACE_MAP_ENTRY(nsIScriptGlobalObjectOwner)
+     NS_INTERFACE_MAP_ENTRY(nsIRefreshURI)
+@@ -3095,20 +3094,16 @@ nsDocShell::GetHistoryID(uint64_t* aID)
+ 
+ NS_IMETHODIMP
+ nsDocShell::GetIsInUnload(bool* aIsInUnload)
+ {
+     *aIsInUnload = mFiredUnloadEvent;
+     return NS_OK;
+ }
+ 
+-//*****************************************************************************
+-// nsDocShell::nsIDocShellTreeNode
+-//*****************************************************************************   
+-
+ NS_IMETHODIMP
+ nsDocShell::GetChildCount(int32_t * aChildCount)
+ {
+     NS_ENSURE_ARG_POINTER(aChildCount);
+     *aChildCount = mChildList.Count();
+     return NS_OK;
+ }
+ 
+diff --git a/docshell/base/nsDocShell.h b/docshell/base/nsDocShell.h
+--- a/docshell/base/nsDocShell.h
++++ b/docshell/base/nsDocShell.h
+@@ -45,17 +45,16 @@
+ #include "nsIDOMNodeList.h"
+ #include "nsIContentViewer.h"
+ #include "nsInterfaceHashtable.h"
+ #include "nsIScriptContext.h"
+ #include "nsITimer.h"
+ 
+ #include "nsIDocShell.h"
+ #include "nsIDocShellTreeItem.h"
+-#include "nsIDocShellTreeNode.h"
+ #include "nsIBaseWindow.h"
+ #include "nsIScrollable.h"
+ #include "nsITextScroll.h"
+ #include "nsIDocShellTreeOwner.h"
+ #include "nsIContentViewerContainer.h"
+ 
+ #include "nsDocLoader.h"
+ #include "nsIURILoader.h"
+@@ -196,17 +195,16 @@ public:
+     NS_DECL_AND_IMPL_ZEROING_OPERATOR_NEW
+ 
+     virtual nsresult Init();
+ 
+     NS_DECL_ISUPPORTS_INHERITED
+ 
+     NS_DECL_NSIDOCSHELL
+     NS_DECL_NSIDOCSHELLTREEITEM
+-    NS_DECL_NSIDOCSHELLTREENODE
+     NS_DECL_NSIDOCSHELLHISTORY
+     NS_DECL_NSIWEBNAVIGATION
+     NS_DECL_NSIBASEWINDOW
+     NS_DECL_NSISCROLLABLE
+     NS_DECL_NSITEXTSCROLL
+     NS_DECL_NSIDOCCHARSET
+     NS_DECL_NSIINTERFACEREQUESTOR
+     NS_DECL_NSIWEBPROGRESSLISTENER
+diff --git a/docshell/base/nsDocShellEnumerator.cpp b/docshell/base/nsDocShellEnumerator.cpp
+--- a/docshell/base/nsDocShellEnumerator.cpp
++++ b/docshell/base/nsDocShellEnumerator.cpp
+@@ -35,17 +35,16 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ 
+ #include "nsDocShellEnumerator.h"
+ 
+ #include "nsIDocShellTreeItem.h"
+-#include "nsIDocShellTreeNode.h"
+ 
+ nsDocShellEnumerator::nsDocShellEnumerator(int32_t inEnumerationDirection)
+ : mRootItem(nullptr)
+ , mCurIndex(0)
+ , mDocShellType(nsIDocShellTreeItem::typeAll)
+ , mArrayValid(false)
+ , mEnumerationDirection(inEnumerationDirection)
+ {
+@@ -149,73 +148,67 @@ nsresult nsDocShellEnumerator::BuildDocS
+   NS_ENSURE_TRUE(mRootItem, NS_ERROR_NOT_INITIALIZED);
+   inItemArray.Clear();
+   nsCOMPtr<nsIDocShellTreeItem> item = do_QueryReferent(mRootItem);
+   return BuildArrayRecursive(item, inItemArray);
+ }
+ 
+ nsresult nsDocShellForwardsEnumerator::BuildArrayRecursive(nsIDocShellTreeItem* inItem, nsTArray<nsWeakPtr>& inItemArray)
+ {
+-  nsresult rv;
+-  nsCOMPtr<nsIDocShellTreeNode> itemAsNode = do_QueryInterface(inItem, &rv);
+-  if (NS_FAILED(rv)) return rv;
++  NS_ENSURE_TRUE(inItem, NS_ERROR_NULL_POINTER);
+ 
+-  int32_t   itemType;
++  int32_t itemType;
+   // add this item to the array
+   if ((mDocShellType == nsIDocShellTreeItem::typeAll) ||
+       (NS_SUCCEEDED(inItem->GetItemType(&itemType)) && (itemType == mDocShellType)))
+   {
+     if (!inItemArray.AppendElement(do_GetWeakReference(inItem)))
+       return NS_ERROR_OUT_OF_MEMORY;
+   }
+ 
+-  int32_t   numChildren;
+-  rv = itemAsNode->GetChildCount(&numChildren);
++  int32_t numChildren;
++  nsresult rv = inItem->GetChildCount(&numChildren);
+   if (NS_FAILED(rv)) return rv;
+   
+   for (int32_t i = 0; i < numChildren; ++i)
+   {
+     nsCOMPtr<nsIDocShellTreeItem> curChild;
+-    rv = itemAsNode->GetChildAt(i, getter_AddRefs(curChild));
++    rv = inItem->GetChildAt(i, getter_AddRefs(curChild));
+     if (NS_FAILED(rv)) return rv;
+       
+     rv = BuildArrayRecursive(curChild, inItemArray);
+     if (NS_FAILED(rv)) return rv;
+   }
+ 
+   return NS_OK;
+ }
+ 
+ 
+ nsresult nsDocShellBackwardsEnumerator::BuildArrayRecursive(nsIDocShellTreeItem* inItem, nsTArray<nsWeakPtr>& inItemArray)
+ {
+-  nsresult rv;
+-  nsCOMPtr<nsIDocShellTreeNode> itemAsNode = do_QueryInterface(inItem, &rv);
+-  if (NS_FAILED(rv)) return rv;
++  NS_ENSURE_TRUE(inItem, NS_ERROR_NULL_POINTER);
+ 
+-  int32_t   numChildren;
+-  rv = itemAsNode->GetChildCount(&numChildren);
++  int32_t numChildren;
++  nsresult rv = inItem->GetChildCount(&numChildren);
+   if (NS_FAILED(rv)) return rv;
+   
+   for (int32_t i = numChildren - 1; i >= 0; --i)
+   {
+     nsCOMPtr<nsIDocShellTreeItem> curChild;
+-    rv = itemAsNode->GetChildAt(i, getter_AddRefs(curChild));
++    rv = inItem->GetChildAt(i, getter_AddRefs(curChild));
+     if (NS_FAILED(rv)) return rv;
+       
+     rv = BuildArrayRecursive(curChild, inItemArray);
+     if (NS_FAILED(rv)) return rv;
+   }
+ 
+-  int32_t   itemType;
++  int32_t itemType;
+   // add this item to the array
+   if ((mDocShellType == nsIDocShellTreeItem::typeAll) ||
+       (NS_SUCCEEDED(inItem->GetItemType(&itemType)) && (itemType == mDocShellType)))
+   {
+     if (!inItemArray.AppendElement(do_GetWeakReference(inItem)))
+       return NS_ERROR_OUT_OF_MEMORY;
+   }
+ 
+ 
+   return NS_OK;
+ }
+-
+-
+diff --git a/docshell/base/nsIDocShellTreeItem.idl b/docshell/base/nsIDocShellTreeItem.idl
+--- a/docshell/base/nsIDocShellTreeItem.idl
++++ b/docshell/base/nsIDocShellTreeItem.idl
+@@ -17,44 +17,45 @@
+  *
+  * The Initial Developer of the Original Code is
+  * Netscape Communications, Inc.
+  * Portions created by the Initial Developer are Copyright (C) 1999
+  * the Initial Developer. All Rights Reserved.
+  *
+  * Contributor(s):
+  *   Travis Bogard <travis@netscape.com>
++ *   Steve Clark <buster@netscape.com>
+  *
+  * Alternatively, the contents of this file may be used under the terms of
+  * either of the GNU General Public License Version 2 or later (the "GPL"),
+  * or the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+  * in which case the provisions of the GPL or the LGPL are applicable instead
+  * of those above. If you wish to allow use of your version of this file only
+  * under the terms of either the GPL or the LGPL, and not to allow others to
+  * use your version of this file under the terms of the MPL, indicate your
+  * decision by deleting the provisions above and replace them with the notice
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+-#include "nsIDocShellTreeNode.idl"
++#include "nsISupports.idl"
+ 
+ interface nsIDocShellTreeOwner;
+ 
+ 
+ /**
+  * The nsIDocShellTreeItem supplies the methods that are required of any item
+  * that wishes to be able to live within the docshell tree either as a middle
+  * node or a leaf. 
+  */
+ 
+ [scriptable, uuid(09b54ec1-d98a-49a9-bc95-3219e8b55089)]
+-interface nsIDocShellTreeItem : nsIDocShellTreeNode
++interface nsIDocShellTreeItem : nsISupports
+ {
+ 	/*
+ 	name of the DocShellTreeItem
+ 	*/
+ 	attribute wstring name;
+ 
+         /**
+          * Compares the provided name against the item's name and
+diff --git a/docshell/base/nsIDocShellTreeNode.idl b/docshell/base/nsIDocShellTreeNode.idl
+deleted file mode 100644
+--- a/docshell/base/nsIDocShellTreeNode.idl
++++ /dev/null
+@@ -1,109 +0,0 @@
+-/* -*- Mode: IDL; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+- *
+- * ***** BEGIN LICENSE BLOCK *****
+- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+- *
+- * The contents of this file are subject to the Mozilla Public License Version
+- * 1.1 (the "License"); you may not use this file except in compliance with
+- * the License. You may obtain a copy of the License at
+- * http://www.mozilla.org/MPL/
+- *
+- * Software distributed under the License is distributed on an "AS IS" basis,
+- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
+- * for the specific language governing rights and limitations under the
+- * License.
+- *
+- * The Original Code is the Mozilla browser.
+- *
+- * The Initial Developer of the Original Code is
+- * Netscape Communications, Inc.
+- * Portions created by the Initial Developer are Copyright (C) 1999
+- * the Initial Developer. All Rights Reserved.
+- *
+- * Contributor(s):
+- *   Travis Bogard <travis@netscape.com>
+- *   Steve Clark <buster@netscape.com>
+- *
+- * Alternatively, the contents of this file may be used under the terms of
+- * either of the GNU General Public License Version 2 or later (the "GPL"),
+- * or the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+- * in which case the provisions of the GPL or the LGPL are applicable instead
+- * of those above. If you wish to allow use of your version of this file only
+- * under the terms of either the GPL or the LGPL, and not to allow others to
+- * use your version of this file under the terms of the MPL, indicate your
+- * decision by deleting the provisions above and replace them with the notice
+- * and other provisions required by the GPL or the LGPL. If you do not delete
+- * the provisions above, a recipient may use your version of this file under
+- * the terms of any one of the MPL, the GPL or the LGPL.
+- *
+- * ***** END LICENSE BLOCK ***** */
+-
+-#include "nsISupports.idl"
+-
+-interface nsIDocShellTreeItem;
+-
+-/**
+- * The nsIDocShellTreeNode supplies the methods for interacting with children
+- * of a docshell.  These are essentially the methods that turn a single docshell
+- * into a docshell tree. 
+- */
+-
+-/*
+- * Long-term, we probably want to merge this interface into
+- * nsIDocShellTreeItem.  Need to eliminate uses of this interface
+- * first.
+- */
+-
+-[scriptable, uuid(37f1ab73-f224-44b1-82f0-d2834ab1cec0)]
+-interface nsIDocShellTreeNode : nsISupports
+-{
+-	/*
+-	The current number of DocShells which are immediate children of the 
+-	this object.
+-	*/
+-	readonly attribute long childCount;
+-
+-	/*
+-	Add a new child DocShellTreeItem.  Adds to the end of the list.
+-	Note that this does NOT take a reference to the child.  The child stays
+-	alive only as long as it's referenced from outside the docshell tree.
+-	@throws NS_ERROR_ILLEGAL_VALUE if child corresponds to the same
+-	        object as this treenode or an ancestor of this treenode
+-	@throws NS_ERROR_UNEXPECTED if this node is a leaf in the tree.
+-	*/
+-	void addChild(in nsIDocShellTreeItem child);
+-
+-	/*
+-	Removes a child DocShellTreeItem.
+-	@throws NS_ERROR_UNEXPECTED if this node is a leaf in the tree.
+-	*/
+-	void removeChild(in nsIDocShellTreeItem child);
+-
+-	/**
+-	 * Return the child at the index requested.  This is 0-based.
+-	 *
+-	 * @throws NS_ERROR_UNEXPECTED if the index is out of range
+-	 */
+-	nsIDocShellTreeItem getChildAt(in long index);
+-
+-	/*
+-	Return the child DocShellTreeItem with the specified name.
+-	aName - This is the name of the item that is trying to be found.
+-	aRecurse - Is used to tell the function to recurse through children.
+-		Note, recursion will only happen through items of the same type.
+-	aSameType - If this is set only children of the same type will be returned.
+-	aRequestor - This is the docshellTreeItem that is requesting the find.  This
+-		parameter is used when recursion is being used to avoid searching the same
+-		tree again when a child has asked a parent to search for children.
+-	aOriginalRequestor - The original treeitem that made the request, if any.
+-    	This is used to ensure that we don't run into cross-site issues.
+-
+-	Note the search is depth first when recursing.
+-	*/
+-	nsIDocShellTreeItem findChildWithName(in wstring aName,
+-	                                      in boolean aRecurse,
+-	                                      in boolean aSameType,
+-	                                      in nsIDocShellTreeItem aRequestor,
+-	                                      in nsIDocShellTreeItem aOriginalRequestor);
+-};
+-
+diff --git a/docshell/shistory/src/nsSHistory.cpp b/docshell/shistory/src/nsSHistory.cpp
+--- a/docshell/shistory/src/nsSHistory.cpp
++++ b/docshell/shistory/src/nsSHistory.cpp
+@@ -46,17 +46,16 @@
+ #include "mozilla/Preferences.h"
+ 
+ // Interfaces Needed
+ #include "nsILayoutHistoryState.h"
+ #include "nsIDocShell.h"
+ #include "nsIDocShellLoadInfo.h"
+ #include "nsISHContainer.h"
+ #include "nsIDocShellTreeItem.h"
+-#include "nsIDocShellTreeNode.h"
+ #include "nsIDocShellLoadInfo.h"
+ #include "nsIServiceManager.h"
+ #include "nsIURI.h"
+ #include "nsIContentViewer.h"
+ #include "nsICacheService.h"
+ #include "nsIObserverService.h"
+ #include "prclist.h"
+ #include "mozilla/Services.h"
+@@ -1585,32 +1584,32 @@ nsSHistory::CompareFrames(nsISHEntry * a
+     InitiateLoad(aNextEntry, aParent, aLoadType);
+     return NS_OK;
+   }
+ 
+   /* The root entries are the same, so compare any child frames */
+   int32_t pcnt=0, ncnt=0, dsCount=0;
+   nsCOMPtr<nsISHContainer>  prevContainer(do_QueryInterface(aPrevEntry));
+   nsCOMPtr<nsISHContainer>  nextContainer(do_QueryInterface(aNextEntry));
+-  nsCOMPtr<nsIDocShellTreeNode> dsTreeNode(do_QueryInterface(aParent));
++  nsCOMPtr<nsIDocShellTreeItem> dsTreeItem = do_QueryInterface(aParent);
+ 
+-  if (!dsTreeNode)
++  if (!dsTreeItem)
+     return NS_ERROR_FAILURE;
+   if (!prevContainer || !nextContainer)
+     return NS_ERROR_FAILURE;
+ 
+   prevContainer->GetChildCount(&pcnt);
+   nextContainer->GetChildCount(&ncnt);
+-  dsTreeNode->GetChildCount(&dsCount);
++  dsTreeItem->GetChildCount(&dsCount);
+ 
+   // Create an array for child docshells.
+   nsCOMArray<nsIDocShell> docshells;
+   for (int32_t i = 0; i < dsCount; ++i) {
+     nsCOMPtr<nsIDocShellTreeItem> treeItem;
+-    dsTreeNode->GetChildAt(i, getter_AddRefs(treeItem));
++    dsTreeItem->GetChildAt(i, getter_AddRefs(treeItem));
+     nsCOMPtr<nsIDocShell> shell = do_QueryInterface(treeItem);
+     if (shell) {
+       docshells.AppendObject(shell);
+     }
+   }
+ 
+   // Search for something to load next.
+   for (int32_t i = 0; i < ncnt; ++i) {
+diff --git a/docshell/test/navigation/NavigationUtils.js b/docshell/test/navigation/NavigationUtils.js
+--- a/docshell/test/navigation/NavigationUtils.js
++++ b/docshell/test/navigation/NavigationUtils.js
+@@ -138,20 +138,20 @@ function xpcEnumerateContentWindows(call
+                      .getService(Ci.nsIWindowWatcher);
+   var enumerator = ww.getWindowEnumerator();
+ 
+   var contentWindows = [];
+ 
+   while (enumerator.hasMoreElements()) {
+     var win = enumerator.getNext();
+     if (typeof ChromeWindow != "undefined" && win instanceof ChromeWindow) {
+-      var docshellTreeNode = win.QueryInterface(Ci.nsIInterfaceRequestor)
++      var docshellTreeItem = win.QueryInterface(Ci.nsIInterfaceRequestor)
+                                 .getInterface(Ci.nsIWebNavigation)
+-                                .QueryInterface(Ci.nsIDocShellTreeNode);
+-      var childCount = docshellTreeNode.childCount;
++                                .QueryInterface(Ci.nsIDocShellTreeItem);
++      var childCount = docshellTreeItem.childCount;
+       for (var i = 0; i < childCount; ++i) {
+         var childTreeNode = docshellTreeNode.getChildAt(i);
+ 
+         // we're only interested in content docshells
+         if (childTreeNode.itemType != Ci.nsIDocShellTreeItem.typeContent)
+           continue;
+ 
+         var webNav = childTreeNode.QueryInterface(Ci.nsIWebNavigation);
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -92,17 +92,16 @@
+ #include "nsContentUtils.h"
+ #include "nsDOMWindowUtils.h"
+ #include "nsIDOMGlobalPropertyInitializer.h"
+ #include "mozilla/Preferences.h"
+ 
+ // Window scriptable helper includes
+ #include "nsIDocShell.h"
+ #include "nsIDocShellTreeItem.h"
+-#include "nsIDocShellTreeNode.h"
+ #include "nsIScriptExternalNameSet.h"
+ #include "nsJSUtils.h"
+ #include "nsIInterfaceRequestor.h"
+ #include "nsIInterfaceRequestorUtils.h"
+ #include "nsScriptNameSpaceManager.h"
+ #include "nsIScriptObjectOwner.h"
+ #include "nsIJSNativeInitializer.h"
+ #include "nsJSEnvironment.h"
+@@ -6841,30 +6840,30 @@ nsWindowSH::NewResolve(nsIXPConnectWrapp
+     return NS_OK;
+   }
+ 
+   // Hmm, we do an awful lot of QIs here; maybe we should add a
+   // method on an interface that would let us just call into the
+   // window code directly...
+ 
+   if (!ObjectIsNativeWrapper(cx, obj)) {
+-    nsCOMPtr<nsIDocShellTreeNode> dsn(do_QueryInterface(win->GetDocShell()));
++    nsCOMPtr<nsIDocShellTreeItem> dsi = do_QueryInterface(win->GetDocShell());
+ 
+     int32_t count = 0;
+ 
+-    if (dsn) {
+-      dsn->GetChildCount(&count);
++    if (dsi) {
++      dsi->GetChildCount(&count);
+     }
+ 
+     if (count > 0) {
+       nsCOMPtr<nsIDocShellTreeItem> child;
+ 
+       const jschar *chars = ::JS_GetInternedStringChars(JSID_TO_STRING(id));
+ 
+-      dsn->FindChildWithName(reinterpret_cast<const PRUnichar*>(chars),
++      dsi->FindChildWithName(reinterpret_cast<const PRUnichar*>(chars),
+                              false, true, nullptr, nullptr,
+                              getter_AddRefs(child));
+ 
+       nsCOMPtr<nsIDOMWindow> child_win(do_GetInterface(child));
+ 
+       if (child_win) {
+         // We found a subframe of the right name, define the property
+         // on the wrapper so that ::NewResolve() doesn't get called
+diff --git a/dom/base/nsDOMWindowList.cpp b/dom/base/nsDOMWindowList.cpp
+--- a/dom/base/nsDOMWindowList.cpp
++++ b/dom/base/nsDOMWindowList.cpp
+@@ -43,17 +43,16 @@
+ #include "nsCOMPtr.h"
+ 
+ // Interfaces needed
+ #include "nsIDocument.h"
+ #include "nsIDOMDocument.h"
+ #include "nsIDOMWindow.h"
+ #include "nsIDocShell.h"
+ #include "nsIDocShellTreeItem.h"
+-#include "nsIDocShellTreeNode.h"
+ #include "nsIInterfaceRequestor.h"
+ #include "nsIInterfaceRequestorUtils.h"
+ #include "nsIScriptGlobalObject.h"
+ #include "nsIWebNavigation.h"
+ 
+ nsDOMWindowList::nsDOMWindowList(nsIDocShell *aDocShell)
+ {
+   SetDocShell(aDocShell);
+@@ -69,80 +68,80 @@ NS_IMPL_RELEASE(nsDOMWindowList)
+ NS_INTERFACE_MAP_BEGIN(nsDOMWindowList)
+    NS_INTERFACE_MAP_ENTRY(nsIDOMWindowCollection)
+    NS_INTERFACE_MAP_ENTRY(nsISupports)
+ NS_INTERFACE_MAP_END
+ 
+ NS_IMETHODIMP
+ nsDOMWindowList::SetDocShell(nsIDocShell* aDocShell)
+ {
+-  nsCOMPtr<nsIDocShellTreeNode> docShellAsNode(do_QueryInterface(aDocShell));
+-  mDocShellNode = docShellAsNode; // Weak Reference
++  nsCOMPtr<nsIDocShellTreeItem> docShellAsItem = do_QueryInterface(aDocShell);
++  mDocShellItem = docShellAsItem; // Weak Reference
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP 
+ nsDOMWindowList::GetLength(uint32_t* aLength)
+ {
+   nsresult rv = NS_OK;
+ 
+   *aLength = 0;
+ 
+-  nsCOMPtr<nsIWebNavigation> shellAsNav(do_QueryInterface(mDocShellNode));
++  nsCOMPtr<nsIWebNavigation> shellAsNav(do_QueryInterface(mDocShellItem));
+ 
+   if (shellAsNav) {
+     nsCOMPtr<nsIDOMDocument> domdoc;
+     shellAsNav->GetDocument(getter_AddRefs(domdoc));
+ 
+     nsCOMPtr<nsIDocument> doc(do_QueryInterface(domdoc));
+ 
+     if (doc) {
+       doc->FlushPendingNotifications(Flush_ContentAndNotify);
+     }
+   }
+ 
+-  // The above flush might cause mDocShellNode to be cleared, so we
++  // The above flush might cause mDocShellItem to be cleared, so we
+   // need to check that it's still non-null here.
+ 
+-  if (mDocShellNode) {
++  if (mDocShellItem) {
+     int32_t length;
+-    rv = mDocShellNode->GetChildCount(&length);
++    rv = mDocShellItem->GetChildCount(&length);
+ 
+     *aLength = length;
+   }
+ 
+   return rv;
+ }
+ 
+ NS_IMETHODIMP 
+ nsDOMWindowList::Item(uint32_t aIndex, nsIDOMWindow** aReturn)
+ {
+   nsCOMPtr<nsIDocShellTreeItem> item;
+ 
+   *aReturn = nullptr;
+ 
+-  nsCOMPtr<nsIWebNavigation> shellAsNav = do_QueryInterface(mDocShellNode);
++  nsCOMPtr<nsIWebNavigation> shellAsNav = do_QueryInterface(mDocShellItem);
+ 
+   if (shellAsNav) {
+     nsCOMPtr<nsIDOMDocument> domdoc;
+     shellAsNav->GetDocument(getter_AddRefs(domdoc));
+ 
+     nsCOMPtr<nsIDocument> doc = do_QueryInterface(domdoc);
+ 
+     if (doc) {
+       doc->FlushPendingNotifications(Flush_ContentAndNotify);
+     }
+   }
+ 
+-  // The above flush might cause mDocShellNode to be cleared, so we
++  // The above flush might cause mDocShellItem to be cleared, so we
+   // need to check that it's still non-null here.
+ 
+-  if (mDocShellNode) {
+-    mDocShellNode->GetChildAt(aIndex, getter_AddRefs(item));
++  if (mDocShellItem) {
++    mDocShellItem->GetChildAt(aIndex, getter_AddRefs(item));
+ 
+     nsCOMPtr<nsIScriptGlobalObject> globalObject(do_GetInterface(item));
+     NS_ASSERTION(!item || (item && globalObject),
+                  "Couldn't get to the globalObject");
+ 
+     if (globalObject) {
+       CallQueryInterface(globalObject, aReturn);
+     }
+@@ -152,34 +151,34 @@ nsDOMWindowList::Item(uint32_t aIndex, n
+ 
+ NS_IMETHODIMP 
+ nsDOMWindowList::NamedItem(const nsAString& aName, nsIDOMWindow** aReturn)
+ {
+   nsCOMPtr<nsIDocShellTreeItem> item;
+ 
+   *aReturn = nullptr;
+ 
+-  nsCOMPtr<nsIWebNavigation> shellAsNav(do_QueryInterface(mDocShellNode));
++  nsCOMPtr<nsIWebNavigation> shellAsNav(do_QueryInterface(mDocShellItem));
+ 
+   if (shellAsNav) {
+     nsCOMPtr<nsIDOMDocument> domdoc;
+     shellAsNav->GetDocument(getter_AddRefs(domdoc));
+ 
+     nsCOMPtr<nsIDocument> doc(do_QueryInterface(domdoc));
+ 
+     if (doc) {
+       doc->FlushPendingNotifications(Flush_ContentAndNotify);
+     }
+   }
+ 
+-  // The above flush might cause mDocShellNode to be cleared, so we
++  // The above flush might cause mDocShellItem to be cleared, so we
+   // need to check that it's still non-null here.
+ 
+-  if (mDocShellNode) {
+-    mDocShellNode->FindChildWithName(PromiseFlatString(aName).get(),
++  if (mDocShellItem) {
++    mDocShellItem->FindChildWithName(PromiseFlatString(aName).get(),
+                                      false, false, nullptr,
+                                      nullptr, getter_AddRefs(item));
+ 
+     nsCOMPtr<nsIScriptGlobalObject> globalObject(do_GetInterface(item));
+     if (globalObject) {
+       CallQueryInterface(globalObject.get(), aReturn);
+     }
+   }
+diff --git a/dom/base/nsDOMWindowList.h b/dom/base/nsDOMWindowList.h
+--- a/dom/base/nsDOMWindowList.h
++++ b/dom/base/nsDOMWindowList.h
+@@ -37,29 +37,28 @@
+  * ***** END LICENSE BLOCK ***** */
+ #ifndef nsDOMWindowList_h___
+ #define nsDOMWindowList_h___
+ 
+ #include "nsISupports.h"
+ #include "nsIDOMWindowCollection.h"
+ #include "nsString.h"
+ 
+-class nsIDocShellTreeNode;
++class nsIDocShellTreeItem;
+ class nsIDocShell;
+-class nsIDOMWindow;
+ 
+ class nsDOMWindowList : public nsIDOMWindowCollection
+ {
+ public:
+   nsDOMWindowList(nsIDocShell *aDocShell);
+   virtual ~nsDOMWindowList();
+ 
+   NS_DECL_ISUPPORTS
+   NS_DECL_NSIDOMWINDOWCOLLECTION
+ 
+   //local methods
+   NS_IMETHOD SetDocShell(nsIDocShell* aDocShell);
+ 
+ protected:
+-  nsIDocShellTreeNode* mDocShellNode; //Weak Reference
++  nsIDocShellTreeItem* mDocShellItem; //Weak Reference
+ };
+ 
+ #endif // nsDOMWindowList_h___
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -101,17 +101,16 @@
+ #include "nsIWidget.h"
+ #include "nsIBaseWindow.h"
+ #include "nsDeviceMotion.h"
+ #include "nsIContent.h"
+ #include "nsIContentViewerEdit.h"
+ #include "nsIDocShell.h"
+ #include "nsIDocShellLoadInfo.h"
+ #include "nsIDocShellTreeItem.h"
+-#include "nsIDocShellTreeNode.h"
+ #include "nsIEditorDocShell.h"
+ #include "nsIDocCharset.h"
+ #include "nsIDocument.h"
+ #include "nsIHTMLDocument.h"
+ #include "nsIDOMHTMLDocument.h"
+ #include "nsIDOMHTMLElement.h"
+ #ifndef MOZ_DISABLE_DOMCRYPTO
+ #include "nsIDOMCrypto.h"
+@@ -7599,24 +7598,24 @@ nsGlobalWindow::SetKeyboardIndicators(UI
+ 
+   // only change the flags that have been modified
+   if (aShowAccelerators != UIStateChangeType_NoChange)
+     mShowAccelerators = aShowAccelerators == UIStateChangeType_Set;
+   if (aShowFocusRings != UIStateChangeType_NoChange)
+     mShowFocusRings = aShowFocusRings == UIStateChangeType_Set;
+ 
+   // propagate the indicators to child windows
+-  nsCOMPtr<nsIDocShellTreeNode> node = do_QueryInterface(GetDocShell());
+-  if (node) {
++  nsCOMPtr<nsIDocShellTreeItem> item = do_QueryInterface(GetDocShell());
++  if (item) {
+     int32_t childCount = 0;
+-    node->GetChildCount(&childCount);
++    item->GetChildCount(&childCount);
+ 
+     for (int32_t i = 0; i < childCount; ++i) {
+       nsCOMPtr<nsIDocShellTreeItem> childShell;
+-      node->GetChildAt(i, getter_AddRefs(childShell));
++      item->GetChildAt(i, getter_AddRefs(childShell));
+       nsCOMPtr<nsPIDOMWindow> childWindow = do_GetInterface(childShell);
+       if (childWindow) {
+         childWindow->SetKeyboardIndicators(aShowAccelerators, aShowFocusRings);
+       }
+     }
+   }
+ 
+   bool newShouldShowFocusRing = ShouldShowFocusRing();
+@@ -8493,25 +8492,24 @@ nsGlobalWindow::FireDelayedDOMEvents()
+     static_cast<nsDOMOfflineResourceList*>(mApplicationCache.get())->FirePendingEvents();
+   }
+ 
+   if (mFireOfflineStatusChangeEventOnThaw) {
+     mFireOfflineStatusChangeEventOnThaw = false;
+     FireOfflineStatusEvent();
+   }
+ 
+-  nsCOMPtr<nsIDocShellTreeNode> node =
+-    do_QueryInterface(GetDocShell());
+-  if (node) {
++  nsCOMPtr<nsIDocShellTreeItem> item = do_QueryInterface(GetDocShell());
++  if (item) {
+     int32_t childCount = 0;
+-    node->GetChildCount(&childCount);
++    item->GetChildCount(&childCount);
+ 
+     for (int32_t i = 0; i < childCount; ++i) {
+       nsCOMPtr<nsIDocShellTreeItem> childShell;
+-      node->GetChildAt(i, getter_AddRefs(childShell));
++      item->GetChildAt(i, getter_AddRefs(childShell));
+       NS_ASSERTION(childShell, "null child shell");
+ 
+       nsCOMPtr<nsPIDOMWindow> pWin = do_GetInterface(childShell);
+       if (pWin) {
+         nsGlobalWindow *win =
+           static_cast<nsGlobalWindow*>
+                      (static_cast<nsPIDOMWindow*>(pWin));
+         win->FireDelayedDOMEvents();
+@@ -9906,24 +9904,24 @@ nsGlobalWindow::SuspendTimeouts(uint32_t
+         // passing null for the context, since this shouldn't actually release this
+         // timeout.
+         t->Release();
+       }
+     }
+   }
+ 
+   // Suspend our children as well.
+-  nsCOMPtr<nsIDocShellTreeNode> node(do_QueryInterface(GetDocShell()));
+-  if (node) {
++  nsCOMPtr<nsIDocShellTreeItem> item(do_QueryInterface(GetDocShell()));
++  if (item) {
+     int32_t childCount = 0;
+-    node->GetChildCount(&childCount);
++    item->GetChildCount(&childCount);
+ 
+     for (int32_t i = 0; i < childCount; ++i) {
+       nsCOMPtr<nsIDocShellTreeItem> childShell;
+-      node->GetChildAt(i, getter_AddRefs(childShell));
++      item->GetChildAt(i, getter_AddRefs(childShell));
+       NS_ASSERTION(childShell, "null child shell");
+ 
+       nsCOMPtr<nsPIDOMWindow> pWin = do_GetInterface(childShell);
+       if (pWin) {
+         nsGlobalWindow *win =
+           static_cast<nsGlobalWindow*>
+                      (static_cast<nsPIDOMWindow*>(pWin));
+         NS_ASSERTION(win->IsOuterWindow(), "Expected outer window");
+@@ -10009,25 +10007,24 @@ nsGlobalWindow::ResumeTimeouts(bool aT
+       }
+ 
+       // Add a reference for the new timer's closure.
+       t->AddRef();
+     }
+   }
+ 
+   // Resume our children as well.
+-  nsCOMPtr<nsIDocShellTreeNode> node =
+-    do_QueryInterface(GetDocShell());
+-  if (node) {
++  nsCOMPtr<nsIDocShellTreeItem> item = do_QueryInterface(GetDocShell());
++  if (item) {
+     int32_t childCount = 0;
+-    node->GetChildCount(&childCount);
++    item->GetChildCount(&childCount);
+ 
+     for (int32_t i = 0; i < childCount; ++i) {
+       nsCOMPtr<nsIDocShellTreeItem> childShell;
+-      node->GetChildAt(i, getter_AddRefs(childShell));
++      item->GetChildAt(i, getter_AddRefs(childShell));
+       NS_ASSERTION(childShell, "null child shell");
+ 
+       nsCOMPtr<nsPIDOMWindow> pWin = do_GetInterface(childShell);
+       if (pWin) {
+         nsGlobalWindow *win =
+           static_cast<nsGlobalWindow*>
+                      (static_cast<nsPIDOMWindow*>(pWin));
+ 
+diff --git a/embedding/browser/webBrowser/nsWebBrowser.cpp b/embedding/browser/webBrowser/nsWebBrowser.cpp
+--- a/embedding/browser/webBrowser/nsWebBrowser.cpp
++++ b/embedding/browser/webBrowser/nsWebBrowser.cpp
+@@ -169,17 +169,16 @@ NS_IMPL_RELEASE(nsWebBrowser)
+ NS_INTERFACE_MAP_BEGIN(nsWebBrowser)
+     NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIWebBrowser)
+     NS_INTERFACE_MAP_ENTRY(nsIWebBrowser)
+     NS_INTERFACE_MAP_ENTRY(nsIWebNavigation)
+     NS_INTERFACE_MAP_ENTRY(nsIBaseWindow)
+     NS_INTERFACE_MAP_ENTRY(nsIScrollable)
+     NS_INTERFACE_MAP_ENTRY(nsITextScroll)
+     NS_INTERFACE_MAP_ENTRY(nsIDocShellTreeItem)
+-    NS_INTERFACE_MAP_ENTRY(nsIDocShellTreeNode)
+     NS_INTERFACE_MAP_ENTRY(nsIInterfaceRequestor)
+     NS_INTERFACE_MAP_ENTRY(nsIWebBrowserSetup)
+     NS_INTERFACE_MAP_ENTRY(nsIWebBrowserPersist)
+     NS_INTERFACE_MAP_ENTRY(nsICancelable)
+     NS_INTERFACE_MAP_ENTRY(nsIWebBrowserFocus)
+     NS_INTERFACE_MAP_ENTRY(nsIWebProgressListener)
+     NS_INTERFACE_MAP_ENTRY(nsIWebBrowserStream)
+     NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
+diff --git a/embedding/browser/webBrowser/nsWebBrowser.h b/embedding/browser/webBrowser/nsWebBrowser.h
+--- a/embedding/browser/webBrowser/nsWebBrowser.h
++++ b/embedding/browser/webBrowser/nsWebBrowser.h
+@@ -46,17 +46,16 @@
+ // Core Includes
+ #include "nsCOMPtr.h"
+ 
+ // Interfaces needed
+ #include "nsCWebBrowser.h"
+ #include "nsIBaseWindow.h"
+ #include "nsIDocShell.h"
+ #include "nsIDocShellTreeItem.h"
+-#include "nsIDocShellTreeNode.h"
+ #include "nsIInterfaceRequestor.h"
+ #include "nsIInterfaceRequestorUtils.h"
+ #include "nsIScrollable.h"
+ #include "nsISHistory.h"
+ #include "nsITextScroll.h"
+ #include "nsIWidget.h"
+ #include "nsIWebProgress.h"
+ #include "nsISecureBrowserUI.h"
+@@ -122,17 +121,16 @@ class nsWebBrowser : public nsIWebBrowse
+ friend class nsDocShellTreeOwner;
+ public:
+     nsWebBrowser();
+ 
+     NS_DECL_ISUPPORTS
+ 
+     NS_DECL_NSIBASEWINDOW
+     NS_DECL_NSIDOCSHELLTREEITEM
+-    NS_DECL_NSIDOCSHELLTREENODE
+     NS_DECL_NSIINTERFACEREQUESTOR
+     NS_DECL_NSISCROLLABLE   
+     NS_DECL_NSITEXTSCROLL
+     NS_DECL_NSIWEBBROWSER
+     NS_DECL_NSIWEBNAVIGATION
+     NS_DECL_NSIWEBBROWSERSETUP
+     NS_DECL_NSIWEBBROWSERPERSIST
+     NS_DECL_NSICANCELABLE
+diff --git a/layout/base/nsDocumentViewer.cpp b/layout/base/nsDocumentViewer.cpp
+--- a/layout/base/nsDocumentViewer.cpp
++++ b/layout/base/nsDocumentViewer.cpp
+@@ -87,17 +87,16 @@
+ #include "nsNetUtil.h"
+ #include "nsIContentViewerEdit.h"
+ #include "nsIContentViewerFile.h"
+ #include "mozilla/css/Loader.h"
+ #include "nsIMarkupDocumentViewer.h"
+ #include "nsIInterfaceRequestor.h"
+ #include "nsIInterfaceRequestorUtils.h"
+ #include "nsIDocShellTreeItem.h"
+-#include "nsIDocShellTreeNode.h"
+ #include "nsIDocShellTreeOwner.h"
+ #include "nsIDocShell.h"
+ #include "nsIBaseWindow.h"
+ #include "nsILayoutHistoryState.h"
+ #include "nsIParser.h"
+ #include "nsGUIEvent.h"
+ #include "nsHTMLReflowState.h"
+ #include "nsIDOMHTMLAnchorElement.h"
+@@ -407,17 +406,17 @@ private:
+   nsresult GetDocumentSelection(nsISelection **aSelection);
+ 
+   void DestroyPresShell();
+   void DestroyPresContext();
+ 
+ #ifdef NS_PRINTING
+   // Called when the DocViewer is notified that the state
+   // of Printing or PP has changed
+-  void SetIsPrintingInDocShellTree(nsIDocShellTreeNode* aParentNode, 
++  void SetIsPrintingInDocShellTree(nsIDocShellTreeItem* aParentNode, 
+                                    bool                 aIsPrintingOrPP, 
+                                    bool                 aStartAtTop);
+ #endif // NS_PRINTING
+ 
+   // Whether we should attach to the top level widget. This is true if we
+   // are sharing/recycling a single base widget and not creating multiple
+   // child widgets.
+   bool ShouldAttachToTopLevel();
+@@ -1159,24 +1158,24 @@ DocumentViewerImpl::PermitUnload(bool 
+     nsAutoPopupStatePusher popupStatePusher(openAbused, true);
+ 
+     mInPermitUnload = true;
+     nsEventDispatcher::DispatchDOMEvent(window, nullptr, event, mPresContext,
+                                         nullptr);
+     mInPermitUnload = false;
+   }
+ 
+-  nsCOMPtr<nsIDocShellTreeNode> docShellNode(do_QueryReferent(mContainer));
++  nsCOMPtr<nsIDocShellTreeItem> docShellItem = do_QueryReferent(mContainer);
+   nsAutoString text;
+   beforeUnload->GetReturnValue(text);
+   if (pEvent->GetInternalNSEvent()->flags & NS_EVENT_FLAG_NO_DEFAULT ||
+       !text.IsEmpty()) {
+     // Ask the user if it's ok to unload the current page
+ 
+-    nsCOMPtr<nsIPrompt> prompt = do_GetInterface(docShellNode);
++    nsCOMPtr<nsIPrompt> prompt = do_GetInterface(docShellItem);
+ 
+     if (prompt) {
+       nsXPIDLString title, message, stayLabel, leaveLabel;
+       rv  = nsContentUtils::GetLocalizedString(nsContentUtils::eDOM_PROPERTIES,
+                                                "OnBeforeUnloadTitle",
+                                                title);
+       rv |= nsContentUtils::GetLocalizedString(nsContentUtils::eDOM_PROPERTIES,
+                                                "OnBeforeUnloadMessage",
+@@ -1206,23 +1205,23 @@ DocumentViewerImpl::PermitUnload(bool 
+                              &dummy, &buttonPressed);
+       NS_ENSURE_SUCCESS(rv, rv);
+ 
+       // Button 0 == leave, button 1 == stay
+       *aPermitUnload = (buttonPressed == 0);
+     }
+   }
+ 
+-  if (docShellNode) {
++  if (docShellItem) {
+     int32_t childCount;
+-    docShellNode->GetChildCount(&childCount);
++    docShellItem->GetChildCount(&childCount);
+ 
+     for (int32_t i = 0; i < childCount && *aPermitUnload; ++i) {
+       nsCOMPtr<nsIDocShellTreeItem> item;
+-      docShellNode->GetChildAt(i, getter_AddRefs(item));
++      docShellItem->GetChildAt(i, getter_AddRefs(item));
+ 
+       nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(item));
+ 
+       if (docShell) {
+         nsCOMPtr<nsIContentViewer> cv;
+         docShell->GetContentViewer(getter_AddRefs(cv));
+ 
+         if (cv) {
+@@ -1238,24 +1237,24 @@ DocumentViewerImpl::PermitUnload(bool 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ DocumentViewerImpl::ResetCloseWindow()
+ {
+   mCallerIsClosingWindow = false;
+ 
+-  nsCOMPtr<nsIDocShellTreeNode> docShellNode(do_QueryReferent(mContainer));
+-  if (docShellNode) {
++  nsCOMPtr<nsIDocShellTreeItem> docShellItem = do_QueryReferent(mContainer);
++  if (docShellItem) {
+     int32_t childCount;
+-    docShellNode->GetChildCount(&childCount);
++    docShellItem->GetChildCount(&childCount);
+ 
+     for (int32_t i = 0; i < childCount; ++i) {
+       nsCOMPtr<nsIDocShellTreeItem> item;
+-      docShellNode->GetChildAt(i, getter_AddRefs(item));
++      docShellItem->GetChildAt(i, getter_AddRefs(item));
+ 
+       nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(item));
+ 
+       if (docShell) {
+         nsCOMPtr<nsIContentViewer> cv;
+         docShell->GetContentViewer(getter_AddRefs(cv));
+ 
+         if (cv) {
+@@ -1343,24 +1342,24 @@ AttachContainerRecurse(nsIDocShell* aShe
+     nsCOMPtr<nsIPresShell> presShell;
+     docViewer->GetPresShell(getter_AddRefs(presShell));
+     if (presShell) {
+       presShell->SetForwardingContainer(nullptr);
+     }
+   }
+ 
+   // Now recurse through the children
+-  nsCOMPtr<nsIDocShellTreeNode> node = do_QueryInterface(aShell);
+-  NS_ASSERTION(node, "docshells must implement nsIDocShellTreeNode");
++  nsCOMPtr<nsIDocShellTreeItem> item = do_QueryInterface(aShell);
++  NS_ASSERTION(item, "docshells must implement nsIDocShellTreeItem");
+ 
+   int32_t childCount;
+-  node->GetChildCount(&childCount);
++  item->GetChildCount(&childCount);
+   for (int32_t i = 0; i < childCount; ++i) {
+     nsCOMPtr<nsIDocShellTreeItem> childItem;
+-    node->GetChildAt(i, getter_AddRefs(childItem));
++    item->GetChildAt(i, getter_AddRefs(childItem));
+     AttachContainerRecurse(nsCOMPtr<nsIDocShell>(do_QueryInterface(childItem)));
+   }
+ }
+ 
+ NS_IMETHODIMP
+ DocumentViewerImpl::Open(nsISupports *aState, nsISHEntry *aSHEntry)
+ {
+   NS_ENSURE_TRUE(mPresShell, NS_ERROR_NOT_INITIALIZED);
+@@ -1500,24 +1499,24 @@ DetachContainerRecurse(nsIDocShell *aShe
+     nsCOMPtr<nsIPresShell> presShell;
+     docViewer->GetPresShell(getter_AddRefs(presShell));
+     if (presShell) {
+       presShell->SetForwardingContainer(nsWeakPtr(do_GetWeakReference(aShell)));
+     }
+   }
+ 
+   // Now recurse through the children
+-  nsCOMPtr<nsIDocShellTreeNode> node = do_QueryInterface(aShell);
+-  NS_ASSERTION(node, "docshells must implement nsIDocShellTreeNode");
++  nsCOMPtr<nsIDocShellTreeItem> item = do_QueryInterface(aShell);
++  NS_ASSERTION(node, "docshells must implement nsIDocShellTreeItem");
+ 
+   int32_t childCount;
+-  node->GetChildCount(&childCount);
++  item->GetChildCount(&childCount);
+   for (int32_t i = 0; i < childCount; ++i) {
+     nsCOMPtr<nsIDocShellTreeItem> childItem;
+-    node->GetChildAt(i, getter_AddRefs(childItem));
++    item->GetChildAt(i, getter_AddRefs(childItem));
+     DetachContainerRecurse(nsCOMPtr<nsIDocShell>(do_QueryInterface(childItem)));
+   }
+ }
+ 
+ NS_IMETHODIMP
+ DocumentViewerImpl::Destroy()
+ {
+   NS_ASSERTION(mDocument, "No document in Destroy()!");
+@@ -1771,24 +1770,24 @@ DocumentViewerImpl::SetDocumentInternal(
+     nsCOMPtr<nsPIDOMWindow> window = do_GetInterface(container);
+     if (window) {
+       window->SetNewDocument(aDocument, nullptr, aForceReuseInnerWindow);
+     }
+ 
+     // Clear the list of old child docshells. Child docshells for the new
+     // document will be constructed as frames are created.
+     if (!aDocument->IsStaticDocument()) {
+-      nsCOMPtr<nsIDocShellTreeNode> node = do_QueryInterface(container);
++      nsCOMPtr<nsIDocShellTreeItem> item = do_QueryInterface(container);
+       if (node) {
+         int32_t count;
+-        node->GetChildCount(&count);
++        item->GetChildCount(&count);
+         for (int32_t i = 0; i < count; ++i) {
+           nsCOMPtr<nsIDocShellTreeItem> child;
+-          node->GetChildAt(0, getter_AddRefs(child));
+-          node->RemoveChild(child);
++          item->GetChildAt(0, getter_AddRefs(child));
++          item->RemoveChild(child);
+         }
+       }
+     }
+   }
+ 
+   nsresult rv = SyncParentSubDocMap();
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+@@ -2676,26 +2675,24 @@ NS_IMETHODIMP DocumentViewerImpl::Scroll
+                                                        nsIPresShell::SCROLL_OVERFLOW_HIDDEN),
+                      NS_ERROR_FAILURE);
+    return NS_OK;
+ }
+ 
+ void
+ DocumentViewerImpl::CallChildren(CallChildFunc aFunc, void* aClosure)
+ {
+-  nsCOMPtr<nsIDocShellTreeNode> docShellNode(do_QueryReferent(mContainer));
++  nsCOMPtr<nsIDocShellTreeItem> docShellItem = do_QueryReferent(mContainer);
+   if (docShellNode)
+   {
+-    int32_t i;
+     int32_t n;
+-    docShellNode->GetChildCount(&n);
+-    for (i=0; i < n; i++)
+-    {
++    docShellItem->GetChildCount(&n);
++    for (int32_t i = 0; i < n; i++) {
+       nsCOMPtr<nsIDocShellTreeItem> child;
+-      docShellNode->GetChildAt(i, getter_AddRefs(child));
++      docShellItem->GetChildAt(i, getter_AddRefs(child));
+       nsCOMPtr<nsIDocShell> childAsShell(do_QueryInterface(child));
+       NS_ASSERTION(childAsShell, "null child in docshell");
+       if (childAsShell)
+       {
+         nsCOMPtr<nsIContentViewer> childCV;
+         childAsShell->GetContentViewer(getter_AddRefs(childCV));
+         if (childCV)
+         {
+@@ -3964,32 +3961,32 @@ DocumentViewerImpl::GetIsRangeSelection(
+ 
+ //----------------------------------------------------------------------------------
+ // Printing/Print Preview Helpers
+ //----------------------------------------------------------------------------------
+ 
+ //----------------------------------------------------------------------------------
+ // Walks the document tree and tells each DocShell whether Printing/PP is happening
+ void 
+-DocumentViewerImpl::SetIsPrintingInDocShellTree(nsIDocShellTreeNode* aParentNode, 
++DocumentViewerImpl::SetIsPrintingInDocShellTree(nsIDocShellTreeItem* aParentItem,
+                                                 bool                 aIsPrintingOrPP, 
+                                                 bool                 aStartAtTop)
+ {
+-  nsCOMPtr<nsIDocShellTreeItem> parentItem(do_QueryInterface(aParentNode));
++  nsCOMPtr<nsIDocShellTreeItem> parentItem = aParentItem;
+ 
+   // find top of "same parent" tree
+   if (aStartAtTop) {
+     if (aIsPrintingOrPP) {
+       while (parentItem) {
+         nsCOMPtr<nsIDocShellTreeItem> parent;
+         parentItem->GetSameTypeParent(getter_AddRefs(parent));
+         if (!parent) {
+           break;
+         }
+-        parentItem = do_QueryInterface(parent);
++        parentItem = parent;
+       }
+       mTopContainerWhilePrinting = do_GetWeakReference(parentItem);
+     } else {
+       parentItem = do_QueryReferent(mTopContainerWhilePrinting);
+     }
+   }
+ 
+   // Check to see if the DocShell's ContentViewer is printing/PP
+@@ -4000,23 +3997,21 @@ DocumentViewerImpl::SetIsPrintingInDocSh
+ 
+   if (!aParentNode) {
+     return;
+   }
+ 
+   // Traverse children to see if any of them are printing.
+   int32_t n;
+   aParentNode->GetChildCount(&n);
+-  for (int32_t i=0; i < n; i++) {
++  for (int32_t i = 0; i < n; i++) {
+     nsCOMPtr<nsIDocShellTreeItem> child;
+     aParentNode->GetChildAt(i, getter_AddRefs(child));
+-    nsCOMPtr<nsIDocShellTreeNode> childAsNode(do_QueryInterface(child));
+-    NS_ASSERTION(childAsNode, "child isn't nsIDocShellTreeNode");
+-    if (childAsNode) {
+-      SetIsPrintingInDocShellTree(childAsNode, aIsPrintingOrPP, false);
++    if (child) {
++      SetIsPrintingInDocShellTree(child, aIsPrintingOrPP, false);
+     }
+   }
+ 
+ }
+ #endif // NS_PRINTING
+ 
+ bool
+ DocumentViewerImpl::ShouldAttachToTopLevel()
+@@ -4087,19 +4082,19 @@ DocumentViewerImpl::GetIsPrinting()
+ //------------------------------------------------------------
+ // Notification from the PrintEngine of the current Printing status
+ void
+ DocumentViewerImpl::SetIsPrinting(bool aIsPrinting)
+ {
+ #ifdef NS_PRINTING
+   // Set all the docShells in the docshell tree to be printing.
+   // that way if anyone of them tries to "navigate" it can't
+-  nsCOMPtr<nsIDocShellTreeNode> docShellTreeNode(do_QueryReferent(mContainer));
+-  if (docShellTreeNode || !aIsPrinting) {
+-    SetIsPrintingInDocShellTree(docShellTreeNode, aIsPrinting, true);
++  nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem = do_QueryReferent(mContainer);
++  if (docShellTreeItem || !aIsPrinting) {
++    SetIsPrintingInDocShellTree(docShellTreeItem, aIsPrinting, true);
+   } else {
+     NS_WARNING("Did you close a window before printing?");
+   }
+ #endif
+ }
+ 
+ //------------------------------------------------------------
+ // The PrintEngine holds the current value
+@@ -4119,19 +4114,19 @@ DocumentViewerImpl::GetIsPrintPreview()
+ //------------------------------------------------------------
+ // Notification from the PrintEngine of the current PP status
+ void
+ DocumentViewerImpl::SetIsPrintPreview(bool aIsPrintPreview)
+ {
+ #ifdef NS_PRINTING
+   // Set all the docShells in the docshell tree to be printing.
+   // that way if anyone of them tries to "navigate" it can't
+-  nsCOMPtr<nsIDocShellTreeNode> docShellTreeNode(do_QueryReferent(mContainer));
+-  if (docShellTreeNode || !aIsPrintPreview) {
+-    SetIsPrintingInDocShellTree(docShellTreeNode, aIsPrintPreview, true);
++  nsCOMPtr<nsIDocShellTreeItem> docShellTreeNode = do_QueryReferent(mContainer);
++  if (docShellTreeItem || !aIsPrintPreview) {
++    SetIsPrintingInDocShellTree(docShellTreeItem, aIsPrintPreview, true);
+   }
+ #endif
+   if (!aIsPrintPreview) {
+     if (mPresShell) {
+       DestroyPresShell();
+     }
+     mWindow = nullptr;
+     mViewManager = nullptr;
+diff --git a/layout/generic/nsSubDocumentFrame.cpp b/layout/generic/nsSubDocumentFrame.cpp
+--- a/layout/generic/nsSubDocumentFrame.cpp
++++ b/layout/generic/nsSubDocumentFrame.cpp
+@@ -39,25 +39,23 @@
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /*
+  * rendering object for replaced elements that contain a document, such
+  * as <frame>, <iframe>, and some <object>s
+  */
+ 
+ #include "mozilla/layout/RenderFrameParent.h"
+-using mozilla::layout::RenderFrameParent;
+ 
+ #include "nsSubDocumentFrame.h"
+ #include "nsCOMPtr.h"
+ #include "nsGenericHTMLElement.h"
+ #include "nsIDocShell.h"
+ #include "nsIDocShellLoadInfo.h"
+ #include "nsIDocShellTreeItem.h"
+-#include "nsIDocShellTreeNode.h"
+ #include "nsIDocShellTreeOwner.h"
+ #include "nsIBaseWindow.h"
+ #include "nsIContentViewer.h"
+ #include "nsIDocumentViewer.h"
+ #include "nsPresContext.h"
+ #include "nsIPresShell.h"
+ #include "nsIComponentManager.h"
+ #include "nsFrameManager.h"
+@@ -96,16 +94,17 @@ using mozilla::layout::RenderFrameParent
+ 
+ // For Accessibility
+ #ifdef ACCESSIBILITY
+ #include "nsAccessibilityService.h"
+ #endif
+ #include "nsIServiceManager.h"
+ 
+ using namespace mozilla;
++using mozilla::layout::RenderFrameParent;
+ 
+ static nsIDocument*
+ GetDocumentFromView(nsIView* aView)
+ {
+   NS_PRECONDITION(aView, "");
+ 
+   nsIFrame* f = static_cast<nsIFrame*>(aView->GetClientData());
+   nsIPresShell* ps =  f ? f->PresContext()->PresShell() : nullptr;
+diff --git a/layout/printing/nsPrintEngine.cpp b/layout/printing/nsPrintEngine.cpp
+--- a/layout/printing/nsPrintEngine.cpp
++++ b/layout/printing/nsPrintEngine.cpp
+@@ -133,17 +133,16 @@ static const char kPrintingPromptService
+ #include "nsIPageSequenceFrame.h"
+ #include "nsIURL.h"
+ #include "nsIContentViewerEdit.h"
+ #include "nsIContentViewerFile.h"
+ #include "nsIMarkupDocumentViewer.h"
+ #include "nsIInterfaceRequestor.h"
+ #include "nsIInterfaceRequestorUtils.h"
+ #include "nsIDocShellTreeItem.h"
+-#include "nsIDocShellTreeNode.h"
+ #include "nsIDocShellTreeOwner.h"
+ #include "nsIWebBrowserChrome.h"
+ #include "nsIDocShell.h"
+ #include "nsIBaseWindow.h"
+ #include "nsILayoutHistoryState.h"
+ #include "nsFrameManager.h"
+ #include "nsIParser.h"
+ #include "nsGUIEvent.h"
+@@ -534,30 +533,29 @@ nsPrintEngine::DoCommonPrint(bool       
+   // Check to see if there is a "regular" selection
+   bool isSelection = IsThereARangeSelection(mPrt->mCurrentFocusWin);
+ 
+   // Get the docshell for this documentviewer
+   nsCOMPtr<nsIDocShell> webContainer(do_QueryReferent(mContainer, &rv));
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   mPrt->mPrintObject = new nsPrintObject();
+-  NS_ENSURE_TRUE(mPrt->mPrintObject, NS_ERROR_OUT_OF_MEMORY);
+   rv = mPrt->mPrintObject->Init(webContainer, aDoc, aIsPrintPreview);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   NS_ENSURE_TRUE(mPrt->mPrintDocList.AppendElement(mPrt->mPrintObject),
+                  NS_ERROR_OUT_OF_MEMORY);
+ 
+   mPrt->mIsParentAFrameSet = IsParentAFrameSet(webContainer);
+   mPrt->mPrintObject->mFrameType = mPrt->mIsParentAFrameSet ? eFrameSet : eDoc;
+ 
+   // Build the "tree" of PrintObjects
+-  nsCOMPtr<nsIDocShellTreeNode> parentAsNode =
++  nsCOMPtr<nsIDocShellTreeItem> parentAsItem =
+     do_QueryInterface(mPrt->mPrintObject->mDocShell);
+-  BuildDocTree(parentAsNode, &mPrt->mPrintDocList, mPrt->mPrintObject);
++  BuildDocTree(parentAsItem, &mPrt->mPrintDocList, mPrt->mPrintObject);
+ 
+   if (!aIsPrintPreview) {
+     SetIsPrinting(true);
+   }
+ 
+   // XXX This isn't really correct...
+   if (!mPrt->mPrintObject->mDocument ||
+       !mPrt->mPrintObject->mDocument->GetRootElement())
+@@ -1130,48 +1128,47 @@ nsPrintEngine::IsParentAFrameSet(nsIDocS
+   return isFrameSet;
+ }
+ 
+ 
+ //---------------------------------------------------------------------
+ // Recursively build a list of sub documents to be printed
+ // that mirrors the document tree
+ void
+-nsPrintEngine::BuildDocTree(nsIDocShellTreeNode *      aParentNode,
++nsPrintEngine::BuildDocTree(nsIDocShellTreeItem*       aParentItem,
+                             nsTArray<nsPrintObject*> * aDocList,
+                             nsPrintObject *            aPO)
+ {
+   NS_ASSERTION(aParentNode, "Pointer is null!");
+   NS_ASSERTION(aDocList, "Pointer is null!");
+   NS_ASSERTION(aPO, "Pointer is null!");
+ 
+   int32_t childWebshellCount;
+-  aParentNode->GetChildCount(&childWebshellCount);
++  aParentItem->GetChildCount(&childWebshellCount);
+   if (childWebshellCount > 0) {
+-    for (int32_t i=0;i<childWebshellCount;i++) {
++    for (int32_t i = 0; i < childWebshellCount; i++) {
+       nsCOMPtr<nsIDocShellTreeItem> child;
+-      aParentNode->GetChildAt(i, getter_AddRefs(child));
++      aParentItem->GetChildAt(i, getter_AddRefs(child));
+       nsCOMPtr<nsIDocShell> childAsShell(do_QueryInterface(child));
+ 
+       nsCOMPtr<nsIContentViewer>  viewer;
+       childAsShell->GetContentViewer(getter_AddRefs(viewer));
+       if (viewer) {
+         nsCOMPtr<nsIContentViewerFile> viewerFile(do_QueryInterface(viewer));
+         if (viewerFile) {
+           nsCOMPtr<nsIDocShell> childDocShell(do_QueryInterface(child));
+-          nsCOMPtr<nsIDocShellTreeNode> childNode(do_QueryInterface(child));
+           nsCOMPtr<nsIDOMDocument> doc = do_GetInterface(childDocShell);
+           nsPrintObject * po = new nsPrintObject();
+           po->mParent = aPO;
+           nsresult rv = po->Init(childDocShell, doc, aPO->mPrintPreview);
+           if (NS_FAILED(rv))
+             NS_NOTREACHED("Init failed?");
+           aPO->mKids.AppendElement(po);
+           aDocList->AppendElement(po);
+-          BuildDocTree(childNode, aDocList, po);
++          BuildDocTree(child, aDocList, po);
+         }
+       }
+     }
+   }
+ }
+ 
+ //---------------------------------------------------------------------
+ void
+@@ -3512,22 +3509,22 @@ DumpViews(nsIDocShell* aDocShell, FILE* 
+         }
+       }
+     }
+     else {
+       fputs("null pres shell\n", out);
+     }
+ 
+     // dump the views of the sub documents
+-    int32_t i, n;
+-    nsCOMPtr<nsIDocShellTreeNode> docShellAsNode(do_QueryInterface(aDocShell));
++    nsCOMPtr<nsIDocShellTreeItem> docShellAsItem = do_QueryInterface(aDocShell);
++    int32_t n;
+     docShellAsNode->GetChildCount(&n);
+-    for (i = 0; i < n; i++) {
++    for (int32_t i = 0; i < n; i++) {
+       nsCOMPtr<nsIDocShellTreeItem> child;
+-      docShellAsNode->GetChildAt(i, getter_AddRefs(child));
++      docShellAsItem->GetChildAt(i, getter_AddRefs(child));
+       nsCOMPtr<nsIDocShell> childAsShell(do_QueryInterface(child));
+       if (childAsShell) {
+         DumpViews(childAsShell, out);
+       }
+     }
+   }
+ }
+ 
+diff --git a/layout/printing/nsPrintEngine.h b/layout/printing/nsPrintEngine.h
+--- a/layout/printing/nsPrintEngine.h
++++ b/layout/printing/nsPrintEngine.h
+@@ -44,17 +44,17 @@
+ 
+ // Interfaces
+ #include "nsIDocument.h"
+ #include "nsIDOMWindow.h"
+ #include "nsIObserver.h"
+ 
+ // Classes
+ class nsPagePrintTimer;
+-class nsIDocShellTreeNode;
++class nsIDocShellTreeItem;
+ class nsDeviceContext;
+ class nsIDocumentViewerPrint;
+ class nsPrintObject;
+ class nsIDocShell;
+ class nsIPageSequenceFrame;
+ class nsIWeakReference;
+ 
+ //------------------------------------------------------------------------
+@@ -130,17 +130,17 @@ public:
+   bool CheckDocumentForPPCaching();
+   void InstallPrintPreviewListener();
+ 
+   // nsIDocumentViewerPrint Printing Methods
+   bool     PrintPage(nsPrintObject* aPOect, bool& aInRange);
+   bool     DonePrintingPages(nsPrintObject* aPO, nsresult aResult);
+ 
+   //---------------------------------------------------------------------
+-  void BuildDocTree(nsIDocShellTreeNode *      aParentNode,
++  void BuildDocTree(nsIDocShellTreeItem*       aParentItem,
+                     nsTArray<nsPrintObject*> * aDocList,
+                     nsPrintObject *            aPO);
+   nsresult ReflowDocList(nsPrintObject * aPO, bool aSetPixelScale);
+ 
+   nsresult ReflowPrintObject(nsPrintObject * aPO);
+ 
+   void CheckForChildFrameSets(nsPrintObject* aPO);
+ 
+diff --git a/layout/tools/layout-debug/src/nsLayoutDebuggingTools.cpp b/layout/tools/layout-debug/src/nsLayoutDebuggingTools.cpp
+--- a/layout/tools/layout-debug/src/nsLayoutDebuggingTools.cpp
++++ b/layout/tools/layout-debug/src/nsLayoutDebuggingTools.cpp
+@@ -35,17 +35,16 @@
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsLayoutDebuggingTools.h"
+ 
+ #include "nsIDocShell.h"
+-#include "nsIDocShellTreeNode.h"
+ #include "nsIDocShellTreeItem.h"
+ #include "nsPIDOMWindow.h"
+ #include "nsIDocumentViewer.h"
+ 
+ #include "nsIServiceManager.h"
+ #include "nsIAtom.h"
+ #include "nsQuickSort.h"
+ 
+@@ -366,21 +365,20 @@ static void DumpAWebShell(nsIDocShellTre
+ 
+     fprintf(out, "%p '", static_cast<void*>(aShellItem));
+     aShellItem->GetName(getter_Copies(name));
+     aShellItem->GetSameTypeParent(getter_AddRefs(parent));
+     fputs(NS_LossyConvertUTF16toASCII(name).get(), out);
+     fprintf(out, "' parent=%p <\n", static_cast<void*>(parent));
+ 
+     ++aIndent;
+-    nsCOMPtr<nsIDocShellTreeNode> shellAsNode(do_QueryInterface(aShellItem));
+-    shellAsNode->GetChildCount(&n);
++    aShellItem->GetChildCount(&n);
+     for (i = 0; i < n; ++i) {
+         nsCOMPtr<nsIDocShellTreeItem> child;
+-        shellAsNode->GetChildAt(i, getter_AddRefs(child));
++        aShellItem->GetChildAt(i, getter_AddRefs(child));
+         if (child) {
+             DumpAWebShell(child, out, aIndent);
+         }
+     }
+     --aIndent;
+     for (i = aIndent; --i >= 0; )
+         fprintf(out, "  ");
+     fputs(">\n", out);
+@@ -408,22 +406,22 @@ DumpContentRecur(nsIDocShell* aDocShell,
+             if (root) {
+                 root->List(out);
+             }
+         }
+         else {
+             fputs("no document\n", out);
+         }
+         // dump the frames of the sub documents
+-        int32_t i, n;
+-        nsCOMPtr<nsIDocShellTreeNode> docShellAsNode(do_QueryInterface(aDocShell));
+-        docShellAsNode->GetChildCount(&n);
+-        for (i = 0; i < n; ++i) {
++        nsCOMPtr<nsIDocShellTreeItem> docShellAsItem = do_QueryInterface(aDocShell);
++        int32_t n;
++        docShellAsItem->GetChildCount(&n);
++        for (int32_t i = 0; i < n; ++i) {
+             nsCOMPtr<nsIDocShellTreeItem> child;
+-            docShellAsNode->GetChildAt(i, getter_AddRefs(child));
++            docShellAsItem->GetChildAt(i, getter_AddRefs(child));
+             nsCOMPtr<nsIDocShell> childAsShell(do_QueryInterface(child));
+             if (child) {
+                 DumpContentRecur(childAsShell, out);
+             }
+         }
+     }
+ #endif
+ }
+@@ -448,22 +446,22 @@ DumpFramesRecur(nsIDocShell* aDocShell, 
+             root->List(out, 0);
+         }
+     }
+     else {
+         fputs("null pres shell\n", out);
+     }
+ 
+     // dump the frames of the sub documents
+-    int32_t i, n;
+-    nsCOMPtr<nsIDocShellTreeNode> docShellAsNode(do_QueryInterface(aDocShell));
++    nsCOMPtr<nsIDocShellTreeItem> docShellAsItem = do_QueryInterface(aDocShell);
++    int32_t n;
+     docShellAsNode->GetChildCount(&n);
+-    for (i = 0; i < n; ++i) {
++    for (int32_t i = 0; i < n; ++i) {
+         nsCOMPtr<nsIDocShellTreeItem> child;
+-        docShellAsNode->GetChildAt(i, getter_AddRefs(child));
++        docShellAsItem->GetChildAt(i, getter_AddRefs(child));
+         nsCOMPtr<nsIDocShell> childAsShell(do_QueryInterface(child));
+         if (childAsShell) {
+             DumpFramesRecur(childAsShell, out);
+         }
+     }
+ #endif
+ }
+ 
+@@ -488,22 +486,22 @@ DumpViewsRecur(nsIDocShell* aDocShell, F
+             root->List(out);
+         }
+     }
+     else {
+         fputs("null view manager\n", out);
+     }
+ 
+     // dump the views of the sub documents
+-    int32_t i, n;
+-    nsCOMPtr<nsIDocShellTreeNode> docShellAsNode(do_QueryInterface(aDocShell));
+-    docShellAsNode->GetChildCount(&n);
+-    for (i = 0; i < n; i++) {
++    nsCOMPtr<nsIDocShellTreeItem> docShellAsItem = do_QueryInterface(aDocShell);
++    int32_t n;
++    docShellAsItem->GetChildCount(&n);
++    for (int32_t i = 0; i < n; i++) {
+         nsCOMPtr<nsIDocShellTreeItem> child;
+-        docShellAsNode->GetChildAt(i, getter_AddRefs(child));
++        docShellAsItem->GetChildAt(i, getter_AddRefs(child));
+         nsCOMPtr<nsIDocShell> childAsShell(do_QueryInterface(child));
+         if (childAsShell) {
+             DumpViewsRecur(childAsShell, out);
+         }
+     }
+ #endif // DEBUG
+ }
+ 
+diff --git a/layout/tools/layout-debug/src/nsRegressionTester.cpp b/layout/tools/layout-debug/src/nsRegressionTester.cpp
+--- a/layout/tools/layout-debug/src/nsRegressionTester.cpp
++++ b/layout/tools/layout-debug/src/nsRegressionTester.cpp
+@@ -38,18 +38,16 @@
+ #include "nsISupports.h"
+ #include "nsRegressionTester.h"
+ 
+ #include "nsXPIDLString.h"
+ #include "nsReadableUtils.h"
+ #include "nsIWindowWatcher.h"
+ #include "nsVoidArray.h"
+ #include "prmem.h"
+-#include "nsIDocShellTreeItem.h"
+-#include "nsIDocShellTreeNode.h"
+ #include "nsPIDOMWindow.h"
+ #include "nsIPresShell.h"
+ #include "nsIDocument.h"
+ #include "nsIDOMDocument.h"
+ #include "nsIURI.h"
+ #include "nsIDOMHTMLDocument.h"
+ #include "nsISimpleEnumerator.h"
+ #include "nsIDocShell.h"
+diff --git a/toolkit/content/widgets/browser.xml b/toolkit/content/widgets/browser.xml
+--- a/toolkit/content/widgets/browser.xml
++++ b/toolkit/content/widgets/browser.xml
+@@ -541,20 +541,20 @@
+       <method name="findChildShell">
+         <parameter name="aDocShell"/>
+         <parameter name="aSoughtURI"/>
+         <body>
+           <![CDATA[
+             if (aDocShell.QueryInterface(Components.interfaces.nsIWebNavigation)
+                          .currentURI.spec == aSoughtURI.spec)
+               return aDocShell;
+-            var node = aDocShell.QueryInterface(
+-                                   Components.interfaces.nsIDocShellTreeNode);
+-            for (var i = 0; i < node.childCount; ++i) {
+-              var docShell = node.getChildAt(i);
++            var item = aDocShell.QueryInterface(
++                                   Components.interfaces.nsIDocShellTreeItem);
++            for (var i = 0; i < item.childCount; ++i) {
++              var docShell = item.getChildAt(i);
+               docShell = this.findChildShell(docShell, aSoughtURI);
+               if (docShell)
+                 return docShell;
+             }
+             return null;
+           ]]>
+         </body>
+       </method>
+diff --git a/xpfe/appshell/src/nsWebShellWindow.cpp b/xpfe/appshell/src/nsWebShellWindow.cpp
+--- a/xpfe/appshell/src/nsWebShellWindow.cpp
++++ b/xpfe/appshell/src/nsWebShellWindow.cpp
+@@ -100,17 +100,16 @@
+ 
+ // For calculating size
+ #include "nsIFrame.h"
+ #include "nsIPresShell.h"
+ #include "nsPresContext.h"
+ 
+ #include "nsIBaseWindow.h"
+ #include "nsIDocShellTreeItem.h"
+-#include "nsIDocShellTreeNode.h"
+ 
+ #include "nsIMarkupDocumentViewer.h"
+ 
+ #ifdef XP_MACOSX
+ #include "nsINativeMenuService.h"
+ #define USE_NATIVE_MENUS
+ #endif
+ 
+@@ -631,20 +630,20 @@ nsCOMPtr<nsIDOMDocument> nsWebShellWindo
+ {
+   nsCOMPtr<nsIDOMDocument> domDoc; // result == nullptr;
+ 
+   // first get the toolbar child docShell
+   nsCOMPtr<nsIDocShell> childDocShell;
+   if (aDocShellName.EqualsLiteral("this")) { // XXX small kludge for code reused
+     childDocShell = mDocShell;
+   } else {
+-    nsCOMPtr<nsIDocShellTreeItem> docShellAsItem;
+-    nsCOMPtr<nsIDocShellTreeNode> docShellAsNode(do_QueryInterface(mDocShell));
+-    docShellAsNode->FindChildWithName(PromiseFlatString(aDocShellName).get(), 
+-      true, false, nullptr, nullptr, getter_AddRefs(docShellAsItem));
++    nsCOMPtr<nsIDocShellTreeItem> childDocShellItem;
++    nsCOMPtr<nsIDocShellTreeItem> parentDocShell = do_QueryInterface(mDocShell);
++    parentDocShell->FindChildWithName(PromiseFlatString(aDocShellName).get(), 
++      true, false, nullptr, nullptr, getter_AddRefs(childDocShellItem));
+     childDocShell = do_QueryInterface(docShellAsItem);
+     if (!childDocShell)
+       return domDoc;
+   }
+   
+   nsCOMPtr<nsIContentViewer> cv;
+   childDocShell->GetContentViewer(getter_AddRefs(cv));
+   if (!cv)

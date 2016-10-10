@@ -1,0 +1,530 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/events/public/nsEventDispatcher.h b/content/events/public/nsEventDispatcher.h
+--- a/content/events/public/nsEventDispatcher.h
++++ b/content/events/public/nsEventDispatcher.h
+@@ -218,33 +218,33 @@ public:
+    * nothing to do with the construction of the event target chain.
+    * Neither aTarget nor aEvent is allowed to be nullptr.
+    *
+    * If aTargets is non-null, event target chain will be created, but
+    * event won't be handled. In this case aEvent->message should be
+    * NS_EVENT_TYPE_NULL.
+    * @note Use this method when dispatching an nsEvent.
+    */
+-  static nsresult Dispatch(nsISupports* aTarget,
++  static nsresult Dispatch(mozilla::dom::EventTarget* aTarget,
+                            nsPresContext* aPresContext,
+                            nsEvent* aEvent,
+                            nsIDOMEvent* aDOMEvent = nullptr,
+                            nsEventStatus* aEventStatus = nullptr,
+                            nsDispatchingCallback* aCallback = nullptr,
+                            nsCOMArray<mozilla::dom::EventTarget>* aTargets = nullptr);
+ 
+   /**
+    * Dispatches an event.
+    * If aDOMEvent is not nullptr, it is used for dispatching
+    * (aEvent can then be nullptr) and (if aDOMEvent is not |trusted| already),
+    * the |trusted| flag is set based on the UniversalXPConnect capability.
+    * Otherwise this works like nsEventDispatcher::Dispatch.
+    * @note Use this method when dispatching nsIDOMEvent.
+    */
+-  static nsresult DispatchDOMEvent(nsISupports* aTarget,
++  static nsresult DispatchDOMEvent(mozilla::dom::EventTarget* aTarget,
+                                    nsEvent* aEvent, nsIDOMEvent* aDOMEvent,
+                                    nsPresContext* aPresContext,
+                                    nsEventStatus* aEventStatus);
+ 
+   /**
+    * Creates a DOM Event.
+    */
+   static nsresult CreateEvent(mozilla::dom::EventTarget* aOwner,
+diff --git a/content/events/src/nsEventDispatcher.cpp b/content/events/src/nsEventDispatcher.cpp
+--- a/content/events/src/nsEventDispatcher.cpp
++++ b/content/events/src/nsEventDispatcher.cpp
+@@ -428,17 +428,17 @@ EventTargetChainItemForChromeTarget(nsIN
+   if (!etci->IsValid()) {
+     nsEventTargetChainItem::Destroy(etci);
+     return nullptr;
+   }
+   return etci;
+ }
+ 
+ /* static */ nsresult
+-nsEventDispatcher::Dispatch(nsISupports* aTarget,
++nsEventDispatcher::Dispatch(EventTarget* aTarget,
+                             nsPresContext* aPresContext,
+                             nsEvent* aEvent,
+                             nsIDOMEvent* aDOMEvent,
+                             nsEventStatus* aEventStatus,
+                             nsDispatchingCallback* aCallback,
+                             nsCOMArray<EventTarget>* aTargets)
+ {
+   PROFILER_LABEL("nsEventDispatcher", "Dispatch");
+@@ -448,17 +448,17 @@ nsEventDispatcher::Dispatch(nsISupports*
+   NS_ASSERTION(!aTargets || !aEvent->message, "Wrong parameters!");
+ 
+   // If we're dispatching an already created DOMEvent object, make
+   // sure it is initialized!
+   // If aTargets is non-null, the event isn't going to be dispatched.
+   NS_ENSURE_TRUE(aEvent->message || !aDOMEvent || aTargets,
+                  NS_ERROR_DOM_INVALID_STATE_ERR);
+ 
+-  nsCOMPtr<EventTarget> target = do_QueryInterface(aTarget);
++  nsCOMPtr<EventTarget> target = aTarget;
+ 
+   bool retargeted = false;
+ 
+   if (aEvent->mFlags.mRetargetToNonNativeAnonymous) {
+     nsCOMPtr<nsIContent> content = do_QueryInterface(target);
+     if (content && content->IsInNativeAnonymousSubtree()) {
+       nsCOMPtr<EventTarget> newTarget =
+         do_QueryInterface(content->FindFirstNonChromeOnlyAccessContent());
+@@ -673,17 +673,17 @@ nsEventDispatcher::Dispatch(nsISupports*
+ 
+   if (aEventStatus) {
+     *aEventStatus = preVisitor.mEventStatus;
+   }
+   return rv;
+ }
+ 
+ /* static */ nsresult
+-nsEventDispatcher::DispatchDOMEvent(nsISupports* aTarget,
++nsEventDispatcher::DispatchDOMEvent(EventTarget* aTarget,
+                                     nsEvent* aEvent,
+                                     nsIDOMEvent* aDOMEvent,
+                                     nsPresContext* aPresContext,
+                                     nsEventStatus* aEventStatus)
+ {
+   if (aDOMEvent) {
+     nsEvent* innerEvent = aDOMEvent->GetInternalNSEvent();
+     NS_ENSURE_TRUE(innerEvent, NS_ERROR_ILLEGAL_VALUE);
+diff --git a/content/events/src/nsEventListenerService.cpp b/content/events/src/nsEventListenerService.cpp
+--- a/content/events/src/nsEventListenerService.cpp
++++ b/content/events/src/nsEventListenerService.cpp
+@@ -192,18 +192,19 @@ nsEventListenerService::GetEventTargetCh
+                                                uint32_t* aCount,
+                                                nsIDOMEventTarget*** aOutArray)
+ {
+   *aCount = 0;
+   *aOutArray = nullptr;
+   NS_ENSURE_ARG(aEventTarget);
+   nsEvent event(true, NS_EVENT_TYPE_NULL);
+   nsCOMArray<EventTarget> targets;
+-  nsresult rv = nsEventDispatcher::Dispatch(aEventTarget, nullptr, &event,
+-                                            nullptr, nullptr, nullptr, &targets);
++  nsresult rv = nsEventDispatcher::Dispatch(
++    static_cast<EventTarget*>(aEventTarget), nullptr, &event, nullptr, nullptr,
++    nullptr, &targets);
+   NS_ENSURE_SUCCESS(rv, rv);
+   int32_t count = targets.Count();
+   if (count == 0) {
+     return NS_OK;
+   }
+ 
+   *aOutArray =
+     static_cast<nsIDOMEventTarget**>(
+diff --git a/content/html/content/src/HTMLInputElement.cpp b/content/html/content/src/HTMLInputElement.cpp
+--- a/content/html/content/src/HTMLInputElement.cpp
++++ b/content/html/content/src/HTMLInputElement.cpp
+@@ -613,17 +613,17 @@ UploadLastDir::Observe(nsISupports* aSub
+     if (contentPrefService)
+       contentPrefService->RemoveByName(CPS_PREF_NAME, nullptr, nullptr);
+   }
+   return NS_OK;
+ }
+ 
+ #ifdef ACCESSIBILITY
+ //Helper method
+-static nsresult FireEventForAccessibility(nsIDOMHTMLInputElement* aTarget,
++static nsresult FireEventForAccessibility(HTMLInputElement* aTarget,
+                                           nsPresContext* aPresContext,
+                                           const nsAString& aEventType);
+ #endif
+ 
+ //
+ // construction, destruction
+ //
+ 
+@@ -2897,17 +2897,19 @@ HTMLInputElement::PostHandleEvent(nsEven
+                                   NS_LITERAL_STRING("CheckboxStateChange"));
+       } else {
+         FireEventForAccessibility(this, aVisitor.mPresContext,
+                                   NS_LITERAL_STRING("RadioStateChange"));
+         // Fire event for the previous selected radio.
+         nsCOMPtr<nsIDOMHTMLInputElement> previous =
+           do_QueryInterface(aVisitor.mItemData);
+         if (previous) {
+-          FireEventForAccessibility(previous, aVisitor.mPresContext,
++          HTMLInputElement* input =
++            static_cast<HTMLInputElement*>(previous.get());
++          FireEventForAccessibility(input, aVisitor.mPresContext,
+                                     NS_LITERAL_STRING("RadioStateChange"));
+         }
+       }
+ #endif
+     }
+   }
+ 
+   if (NS_SUCCEEDED(rv)) {
+@@ -4301,23 +4303,22 @@ HTMLInputElement::GetPhonetic(nsAString&
+       textControlFrame->GetPhonetic(aPhonetic);
+   }
+ 
+   return NS_OK;
+ }
+ 
+ #ifdef ACCESSIBILITY
+ /*static*/ nsresult
+-FireEventForAccessibility(nsIDOMHTMLInputElement* aTarget,
++FireEventForAccessibility(HTMLInputElement* aTarget,
+                           nsPresContext* aPresContext,
+                           const nsAString& aEventType)
+ {
+   nsCOMPtr<nsIDOMEvent> event;
+-  nsCOMPtr<mozilla::dom::Element> element = do_QueryInterface(aTarget);
+-  if (NS_SUCCEEDED(nsEventDispatcher::CreateEvent(element, aPresContext, nullptr,
++  if (NS_SUCCEEDED(nsEventDispatcher::CreateEvent(aTarget, aPresContext, nullptr,
+                                                   NS_LITERAL_STRING("Events"),
+                                                   getter_AddRefs(event)))) {
+     event->InitEvent(aEventType, true, true);
+     event->SetTrusted(true);
+ 
+     nsEventDispatcher::DispatchDOMEvent(aTarget, nullptr, event, aPresContext, nullptr);
+   }
+ 
+diff --git a/dom/base/nsFocusManager.cpp b/dom/base/nsFocusManager.cpp
+--- a/dom/base/nsFocusManager.cpp
++++ b/dom/base/nsFocusManager.cpp
+@@ -1605,18 +1605,20 @@ nsFocusManager::Blur(nsPIDOMWindow* aWin
+     mFocusedContent = nullptr;
+ 
+     // pass 1 for the focus method when calling SendFocusOrBlurEvent just so
+     // that the check is made for suppressed documents. Check to ensure that
+     // the document isn't null in case someone closed it during the blur above
+     nsIDocument* doc = window->GetExtantDoc();
+     if (doc)
+       SendFocusOrBlurEvent(NS_BLUR_CONTENT, presShell, doc, doc, 1, false);
+-    if (mFocusedWindow == nullptr)
+-      SendFocusOrBlurEvent(NS_BLUR_CONTENT, presShell, doc, window, 1, false);
++    if (!mFocusedWindow) {
++      nsCOMPtr<EventTarget> target = do_QueryInterface(window);
++      SendFocusOrBlurEvent(NS_BLUR_CONTENT, presShell, doc, target, 1, false);
++    }
+ 
+     // check if a different window was focused
+     result = (mFocusedWindow == nullptr && mActiveWindow);
+   }
+   else if (mActiveWindow) {
+     // Otherwise, the blur of the element without blurring the document
+     // occurred normally. Call UpdateCaret to redisplay the caret at the right
+     // location within the document. This is needed to ensure that the caret
+@@ -1740,19 +1742,21 @@ nsFocusManager::Focus(nsPIDOMWindow* aWi
+     // receive focus event.
+     if (doc && doc->HasFlag(NODE_IS_EDITABLE)) {
+       nsIMEStateManager::OnChangeFocus(presShell->GetPresContext(), nullptr,
+                                        GetFocusMoveActionCause(aFlags));
+     }
+     if (doc)
+       SendFocusOrBlurEvent(NS_FOCUS_CONTENT, presShell, doc,
+                            doc, aFlags & FOCUSMETHOD_MASK, aWindowRaised);
+-    if (mFocusedWindow == aWindow && mFocusedContent == nullptr)
+-      SendFocusOrBlurEvent(NS_FOCUS_CONTENT, presShell, doc,
+-                           aWindow, aFlags & FOCUSMETHOD_MASK, aWindowRaised);
++    if (mFocusedWindow == aWindow && mFocusedContent == nullptr) {
++      nsCOMPtr<EventTarget> target = do_QueryInterface(aWindow);
++      SendFocusOrBlurEvent(NS_FOCUS_CONTENT, presShell, doc, target,
++                           aFlags & FOCUSMETHOD_MASK, aWindowRaised);
++    }
+   }
+ 
+   // check to ensure that the element is still focusable, and that nothing
+   // else was focused during the events above.
+   if (CheckIfFocusable(aContent, aFlags) &&
+       mFocusedWindow == aWindow && mFocusedContent == nullptr) {
+     mFocusedContent = aContent;
+ 
+@@ -1842,43 +1846,43 @@ nsFocusManager::Focus(nsPIDOMWindow* aWi
+ 
+   if (clearFirstFocusEvent)
+     mFirstFocusEvent = nullptr;
+ }
+ 
+ class FocusBlurEvent : public nsRunnable
+ {
+ public:
+-  FocusBlurEvent(nsISupports* aTarget, uint32_t aType,
++  FocusBlurEvent(EventTarget* aTarget, uint32_t aType,
+                  nsPresContext* aContext, bool aWindowRaised,
+                  bool aIsRefocus)
+   : mTarget(aTarget), mType(aType), mContext(aContext),
+     mWindowRaised(aWindowRaised), mIsRefocus(aIsRefocus) {}
+ 
+   NS_IMETHOD Run()
+   {
+     nsFocusEvent event(true, mType);
+     event.mFlags.mBubbles = false;
+     event.fromRaise = mWindowRaised;
+     event.isRefocus = mIsRefocus;
+     return nsEventDispatcher::Dispatch(mTarget, mContext, &event);
+   }
+ 
+-  nsCOMPtr<nsISupports>   mTarget;
++  nsCOMPtr<EventTarget>   mTarget;
+   uint32_t                mType;
+   nsRefPtr<nsPresContext> mContext;
+   bool                    mWindowRaised;
+   bool                    mIsRefocus;
+ };
+ 
+ void
+ nsFocusManager::SendFocusOrBlurEvent(uint32_t aType,
+                                      nsIPresShell* aPresShell,
+                                      nsIDocument* aDocument,
+-                                     nsISupports* aTarget,
++                                     EventTarget* aTarget,
+                                      uint32_t aFocusMethod,
+                                      bool aWindowRaised,
+                                      bool aIsRefocus)
+ {
+   NS_ASSERTION(aType == NS_FOCUS_CONTENT || aType == NS_BLUR_CONTENT,
+                "Wrong event type for SendFocusOrBlurEvent");
+ 
+   nsCOMPtr<EventTarget> eventTarget = do_QueryInterface(aTarget);
+diff --git a/dom/base/nsFocusManager.h b/dom/base/nsFocusManager.h
+--- a/dom/base/nsFocusManager.h
++++ b/dom/base/nsFocusManager.h
+@@ -20,16 +20,22 @@
+ #define FOCUSMANAGER_CONTRACTID "@mozilla.org/focus-manager;1"
+ 
+ class nsIContent;
+ class nsIDocShellTreeItem;
+ class nsPIDOMWindow;
+ 
+ struct nsDelayedBlurOrFocusEvent;
+ 
++namespace mozilla {
++namespace dom {
++class EventTarget;
++} // namespace dom
++} // namespace mozilla
++
+ /**
+  * The focus manager keeps track of where the focus is, that is, the node
+  * which receives key events.
+  */
+ 
+ class nsFocusManager MOZ_FINAL : public nsIFocusManager,
+                                  public nsIObserver,
+                                  public nsSupportsWeakReference
+@@ -262,17 +268,17 @@ protected:
+    * aType should be either NS_FOCUS_CONTENT or NS_BLUR_CONTENT. For blur
+    * events, aFocusMethod should normally be non-zero.
+    *
+    * aWindowRaised should only be true if called from WindowRaised.
+    */
+   void SendFocusOrBlurEvent(uint32_t aType,
+                             nsIPresShell* aPresShell,
+                             nsIDocument* aDocument,
+-                            nsISupports* aTarget,
++                            mozilla::dom::EventTarget* aTarget,
+                             uint32_t aFocusMethod,
+                             bool aWindowRaised,
+                             bool aIsRefocus = false);
+ 
+   /**
+    * Scrolls aContent into view unless the FLAG_NOSCROLL flag is set.
+    */
+   void ScrollIntoView(nsIPresShell* aPresShell,
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -6795,17 +6795,17 @@ PostMessageEvent::Run()
+   nsRefPtr<nsPresContext> presContext;
+   if (shell)
+     presContext = shell->GetPresContext();
+ 
+   message->SetTrusted(mTrustedCaller);
+   nsEvent *internalEvent = message->GetInternalNSEvent();
+ 
+   nsEventStatus status = nsEventStatus_eIgnore;
+-  nsEventDispatcher::Dispatch(static_cast<nsPIDOMWindow*>(mTargetWindow),
++  nsEventDispatcher::Dispatch(mTargetWindow,
+                               presContext,
+                               internalEvent,
+                               message,
+                               &status);
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+@@ -7924,18 +7924,18 @@ nsGlobalWindow::DispatchEvent(nsIDOMEven
+   nsRefPtr<nsPresContext> presContext;
+   if (shell) {
+     // Retrieve the context
+     presContext = shell->GetPresContext();
+   }
+ 
+   nsEventStatus status = nsEventStatus_eIgnore;
+   nsresult rv =
+-    nsEventDispatcher::DispatchDOMEvent(GetOuterWindow(), nullptr, aEvent,
+-                                        presContext, &status);
++    nsEventDispatcher::DispatchDOMEvent(GetOuterWindowInternal(), nullptr,
++                                        aEvent, presContext, &status);
+ 
+   *aRetVal = (status != nsEventStatus_eConsumeNoDefault);
+   return rv;
+ }
+ 
+ NS_IMETHODIMP
+ nsGlobalWindow::AddEventListener(const nsAString& aType,
+                                  nsIDOMEventListener *aListener,
+diff --git a/dom/base/nsJSEnvironment.cpp b/dom/base/nsJSEnvironment.cpp
+--- a/dom/base/nsJSEnvironment.cpp
++++ b/dom/base/nsJSEnvironment.cpp
+@@ -319,17 +319,18 @@ NS_HandleScriptError(nsIScriptGlobalObje
+     docShell->GetPresContext(getter_AddRefs(presContext));
+ 
+     static int32_t errorDepth; // Recursion prevention
+     ++errorDepth;
+ 
+     if (presContext && errorDepth < 2) {
+       // Dispatch() must be synchronous for the recursion block
+       // (errorDepth) to work.
+-      nsEventDispatcher::Dispatch(win, presContext, aErrorEvent, nullptr,
++      nsCOMPtr<EventTarget> target = do_QueryInterface(win);
++      nsEventDispatcher::Dispatch(target, presContext, aErrorEvent, nullptr,
+                                   aStatus);
+       called = true;
+     }
+     --errorDepth;
+   }
+   return called;
+ }
+ 
+@@ -389,17 +390,18 @@ public:
+             errorevent.errorMsg = mErrorMsg.get();
+             errorevent.lineNr = mLineNr;
+           } else {
+             NS_WARNING("Not same origin error!");
+             errorevent.errorMsg = xoriginMsg.get();
+             errorevent.lineNr = 0;
+           }
+ 
+-          nsEventDispatcher::Dispatch(win, presContext, &errorevent, nullptr,
++          nsCOMPtr<EventTarget> target = do_QueryInterface(win);
++          nsEventDispatcher::Dispatch(target, presContext, &errorevent, nullptr,
+                                       &status);
+         }
+ 
+         sHandlingScriptError = false;
+       }
+     }
+ 
+     if (status != nsEventStatus_eConsumeNoDefault) {
+diff --git a/layout/base/nsDocumentViewer.cpp b/layout/base/nsDocumentViewer.cpp
+--- a/layout/base/nsDocumentViewer.cpp
++++ b/layout/base/nsDocumentViewer.cpp
+@@ -1022,17 +1022,18 @@ nsDocumentViewer::LoadComplete(nsresult 
+                    "Bad readystate");
+       nsCOMPtr<nsIDocument> d = mDocument;
+       mDocument->SetReadyStateInternal(nsIDocument::READYSTATE_COMPLETE);
+ 
+       nsRefPtr<nsDOMNavigationTiming> timing(d->GetNavigationTiming());
+       if (timing) {
+         timing->NotifyLoadEventStart();
+       }
+-      nsEventDispatcher::Dispatch(window, mPresContext, &event, nullptr,
++      nsCOMPtr<dom::EventTarget> target = do_QueryInterface(window);
++      nsEventDispatcher::Dispatch(target, mPresContext, &event, nullptr,
+                                   &status);
+       if (timing) {
+         timing->NotifyLoadEventEnd();
+       }
+     }
+   } else {
+     // XXX: Should fire error event to the document...
+   }
+@@ -1121,17 +1122,18 @@ nsDocumentViewer::PermitUnload(bool aCal
+   nsRefPtr<nsDocumentViewer> kungFuDeathGrip(this);
+ 
+   {
+     // Never permit popups from the beforeunload handler, no matter
+     // how we get here.
+     nsAutoPopupStatePusher popupStatePusher(openAbused, true);
+ 
+     mInPermitUnload = true;
+-    nsEventDispatcher::DispatchDOMEvent(window, nullptr, event, mPresContext,
++    nsCOMPtr<dom::EventTarget> target = do_QueryInterface(window);
++    nsEventDispatcher::DispatchDOMEvent(target, nullptr, event, mPresContext,
+                                         nullptr);
+     mInPermitUnload = false;
+   }
+ 
+   nsCOMPtr<nsIDocShellTreeNode> docShellNode(do_QueryReferent(mContainer));
+   nsAutoString text;
+   beforeUnload->GetReturnValue(text);
+   if (event->GetInternalNSEvent()->mFlags.mDefaultPrevented ||
+@@ -1281,17 +1283,18 @@ nsDocumentViewer::PageHide(bool aIsUnloa
+     event.mFlags.mBubbles = false;
+     // XXX Dispatching to |window|, but using |document| as the target.
+     event.target = mDocument;
+ 
+     // Never permit popups from the unload handler, no matter how we get
+     // here.
+     nsAutoPopupStatePusher popupStatePusher(openAbused, true);
+ 
+-    nsEventDispatcher::Dispatch(window, mPresContext, &event, nullptr, &status);
++    nsCOMPtr<dom::EventTarget> target = do_QueryInterface(window);
++    nsEventDispatcher::Dispatch(target, mPresContext, &event, nullptr, &status);
+   }
+ 
+ #ifdef MOZ_XUL
+   // look for open menupopups and close them after the unload event, in case
+   // the unload event listeners open any new popups
+   nsContentUtils::HidePopupsInDocument(mDocument);
+ #endif
+ 
+diff --git a/layout/base/nsPresShell.cpp b/layout/base/nsPresShell.cpp
+--- a/layout/base/nsPresShell.cpp
++++ b/layout/base/nsPresShell.cpp
+@@ -1926,17 +1926,18 @@ PresShell::FireBeforeResizeEvent()
+     return;
+ 
+   // Send beforeresize event from here.
+   nsEvent event(true, NS_BEFORERESIZE_EVENT);
+ 
+   nsPIDOMWindow *window = mDocument->GetWindow();
+   if (window) {
+     nsCOMPtr<nsIPresShell> kungFuDeathGrip(this);
+-    nsEventDispatcher::Dispatch(window, mPresContext, &event);
++    nsCOMPtr<dom::EventTarget> target = do_QueryInterface(window);
++    nsEventDispatcher::Dispatch(target, mPresContext, &event);
+   }
+ }
+ 
+ void
+ PresShell::FireResizeEvent()
+ {
+   if (mAsyncResizeTimerIsActive) {
+     mAsyncResizeTimerIsActive = false;
+@@ -1950,17 +1951,18 @@ PresShell::FireResizeEvent()
+   //Send resize event from here.
+   nsEvent event(true, NS_RESIZE_EVENT);
+   nsEventStatus status = nsEventStatus_eIgnore;
+ 
+   nsPIDOMWindow *window = mDocument->GetWindow();
+   if (window) {
+     nsCOMPtr<nsIPresShell> kungFuDeathGrip(this);
+     mInResize = true;
+-    nsEventDispatcher::Dispatch(window, mPresContext, &event, nullptr, &status);
++    nsCOMPtr<dom::EventTarget> target = do_QueryInterface(window);
++    nsEventDispatcher::Dispatch(target, mPresContext, &event, nullptr, &status);
+     mInResize = false;
+   }
+ }
+ 
+ void
+ PresShell::SetIgnoreFrameDestruction(bool aIgnore)
+ {
+   if (mDocument) {
