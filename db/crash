@@ -1,0 +1,53 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/bindings/Codegen.py b/dom/bindings/Codegen.py
+--- a/dom/bindings/Codegen.py
++++ b/dom/bindings/Codegen.py
+@@ -339,16 +339,19 @@ class CGGetProtoObjectMethod(CGAbstractM
+      as needed. */
+ 
+   /* Make sure our global is sane.  Hopefully we can remove this sometime */
+   if (!(js::GetObjectClass(aGlobal)->flags & JSCLASS_DOM_GLOBAL)) {
+     return NULL;
+   }
+   /* Check to see whether the prototype is already installed */
+   JSObject **protoArray = GetProtoArray(aGlobal);
++  if (!protoArray) {
++    return NULL;
++  }
+   JSObject *ourProto = protoArray[id::%s];
+   if (!ourProto) {
+     ourProto = protoArray[id::%s] = CreateProtoObject(aCx, aGlobal);
+   }
+ 
+   /* ourProto might _still_ be null, but that's OK */
+   return ourProto;""" % (self.descriptor.name, self.descriptor.name)
+ 
+diff --git a/dom/bindings/Utils.h b/dom/bindings/Utils.h
+--- a/dom/bindings/Utils.h
++++ b/dom/bindings/Utils.h
+@@ -128,18 +128,22 @@ UnwrapInterfaceArg(JSContext *cx,
+   // nodelist bindings).
+   return xpc_qsUnwrapArg(cx, v, value, argRef, vp);
+ }
+ 
+ inline JSObject **
+ GetProtoArray(JSObject *global)
+ {
+   MOZ_ASSERT(js::GetObjectClass(global)->flags & JSCLASS_DOM_GLOBAL);
+-  return static_cast<JSObject**>(
+-    js::GetReservedSlot(global, DOM_PROTOTYPE_SLOT).toPrivate());
++  const JS::Value& slot = js::GetReservedSlot(global, DOM_PROTOTYPE_SLOT);
++  if (slot.isUndefined()) {
++    return NULL;
++  }
++
++  return static_cast<JSObject**>(slot.toPrivate());
+ }
+ 
+ inline void
+ AllocateProtoCache(JSObject *obj)
+ {
+   MOZ_ASSERT(js::GetObjectClass(obj)->flags & JSCLASS_DOM_GLOBAL);
+   // Important: The () at the end ensure zero-initialization
+   JSObject** protoArray = new JSObject*[prototypes::id::Count]();

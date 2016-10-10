@@ -1,0 +1,1702 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/public/nsIXMLHttpRequest.idl b/content/base/public/nsIXMLHttpRequest.idl
+--- a/content/base/public/nsIXMLHttpRequest.idl
++++ b/content/base/public/nsIXMLHttpRequest.idl
+@@ -156,29 +156,30 @@ interface nsIXMLHttpRequest : nsISupport
+    * NULL if the request is unsuccessful or
+    * has not yet been sent.
+    */
+   [implicit_jscontext] readonly attribute jsval /* any */ response;
+ 
+   /**
+    * The status of the response to the request for HTTP requests.
+    */
++  // XXX spec says unsigned short
+   readonly attribute unsigned long status;
+ 
+   /**
+    * The string representing the status of the response for
+    * HTTP requests.
+    */
+-  readonly attribute AUTF8String statusText;
++  readonly attribute DOMString statusText;
+ 
+   /**
+    * If the request has been sent already, this method will
+    * abort the request.
+    */
+-  void   abort();
++  [binaryname(SlowAbort)] void abort();
+ 
+   /**
+    * Returns all of the response headers as a string for HTTP
+    * requests.
+    *
+    * Note that this will return all the headers from the *current*
+    * part of a multipart request, not from the original channel.
+    *
+@@ -307,17 +308,17 @@ interface nsIXMLHttpRequest : nsISupport
+    * Override the mime type returned by the server (if any). This may
+    * be used, for example, to force a stream to be treated and parsed
+    * as text/xml, even if the server does not report it as such. This
+    * must be done before the <code>send</code> method is invoked.
+    *
+    * @param mimetype The type used to override that returned by the server
+    *                 (if any).
+    */
+-  void   overrideMimeType(in AUTF8String mimetype);
++  [binaryname(SlowOverrideMimeType)] void overrideMimeType(in DOMString mimetype);
+ 
+   /**
+    * Set to true if the response is expected to be a stream of
+    * possibly multiple (XML) documents. If set to true, the content
+    * type of the initial response must be multipart/x-mixed-replace or
+    * an error will be triggerd. All requests must be asynchronous.
+    *
+    * This enables server push. For each XML document that's written to
+diff --git a/content/base/src/nsXMLHttpRequest.cpp b/content/base/src/nsXMLHttpRequest.cpp
+--- a/content/base/src/nsXMLHttpRequest.cpp
++++ b/content/base/src/nsXMLHttpRequest.cpp
+@@ -100,19 +100,22 @@
+ #include "nsIContentSecurityPolicy.h"
+ #include "nsAsyncRedirectVerifyHelper.h"
+ #include "jstypedarray.h"
+ #include "nsStringBuffer.h"
+ #include "nsDOMFile.h"
+ #include "nsIFileChannel.h"
+ #include "mozilla/Telemetry.h"
+ #include "sampler.h"
++#include "mozilla/dom/bindings/XMLHttpRequestBinding.h"
++
+ #include "nsWrapperCacheInlines.h"
+ 
+ using namespace mozilla;
++using namespace mozilla::dom;
+ 
+ #define LOAD_STR "load"
+ #define ERROR_STR "error"
+ #define ABORT_STR "abort"
+ #define TIMEOUT_STR "timeout"
+ #define LOADSTART_STR "loadstart"
+ #define PROGRESS_STR "progress"
+ #define UPLOADPROGRESS_STR "uploadprogress"
+@@ -156,16 +159,26 @@ using namespace mozilla;
+    XML_HTTP_REQUEST_SENT |                  \
+    XML_HTTP_REQUEST_STOPPED)
+ 
+ #define NS_BADCERTHANDLER_CONTRACTID \
+   "@mozilla.org/content/xmlhttprequest-bad-cert-handler;1"
+ 
+ #define NS_PROGRESS_EVENT_INTERVAL 50
+ 
++#define IMPL_STRING_GETTER(_name)                                               \
++  NS_IMETHODIMP                                                                 \
++  nsXMLHttpRequest::_name(nsAString& aOut)                                      \
++  {                                                                             \
++    nsString tmp;                                                               \
++    _name(tmp);                                                                 \
++    aOut = tmp;                                                                 \
++    return NS_OK;                                                               \
++  }
++
+ NS_IMPL_ISUPPORTS1(nsXHRParseEndListener, nsIDOMEventListener)
+ 
+ class nsResumeTimeoutsEvent : public nsRunnable
+ {
+ public:
+   nsResumeTimeoutsEvent(nsPIDOMWindow* aWindow) : mWindow(aWindow) {}
+ 
+   NS_IMETHOD Run()
+@@ -452,16 +465,17 @@ nsXMLHttpRequest::nsXMLHttpRequest()
+     mWarnAboutSyncHtml(false),
+     mLoadLengthComputable(false), mLoadTotal(0),
+     mFirstStartRequestSeen(false),
+     mInLoadProgressEvent(false),
+     mResultJSON(JSVAL_VOID),
+     mResultArrayBuffer(nsnull)
+ {
+   nsLayoutStatics::AddRef();
++  StaticAssertions();
+ }
+ 
+ nsXMLHttpRequest::~nsXMLHttpRequest()
+ {
+   mState |= XML_HTTP_REQUEST_DELETED;
+ 
+   if (mState & (XML_HTTP_REQUEST_STOPPED |
+                 XML_HTTP_REQUEST_SENT |
+@@ -965,17 +979,17 @@ NS_IMETHODIMP nsXMLHttpRequest::GetRespo
+ nsresult
+ nsXMLHttpRequest::CreateResponseParsedJSON(JSContext* aCx)
+ {
+   if (!aCx) {
+     return NS_ERROR_FAILURE;
+   }
+   // The Unicode converter has already zapped the BOM if there was one
+   if (!JS_ParseJSON(aCx,
+-                    (jschar*)mResponseText.get(),
++                    static_cast<const jschar*>(mResponseText.get()),
+                     mResponseText.Length(), &mResultJSON)) {
+     return NS_ERROR_FAILURE;
+   }
+ 
+   return NS_OK;
+ }
+ 
+ nsresult
+@@ -1033,75 +1047,115 @@ NS_IMETHODIMP nsXMLHttpRequest::GetRespo
+     break;
+   default:
+     NS_ERROR("Should not happen");
+   }
+ 
+   return NS_OK;
+ }
+ 
++void
++nsXMLHttpRequest::StaticAssertions()
++{
++#define ASSERT_ENUM_EQUAL(_lc, _uc) \
++  MOZ_STATIC_ASSERT(\
++    bindings::prototypes::XMLHttpRequestResponseType::_lc \
++      == bindings::prototypes::XMLHttpRequestResponseType::value(XML_HTTP_RESPONSE_TYPE_ ## _uc), \
++    #_uc " should match")
++
++  ASSERT_ENUM_EQUAL(_empty, DEFAULT);
++  ASSERT_ENUM_EQUAL(arraybuffer, ARRAYBUFFER);
++  ASSERT_ENUM_EQUAL(blob, BLOB);
++  ASSERT_ENUM_EQUAL(document, DOCUMENT);
++  ASSERT_ENUM_EQUAL(json, JSON);
++  ASSERT_ENUM_EQUAL(text, TEXT);
++  ASSERT_ENUM_EQUAL(mozchunkedtext, CHUNKED_TEXT);
++  ASSERT_ENUM_EQUAL(mozchunkedarraybuffer, CHUNKED_ARRAYBUFFER);
++  ASSERT_ENUM_EQUAL(mozblob, MOZ_BLOB);
++#undef ASSERT_ENUM_EQUAL
++}
++
++uint32_t
++nsXMLHttpRequest::GetResponseType()
++{
++  return bindings::prototypes::XMLHttpRequestResponseType::value(mResponseType);
++}
++
+ /* attribute AString responseType; */
+ NS_IMETHODIMP nsXMLHttpRequest::SetResponseType(const nsAString& aResponseType)
+ {
++  uint32_t responseType;
++  if (aResponseType.IsEmpty()) {
++    responseType = XML_HTTP_RESPONSE_TYPE_DEFAULT;
++  } else if (aResponseType.EqualsLiteral("arraybuffer")) {
++    responseType = XML_HTTP_RESPONSE_TYPE_ARRAYBUFFER;
++  } else if (aResponseType.EqualsLiteral("blob")) {
++    responseType = XML_HTTP_RESPONSE_TYPE_BLOB;
++  } else if (aResponseType.EqualsLiteral("document")) {
++    responseType = XML_HTTP_RESPONSE_TYPE_DOCUMENT;
++  } else if (aResponseType.EqualsLiteral("text")) {
++    responseType = XML_HTTP_RESPONSE_TYPE_TEXT;
++  } else if (aResponseType.EqualsLiteral("json")) {
++    responseType = XML_HTTP_RESPONSE_TYPE_JSON;
++  } else if (aResponseType.EqualsLiteral("moz-chunked-text")) {
++    responseType = XML_HTTP_RESPONSE_TYPE_CHUNKED_TEXT;
++  } else if (aResponseType.EqualsLiteral("moz-chunked-arraybuffer")) {
++    responseType = XML_HTTP_RESPONSE_TYPE_CHUNKED_ARRAYBUFFER;
++  } else if (aResponseType.EqualsLiteral("moz-blob")) {
++    responseType = XML_HTTP_RESPONSE_TYPE_MOZ_BLOB;
++  } else {
++    return NS_OK;
++  }
++
++  nsresult rv = NS_OK;
++  SetResponseType(responseType, rv);
++  return rv;
++}
++
++void
++nsXMLHttpRequest::SetResponseType(uint32_t aResponseType, nsresult& aRv)
++{
+   // If the state is not OPENED or HEADERS_RECEIVED raise an
+   // INVALID_STATE_ERR exception and terminate these steps.
+   if (!(mState & (XML_HTTP_REQUEST_OPENED | XML_HTTP_REQUEST_SENT |
+-                  XML_HTTP_REQUEST_HEADERS_RECEIVED)))
+-    return NS_ERROR_DOM_INVALID_STATE_ERR;
++                  XML_HTTP_REQUEST_HEADERS_RECEIVED))) {
++    aRv = NS_ERROR_DOM_INVALID_STATE_ERR;
++    return;
++  }
+ 
+   // sync request is not allowed setting responseType in window context
+   if (mOwner &&
+       !(mState & (XML_HTTP_REQUEST_UNSENT | XML_HTTP_REQUEST_ASYNC))) {
+     LogMessage("ResponseTypeSyncXHRWarning", mOwner);
+-    return NS_ERROR_DOM_INVALID_ACCESS_ERR;
++    aRv = NS_ERROR_DOM_INVALID_ACCESS_ERR;
++    return;
+   }
+ 
++  if (!(mState & XML_HTTP_REQUEST_ASYNC) &&
++      (aResponseType == XML_HTTP_RESPONSE_TYPE_CHUNKED_TEXT ||
++       aResponseType == XML_HTTP_RESPONSE_TYPE_CHUNKED_ARRAYBUFFER)) {
++    aRv = NS_ERROR_DOM_INVALID_STATE_ERR;
++    return;
++  }
++
+   // Set the responseType attribute's value to the given value.
+-  if (aResponseType.IsEmpty()) {
+-    mResponseType = XML_HTTP_RESPONSE_TYPE_DEFAULT;
+-  } else if (aResponseType.EqualsLiteral("arraybuffer")) {
+-    mResponseType = XML_HTTP_RESPONSE_TYPE_ARRAYBUFFER;
+-  } else if (aResponseType.EqualsLiteral("blob")) {
+-    mResponseType = XML_HTTP_RESPONSE_TYPE_BLOB;
+-  } else if (aResponseType.EqualsLiteral("document")) {
+-    mResponseType = XML_HTTP_RESPONSE_TYPE_DOCUMENT;
+-  } else if (aResponseType.EqualsLiteral("text")) {
+-    mResponseType = XML_HTTP_RESPONSE_TYPE_TEXT;
+-  } else if (aResponseType.EqualsLiteral("json")) {
+-    mResponseType = XML_HTTP_RESPONSE_TYPE_JSON;
+-  } else if (aResponseType.EqualsLiteral("moz-chunked-text")) {
+-    if (!(mState & XML_HTTP_REQUEST_ASYNC)) {
+-      return NS_ERROR_DOM_INVALID_STATE_ERR;
+-    }
+-    mResponseType = XML_HTTP_RESPONSE_TYPE_CHUNKED_TEXT;
+-  } else if (aResponseType.EqualsLiteral("moz-chunked-arraybuffer")) {
+-    if (!(mState & XML_HTTP_REQUEST_ASYNC)) {
+-      return NS_ERROR_DOM_INVALID_STATE_ERR;
+-    }
+-    mResponseType = XML_HTTP_RESPONSE_TYPE_CHUNKED_ARRAYBUFFER;
+-  } else if (aResponseType.EqualsLiteral("moz-blob")) {
+-    mResponseType = XML_HTTP_RESPONSE_TYPE_MOZ_BLOB;
+-  }
+-  // If the given value is not the empty string, "arraybuffer",
+-  // "blob", "document", or "text" terminate these steps.
++  mResponseType = ResponseType(aResponseType);
+ 
+   // If the state is OPENED, SetCacheAsFile would have no effect here
+   // because the channel hasn't initialized the cache entry yet.
+   // SetCacheAsFile will be called from OnStartRequest.
+   // If the state is HEADERS_RECEIVED, however, we need to call
+   // it immediately because OnStartRequest is already dispatched.
+   if (mState & XML_HTTP_REQUEST_HEADERS_RECEIVED) {
+     nsCOMPtr<nsICachingChannel> cc(do_QueryInterface(mChannel));
+     if (cc) {
+       cc->SetCacheAsFile(mResponseType == XML_HTTP_RESPONSE_TYPE_BLOB ||
+                          mResponseType == XML_HTTP_RESPONSE_TYPE_MOZ_BLOB);
+     }
+   }
+-
+-  return NS_OK;
+ }
+ 
+ /* readonly attribute jsval response; */
+ NS_IMETHODIMP nsXMLHttpRequest::GetResponse(JSContext *aCx, jsval *aResult)
+ {
+   nsresult rv = NS_OK;
+ 
+   switch (mResponseType) {
+@@ -1191,77 +1245,86 @@ NS_IMETHODIMP nsXMLHttpRequest::GetRespo
+ 
+   return rv;
+ }
+ 
+ /* readonly attribute unsigned long status; */
+ NS_IMETHODIMP
+ nsXMLHttpRequest::GetStatus(PRUint32 *aStatus)
+ {
+-  *aStatus = 0;
+-
++  nsresult rv = NS_OK;
++  *aStatus = GetStatus(rv);
++  return rv;
++}
++
++uint32_t
++nsXMLHttpRequest::GetStatus(nsresult& aRv)
++{
+   if (mState & XML_HTTP_REQUEST_USE_XSITE_AC) {
+     // Make sure we don't leak status information from denied cross-site
+     // requests.
+     if (mChannel) {
+       nsresult status;
+       mChannel->GetStatus(&status);
+       if (NS_FAILED(status)) {
+-        return NS_OK;
++        return 0;
+       }
+     }
+   }
+ 
+   nsCOMPtr<nsIHttpChannel> httpChannel = GetCurrentHttpChannel();
+ 
+-  if (httpChannel) {
+-    nsresult rv = httpChannel->GetResponseStatus(aStatus);
+-    if (rv == NS_ERROR_NOT_AVAILABLE) {
+-      // Someone's calling this before we got a response... Check our
+-      // ReadyState.  If we're at 3 or 4, then this means the connection
+-      // errored before we got any data; return 0 in that case.
+-      PRUint16 readyState;
+-      GetReadyState(&readyState);
+-      if (readyState >= LOADING) {
+-        *aStatus = 0;
+-        return NS_OK;
++  if (!httpChannel) {
++    return 0;
++  }
++
++  PRUint32 status;
++  nsresult rv = httpChannel->GetResponseStatus(&status);
++  if (rv == NS_ERROR_NOT_AVAILABLE) {
++    // Someone's calling this before we got a response... Check our
++    // ReadyState.  If we're at 3 or 4, then this means the connection
++    // errored before we got any data; return 0 in that case.
++    if (GetReadyState() >= LOADING) {
++      return 0;
++    }
++  }
++
++  // TODO: HttpBaseChannel::GetResponseStatus only returns
++  //       NS_ERROR_NOT_AVAILABLE and NS_OK. Make this infallible?
++  aRv = rv;
++  return status;
++}
++
++IMPL_STRING_GETTER(GetStatusText)
++void
++nsXMLHttpRequest::GetStatusText(nsString& aStatusText)
++{
++  nsCOMPtr<nsIHttpChannel> httpChannel = GetCurrentHttpChannel();
++
++  aStatusText.Truncate();
++
++  if (!httpChannel) {
++    return;
++  }
++
++  if (mState & XML_HTTP_REQUEST_USE_XSITE_AC) {
++    // Make sure we don't leak status information from denied cross-site
++    // requests.
++    if (mChannel) {
++      nsresult status;
++      mChannel->GetStatus(&status);
++      if (NS_FAILED(status)) {
++        return;
+       }
+     }
+-
+-    return rv;
+   }
+ 
+-  return NS_OK;
+-}
+-
+-/* readonly attribute AUTF8String statusText; */
+-NS_IMETHODIMP
+-nsXMLHttpRequest::GetStatusText(nsACString& aStatusText)
+-{
+-  nsCOMPtr<nsIHttpChannel> httpChannel = GetCurrentHttpChannel();
+-
+-  aStatusText.Truncate();
+-
+-  if (httpChannel) {
+-    if (mState & XML_HTTP_REQUEST_USE_XSITE_AC) {
+-      // Make sure we don't leak status information from denied cross-site
+-      // requests.
+-      if (mChannel) {
+-        nsresult status;
+-        mChannel->GetStatus(&status);
+-        if (NS_FAILED(status)) {
+-          return NS_OK;
+-        }
+-      }
+-    }
+-
+-    httpChannel->GetResponseStatusText(aStatusText);
+-  }
+-
+-  return NS_OK;
++  nsCString statusText;
++  httpChannel->GetResponseStatusText(statusText);
++  CopyUTF8toUTF16(statusText, aStatusText);
+ }
+ 
+ void
+ nsXMLHttpRequest::CloseRequestWithError(const nsAString& aType,
+                                         const PRUint32 aFlag)
+ {
+   if (mReadRequest) {
+     mReadRequest->Cancel(NS_BINDING_ABORTED);
+@@ -1307,65 +1370,70 @@ nsXMLHttpRequest::CloseRequestWithError(
+   if (mState & XML_HTTP_REQUEST_ABORTED) {
+     ChangeState(XML_HTTP_REQUEST_UNSENT, false);  // IE seems to do it
+   }
+ 
+   mState &= ~XML_HTTP_REQUEST_SYNCLOOPING;
+ }
+ 
+ /* void abort (); */
+-NS_IMETHODIMP
++void
+ nsXMLHttpRequest::Abort()
+ {
+   CloseRequestWithError(NS_LITERAL_STRING(ABORT_STR), XML_HTTP_REQUEST_ABORTED);
++}
++
++NS_IMETHODIMP
++nsXMLHttpRequest::SlowAbort()
++{
++  Abort();
+   return NS_OK;
+ }
+ 
+ /* DOMString getAllResponseHeaders(); */
+-NS_IMETHODIMP
+-nsXMLHttpRequest::GetAllResponseHeaders(nsAString& aResponseHeaders)
++IMPL_STRING_GETTER(GetAllResponseHeaders)
++void
++nsXMLHttpRequest::GetAllResponseHeaders(nsString& aResponseHeaders)
+ {
+   aResponseHeaders.Truncate();
+ 
+   // If the state is UNSENT or OPENED,
+   // return the empty string and terminate these steps.
+   if (mState & (XML_HTTP_REQUEST_UNSENT |
+                 XML_HTTP_REQUEST_OPENED | XML_HTTP_REQUEST_SENT)) {
+-    return NS_OK;
++    return;
+   }
+ 
+   if (mState & XML_HTTP_REQUEST_USE_XSITE_AC) {
+-    return NS_OK;
++    return;
+   }
+ 
+   if (nsCOMPtr<nsIHttpChannel> httpChannel = GetCurrentHttpChannel()) {
+     nsRefPtr<nsHeaderVisitor> visitor = new nsHeaderVisitor();
+     if (NS_SUCCEEDED(httpChannel->VisitResponseHeaders(visitor))) {
+-      aResponseHeaders = NS_ConvertUTF8toUTF16(visitor->Headers());
++      CopyASCIItoUTF16(visitor->Headers(), aResponseHeaders);
+     }
+-    return NS_OK;
++    return;
+   }
+ 
+   if (!mChannel) {
+-    return NS_OK;
++    return;
+   }
+ 
+   // Even non-http channels supply content type.
+   nsCAutoString value;
+   if (NS_SUCCEEDED(mChannel->GetContentType(value))) {
+     aResponseHeaders.AppendLiteral("Content-Type: ");
+-    aResponseHeaders.Append(NS_ConvertUTF8toUTF16(value));
+-    if (NS_SUCCEEDED(mChannel->GetContentCharset(value)) &&
+-        !value.IsEmpty()) {
++    AppendASCIItoUTF16(value, aResponseHeaders);
++    if (NS_SUCCEEDED(mChannel->GetContentCharset(value)) && !value.IsEmpty()) {
+       aResponseHeaders.AppendLiteral(";charset=");
+-      aResponseHeaders.Append(NS_ConvertUTF8toUTF16(value));
++      AppendASCIItoUTF16(value, aResponseHeaders);
+     }
+     aResponseHeaders.Append('\n');
+   }
+-  return NS_OK;
+ }
+ 
+ /* ACString getResponseHeader (in AUTF8String header); */
+ NS_IMETHODIMP
+ nsXMLHttpRequest::GetResponseHeader(const nsACString& header,
+                                     nsACString& _retval)
+ {
+   nsresult rv = NS_OK;
+@@ -2057,17 +2125,17 @@ nsXMLHttpRequest::OnStartRequest(nsIRequ
+     if (cc) {
+       cc->SetCacheAsFile(true);
+     }
+   }
+ 
+   ResetResponse();
+ 
+   if (!mOverrideMimeType.IsEmpty()) {
+-    channel->SetContentType(mOverrideMimeType);
++    channel->SetContentType(NS_ConvertUTF16toUTF8(mOverrideMimeType));
+   }
+ 
+   DetectCharset();
+ 
+   // Set up responseXML
+   bool parseBody = mResponseType == XML_HTTP_RESPONSE_TYPE_DEFAULT ||
+                      mResponseType == XML_HTTP_RESPONSE_TYPE_DOCUMENT;
+   nsCOMPtr<nsIHttpChannel> httpChannel(do_QueryInterface(mChannel));
+@@ -3001,34 +3069,43 @@ nsXMLHttpRequest::SetRequestHeader(const
+ 
+   return rv;
+ }
+ 
+ /* attribute unsigned long timeout; */
+ NS_IMETHODIMP
+ nsXMLHttpRequest::GetTimeout(PRUint32 *aTimeout)
+ {
+-  *aTimeout = mTimeoutMilliseconds;
++  *aTimeout = GetTimeout();
+   return NS_OK;
+ }
++
+ NS_IMETHODIMP
+ nsXMLHttpRequest::SetTimeout(PRUint32 aTimeout)
+ {
+-  if ((mState & (XML_HTTP_REQUEST_ASYNC | XML_HTTP_REQUEST_UNSENT)) || !mOwner) {
+-    mTimeoutMilliseconds = aTimeout;
+-    if (mRequestSentTime) {
+-      StartTimeoutTimer();
+-    }
+-    return NS_OK;
++  nsresult rv = NS_OK;
++  SetTimeout(aTimeout, rv);
++  return rv;
++}
++
++void
++nsXMLHttpRequest::SetTimeout(uint32_t aTimeout, nsresult& aRv)
++{
++  if (!(mState & (XML_HTTP_REQUEST_ASYNC | XML_HTTP_REQUEST_UNSENT)) && mOwner) {
++    /* Timeout is not supported for synchronous requests with an owning window,
++       per XHR2 spec. */
++    LogMessage("TimeoutSyncXHRWarning", mOwner);
++    aRv = NS_ERROR_DOM_INVALID_ACCESS_ERR;
++    return;
+   }
+ 
+-  /* Timeout is not supported for synchronous requests with an owning window,
+-     per XHR2 spec. */
+-  LogMessage("TimeoutSyncXHRWarning", mOwner);
+-  return NS_ERROR_DOM_INVALID_ACCESS_ERR;
++  mTimeoutMilliseconds = aTimeout;
++  if (mRequestSentTime) {
++    StartTimeoutTimer();
++  }
+ }
+ 
+ void
+ nsXMLHttpRequest::StartTimeoutTimer()
+ {
+   NS_ABORT_IF_FALSE(mRequestSentTime,
+                     "StartTimeoutTimer mustn't be called before the request was sent!");
+   if (mState & XML_HTTP_REQUEST_DONE) {
+@@ -3051,143 +3128,183 @@ nsXMLHttpRequest::StartTimeoutTimer()
+     (PRUint32)((PR_Now() - mRequestSentTime) / PR_USEC_PER_MSEC);
+   mTimeoutTimer->InitWithCallback(
+     this,
+     mTimeoutMilliseconds > elapsed ? mTimeoutMilliseconds - elapsed : 0,
+     nsITimer::TYPE_ONE_SHOT
+   );
+ }
+ 
+-/* readonly attribute long readyState; */
++/* readonly attribute unsigned short readyState; */
+ NS_IMETHODIMP
+ nsXMLHttpRequest::GetReadyState(PRUint16 *aState)
+ {
+-  NS_ENSURE_ARG_POINTER(aState);
++  *aState = GetReadyState();
++  return NS_OK;
++}
++
++uint16_t
++nsXMLHttpRequest::GetReadyState()
++{
+   // Translate some of our internal states for external consumers
+   if (mState & XML_HTTP_REQUEST_UNSENT) {
+-    *aState = UNSENT;
+-  } else  if (mState & (XML_HTTP_REQUEST_OPENED | XML_HTTP_REQUEST_SENT)) {
+-    *aState = OPENED;
+-  } else if (mState & XML_HTTP_REQUEST_HEADERS_RECEIVED) {
+-    *aState = HEADERS_RECEIVED;
+-  } else if (mState & (XML_HTTP_REQUEST_LOADING | XML_HTTP_REQUEST_STOPPED)) {
+-    *aState = LOADING;
+-  } else if (mState & XML_HTTP_REQUEST_DONE) {
+-    *aState = DONE;
+-  } else {
+-    NS_ERROR("Should not happen");
++    return UNSENT;
+   }
+-
++  if (mState & (XML_HTTP_REQUEST_OPENED | XML_HTTP_REQUEST_SENT)) {
++    return OPENED;
++  }
++  if (mState & XML_HTTP_REQUEST_HEADERS_RECEIVED) {
++    return HEADERS_RECEIVED;
++  }
++  if (mState & (XML_HTTP_REQUEST_LOADING | XML_HTTP_REQUEST_STOPPED)) {
++    return LOADING;
++  }
++  MOZ_ASSERT(mState & XML_HTTP_REQUEST_DONE);
++  return DONE;
++}
++
++/* void overrideMimeType(in DOMString mimetype); */
++NS_IMETHODIMP
++nsXMLHttpRequest::SlowOverrideMimeType(const nsAString& aMimeType)
++{
++  OverrideMimeType(aMimeType);
+   return NS_OK;
+ }
+ 
+-/* void   overrideMimeType(in AUTF8String mimetype); */
+-NS_IMETHODIMP
+-nsXMLHttpRequest::OverrideMimeType(const nsACString& aMimeType)
+-{
+-  // XXX Should we do some validation here?
+-  mOverrideMimeType.Assign(aMimeType);
+-  return NS_OK;
+-}
+-
+-
+ /* attribute boolean multipart; */
+ NS_IMETHODIMP
+ nsXMLHttpRequest::GetMultipart(bool *_retval)
+ {
+-  *_retval = !!(mState & XML_HTTP_REQUEST_MULTIPART);
+-
++  *_retval = GetMultipart();
+   return NS_OK;
+ }
+ 
+-/* attribute boolean multipart; */
++bool
++nsXMLHttpRequest::GetMultipart()
++{
++  return !!(mState & XML_HTTP_REQUEST_MULTIPART);
++}
++
+ NS_IMETHODIMP
+ nsXMLHttpRequest::SetMultipart(bool aMultipart)
+ {
++  nsresult rv = NS_OK;
++  SetMultipart(aMultipart, rv);
++  return rv;
++}
++
++void
++nsXMLHttpRequest::SetMultipart(bool aMultipart, nsresult& aRv)
++{
+   if (!(mState & XML_HTTP_REQUEST_UNSENT)) {
+     // Can't change this while we're in the middle of something.
+-    return NS_ERROR_IN_PROGRESS;
++    aRv = NS_ERROR_IN_PROGRESS;
++    return;
+   }
+ 
+   if (aMultipart) {
+     mState |= XML_HTTP_REQUEST_MULTIPART;
+   } else {
+     mState &= ~XML_HTTP_REQUEST_MULTIPART;
+   }
+-
+-  return NS_OK;
+ }
+ 
+ /* attribute boolean mozBackgroundRequest; */
+ NS_IMETHODIMP
+ nsXMLHttpRequest::GetMozBackgroundRequest(bool *_retval)
+ {
+-  *_retval = !!(mState & XML_HTTP_REQUEST_BACKGROUND);
+-
++  *_retval = GetMozBackgroundRequest();
+   return NS_OK;
+ }
+ 
+-/* attribute boolean mozBackgroundRequest; */
++bool
++nsXMLHttpRequest::GetMozBackgroundRequest()
++{
++  return !!(mState & XML_HTTP_REQUEST_BACKGROUND);
++}
++
+ NS_IMETHODIMP
+ nsXMLHttpRequest::SetMozBackgroundRequest(bool aMozBackgroundRequest)
+ {
++  nsresult rv = NS_OK;
++  SetMozBackgroundRequest(aMozBackgroundRequest, rv);
++  return rv;
++}
++
++void
++nsXMLHttpRequest::SetMozBackgroundRequest(bool aMozBackgroundRequest, nsresult& aRv)
++{
+   bool privileged;
+-
+-  nsresult rv = IsCapabilityEnabled("UniversalXPConnect", &privileged);
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  if (!privileged)
+-    return NS_ERROR_DOM_SECURITY_ERR;
++  aRv = IsCapabilityEnabled("UniversalXPConnect", &privileged);
++  if (NS_FAILED(aRv)) {
++    return;
++  }
++
++  if (!privileged) {
++    aRv = NS_ERROR_DOM_SECURITY_ERR;
++    return;
++  }
+ 
+   if (!(mState & XML_HTTP_REQUEST_UNSENT)) {
+     // Can't change this while we're in the middle of something.
+-    return NS_ERROR_IN_PROGRESS;
++    aRv = NS_ERROR_IN_PROGRESS;
++    return;
+   }
+ 
+   if (aMozBackgroundRequest) {
+     mState |= XML_HTTP_REQUEST_BACKGROUND;
+   } else {
+     mState &= ~XML_HTTP_REQUEST_BACKGROUND;
+   }
+-
+-  return NS_OK;
+ }
+ 
+ /* attribute boolean withCredentials; */
+ NS_IMETHODIMP
+ nsXMLHttpRequest::GetWithCredentials(bool *_retval)
+ {
+-  *_retval = !!(mState & XML_HTTP_REQUEST_AC_WITH_CREDENTIALS);
+-
++  *_retval = GetWithCredentials();
+   return NS_OK;
+ }
+ 
+-/* attribute boolean withCredentials; */
++bool
++nsXMLHttpRequest::GetWithCredentials()
++{
++  return !!(mState & XML_HTTP_REQUEST_AC_WITH_CREDENTIALS);
++}
++
+ NS_IMETHODIMP
+ nsXMLHttpRequest::SetWithCredentials(bool aWithCredentials)
+ {
++  nsresult rv = NS_OK;
++  SetWithCredentials(aWithCredentials, rv);
++  return rv;
++}
++
++void
++nsXMLHttpRequest::SetWithCredentials(bool aWithCredentials, nsresult& aRv)
++{
+   // Return error if we're already processing a request
+   if (XML_HTTP_REQUEST_SENT & mState) {
+-    return NS_ERROR_FAILURE;
++    aRv = NS_ERROR_FAILURE;
++    return;
+   }
+ 
+   // sync request is not allowed setting withCredentials in window context
+   if (mOwner &&
+       !(mState & (XML_HTTP_REQUEST_UNSENT | XML_HTTP_REQUEST_ASYNC))) {
+     LogMessage("WithCredentialsSyncXHRWarning", mOwner);
+-    return NS_ERROR_DOM_INVALID_ACCESS_ERR;
++    aRv = NS_ERROR_DOM_INVALID_ACCESS_ERR;
++    return;
+   }
+ 
+   if (aWithCredentials) {
+     mState |= XML_HTTP_REQUEST_AC_WITH_CREDENTIALS;
+-  }
+-  else {
++  } else {
+     mState &= ~XML_HTTP_REQUEST_AC_WITH_CREDENTIALS;
+   }
+-  return NS_OK;
+ }
+ 
+ nsresult
+ nsXMLHttpRequest::ChangeState(PRUint32 aState, bool aBroadcast)
+ {
+   // If we are setting one of the mutually exclusive states,
+   // unset those state bits first.
+   if (aState & XML_HTTP_REQUEST_LOADSTATES) {
+@@ -3530,31 +3647,34 @@ nsXMLHttpRequest::GetInterface(const nsI
+     return wwatch->GetPrompt(window, aIID,
+                              reinterpret_cast<void**>(aResult));
+ 
+   }
+ 
+   return QueryInterface(aIID, aResult);
+ }
+ 
++nsXMLHttpRequestUpload*
++nsXMLHttpRequest::GetUpload(nsresult& aRv)
++{
++  nsIScriptContext* scriptContext = GetContextForEventHandlers(&aRv);
++  NS_ENSURE_SUCCESS(aRv, NULL);
++  if (!mUpload) {
++    mUpload = new nsXMLHttpRequestUpload(mOwner, scriptContext);
++  }
++  return mUpload;
++}
++
+ NS_IMETHODIMP
+ nsXMLHttpRequest::GetUpload(nsIXMLHttpRequestUpload** aUpload)
+ {
+-  *aUpload = nsnull;
+-
+-  nsresult rv;
+-  nsIScriptContext* scriptContext =
+-    GetContextForEventHandlers(&rv);
+-  NS_ENSURE_SUCCESS(rv, rv);
+-  if (!mUpload) {
+-    mUpload = new nsXMLHttpRequestUpload(mOwner, scriptContext);
+-    NS_ENSURE_TRUE(mUpload, NS_ERROR_OUT_OF_MEMORY);
+-  }
+-  NS_ADDREF(*aUpload = mUpload);
+-  return NS_OK;
++  nsresult rv = NS_OK;
++  nsRefPtr<nsXMLHttpRequestUpload> upload = GetUpload(rv);
++  upload.forget(aUpload);
++  return rv;
+ }
+ 
+ void
+ nsXMLHttpRequest::HandleTimeoutCallback()
+ {
+   if (mState & XML_HTTP_REQUEST_DONE) {
+     NS_NOTREACHED("nsXMLHttpRequest::HandleTimeoutCallback with completed request");
+     // do nothing!
+diff --git a/content/base/src/nsXMLHttpRequest.h b/content/base/src/nsXMLHttpRequest.h
+--- a/content/base/src/nsXMLHttpRequest.h
++++ b/content/base/src/nsXMLHttpRequest.h
+@@ -78,16 +78,96 @@ class nsXHREventTarget : public nsDOMEve
+ public:
+   virtual ~nsXHREventTarget() {}
+   NS_DECL_ISUPPORTS_INHERITED
+   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsXHREventTarget,
+                                            nsDOMEventTargetHelper)
+   NS_DECL_NSIXMLHTTPREQUESTEVENTTARGET
+   NS_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper::)
+ 
++  void AddEventListener(const nsAString& aType, nsIDOMEventListener& aCallback,
++                        bool aCapture, nsresult& aRv)
++  {
++    static_cast<nsIDOMEventTarget*>(static_cast<nsDOMEventTargetHelper*>(this))->AddEventListener(aType, aCallback, aCapture, aRv);
++  }
++  void RemoveEventListener(const nsAString& aType,
++                           nsIDOMEventListener& aCallback,
++                           bool aCapture, nsresult& aRv)
++  {
++    static_cast<nsIDOMEventTarget*>(static_cast<nsDOMEventTargetHelper*>(this))->RemoveEventListener(aType, aCallback, aCapture, aRv);
++  }
++  bool DispatchEvent(nsIDOMEvent& aEvent, nsresult& aRv)
++  {
++    return static_cast<nsIDOMEventTarget*>(static_cast<nsDOMEventTargetHelper*>(this))->DispatchEvent(aEvent, aRv);
++  }
++
++  JSObject* GetOnloadstart(nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++    return NULL;
++  }
++  JSObject* GetOnprogress(nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++    return NULL;
++  }
++  JSObject* GetOnabort(nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++    return NULL;
++  }
++  JSObject* GetOnerror(nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++    return NULL;
++  }
++  JSObject* GetOnload(nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++    return NULL;
++  }
++  JSObject* GetOntimeout(nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++    return NULL;
++  }
++  JSObject* GetOnloadend(nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++    return NULL;
++  }
++  void SetOnloadstart(JSObject* aCallback, nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++  }
++  void SetOnprogress(JSObject* aCallback, nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++  }
++  void SetOnabort(JSObject* aCallback, nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++  }
++  void SetOnerror(JSObject* aCallback, nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++  }
++  void SetOnload(JSObject* aCallback, nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++  }
++  void SetOntimeout(JSObject* aCallback, nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++  }
++  void SetOnloadend(JSObject* aCallback, nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++  }
++
+ protected:
+   nsRefPtr<nsDOMEventListenerWrapper> mOnLoadListener;
+   nsRefPtr<nsDOMEventListenerWrapper> mOnErrorListener;
+   nsRefPtr<nsDOMEventListenerWrapper> mOnAbortListener;
+   nsRefPtr<nsDOMEventListenerWrapper> mOnLoadStartListener;
+   nsRefPtr<nsDOMEventListenerWrapper> mOnProgressListener;
+   nsRefPtr<nsDOMEventListenerWrapper> mOnLoadendListener;
+   nsRefPtr<nsDOMEventListenerWrapper> mOnTimeoutListener;
+@@ -160,16 +240,169 @@ public:
+   NS_DECL_NSITIMERCALLBACK
+ 
+   // nsIJSNativeInitializer
+   NS_IMETHOD Initialize(nsISupports* aOwner, JSContext* cx, JSObject* obj,
+                        PRUint32 argc, jsval* argv);
+ 
+   NS_FORWARD_NSIDOMEVENTTARGET(nsXHREventTarget::)
+ 
++  void StaticAssertions();
++
++  void AddEventListener(const nsAString& aType, nsIDOMEventListener& aCallback,
++                        bool aCapture, nsresult& aRv)
++  {
++    static_cast<nsIDOMEventTarget*>(static_cast<nsDOMEventTargetHelper*>(this))->AddEventListener(aType, aCallback, aCapture, aRv);
++  }
++  void RemoveEventListener(const nsAString& aType,
++                           nsIDOMEventListener& aCallback,
++                           bool aCapture, nsresult& aRv)
++  {
++    static_cast<nsIDOMEventTarget*>(static_cast<nsDOMEventTargetHelper*>(this))->RemoveEventListener(aType, aCallback, aCapture, aRv);
++  }
++  bool DispatchEvent(nsIDOMEvent& aEvent, nsresult& aRv)
++  {
++    return static_cast<nsIDOMEventTarget*>(static_cast<nsDOMEventTargetHelper*>(this))->DispatchEvent(aEvent, aRv);
++  }
++
++  JSObject* GetOnloadstart(nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++    return NULL;
++  }
++  JSObject* GetOnprogress(nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++    return NULL;
++  }
++  JSObject* GetOnabort(nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++    return NULL;
++  }
++  JSObject* GetOnerror(nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++    return NULL;
++  }
++  JSObject* GetOnload(nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++    return NULL;
++  }
++  JSObject* GetOntimeout(nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++    return NULL;
++  }
++  JSObject* GetOnloadend(nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++    return NULL;
++  }
++  void SetOnloadstart(JSObject* aCallback, nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++  }
++  void SetOnprogress(JSObject* aCallback, nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++  }
++  void SetOnabort(JSObject* aCallback, nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++  }
++  void SetOnerror(JSObject* aCallback, nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++  }
++  void SetOnload(JSObject* aCallback, nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++  }
++  void SetOntimeout(JSObject* aCallback, nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++  }
++  void SetOnloadend(JSObject* aCallback, nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++  }
++
++  // event handler
++  JSObject* GetOnreadystatechange(nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++    return NULL;
++  }
++  void SetOnreadystatechange(JSObject* aCallback, nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++  }
++
++  // states
++  uint16_t GetReadyState();
++
++  // request
++  void Open(const nsAString& aMethod, const nsAString& aUrl, bool aAsync,
++            const nsAString& user, const nsAString& password, nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++  }
++  void SetRequestHeader(const nsAString& aHeader, const nsAString& aValue,
++                        nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++  }
++  uint32_t GetTimeout()
++  {
++    return mTimeoutMilliseconds;
++  }
++  void SetTimeout(uint32_t aTimeout, nsresult& aRv);
++  bool GetWithCredentials();
++  void SetWithCredentials(bool aWithCredentials, nsresult& aRv);
++  nsXMLHttpRequestUpload* GetUpload(nsresult& aRv);
++
++  void Send(nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++  }
++  void Abort();
++
++  // response
++  uint32_t GetStatus(nsresult& aRv);
++  void GetStatusText(nsString& aStatusText);
++  void GetResponseHeader(const nsAString& aHeader, nsString& aResponse,
++                         nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++  }
++  void GetAllResponseHeaders(nsString& aResponseHeaders);
++  void OverrideMimeType(const nsAString& aMimeType)
++  {
++    // XXX Should we do some validation here?
++    mOverrideMimeType = aMimeType;
++  }
++  uint32_t GetResponseType();
++  void SetResponseType(uint32_t aType, nsresult& aRv);
++  JS::Value GetResponse(nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++    return JSVAL_NULL;
++  }
++  void GetResponseText(nsString& aStatusText, nsresult& aRv)
++  {
++    aRv = NS_ERROR_FAILURE;
++  }
++
++  bool GetMozBackgroundRequest();
++  void SetMozBackgroundRequest(bool aMozBackgroundRequest, nsresult& aRv);
++  bool GetMultipart();
++  void SetMultipart(bool aMultipart, nsresult& aRv);
++
+   // This creates a trusted readystatechange event, which is not cancelable and
+   // doesn't bubble.
+   static nsresult CreateReadystatechangeEvent(nsIDOMEvent** aDOMEvent);
+   // For backwards compatibility aPosition should contain the headers for upload
+   // and aTotalSize is LL_MAXUINT when unknown. Both those values are
+   // used by nsXMLHttpProgressEvent. Normal progress event should not use
+   // headers in aLoaded and aTotal is 0 when unknown.
+   void DispatchProgressEvent(nsDOMEventTargetHelper* aTarget,
+@@ -299,40 +532,41 @@ protected:
+   // In cases where we've only received half a surrogate, the decoder itself
+   // carries the state to remember this. Next time we receive more data we
+   // simply feed the new data into the decoder which will handle the second
+   // part of the surrogate.
+   nsCOMPtr<nsIUnicodeDecoder> mDecoder;
+ 
+   nsCString mResponseCharset;
+ 
+-  enum {
++  enum ResponseType {
+     XML_HTTP_RESPONSE_TYPE_DEFAULT,
+     XML_HTTP_RESPONSE_TYPE_ARRAYBUFFER,
+     XML_HTTP_RESPONSE_TYPE_BLOB,
+     XML_HTTP_RESPONSE_TYPE_DOCUMENT,
++    XML_HTTP_RESPONSE_TYPE_JSON,
+     XML_HTTP_RESPONSE_TYPE_TEXT,
+-    XML_HTTP_RESPONSE_TYPE_JSON,
+     XML_HTTP_RESPONSE_TYPE_CHUNKED_TEXT,
+     XML_HTTP_RESPONSE_TYPE_CHUNKED_ARRAYBUFFER,
+     XML_HTTP_RESPONSE_TYPE_MOZ_BLOB
+-  } mResponseType;
++  };
++  ResponseType mResponseType;
+ 
+   // It is either a cached blob-response from the last call to GetResponse,
+   // but is also explicitly set in OnStopRequest.
+   nsCOMPtr<nsIDOMBlob> mResponseBlob;
+   // Non-null only when we are able to get a os-file representation of the
+   // response, i.e. when loading from a file, or when the http-stream
+   // caches into a file or is reading from a cached file.
+   nsRefPtr<nsDOMFileBase> mDOMFile;
+   // We stream data to mBuilder when response type is "blob" or "moz-blob"
+   // and mDOMFile is null.
+   nsRefPtr<nsDOMBlobBuilder> mBuilder;
+ 
+-  nsCString mOverrideMimeType;
++  nsString mOverrideMimeType;
+ 
+   /**
+    * The notification callbacks the channel had when Send() was
+    * called.  We want to forward things here as needed.
+    */
+   nsCOMPtr<nsIInterfaceRequestor> mNotificationCallbacks;
+   /**
+    * Sink interfaces that we implement that mNotificationCallbacks may
+diff --git a/dom/bindings/Codegen.py b/dom/bindings/Codegen.py
+--- a/dom/bindings/Codegen.py
++++ b/dom/bindings/Codegen.py
+@@ -976,17 +976,16 @@ class CGCallGenerator(CGThing):
+     object is stored in a variable named "self".
+     """
+     def __init__(self, errorReport, argCount, returnType, resultAlreadyAddRefed,
+                  descriptorProvider, nativeMethodName):
+         CGThing.__init__(self)
+ 
+         isFallible = errorReport is not None
+ 
+-        # XXXbz return values that have to go in outparams go here?
+         args = CGList([CGGeneric("arg" + str(i)) for i in range(argCount)], ", ")
+         resultOutParam = returnType is not None and returnType.isString()
+         # Return values that go in outparams go here
+         if resultOutParam:
+             args.append(CGGeneric("result"))
+         if isFallible:
+             args.append(CGGeneric("rv"))
+ 
+@@ -1264,25 +1263,25 @@ class CGNativeSetter(CGNativeBindingMeth
+         return SetterCall(self.attr.type, nativeMethodName, self.descriptor,
+                           self.attr, self.extendedAttributes).define()
+ 
+ def getEnumValueName(value):
+     # Some enum values can be empty strings.  Others might have weird
+     # characters in them.  Deal with the former by returning "_empty",
+     # deal with possible name collisions from that by throwing if the
+     # enum value is actually "_empty", and throw on any value
+-    # containing chars other than [a-z] for now.
++    # containing chars other than [a-z-] for now.
+     if value == "_empty":
+         raise SyntaxError('"_empty" is not an IDL enum value we support yet')
+     if value == "":
+         return "_empty"
+-    if not re.match("^[a-z]+$", value):
++    if not re.match("^[a-z-]+$", value):
+         raise SyntaxError('Enum value "' + value + '" contains characters '
+-                          'outside [a-z]')
+-    return value
++                          'outside [a-z-]')
++    return value.replace('-', '')
+ 
+ class CGEnum(CGThing):
+     def __init__(self, enum):
+         CGThing.__init__(self)
+         self.enum = enum
+ 
+     def declare(self):
+         return """
+diff --git a/dom/bindings/parser/WebIDL.py b/dom/bindings/parser/WebIDL.py
+--- a/dom/bindings/parser/WebIDL.py
++++ b/dom/bindings/parser/WebIDL.py
+@@ -899,17 +899,17 @@ class IDLWrapperType(IDLType):
+         self.inner = inner
+         self.name = inner.identifier
+         self.builtin = False
+ 
+     def __eq__(self, other):
+         return other and self.name == other.name and self.builtin == other.builtin
+ 
+     def __str__(self):
+-        return str(self.name.name)
++        return str(self.name.name) + " (Wrapper)"
+ 
+     def nullable(self):
+         return False
+ 
+     def isPrimitive(self):
+         return False
+ 
+     def isString(self):
+diff --git a/dom/interfaces/events/nsIDOMEventTarget.idl b/dom/interfaces/events/nsIDOMEventTarget.idl
+--- a/dom/interfaces/events/nsIDOMEventTarget.idl
++++ b/dom/interfaces/events/nsIDOMEventTarget.idl
+@@ -67,16 +67,39 @@ class nsEventListenerManager;
+ 
+ interface nsIScriptContext;
+ interface nsIDOMEventListener;
+ interface nsIDOMEvent;
+ 
+ [scriptable, builtinclass, uuid(8e375931-298d-4d0a-9cb4-5668f0cdc5a8)]
+ interface nsIDOMEventTarget : nsISupports
+ {
++%{C++
++  // Non-virtual so they won't affect the vtable.
++  void AddEventListener(const nsAString& aType,
++                        nsIDOMEventListener& aCallback, // XXX nullable
++                        bool aCapture, nsresult& aRv)
++  {
++    aRv = AddEventListener(aType, &aCallback, aCapture);
++  }
++  void RemoveEventListener(const nsAString& aType,
++                           nsIDOMEventListener& aCallback, // XXX nullable
++                           bool aCapture, nsresult& aRv)
++  {
++    aRv = RemoveEventListener(aType, &aCallback, aCapture);
++  }
++  bool DispatchEvent(nsIDOMEvent& aEvent, nsresult& aRv)
++  {
++    bool result = false;
++    aRv = DispatchEvent(&aEvent, &result);
++    return result;
++  }
++%}
++
++
+   /**
+    * This method allows the registration of event listeners on the event target.
+    * If an EventListener is added to an EventTarget while it is processing an
+    * event, it will not be triggered by the current actions but may be 
+    * triggered during a later stage of event flow, such as the bubbling phase.
+    * 
+    * If multiple identical EventListeners are registered on the same 
+    * EventTarget with the same parameters the duplicate instances are 
+diff --git a/dom/webidl/XMLHttpRequest.webidl b/dom/webidl/XMLHttpRequest.webidl
+--- a/dom/webidl/XMLHttpRequest.webidl
++++ b/dom/webidl/XMLHttpRequest.webidl
+@@ -11,17 +11,20 @@
+  */
+ 
+ enum XMLHttpRequestResponseType {
+   "",
+   "arraybuffer",
+   "blob",
+   "document",
+   "json",
+-  "text"
++  "text",
++  "moz-chunked-text",
++  "moz-chunked-arraybuffer",
++  "moz-blob"
+ };
+ 
+ [Constructor]
+ interface XMLHttpRequest : XMLHttpRequestEventTarget {
+   // event handler
+   [TreatNonCallableAsNull] attribute Function? onreadystatechange;
+ 
+   // states
+@@ -49,11 +52,16 @@ interface XMLHttpRequest : XMLHttpReques
+   // response
+   readonly attribute unsigned short status;
+   readonly attribute DOMString statusText;
+   DOMString? getResponseHeader(DOMString header);
+   DOMString getAllResponseHeaders();
+   void overrideMimeType(DOMString mime);
+            attribute XMLHttpRequestResponseType responseType;
+   readonly attribute any response;
+-  readonly attribute DOMString responseText;
++  // Willful violation: we return null for the moz-chunked-text case.
++  readonly attribute DOMString? responseText;
+ //  readonly attribute Document? responseXML;
++
++  // Mozilla extensions
++  attribute boolean mozBackgroundRequest;
++  attribute boolean multipart;
+ };
+diff --git a/dom/workers/XMLHttpRequest.cpp b/dom/workers/XMLHttpRequest.cpp
+--- a/dom/workers/XMLHttpRequest.cpp
++++ b/dom/workers/XMLHttpRequest.cpp
+@@ -325,17 +325,19 @@ public:
+ 
+ #define HANDLE_STATE_VALUE(_member, _slot) \
+   if (aNewState. _member##Exception || !JSVAL_IS_VOID(aNewState. _member)) { \
+     JS_SetReservedSlot(aObj, _slot, aNewState. _member);                     \
+   }
+ 
+     HANDLE_STATE_VALUE(mResponseText, SLOT_responseText)
+     HANDLE_STATE_VALUE(mStatus, SLOT_status)
+-    HANDLE_STATE_VALUE(mStatusText, SLOT_statusText)
++    if (!JSVAL_IS_VOID(aNewState.mStatusText)) {
++      JS_SetReservedSlot(aObj, SLOT_statusText, aNewState.mStatusText);
++    }
+     HANDLE_STATE_VALUE(mReadyState, SLOT_readyState)
+     HANDLE_STATE_VALUE(mResponse, SLOT_response)
+ 
+ #undef HANDLE_STATE_VALUE
+ 
+     return true;
+   }
+ 
+diff --git a/dom/workers/XMLHttpRequest.h b/dom/workers/XMLHttpRequest.h
+--- a/dom/workers/XMLHttpRequest.h
++++ b/dom/workers/XMLHttpRequest.h
+@@ -54,17 +54,16 @@ struct StateData
+ {
+   jsval mResponseText;
+   jsval mStatus;
+   jsval mStatusText;
+   jsval mReadyState;
+   jsval mResponse;
+   bool mResponseTextException;
+   bool mStatusException;
+-  bool mStatusTextException;
+   bool mReadyStateException;
+   bool mResponseException;
+ };
+ 
+ bool
+ UpdateXHRState(JSContext* aCx, JSObject* aObj, bool aIsUpload,
+                const StateData& aNewState);
+ 
+diff --git a/dom/workers/XMLHttpRequestPrivate.cpp b/dom/workers/XMLHttpRequestPrivate.cpp
+--- a/dom/workers/XMLHttpRequestPrivate.cpp
++++ b/dom/workers/XMLHttpRequestPrivate.cpp
+@@ -82,17 +82,17 @@ public:
+   PRUint64 mLastUploadTotal;
+   bool mIsSyncXHR;
+   bool mLastLengthComputable;
+   bool mLastUploadLengthComputable;
+   bool mSeenLoadStart;
+   bool mSeenUploadLoadStart;
+ 
+   // Only touched on the main thread.
+-  nsCString mPreviousStatusText;
++  nsString mPreviousStatusText;
+   PRUint32 mSyncQueueKey;
+   PRUint32 mSyncEventResponseSyncQueueKey;
+   bool mUploadEventListenersAttached;
+   bool mMainThreadSeenLoadStart;
+ 
+ public:
+   NS_DECL_ISUPPORTS
+   NS_DECL_NSIDOMEVENTLISTENER
+@@ -439,50 +439,49 @@ NS_IMPL_ISUPPORTS2(LoadStartDetectionRun
+ 
+ class EventRunnable : public MainThreadProxyRunnable
+ {
+   nsString mType;
+   nsString mResponseType;
+   JSAutoStructuredCloneBuffer mResponseBuffer;
+   nsTArray<nsCOMPtr<nsISupports> > mClonedObjects;
+   jsval mResponse;
+-  nsCString mStatusText;
++  nsString mStatusText;
+   PRUint64 mLoaded;
+   PRUint64 mTotal;
+   PRUint32 mChannelId;
+   PRUint32 mStatus;
+   PRUint16 mReadyState;
+   bool mUploadEvent;
+   bool mProgressEvent;
+   bool mLengthComputable;
+   bool mResponseTextException;
+   bool mStatusException;
+-  bool mStatusTextException;
+   bool mReadyStateException;
+   bool mResponseException;
+ 
+ public:
+   EventRunnable(Proxy* aProxy, bool aUploadEvent, const nsString& aType,
+                 bool aLengthComputable, PRUint64 aLoaded, PRUint64 aTotal)
+   : MainThreadProxyRunnable(aProxy->mWorkerPrivate, SkipWhenClearing, aProxy),
+     mType(aType), mResponse(JSVAL_VOID), mLoaded(aLoaded), mTotal(aTotal),
+     mChannelId(aProxy->mInnerChannelId), mStatus(0), mReadyState(0),
+     mUploadEvent(aUploadEvent), mProgressEvent(true),
+     mLengthComputable(aLengthComputable), mResponseTextException(false),
+-    mStatusException(false), mStatusTextException(false),
++    mStatusException(false),
+     mReadyStateException(false), mResponseException(false)
+   { }
+ 
+   EventRunnable(Proxy* aProxy, bool aUploadEvent, const nsString& aType)
+   : MainThreadProxyRunnable(aProxy->mWorkerPrivate, SkipWhenClearing, aProxy),
+     mType(aType), mResponse(JSVAL_VOID), mLoaded(0), mTotal(0),
+     mChannelId(aProxy->mInnerChannelId), mStatus(0), mReadyState(0),
+     mUploadEvent(aUploadEvent), mProgressEvent(false), mLengthComputable(0),
+     mResponseTextException(false), mStatusException(false),
+-    mStatusTextException(false), mReadyStateException(false),
++    mReadyStateException(false),
+     mResponseException(false)
+   { }
+ 
+   bool
+   PreDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
+   {
+     nsRefPtr<nsXMLHttpRequest>& xhr = mProxy->mXHR;
+     NS_ASSERTION(xhr, "Must have an XHR here!");
+@@ -519,27 +518,21 @@ public:
+       mResponseException = true;
+     }
+ 
+     nsString responseText;
+     mResponseTextException = NS_FAILED(xhr->GetResponseText(responseText));
+ 
+     mStatusException = NS_FAILED(xhr->GetStatus(&mStatus));
+ 
+-    if (NS_SUCCEEDED(xhr->GetStatusText(mStatusText))) {
+-      if (mStatusText == mProxy->mPreviousStatusText) {
+-        mStatusText.SetIsVoid(true);
+-      }
+-      else {
+-        mProxy->mPreviousStatusText = mStatusText;
+-      }
+-      mStatusTextException = false;
+-    }
+-    else {
+-      mStatusTextException = true;
++    xhr->GetStatusText(mStatusText);
++    if (mStatusText == mProxy->mPreviousStatusText) {
++      mStatusText.SetIsVoid(true);
++    } else {
++      mProxy->mPreviousStatusText = mStatusText;
+     }
+ 
+     mReadyStateException = NS_FAILED(xhr->GetReadyState(&mReadyState));
+     return true;
+   }
+ 
+   bool
+   WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
+@@ -646,26 +639,25 @@ public:
+     }
+     else {
+       state.mResponseText = JSVAL_VOID;
+     }
+ 
+     state.mStatusException = mStatusException;
+     state.mStatus = mStatusException ? JSVAL_VOID : INT_TO_JSVAL(mStatus);
+ 
+-    state.mStatusTextException = mStatusTextException;
+-    if (mStatusTextException || mStatusText.IsVoid()) {
++    if (mStatusText.IsVoid()) {
+       state.mStatusText = JSVAL_VOID;
+     }
+     else if (mStatusText.IsEmpty()) {
+       state.mStatusText = JS_GetEmptyStringValue(aCx);
+     }
+     else {
+-      JSString* statusText = JS_NewStringCopyN(aCx, mStatusText.get(),
+-                                               mStatusText.Length());
++      JSString* statusText = JS_NewUCStringCopyN(aCx, mStatusText.get(),
++                                                 mStatusText.Length());
+       if (!statusText) {
+         return false;
+       }
+       mStatusText.Truncate();
+       state.mStatusText = STRING_TO_JSVAL(statusText);
+     }
+ 
+     state.mReadyStateException = mReadyStateException;
+@@ -696,17 +688,17 @@ public:
+       JS_ReportPendingException(aCx);
+     }
+ 
+     // After firing the event set mResponse to JSVAL_NULL for chunked response
+     // types.
+     if (StringBeginsWith(mResponseType, NS_LITERAL_STRING("moz-chunked-"))) {
+       xhr::StateData newState = {
+         JSVAL_NULL, JSVAL_VOID, JSVAL_VOID, JSVAL_VOID, JSVAL_NULL,
+-        false, false, false, false, false
++        false, false, false, false
+       };
+ 
+       if (!xhr::UpdateXHRState(aCx, target, mUploadEvent, newState)) {
+         return false;
+       }
+     }
+ 
+     return true;
+@@ -899,23 +891,23 @@ public:
+   int
+   MainThreadRun()
+   {
+     mProxy->mInnerChannelId++;
+ 
+     WorkerPrivate* oldWorker = mProxy->mWorkerPrivate;
+     mProxy->mWorkerPrivate = mWorkerPrivate;
+ 
+-    nsresult rv = mProxy->mXHR->Abort();
++    mProxy->mXHR->Abort();
+ 
+     mProxy->mWorkerPrivate = oldWorker;
+ 
+     mProxy->Reset();
+ 
+-    return GetDOMExceptionCodeFromResult(rv);
++    return 0;
+   }
+ };
+ 
+ class GetAllResponseHeadersRunnable : public WorkerThreadProxySyncRunnable
+ {
+   nsString& mResponseHeaders;
+ 
+ public:
+@@ -923,19 +915,18 @@ public:
+                                 nsString& aResponseHeaders)
+   : WorkerThreadProxySyncRunnable(aWorkerPrivate, aProxy),
+     mResponseHeaders(aResponseHeaders)
+   { }
+ 
+   int
+   MainThreadRun()
+   {
+-    nsresult rv =
+-      mProxy->mXHR->GetAllResponseHeaders(mResponseHeaders);
+-    return GetDOMExceptionCodeFromResult(rv);
++    mProxy->mXHR->GetAllResponseHeaders(mResponseHeaders);
++    return 0;
+   }
+ };
+ 
+ class GetResponseHeaderRunnable : public WorkerThreadProxySyncRunnable
+ {
+   const nsCString mHeader;
+   nsCString& mValue;
+ 
+@@ -1161,29 +1152,29 @@ public:
+   {
+     nsresult rv = mProxy->mXHR->SetRequestHeader(mHeader, mValue);
+     return GetDOMExceptionCodeFromResult(rv);
+   }
+ };
+ 
+ class OverrideMimeTypeRunnable : public WorkerThreadProxySyncRunnable
+ {
+-  nsCString mMimeType;
++  nsString mMimeType;
+ 
+ public:
+   OverrideMimeTypeRunnable(WorkerPrivate* aWorkerPrivate, Proxy* aProxy,
+-                           const nsCString& aMimeType)
++                           const nsString& aMimeType)
+   : WorkerThreadProxySyncRunnable(aWorkerPrivate, aProxy), mMimeType(aMimeType)
+   { }
+ 
+   int
+   MainThreadRun()
+   {
+-    nsresult rv = mProxy->mXHR->OverrideMimeType(mMimeType);
+-    return GetDOMExceptionCodeFromResult(rv);
++    mProxy->mXHR->OverrideMimeType(mMimeType);
++    return 0;
+   }
+ };
+ 
+ class AutoUnpinXHR {
+ public:
+   AutoUnpinXHR(XMLHttpRequestPrivate* aXMLHttpRequestPrivate,
+                JSContext* aCx)
+   :  mXMLHttpRequestPrivate(aXMLHttpRequestPrivate), mCx(aCx)
+@@ -1872,30 +1863,29 @@ XMLHttpRequestPrivate::OverrideMimeType(
+   }
+ 
+   nsDependentJSString mimeType;
+   if (!mimeType.init(aCx, aMimeType)) {
+     return false;
+   }
+ 
+   nsRefPtr<OverrideMimeTypeRunnable> runnable =
+-    new OverrideMimeTypeRunnable(mWorkerPrivate, mProxy, 
+-                                 NS_ConvertUTF16toUTF8(mimeType));
++    new OverrideMimeTypeRunnable(mWorkerPrivate, mProxy, mimeType);
+   return runnable->Dispatch(aCx);
+ }
+ 
+ bool
+ XMLHttpRequestPrivate::MaybeDispatchPrematureAbortEvents(JSContext* aCx)
+ {
+   mWorkerPrivate->AssertIsOnWorkerThread();
+   NS_ASSERTION(mProxy, "Must have a proxy here!");
+ 
+   xhr::StateData state = {
+     JSVAL_VOID, JSVAL_VOID, JSVAL_VOID, INT_TO_JSVAL(4), JSVAL_VOID,
+-    false, false, false, false, false
++    false, false, false, false
+   };
+ 
+   // If we never saw loadstart, we must Unpin ourselves or we will hang at
+   // shutdown.  Do that here before any early returns.
+   if (!mProxy->mSeenLoadStart && mProxy->mWorkerPrivate) {
+     Unpin(aCx);
+   }
+ 
+diff --git a/xpcom/ds/nsVariant.h b/xpcom/ds/nsVariant.h
+--- a/xpcom/ds/nsVariant.h
++++ b/xpcom/ds/nsVariant.h
+@@ -1,9 +1,9 @@
+-/* -*- Mode: IDL; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
++/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+  *
+  * ***** BEGIN LICENSE BLOCK *****
+  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+  *
+  * The contents of this file are subject to the Mozilla Public License Version
+  * 1.1 (the "License"); you may not use this file except in compliance with
+  * the License. You may obtain a copy of the License at
+  * http://www.mozilla.org/MPL/
+@@ -34,16 +34,19 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* The long avoided variant support for xpcom. */
+ 
++#ifndef nsVariant_h
++#define nsVariant_h
++
+ #include "nsIVariant.h"
+ #include "nsStringFwd.h"
+ #include "xpt_struct.h"
+ 
+ class nsCycleCollectionTraversalCallback;
+ 
+ /** 
+  * Map the nsAUTF8String, nsUTF8String classes to the nsACString and
+@@ -201,8 +204,9 @@ protected:
+ { /* 0D6EA1D0-879C-11d5-90EF-0010A4E73D9A */ \
+     0xd6ea1d0,                               \
+     0x879c,                                  \
+     0x11d5,                                  \
+     {0x90, 0xef, 0x0, 0x10, 0xa4, 0xe7, 0x3d, 0x9a}}
+ 
+ #define NS_VARIANT_CLASSNAME "Variant"
+ 
++#endif // nsVariant_h

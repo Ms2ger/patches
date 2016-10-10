@@ -1,0 +1,142 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/bindings/Codegen.py b/dom/bindings/Codegen.py
+--- a/dom/bindings/Codegen.py
++++ b/dom/bindings/Codegen.py
+@@ -319,18 +319,19 @@ class CGAbstractClassHook(CGAbstractStat
+     """
+ 
+     def __init__(self, descriptor, name, returnType, args):
+         CGAbstractStaticMethod.__init__(self, descriptor, name, returnType,
+                                         args)
+ 
+     def definition_body_prologue(self):
+         return """
++  MOZ_ASSERT(obj);
+   MOZ_ASSERT(js::GetObjectJSClass(obj) == Class.ToJSClass());
+-  %s *self = UnwrapDOMObject<%s>(obj);
++  %s *self = UnwrapDOMObject<%s>(*obj);
+ """ % (self.descriptor.nativeClass, self.descriptor.nativeClass)
+ 
+     def definition_body(self):
+         return self.definition_body_prologue() + self.generate_code()
+ 
+     def generate_code(self):
+         # Override me
+         assert(False)
+@@ -514,30 +515,31 @@ class ConcreteObjectUnwrapper():
+                               "protoIDIndex" : "depth::" + descriptor.name,
+                               "source" : source,
+                               "target" : target,
+                               "codeOnFailure" : codeOnFailure }
+ 
+     def __str__(self):
+         return string.Template("""
+   {
+-    nsresult rv = UnwrapObject(cx, ${source}, ${protoID},
++    MOZ_ASSERT(${source});
++    nsresult rv = UnwrapObject(cx, *${source}, ${protoID},
+                                ${protoIDIndex}, &${target});
+     if (NS_FAILED(rv)) {
+       ${codeOnFailure}
+     }
+   }""").substitute(self.substitution)
+ 
+ class FailureFatalConcreteObjectUnwrapper(ConcreteObjectUnwrapper):
+     """
+     As ConcreteObjectUnwrapper, but defaulting to throwing if unwrapping fails
+     """
+     def __init__(self, descriptor, source, target):
+         ConcreteObjectUnwrapper.__init__(self, descriptor, source, target,
+-                                         "xpc_qsThrow(cx, rv);")
++                                         "return xpc_qsThrow(cx, rv);")
+ 
+ def getArgumentConversionTemplate(type, descriptor):
+     if descriptor is not None:
+         assert(type.isInterface())
+         # This is an interface that we implement as a concrete class
+         # or an XPCOM interface.
+         if type.nullable():
+             nameSuffix = ""
+diff --git a/dom/bindings/Utils.h b/dom/bindings/Utils.h
+--- a/dom/bindings/Utils.h
++++ b/dom/bindings/Utils.h
+@@ -159,65 +159,67 @@ struct WrapHelper<T, true>
+ inline bool
+ IsDOMClass(JSClass *clasp)
+ {
+   return clasp->flags & JSCLASS_IS_DOMJSCLASS;
+ }
+ 
+ template<class T>
+ inline T*
+-UnwrapDOMObject(JSObject *obj)
++UnwrapDOMObject(JSObject &obj)
+ {
+-  MOZ_ASSERT(IsDOMClass(js::GetObjectJSClass(obj)));
+-  return static_cast<T*>(js::GetReservedSlot(obj,
++  MOZ_ASSERT(IsDOMClass(js::GetObjectJSClass(&obj)));
++  return static_cast<T*>(js::GetReservedSlot(&obj,
+                                              DOM_OBJECT_SLOT).toPrivate());
+ }
+ 
+ /*
+  * - protoID is the ID of the prototype that corresponds to type T
+  * - protoIDIndex is the index at which we expect to find protoID in the DOM
+  *                class's mInterfaceChain.
+  */
+ template<class T>
+ inline nsresult
+ UnwrapObject(JSContext *cx,
+-             JSObject *obj,
++             JSObject &obj,
+              prototypes::ID protoID,
+              prototypes::Depth protoIDIndex,
+              T **value)
+ {
++  JSObject& object = obj;
+   /* First check to see whether we have a DOM object */
+-  JSClass *clasp = js::GetObjectJSClass(obj);
++  JSClass *clasp = js::GetObjectJSClass(&object);
+   if (!IsDOMClass(clasp)) {
+     /* Maybe we have a security wrapper or outer window? */
+-    if (!js::IsWrapper(obj)) {
++    if (!js::IsWrapper(&object)) {
+       /* Not a DOM object, not a wrapper, just bail */
+       return NS_ERROR_XPC_BAD_CONVERT_JS;
+     }
+ 
+-    obj = XPCWrapper::Unwrap(cx, obj, false);
+-    if (!obj) {
++    JSObject* unwrapped = XPCWrapper::Unwrap(cx, &object, false);
++    if (!unwrapped) {
+       return NS_ERROR_XPC_SECURITY_MANAGER_VETO;
+     }
+-    MOZ_ASSERT(!js::IsWrapper(obj));
+-    clasp = js::GetObjectJSClass(obj);
++    object = *unwrapped;
++    MOZ_ASSERT(!js::IsWrapper(&object));
++    clasp = js::GetObjectJSClass(&object);
+     if (!IsDOMClass(clasp)) {
+       /* We don't have a DOM object */
+       return NS_ERROR_XPC_BAD_CONVERT_JS;
+     }
+   }
+ 
+   MOZ_ASSERT(IsDOMClass(clasp));
+ 
+   /* This object is a DOM object.  Double-check that it is safely
+      castable to T by checking whether it claims to inherit from the
+      class identified by protoID. */
+   DOMJSClass *domClass = DOMJSClass::FromJSClass(clasp);
+   if (domClass->mInterfaceChain[protoIDIndex] == protoID) {
+-    *value = UnwrapDOMObject<T>(obj);
++    *value = UnwrapDOMObject<T>(object);
+     return NS_OK;
+   }
+ 
+   /* It's the wrong sort of DOM object */
+   return NS_ERROR_XPC_BAD_CONVERT_JS;
+ }
+ 
+ inline JSObject **

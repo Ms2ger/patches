@@ -1,0 +1,124 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/events/src/nsEventListenerManager.cpp b/content/events/src/nsEventListenerManager.cpp
+--- a/content/events/src/nsEventListenerManager.cpp
++++ b/content/events/src/nsEventListenerManager.cpp
+@@ -953,60 +953,78 @@ nsEventListenerManager::HasUnloadListene
+ }
+ 
+ nsresult
+ nsEventListenerManager::SetJSEventListenerToJsval(nsIAtom *aEventName,
+                                                   JSContext *cx,
+                                                   JSObject* aScope,
+                                                   const jsval & v)
+ {
+-  JSObject *handler;
+-  if (JSVAL_IS_PRIMITIVE(v) ||
+-      !JS_ObjectIsCallable(cx, handler = JSVAL_TO_OBJECT(v))) {
++  JSObject* handler;
++  if (v.isObject() && JS_ObjectIsCallable(cx, &v.toObject())) {
++    handler = &v.toObject();
++  } else {
++    handler = NULL;
++  }
++  return SetJSEventListenerToJsval(aEventName, cx, aScope, handler);
++}
++
++nsresult
++nsEventListenerManager::SetJSEventListenerToJsval(nsIAtom *aEventName,
++                                                  JSContext* cx,
++                                                  JSObject* aScope,
++                                                  JSObject* aHandler)
++{
++  if (!aHandler) {
+     RemoveScriptEventListener(aEventName);
+     return NS_OK;
+   }
+ 
+   // We might not have a script context, e.g. if we're setting a listener
+   // on a dead Window.
+   nsIScriptContext *context = nsJSUtils::GetStaticScriptContext(cx, aScope);
+   NS_ENSURE_TRUE(context, NS_ERROR_FAILURE);
+ 
+   JSObject *scope = ::JS_GetGlobalForObject(cx, aScope);
+   // Untrusted events are always permitted for non-chrome script
+   // handlers.
+   nsListenerStruct *ignored;
+-  return SetJSEventListener(context, scope, aEventName, handler,
++  return SetJSEventListener(context, scope, aEventName, aHandler,
+                             !nsContentUtils::IsCallerChrome(), &ignored);
+ }
+ 
+ void
+ nsEventListenerManager::GetJSEventListener(nsIAtom *aEventName, jsval *vp)
+ {
++  JSObject* eventListener = GetJSEventListener(aEventName);
++  *vp = JS::ObjectOrNullValue(eventListener);
++}
++
++JSObject*
++nsEventListenerManager::GetJSEventListener(nsIAtom* aEventName)
++{
+   PRUint32 eventType = nsContentUtils::GetEventId(aEventName);
+   nsListenerStruct* ls = FindJSEventListener(eventType, aEventName);
+ 
+-  *vp = JSVAL_NULL;
+-
+   if (!ls) {
+-    return;
++    return NULL;
+   }
+ 
+   nsIJSEventListener *listener = ls->GetJSListener();
+   if (listener->GetEventContext()->GetScriptTypeID() !=
+         nsIProgrammingLanguage::JAVASCRIPT) {
+     // Not JS, so no point doing anything with it.
+-    return;
++    return NULL;
+   }
+     
+   if (ls->mHandlerIsString) {
+     CompileEventHandlerInternal(ls, true, nsnull);
+   }
+ 
+-  *vp = OBJECT_TO_JSVAL(listener->GetHandler());
++  return listener->GetHandler();
+ }
+ 
+ PRInt64
+ nsEventListenerManager::SizeOf() const
+ {
+   PRInt64 size = sizeof(*this);
+   PRUint32 count = mListeners.Length();
+   for (PRUint32 i = 0; i < count; ++i) {
+diff --git a/content/events/src/nsEventListenerManager.h b/content/events/src/nsEventListenerManager.h
+--- a/content/events/src/nsEventListenerManager.h
++++ b/content/events/src/nsEventListenerManager.h
+@@ -287,20 +287,27 @@ public:
+   /**
+    * Set the "inline" event listener for aEventName to |v|.  This
+    * might actually remove the event listener, depending on the value
+    * of |v|.
+    */
+   nsresult SetJSEventListenerToJsval(nsIAtom *aEventName, JSContext *cx,
+                                      JSObject *aScope, const jsval &v);
+   /**
++   * Set the "inline" event listener for aEventName to |v|.  This
++   * removes the event listener if aHandler is null.
++   */
++  nsresult SetJSEventListenerToJsval(nsIAtom* aEventName, JSContext* cx,
++                                     JSObject* aScope, JSObject* aHandler);
++  /**
+    * Get the value of the "inline" event listener for aEventName.
+    * This may cause lazy compilation if the listener is uncompiled.
+    */
+   void GetJSEventListener(nsIAtom *aEventName, jsval *vp);
++  JSObject* GetJSEventListener(nsIAtom* aEventName);
+ 
+ protected:
+   void AddEventListener(nsIDOMEventListener *aListener, 
+                         PRUint32 aType,
+                         nsIAtom* aTypeAtom,
+                         PRInt32 aFlags);
+   void RemoveEventListener(nsIDOMEventListener *aListener,
+                            PRUint32 aType,

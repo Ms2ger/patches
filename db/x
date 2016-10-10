@@ -1,0 +1,699 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/bindings/Codegen.py b/dom/bindings/Codegen.py
+--- a/dom/bindings/Codegen.py
++++ b/dom/bindings/Codegen.py
+@@ -609,19 +603,19 @@ def getArgumentConversionTemplate(type, 
+     if type.isInterface():
+         raise TypeError("Interface type with no descriptor: " + type)
+ 
+     if type.isString():
+         # XXXbz Need to figure out string behavior?  Also, how to
+         # detect them?  Also, nullability?
+ 
+         return (
+-            "  xpc_qsDOMString ${name}(cx, ${argVal}, ${argPtr},\n"
+-            "                       xpc_qsDOMString::eDefaultNullBehavior,\n"
+-            "                       xpc_qsDOMString::eDefaultUndefinedBehavior);\n"
++            "  xpc::DOMString ${name}(cx, ${argVal}, ${argPtr},\n"
++            "                      xpc::DOMString::eDefaultNullBehavior,\n"
++            "                      xpc::DOMString::eDefaultUndefinedBehavior);\n"
+             "  if (!${name}.IsValid()) {\n"
+             "    return false;\n"
+             "  }\n")
+ 
+     if type.isEnum():
+         if type.nullable():
+             raise TypeError("We don't support nullable enumerated arguments "
+                             "yet")
+@@ -711,22 +705,22 @@ def getArgumentConversionTemplate(type, 
+         elif tag is IDLType.Tags.int16:
+             replacements["intermediateCast"] = "(uint16_t)"
+         else:
+             replacements["intermediateCast"] = ""
+     elif tag is IDLType.Tags.int64:
+         # XXXbz this may not match what WebIDL says to do in terms of reducing
+         # mod 2^64.  Should we check?
+         replacements["jstype"] = "PRInt64"
+-        replacements["converter"] = "xpc_qsValueToInt64"
++        replacements["converter"] = "xpc::ValueToInt64"
+     elif tag is IDLType.Tags.uint64:
+         # XXXbz this may not match what WebIDL says to do in terms of reducing
+         # mod 2^64.  Should we check?
+         replacements["jstype"] = "PRUint64"
+-        replacements["converter"] = "xpc_qsValueToUint64"
++        replacements["converter"] = "xpc::ValueToUint64"
+     elif tag in [IDLType.Tags.float, IDLType.Tags.double]:
+         replacements["jstype"] = "jsdouble"
+         replacements["converter"] = "JS_ValueToNumber"
+     else:
+         raise TypeError("Unknown primitive type '%s'" % type);
+ 
+     # We substitute the %(name)s things here.  Our caller will
+     # substitute the ${name} things.
+diff --git a/dom/bindings/Makefile.in b/dom/bindings/Makefile.in
+--- a/dom/bindings/Makefile.in
++++ b/dom/bindings/Makefile.in
+@@ -32,18 +32,16 @@ EXPORTS_NAMESPACES = $(binding_include_p
+ 
+ EXPORTS_$(binding_include_path) = \
+   DOMJSClass.h \
+   PrototypeList.h \
+   Utils.h \
+   $(binding_header_files) \
+   $(NULL)
+ 
+-LOCAL_INCLUDES += -I$(topsrcdir)/js/xpconnect/src
+-
+ include $(topsrcdir)/config/rules.mk
+ 
+ bindinggen_dependencies := \
+   BindingGen.py \
+   Bindings.conf \
+   Configuration.py \
+   Codegen.py \
+   ParserResults.pkl \
+diff --git a/dom/bindings/Utils.h b/dom/bindings/Utils.h
+--- a/dom/bindings/Utils.h
++++ b/dom/bindings/Utils.h
+@@ -5,19 +5,24 @@
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_bindings_Utils_h__
+ #define mozilla_dom_bindings_Utils_h__
+ 
+ #include "mozilla/dom/bindings/DOMJSClass.h"
+ 
+ #include "jsapi.h"
++#include "jsfriendapi.h"
++#include "jsgc.h"
++#include "jswrapper.h"
+ 
+-#include "XPCQuickStubs.h"
+-#include "XPCWrapper.h"
++//#include "XPCQuickStubs.h"
++//#include "XPCWrapper.h"
++#include "nsIXPConnect.h"
++#include "xpcpublic.h"
+ 
+ /* All DOM globals must have a slot at DOM_PROTOTYPE_SLOT */
+ #define DOM_PROTOTYPE_SLOT (JSCLASS_GLOBAL_SLOT_COUNT + 1)
+ 
+ namespace mozilla {
+ namespace dom {
+ namespace bindings {
+ 
+@@ -47,16 +52,24 @@ template <class T>
+ inline T*
+ UnwrapDOMObject(JSObject *obj)
+ {
+   MOZ_ASSERT(IsDOMClass(js::GetObjectJSClass(obj)));
+   return static_cast<T*>(js::GetReservedSlot(obj,
+                                              DOM_OBJECT_SLOT).toPrivate());
+ }
+ 
++
++namespace XPCWrapper {
++
++JSObject*
++Unwrap(JSContext* cx, JSObject* wrapper, bool stopAtOuter = true);
++
++} // namespace XPCWrapper
++
+ template <prototypes::ID PrototypeID, class T>
+ inline nsresult
+ UnwrapObject(JSContext *cx, JSObject *obj, T **value)
+ {
+   /* First check to see whether we have a DOM object */
+   JSClass *clasp = js::GetObjectJSClass(obj);
+   if (!IsDOMClass(clasp)) {
+     /* Maybe we have a security wrapper or outer window? */
+diff --git a/dom/workers/Makefile.in b/dom/workers/Makefile.in
+--- a/dom/workers/Makefile.in
++++ b/dom/workers/Makefile.in
+@@ -73,14 +73,13 @@ CPPSRCS = \
+   XMLHttpRequestPrivate.cpp \
+   $(NULL)
+ 
+ LOCAL_INCLUDES = \
+   -I$(topsrcdir)/content/base/src \
+   -I$(topsrcdir)/content/events/src \
+   -I$(topsrcdir)/dom/base \
+   -I$(topsrcdir)/xpcom/build \
+-  -I$(topsrcdir)/js/xpconnect/src \
+   $(NULL)
+ 
+ TEST_DIRS += test
+ 
+ include $(topsrcdir)/config/rules.mk
+diff --git a/js/xpconnect/src/XPCQuickStubs.cpp b/js/xpconnect/src/XPCQuickStubs.cpp
+--- a/js/xpconnect/src/XPCQuickStubs.cpp
++++ b/js/xpconnect/src/XPCQuickStubs.cpp
+@@ -665,19 +665,21 @@ xpc_qsGetterOnlyPropertyStub(JSContext *
+ {
+     return JS_ReportErrorFlagsAndNumber(cx,
+                                         JSREPORT_WARNING | JSREPORT_STRICT |
+                                         JSREPORT_STRICT_MODE_ERROR,
+                                         js_GetErrorMessage, NULL,
+                                         JSMSG_GETTER_ONLY);
+ }
+ 
+-xpc_qsDOMString::xpc_qsDOMString(JSContext *cx, jsval v, jsval *pval,
+-                                 StringificationBehavior nullBehavior,
+-                                 StringificationBehavior undefinedBehavior)
++namespace xpc {
++
++DOMString::DOMString(JSContext *cx, jsval v, jsval *pval,
++                     StringificationBehavior nullBehavior,
++                     StringificationBehavior undefinedBehavior)
+ {
+     typedef implementation_type::char_traits traits;
+     // From the T_DOMSTRING case in XPCConvert::JSData2Native.
+     JSString *s = InitOrStringify<traits>(cx, v, pval, nullBehavior,
+                                           undefinedBehavior);
+     if (!s)
+         return;
+ 
+@@ -687,19 +689,19 @@ xpc_qsDOMString::xpc_qsDOMString(JSConte
+         mValid = false;
+         return;
+     }
+ 
+     new(mBuf) implementation_type(chars, len);
+     mValid = true;
+ }
+ 
+-xpc_qsACString::xpc_qsACString(JSContext *cx, jsval v, jsval *pval,
+-                               StringificationBehavior nullBehavior,
+-                               StringificationBehavior undefinedBehavior)
++ACString::ACString(JSContext *cx, jsval v, jsval *pval,
++                   StringificationBehavior nullBehavior,
++                   StringificationBehavior undefinedBehavior)
+ {
+     typedef implementation_type::char_traits traits;
+     // From the T_CSTRING case in XPCConvert::JSData2Native.
+     JSString *s = InitOrStringify<traits>(cx, v, pval, nullBehavior,
+                                           undefinedBehavior);
+     if (!s)
+         return;
+ 
+@@ -714,17 +716,17 @@ xpc_qsACString::xpc_qsACString(JSContext
+         mValid = false;
+         return;
+     }
+ 
+     new(mBuf) implementation_type(bytes.ptr(), len);
+     mValid = true;
+ }
+ 
+-xpc_qsAUTF8String::xpc_qsAUTF8String(JSContext *cx, jsval v, jsval *pval)
++AUTF8String::AUTF8String(JSContext *cx, jsval v, jsval *pval)
+ {
+     typedef nsCharTraits<PRUnichar> traits;
+     // From the T_UTF8STRING  case in XPCConvert::JSData2Native.
+     JSString *s = InitOrStringify<traits>(cx, v, pval, eNull, eNull);
+     if (!s)
+         return;
+ 
+     size_t len;
+@@ -733,16 +735,18 @@ xpc_qsAUTF8String::xpc_qsAUTF8String(JSC
+         mValid = false;
+         return;
+     }
+ 
+     new(mBuf) implementation_type(chars, len);
+     mValid = true;
+ }
+ 
++} // namespace xpc
++
+ static nsresult
+ getNative(nsISupports *idobj,
+           QITableEntry* entries,
+           JSObject *obj,
+           const nsIID &iid,
+           void **ppThis,
+           nsISupports **pThisRef,
+           jsval *vp)
+diff --git a/js/xpconnect/src/XPCQuickStubs.h b/js/xpconnect/src/XPCQuickStubs.h
+--- a/js/xpconnect/src/XPCQuickStubs.h
++++ b/js/xpconnect/src/XPCQuickStubs.h
+@@ -240,177 +240,16 @@ xpc_qsInt64ToJsval(JSContext *cx, PRInt6
+ 
+ inline JSBool
+ xpc_qsUint64ToJsval(JSContext *cx, PRUint64 u, jsval *rv)
+ {
+     return JS_NewNumberValue(cx, static_cast<jsdouble>(u), rv);
+ }
+ 
+ 
+-/* Classes for converting jsvals to string types. */
+-
+-template <class S, class T>
+-class xpc_qsBasicString
+-{
+-public:
+-    typedef S interface_type;
+-    typedef T implementation_type;
+-
+-    ~xpc_qsBasicString()
+-    {
+-        if (mValid)
+-            Ptr()->~implementation_type();
+-    }
+-
+-    JSBool IsValid() { return mValid; }
+-
+-    implementation_type *Ptr()
+-    {
+-        MOZ_ASSERT(mValid);
+-        return reinterpret_cast<implementation_type *>(mBuf);
+-    }
+-
+-    operator interface_type &()
+-    {
+-        MOZ_ASSERT(mValid);
+-        return *Ptr();
+-    }
+-
+-    /* Enum that defines how JS |null| and |undefined| should be treated.  See
+-     * the WebIDL specification.  eStringify means convert to the string "null"
+-     * or "undefined" respectively, via the standard JS ToString() operation;
+-     * eEmpty means convert to the string ""; eNull means convert to an empty
+-     * string with the void bit set.
+-     *
+-     * Per webidl the default behavior of an unannotated interface is
+-     * eStringify, but our de-facto behavior has been eNull for |null| and
+-     * eStringify for |undefined|, so leaving it that way for now.  If we ever
+-     * get to a point where we go through and annotate our interfaces as
+-     * needed, we can change that.
+-     */
+-    enum StringificationBehavior {
+-        eStringify,
+-        eEmpty,
+-        eNull,
+-        eDefaultNullBehavior = eNull,
+-        eDefaultUndefinedBehavior = eStringify
+-    };
+-
+-protected:
+-    /*
+-     * Neither field is initialized; that is left to the derived class
+-     * constructor. However, the destructor destroys the string object
+-     * stored in mBuf, if mValid is true.
+-     */
+-    void *mBuf[JS_HOWMANY(sizeof(implementation_type), sizeof(void *))];
+-    JSBool mValid;
+-
+-    /*
+-     * If null is returned, then we either failed or fully initialized
+-     * |this|; in either case the caller should return immediately
+-     * without doing anything else. Otherwise, the JSString* created
+-     * from |v| will be returned.  It'll be rooted, as needed, in
+-     * *pval.  nullBehavior and undefinedBehavior control what happens
+-     * when |v| is JSVAL_IS_NULL and JSVAL_IS_VOID respectively.
+-     */
+-    template<class traits>
+-    JSString* InitOrStringify(JSContext* cx, jsval v, jsval* pval,
+-                              StringificationBehavior nullBehavior,
+-                              StringificationBehavior undefinedBehavior) {
+-        JSString *s;
+-        if (JSVAL_IS_STRING(v)) {
+-            s = JSVAL_TO_STRING(v);
+-        } else {
+-            StringificationBehavior behavior = eStringify;
+-            if (JSVAL_IS_NULL(v)) {
+-                behavior = nullBehavior;
+-            } else if (JSVAL_IS_VOID(v)) {
+-                behavior = undefinedBehavior;
+-            }
+-
+-            // If pval is null, that means the argument was optional and
+-            // not passed; turn those into void strings if they're
+-            // supposed to be stringified.
+-            if (behavior != eStringify || !pval) {
+-                // Here behavior == eStringify implies !pval, so both eNull and
+-                // eStringify should end up with void strings.
+-                (new(mBuf) implementation_type(traits::sEmptyBuffer, PRUint32(0)))->
+-                    SetIsVoid(behavior != eEmpty);
+-                mValid = true;
+-                return nsnull;
+-            }
+-
+-            s = JS_ValueToString(cx, v);
+-            if (!s) {
+-                mValid = false;
+-                return nsnull;
+-            }
+-            *pval = STRING_TO_JSVAL(s);  // Root the new string.
+-        }
+-
+-        return s;
+-    }
+-};
+-
+-/**
+- * Class for converting a jsval to DOMString.
+- *
+- *     xpc_qsDOMString arg0(cx, &argv[0]);
+- *     if (!arg0.IsValid())
+- *         return false;
+- *
+- * The second argument to the constructor is an in-out parameter. It must
+- * point to a rooted jsval, such as a JSNative argument or return value slot.
+- * The value in the jsval on entry is converted to a string. The constructor
+- * may overwrite that jsval with a string value, to protect the characters of
+- * the string from garbage collection. The caller must leave the jsval alone
+- * for the lifetime of the xpc_qsDOMString.
+- */
+-class xpc_qsDOMString : public xpc_qsBasicString<nsAString, nsDependentString>
+-{
+-public:
+-    xpc_qsDOMString(JSContext *cx, jsval v, jsval *pval,
+-                    StringificationBehavior nullBehavior,
+-                    StringificationBehavior undefinedBehavior);
+-};
+-
+-/**
+- * The same as xpc_qsDOMString, but with slightly different conversion behavior,
+- * corresponding to the [astring] magic XPIDL annotation rather than [domstring].
+- */
+-class xpc_qsAString : public xpc_qsDOMString
+-{
+-public:
+-    xpc_qsAString(JSContext *cx, jsval v, jsval *pval)
+-        : xpc_qsDOMString(cx, v, pval, eNull, eNull)
+-    {}
+-};
+-
+-/**
+- * Like xpc_qsDOMString and xpc_qsAString, but for XPIDL native types annotated
+- * with [cstring] rather than [domstring] or [astring].
+- */
+-class xpc_qsACString : public xpc_qsBasicString<nsACString, nsCString>
+-{
+-public:
+-    xpc_qsACString(JSContext *cx, jsval v, jsval *pval,
+-                   StringificationBehavior nullBehavior = eNull,
+-                   StringificationBehavior undefinedBehavior = eNull);
+-};
+-
+-/**
+- * And similar for AUTF8String.
+- */
+-class xpc_qsAUTF8String :
+-  public xpc_qsBasicString<nsACString, NS_ConvertUTF16toUTF8>
+-{
+-public:
+-  xpc_qsAUTF8String(JSContext* cx, jsval v, jsval *pval);
+-};
+-
+ struct xpc_qsSelfRef
+ {
+     xpc_qsSelfRef() : ptr(nsnull) {}
+     explicit xpc_qsSelfRef(nsISupports *p) : ptr(p) {}
+     ~xpc_qsSelfRef() { NS_IF_RELEASE(ptr); }
+ 
+     nsISupports* ptr;
+ };
+@@ -648,60 +487,16 @@ xpc_qsXPCOMObjectToJsval(XPCLazyCallCont
+ /**
+  * Convert a variant to jsval. Return true on success.
+  */
+ JSBool
+ xpc_qsVariantToJsval(XPCLazyCallContext &ccx,
+                      nsIVariant *p,
+                      jsval *rval);
+ 
+-/**
+- * Convert a jsval to PRInt64. Return true on success.
+- */
+-inline JSBool
+-xpc_qsValueToInt64(JSContext *cx,
+-                   jsval v,
+-                   PRInt64 *result)
+-{
+-    if (JSVAL_IS_INT(v)) {
+-        int32_t intval;
+-        if (!JS_ValueToECMAInt32(cx, v, &intval))
+-            return false;
+-        *result = static_cast<PRInt64>(intval);
+-    } else {
+-        jsdouble doubleval;
+-        if (!JS_ValueToNumber(cx, v, &doubleval))
+-            return false;
+-        *result = static_cast<PRInt64>(doubleval);
+-    }
+-    return true;
+-}
+-
+-/**
+- * Convert a jsval to PRUint64. Return true on success.
+- */
+-inline JSBool
+-xpc_qsValueToUint64(JSContext *cx,
+-                    jsval v,
+-                    PRUint64 *result)
+-{
+-    if (JSVAL_IS_INT(v)) {
+-        uint32_t intval;
+-        if (!JS_ValueToECMAUint32(cx, v, &intval))
+-            return false;
+-        *result = static_cast<PRUint64>(intval);
+-    } else {
+-        jsdouble doubleval;
+-        if (!JS_ValueToNumber(cx, v, &doubleval))
+-            return false;
+-        *result = static_cast<PRUint64>(doubleval);
+-    }
+-    return true;
+-}
+-
+ #ifdef DEBUG
+ void
+ xpc_qsAssertContextOK(JSContext *cx);
+ 
+ inline bool
+ xpc_qsSameResult(nsISupports *result1, nsISupports *result2)
+ {
+     return SameCOMIdentity(result1, result2);
+diff --git a/js/xpconnect/src/xpcpublic.h b/js/xpconnect/src/xpcpublic.h
+--- a/js/xpconnect/src/xpcpublic.h
++++ b/js/xpconnect/src/xpcpublic.h
+@@ -220,16 +220,216 @@ bool Base64Decode(JSContext *cx, JS::Val
+  * If that happens, str will point to an empty string after this call.
+  */
+ bool StringToJsval(JSContext *cx, nsAString &str, JS::Value *rval);
+ bool NonVoidStringToJsval(JSContext *cx, nsAString &str, JS::Value *rval);
+ 
+ void *GetCompartmentName(JSContext *cx, JSCompartment *c);
+ void DestroyCompartmentName(void *string);
+ 
++/**
++ * Convert a jsval to PRInt64. Return true on success.
++ */
++inline bool
++ValueToInt64(JSContext *cx, jsval v, PRInt64 *result)
++{
++    if (JSVAL_IS_INT(v)) {
++        int32_t intval;
++        if (!JS_ValueToECMAInt32(cx, v, &intval))
++            return false;
++        *result = static_cast<PRInt64>(intval);
++    } else {
++        jsdouble doubleval;
++        if (!JS_ValueToNumber(cx, v, &doubleval))
++            return false;
++        *result = static_cast<PRInt64>(doubleval);
++    }
++    return true;
++}
++
++/**
++ * Convert a jsval to PRUint64. Return true on success.
++ */
++inline bool
++ValueToUint64(JSContext *cx, jsval v, PRUint64 *result)
++{
++    if (JSVAL_IS_INT(v)) {
++        uint32_t intval;
++        if (!JS_ValueToECMAUint32(cx, v, &intval))
++            return false;
++        *result = static_cast<PRUint64>(intval);
++    } else {
++        jsdouble doubleval;
++        if (!JS_ValueToNumber(cx, v, &doubleval))
++            return false;
++        *result = static_cast<PRUint64>(doubleval);
++    }
++    return true;
++}
++
++/* Classes for converting jsvals to string types. */
++
++template <class S, class T>
++class BasicString
++{
++public:
++    typedef S interface_type;
++    typedef T implementation_type;
++
++    ~BasicString()
++    {
++        if (mValid)
++            Ptr()->~implementation_type();
++    }
++
++    bool IsValid() { return mValid; }
++
++    implementation_type *Ptr()
++    {
++        MOZ_ASSERT(mValid);
++        return reinterpret_cast<implementation_type *>(mBuf);
++    }
++
++    operator interface_type &()
++    {
++        MOZ_ASSERT(mValid);
++        return *Ptr();
++    }
++
++    /* Enum that defines how JS |null| and |undefined| should be treated.  See
++     * the WebIDL specification.  eStringify means convert to the string "null"
++     * or "undefined" respectively, via the standard JS ToString() operation;
++     * eEmpty means convert to the string ""; eNull means convert to an empty
++     * string with the void bit set.
++     *
++     * Per webidl the default behavior of an unannotated interface is
++     * eStringify, but our de-facto behavior has been eNull for |null| and
++     * eStringify for |undefined|, so leaving it that way for now.  If we ever
++     * get to a point where we go through and annotate our interfaces as
++     * needed, we can change that.
++     */
++    enum StringificationBehavior {
++        eStringify,
++        eEmpty,
++        eNull,
++        eDefaultNullBehavior = eNull,
++        eDefaultUndefinedBehavior = eStringify
++    };
++
++protected:
++    /*
++     * Neither field is initialized; that is left to the derived class
++     * constructor. However, the destructor destroys the string object
++     * stored in mBuf, if mValid is true.
++     */
++    void *mBuf[JS_HOWMANY(sizeof(implementation_type), sizeof(void *))];
++    bool mValid;
++
++    /*
++     * If null is returned, then we either failed or fully initialized
++     * |this|; in either case the caller should return immediately
++     * without doing anything else. Otherwise, the JSString* created
++     * from |v| will be returned.  It'll be rooted, as needed, in
++     * *pval.  nullBehavior and undefinedBehavior control what happens
++     * when |v| is JSVAL_IS_NULL and JSVAL_IS_VOID respectively.
++     */
++    template<class traits>
++    JSString* InitOrStringify(JSContext* cx, jsval v, jsval* pval,
++                              StringificationBehavior nullBehavior,
++                              StringificationBehavior undefinedBehavior) {
++        JSString *s;
++        if (JSVAL_IS_STRING(v)) {
++            s = JSVAL_TO_STRING(v);
++        } else {
++            StringificationBehavior behavior = eStringify;
++            if (JSVAL_IS_NULL(v)) {
++                behavior = nullBehavior;
++            } else if (JSVAL_IS_VOID(v)) {
++                behavior = undefinedBehavior;
++            }
++
++            // If pval is null, that means the argument was optional and
++            // not passed; turn those into void strings if they're
++            // supposed to be stringified.
++            if (behavior != eStringify || !pval) {
++                // Here behavior == eStringify implies !pval, so both eNull and
++                // eStringify should end up with void strings.
++                (new(mBuf) implementation_type(traits::sEmptyBuffer, PRUint32(0)))->
++                    SetIsVoid(behavior != eEmpty);
++                mValid = true;
++                return nsnull;
++            }
++
++            s = JS_ValueToString(cx, v);
++            if (!s) {
++                mValid = false;
++                return nsnull;
++            }
++            *pval = STRING_TO_JSVAL(s);  // Root the new string.
++        }
++
++        return s;
++    }
++};
++
++/**
++ * Class for converting a jsval to DOMString.
++ *
++ *     DOMString arg0(cx, &argv[0]);
++ *     if (!arg0.IsValid())
++ *         return false;
++ *
++ * The second argument to the constructor is an in-out parameter. It must
++ * point to a rooted jsval, such as a JSNative argument or return value slot.
++ * The value in the jsval on entry is converted to a string. The constructor
++ * may overwrite that jsval with a string value, to protect the characters of
++ * the string from garbage collection. The caller must leave the jsval alone
++ * for the lifetime of the DOMString.
++ */
++class DOMString : public BasicString<nsAString, nsDependentString>
++{
++public:
++    DOMString(JSContext *cx, jsval v, jsval *pval,
++              StringificationBehavior nullBehavior,
++              StringificationBehavior undefinedBehavior);
++};
++
++/**
++ * The same as DOMString, but with slightly different conversion behavior,
++ * corresponding to the [astring] magic XPIDL annotation rather than [domstring].
++ */
++class AString : public DOMString
++{
++public:
++    AString(JSContext *cx, jsval v, jsval *pval)
++        : DOMString(cx, v, pval, eNull, eNull)
++    {}
++};
++
++/**
++ * Like DOMString and AString, but for XPIDL native types annotated
++ * with [cstring] rather than [domstring] or [astring].
++ */
++class ACString : public BasicString<nsACString, nsCString>
++{
++public:
++    ACString(JSContext *cx, jsval v, jsval *pval,
++             StringificationBehavior nullBehavior = eNull,
++             StringificationBehavior undefinedBehavior = eNull);
++};
++
++/**
++ * And similar for AUTF8String.
++ */
++class AUTF8String : public BasicString<nsACString, NS_ConvertUTF16toUTF8>
++{
++public:
++  AUTF8String(JSContext* cx, jsval v, jsval *pval);
++};
++
+ #ifdef DEBUG
+ void DumpJSHeap(FILE* file);
+ #endif
+ } // namespace xpc
+ 
+ class nsIMemoryMultiReporterCallback;
+ 
+ namespace mozilla {
