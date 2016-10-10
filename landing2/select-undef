@@ -1,0 +1,97 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/content/src/nsHTMLSelectElement.h b/content/html/content/src/nsHTMLSelectElement.h
+--- a/content/html/content/src/nsHTMLSelectElement.h
++++ b/content/html/content/src/nsHTMLSelectElement.h
+@@ -431,16 +431,21 @@ public:
+     // If item index is out of range, insert to last.
+     // (since beforeElement becomes null, it is inserted to last)
+     nsCOMPtr<nsIDOMHTMLElement> beforeElement =
+       do_QueryInterface(mOptions->GetElementAt(aIndex));
+ 
+     return Add(aElement, beforeElement);
+   }
+ 
++  nsGenericElement* IndexedGetter(uint32_t aIndex, bool& aFound) const
++  {
++    return mOptions->IndexedGetter(aIndex, aFound);
++  }
++
+ protected:
+   friend class nsSafeOptionListMutation;
+ 
+   // Helper Methods
+   /**
+    * Check whether the option specified by the index is selected
+    * @param aIndex the index
+    * @return whether the option at the index is selected
+diff --git a/content/html/content/test/test_bug780993.html b/content/html/content/test/test_bug780993.html
+--- a/content/html/content/test/test_bug780993.html
++++ b/content/html/content/test/test_bug780993.html
+@@ -7,17 +7,17 @@
+ <script>
+ test(function() {
+   var select = document.createElement("select");
+   var option = document.createElement("option");
+   select.appendChild(option);
+   assert_equals(select[0], option);
+   select[0] = null;
+   assert_equals(option.parentNode, null);
+-  assert_equals(select[0], null);
++  assert_equals(select[0], undefined);
+ }, "Should be able to set select[n] to null.");
+ test(function() {
+   var select = document.createElement("select");
+   var option = document.createElement("option");
+   var option2 = document.createElement("option");
+   select.appendChild(option);
+   assert_equals(select[0], option);
+   select[0] = option2;
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -9676,33 +9676,31 @@ nsHTMLSelectElementSH::NewResolve(nsIXPC
+ 
+ NS_IMETHODIMP
+ nsHTMLSelectElementSH::GetProperty(nsIXPConnectWrappedNative *wrapper,
+                                    JSContext *cx, JSObject *obj, jsid id,
+                                    jsval *vp, bool *_retval)
+ {
+   int32_t n = GetArrayIndexFromId(cx, id);
+ 
+-  nsresult rv = NS_OK;
+   if (n >= 0) {
+     nsHTMLSelectElement *s =
+       nsHTMLSelectElement::FromSupports(GetNative(wrapper, obj));
+ 
+-    nsHTMLOptionCollection *options = s->GetOptions();
+-
+-    if (options) {
+-      nsISupports *node = options->GetElementAt(n);
+-
+-      rv = WrapNative(cx, JS_GetGlobalForScopeChain(cx), node,
+-                      &NS_GET_IID(nsIDOMNode), true, vp);
+-      if (NS_SUCCEEDED(rv)) {
+-        rv = NS_SUCCESS_I_DID_SOMETHING;
+-      }
+-      return rv;
+-    }
++    bool found;
++    nsGenericElement* node = s->IndexedGetter(n, found);
++    if (found) {
++      nsresult rv = WrapNative(cx, JS_GetGlobalForScopeChain(cx), node,
++                               &NS_GET_IID(nsIDOMNode), true, vp);
++      NS_ENSURE_SUCCESS(rv, rv);
++    } else {
++      MOZ_ASSERT(!node);
++      vp->setUndefined();
++    }
++    return NS_SUCCESS_I_DID_SOMETHING;
+   }
+ 
+   return NS_OK;
+ }
+ 
+ // static
+ nsresult
+ nsHTMLSelectElementSH::SetOption(JSContext *cx, JS::Value *vp, uint32_t aIndex,

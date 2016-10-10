@@ -1,0 +1,1231 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/accessible/src/base/Logging.cpp b/accessible/src/base/Logging.cpp
+--- a/accessible/src/base/Logging.cpp
++++ b/accessible/src/base/Logging.cpp
+@@ -85,19 +85,18 @@ LogDocURI(nsIDocument* aDocumentNode)
+ }
+ 
+ static void
+ LogDocShellState(nsIDocument* aDocumentNode)
+ {
+   printf("docshell busy: ");
+ 
+   nsCAutoString docShellBusy;
+-  nsCOMPtr<nsISupports> container = aDocumentNode->GetContainer();
+-  if (container) {
+-    nsCOMPtr<nsIDocShell> docShell = do_QueryInterface(container);
++  nsCOMPtr<nsIDocShell> docShell = aDocumentNode->GetContainer();
++  if (docShell) {
+     uint32_t busyFlags = nsIDocShell::BUSY_FLAGS_NONE;
+     docShell->GetBusyFlags(&busyFlags);
+     if (busyFlags == nsIDocShell::BUSY_FLAGS_NONE)
+       printf("'none'");
+     if (busyFlags & nsIDocShell::BUSY_FLAGS_BUSY)
+       printf("'busy'");
+     if (busyFlags & nsIDocShell::BUSY_FLAGS_BEFORE_PAGE_LOAD)
+       printf(", 'before page load'");
+@@ -118,17 +117,17 @@ LogDocType(nsIDocument* aDocumentNode)
+     printf("document type: [failed]");\
+   }
+ }
+ 
+ static void
+ LogDocShellTree(nsIDocument* aDocumentNode)
+ {
+   if (aDocumentNode->IsActive()) {
+-    nsCOMPtr<nsISupports> container = aDocumentNode->GetContainer();
++    nsCOMPtr<nsIDocShell> container = aDocumentNode->GetContainer();
+     nsCOMPtr<nsIDocShellTreeItem> treeItem(do_QueryInterface(container));
+     nsCOMPtr<nsIDocShellTreeItem> parentTreeItem;
+     treeItem->GetParent(getter_AddRefs(parentTreeItem));
+     nsCOMPtr<nsIDocShellTreeItem> rootTreeItem;
+     treeItem->GetRootTreeItem(getter_AddRefs(rootTreeItem));
+     printf("docshell hierarchy, parent: %p, root: %p, is tab document: %s;",
+            static_cast<void*>(parentTreeItem), static_cast<void*>(rootTreeItem),
+            (nsCoreUtils::IsTabDocument(aDocumentNode) ? "yes" : "no"));
+diff --git a/accessible/src/base/nsAccessibilityService.cpp b/accessible/src/base/nsAccessibilityService.cpp
+--- a/accessible/src/base/nsAccessibilityService.cpp
++++ b/accessible/src/base/nsAccessibilityService.cpp
+@@ -141,17 +141,17 @@ nsAccessibilityService::FireAccessibleEv
+ // nsIAccessibilityService
+ 
+ Accessible*
+ nsAccessibilityService::GetRootDocumentAccessible(nsIPresShell* aPresShell,
+                                                   bool aCanCreate)
+ {
+   nsIDocument* documentNode = aPresShell->GetDocument();
+   if (documentNode) {
+-    nsCOMPtr<nsISupports> container = documentNode->GetContainer();
++    nsCOMPtr<nsIDocShell> container = documentNode->GetContainer();
+     nsCOMPtr<nsIDocShellTreeItem> treeItem(do_QueryInterface(container));
+     if (treeItem) {
+       nsCOMPtr<nsIDocShellTreeItem> rootTreeItem;
+       treeItem->GetRootTreeItem(getter_AddRefs(rootTreeItem));
+       if (treeItem != rootTreeItem) {
+         nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(rootTreeItem));
+         nsCOMPtr<nsIPresShell> presShell;
+         docShell->GetPresShell(getter_AddRefs(presShell));
+diff --git a/accessible/src/base/nsCoreUtils.cpp b/accessible/src/base/nsCoreUtils.cpp
+--- a/accessible/src/base/nsCoreUtils.cpp
++++ b/accessible/src/base/nsCoreUtils.cpp
+@@ -402,55 +402,52 @@ nsCoreUtils::GetScreenCoordsForWindow(ns
+ }
+ 
+ already_AddRefed<nsIDocShellTreeItem>
+ nsCoreUtils::GetDocShellTreeItemFor(nsINode *aNode)
+ {
+   if (!aNode)
+     return nsnull;
+ 
+-  nsCOMPtr<nsISupports> container = aNode->OwnerDoc()->GetContainer();
+-  nsIDocShellTreeItem *docShellTreeItem = nsnull;
+-  if (container)
+-    CallQueryInterface(container, &docShellTreeItem);
+-
+-  return docShellTreeItem;
++  nsCOMPtr<nsIDocShell> container = aNode->OwnerDoc()->GetContainer();
++  nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem = do_QueryInterface(container);
++  return docShellTreeItem.forget();
+ }
+ 
+ bool
+ nsCoreUtils::IsRootDocument(nsIDocument *aDocument)
+ {
+-  nsCOMPtr<nsISupports> container = aDocument->GetContainer();
++  nsCOMPtr<nsIDocShell> container = aDocument->GetContainer();
+   nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem =
+     do_QueryInterface(container);
+   NS_ASSERTION(docShellTreeItem, "No document shell for document!");
+ 
+   nsCOMPtr<nsIDocShellTreeItem> parentTreeItem;
+   docShellTreeItem->GetParent(getter_AddRefs(parentTreeItem));
+ 
+   return !parentTreeItem;
+ }
+ 
+ bool
+ nsCoreUtils::IsContentDocument(nsIDocument *aDocument)
+ {
+-  nsCOMPtr<nsISupports> container = aDocument->GetContainer();
++  nsCOMPtr<nsIDocShell> container = aDocument->GetContainer();
+   nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem =
+     do_QueryInterface(container);
+   NS_ASSERTION(docShellTreeItem, "No document shell tree item for document!");
+ 
+   int32_t contentType;
+   docShellTreeItem->GetItemType(&contentType);
+   return (contentType == nsIDocShellTreeItem::typeContent);
+ }
+ 
+ bool
+ nsCoreUtils::IsTabDocument(nsIDocument* aDocumentNode)
+ {
+-  nsCOMPtr<nsISupports> container = aDocumentNode->GetContainer();
++  nsCOMPtr<nsIDocShell> container = aDocumentNode->GetContainer();
+   nsCOMPtr<nsIDocShellTreeItem> treeItem(do_QueryInterface(container));
+ 
+   nsCOMPtr<nsIDocShellTreeItem> parentTreeItem;
+   treeItem->GetParent(getter_AddRefs(parentTreeItem));
+ 
+   // Tab document running in own process doesn't have parent.
+   if (XRE_GetProcessType() == GeckoProcessType_Content)
+     return !parentTreeItem;
+diff --git a/accessible/src/generic/Accessible.cpp b/accessible/src/generic/Accessible.cpp
+--- a/accessible/src/generic/Accessible.cpp
++++ b/accessible/src/generic/Accessible.cpp
+@@ -404,17 +404,17 @@ Accessible::AccessKey() const
+   default:
+     return KeyBinding();
+   }
+ 
+   // Determine the access modifier used in this context.
+   nsIDocument* document = mContent->GetCurrentDoc();
+   if (!document)
+     return KeyBinding();
+-  nsCOMPtr<nsISupports> container = document->GetContainer();
++  nsCOMPtr<nsIDocShell> container = document->GetContainer();
+   if (!container)
+     return KeyBinding();
+   nsCOMPtr<nsIDocShellTreeItem> treeItem(do_QueryInterface(container));
+   if (!treeItem)
+     return KeyBinding();
+ 
+   nsresult rv = NS_ERROR_FAILURE;
+   int32_t itemType = 0, modifierMask = 0;
+@@ -1291,17 +1291,17 @@ Accessible::GetAttributesInternal(nsIPer
+     nsIContent* rootContent = nsCoreUtils::GetRoleContent(doc);
+     if (!rootContent)
+       return NS_OK;
+ 
+     nsAccUtils::SetLiveContainerAttributes(aAttributes, startContent,
+                                            rootContent);
+ 
+     // Allow ARIA live region markup from outer documents to override
+-    nsCOMPtr<nsISupports> container = doc->GetContainer(); 
++    nsCOMPtr<nsIDocShell> container = doc->GetContainer();
+     nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem =
+       do_QueryInterface(container);
+     if (!docShellTreeItem)
+       break;
+ 
+     nsCOMPtr<nsIDocShellTreeItem> sameTypeParent;
+     docShellTreeItem->GetSameTypeParent(getter_AddRefs(sameTypeParent));
+     if (!sameTypeParent || sameTypeParent == docShellTreeItem)
+diff --git a/accessible/src/generic/DocAccessible.cpp b/accessible/src/generic/DocAccessible.cpp
+--- a/accessible/src/generic/DocAccessible.cpp
++++ b/accessible/src/generic/DocAccessible.cpp
+@@ -376,17 +376,17 @@ DocAccessible::TakeFocus()
+ // nsIAccessibleDocument
+ 
+ NS_IMETHODIMP
+ DocAccessible::GetURL(nsAString& aURL)
+ {
+   if (IsDefunct())
+     return NS_ERROR_FAILURE;
+ 
+-  nsCOMPtr<nsISupports> container = mDocument->GetContainer();
++  nsCOMPtr<nsIDocShell> container = mDocument->GetContainer();
+   nsCOMPtr<nsIWebNavigation> webNav(do_GetInterface(container));
+   nsCAutoString theURL;
+   if (webNav) {
+     nsCOMPtr<nsIURI> pURI;
+     webNav->GetCurrentURI(getter_AddRefs(pURI));
+     if (pURI)
+       pURI->GetSpec(theURL);
+   }
+@@ -547,17 +547,17 @@ already_AddRefed<nsIEditor>
+ DocAccessible::GetEditor() const
+ {
+   // Check if document is editable (designMode="on" case). Otherwise check if
+   // the html:body (for HTML document case) or document element is editable.
+   if (!mDocument->HasFlag(NODE_IS_EDITABLE) &&
+       !mContent->HasFlag(NODE_IS_EDITABLE))
+     return nsnull;
+ 
+-  nsCOMPtr<nsISupports> container = mDocument->GetContainer();
++  nsCOMPtr<nsIDocShell> container = mDocument->GetContainer();
+   nsCOMPtr<nsIEditingSession> editingSession(do_GetInterface(container));
+   if (!editingSession)
+     return nsnull; // No editing session interface
+ 
+   nsCOMPtr<nsIEditor> editor;
+   editingSession->GetEditorForWindow(mDocument->GetWindow(), getter_AddRefs(editor));
+   if (!editor)
+     return nsnull;
+@@ -737,17 +737,17 @@ DocAccessible::GetBoundsRect(nsRect& aBo
+ nsresult
+ DocAccessible::AddEventListeners()
+ {
+   // 1) Set up scroll position listener
+   // 2) Check for editor and listen for changes to editor
+ 
+   NS_ENSURE_TRUE(mPresShell, NS_ERROR_FAILURE);
+ 
+-  nsCOMPtr<nsISupports> container = mDocument->GetContainer();
++  nsCOMPtr<nsIDocShell> container = mDocument->GetContainer();
+   nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem(do_QueryInterface(container));
+   NS_ENSURE_TRUE(docShellTreeItem, NS_ERROR_FAILURE);
+ 
+   // Make sure we're a content docshell
+   // We don't want to listen to chrome progress
+   int32_t itemType;
+   docShellTreeItem->GetItemType(&itemType);
+ 
+@@ -785,17 +785,17 @@ DocAccessible::RemoveEventListeners()
+   // Remove scroll position listener
+   RemoveScrollListener();
+ 
+   NS_ASSERTION(mDocument, "No document during removal of listeners.");
+ 
+   if (mDocument) {
+     mDocument->RemoveObserver(this);
+ 
+-    nsCOMPtr<nsISupports> container = mDocument->GetContainer();
++    nsCOMPtr<nsIDocShell> container = mDocument->GetContainer();
+     nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem(do_QueryInterface(container));
+     NS_ASSERTION(docShellTreeItem, "doc should support nsIDocShellTreeItem.");
+ 
+     if (docShellTreeItem) {
+       int32_t itemType;
+       docShellTreeItem->GetItemType(&itemType);
+       if (itemType == nsIDocShellTreeItem::typeContent) {
+         nsCOMPtr<nsICommandManager> commandManager = do_GetInterface(docShellTreeItem);
+@@ -2055,17 +2055,17 @@ DocAccessible::ShutdownChildrenInSubtree
+   }
+ 
+   UnbindFromDocument(aAccessible);
+ }
+ 
+ bool
+ DocAccessible::IsLoadEventTarget() const
+ {
+-  nsCOMPtr<nsISupports> container = mDocument->GetContainer();
++  nsCOMPtr<nsIDocShell> container = mDocument->GetContainer();
+   nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem =
+     do_QueryInterface(container);
+   NS_ASSERTION(docShellTreeItem, "No document shell for document!");
+ 
+   nsCOMPtr<nsIDocShellTreeItem> parentTreeItem;
+   docShellTreeItem->GetParent(getter_AddRefs(parentTreeItem));
+ 
+   // Return true if it's not a root document (either tab document or
+diff --git a/content/base/public/nsIDocument.h b/content/base/public/nsIDocument.h
+--- a/content/base/public/nsIDocument.h
++++ b/content/base/public/nsIDocument.h
+@@ -846,45 +846,34 @@ public:
+    * Reset this document to aURI, aLoadGroup, and aPrincipal.  aURI must not be
+    * null.  If aPrincipal is null, a codebase principal based on aURI will be
+    * used.
+    */
+   virtual void ResetToURI(nsIURI *aURI, nsILoadGroup* aLoadGroup,
+                           nsIPrincipal* aPrincipal) = 0;
+ 
+   /**
+-   * Set the container (docshell) for this document. Virtual so that
+-   * docshell can call it.
++   * Set the docshell for this document.
+    */
+-  virtual void SetContainer(nsISupports *aContainer);
++  void SetContainer(nsIDocShell* aContainer);
+ 
+   /**
+-   * Get the container (docshell) for this document.
++   * Get the docshell for this document.
+    */
+-  already_AddRefed<nsISupports> GetContainer() const
+-  {
+-    nsISupports* container = nsnull;
+-    if (mDocumentContainer)
+-      CallQueryReferent(mDocumentContainer.get(), &container);
++  already_AddRefed<nsIDocShell> GetContainer() const;
+ 
+-    return container;
+-  }
++  /**
++   * Returns true if GetContainer() returns non-null, false otherwise.
++   */
++  bool HasContainer() const;
+ 
+   /**
+    * Get the container's load context for this document.
+    */
+-  nsILoadContext* GetLoadContext() const
+-  {
+-    nsCOMPtr<nsISupports> container = GetContainer();
+-    if (container) {
+-      nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(container);
+-      return loadContext;
+-    }
+-    return nsnull;
+-  }
++  nsILoadContext* GetLoadContext() const;
+ 
+   /**
+    * Set and get XML declaration. If aVersion is null there is no declaration.
+    * aStandalone takes values -1, 0 and 1 indicating respectively that there
+    * was no standalone parameter in the declaration, that it was given as no,
+    * or that it was given as yes.
+    */
+   virtual void SetXMLDeclaration(const PRUnichar *aVersion,
+@@ -1254,19 +1243,17 @@ public:
+   }
+   
+   /**
+    * Set the display document for this document.  aDisplayDocument must not be
+    * null.
+    */
+   void SetDisplayDocument(nsIDocument* aDisplayDocument)
+   {
+-    NS_PRECONDITION(!GetShell() &&
+-                    !nsCOMPtr<nsISupports>(GetContainer()) &&
+-                    !GetWindow() &&
++    NS_PRECONDITION(!GetShell() && !HasContainer() && !GetWindow() &&
+                     !GetScriptGlobalObject(),
+                     "Shouldn't set mDisplayDocument on documents that already "
+                     "have a presentation or a docshell or a window");
+     NS_PRECONDITION(aDisplayDocument != this, "Should be different document");
+     NS_PRECONDITION(!aDisplayDocument->GetDisplayDocument(),
+                     "Display documents should not nest");
+     mDisplayDocument = aDisplayDocument;
+   }
+@@ -1413,17 +1400,17 @@ public:
+    */
+   bool IsStaticDocument() { return mIsStaticDocument; }
+ 
+   /**
+    * Clones the document and subdocuments and stylesheet etc.
+    * @param aCloneContainer The container for the clone document.
+    */
+   virtual already_AddRefed<nsIDocument>
+-  CreateStaticClone(nsISupports* aCloneContainer);
++  CreateStaticClone(nsIDocShell* aCloneContainer);
+ 
+   /**
+    * If this document is a static clone, this returns the original
+    * document.
+    */
+   nsIDocument* GetOriginalDocument()
+   {
+     MOZ_ASSERT(!mOriginalDocument || !mOriginalDocument->GetOriginalDocument());
+diff --git a/content/base/src/nsContentUtils.cpp b/content/base/src/nsContentUtils.cpp
+--- a/content/base/src/nsContentUtils.cpp
++++ b/content/base/src/nsContentUtils.cpp
+@@ -2568,17 +2568,17 @@ nsContentUtils::CanLoadImage(nsIURI* aUR
+   NS_PRECONDITION(aLoadingDocument, "Must have a document");
+   NS_PRECONDITION(aLoadingPrincipal, "Must have a loading principal");
+ 
+   nsresult rv;
+ 
+   uint32_t appType = nsIDocShell::APP_TYPE_UNKNOWN;
+ 
+   {
+-    nsCOMPtr<nsISupports> container = aLoadingDocument->GetContainer();
++    nsCOMPtr<nsIDocShell> container = aLoadingDocument->GetContainer();
+     nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem =
+       do_QueryInterface(container);
+ 
+     if (docShellTreeItem) {
+       nsCOMPtr<nsIDocShellTreeItem> root;
+       docShellTreeItem->GetRootTreeItem(getter_AddRefs(root));
+ 
+       nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(root));
+@@ -3196,17 +3196,17 @@ nsContentUtils::IsChromeDoc(nsIDocument 
+   sSecurityManager->GetSystemPrincipal(getter_AddRefs(systemPrincipal));
+ 
+   return aDocument->NodePrincipal() == systemPrincipal;
+ }
+ 
+ bool
+ nsContentUtils::IsChildOfSameType(nsIDocument* aDoc)
+ {
+-  nsCOMPtr<nsISupports> container = aDoc->GetContainer();
++  nsCOMPtr<nsIDocShell> container = aDoc->GetContainer();
+   nsCOMPtr<nsIDocShellTreeItem> docShellAsItem(do_QueryInterface(container));
+   nsCOMPtr<nsIDocShellTreeItem> sameTypeParent;
+   if (docShellAsItem) {
+     docShellAsItem->GetSameTypeParent(getter_AddRefs(sameTypeParent));
+   }
+   return sameTypeParent != nsnull;
+ }
+ 
+@@ -3264,17 +3264,17 @@ nsContentUtils::IsInChromeDocshell(nsIDo
+   if (!aDocument) {
+     return false;
+   }
+ 
+   if (aDocument->GetDisplayDocument()) {
+     return IsInChromeDocshell(aDocument->GetDisplayDocument());
+   }
+ 
+-  nsCOMPtr<nsISupports> docContainer = aDocument->GetContainer();
++  nsCOMPtr<nsIDocShell> docContainer = aDocument->GetContainer();
+   nsCOMPtr<nsIDocShellTreeItem> docShell(do_QueryInterface(docContainer));
+   int32_t itemType = nsIDocShellTreeItem::typeContent;
+   if (docShell) {
+     docShell->GetItemType(&itemType);
+   }
+ 
+   return itemType == nsIDocShellTreeItem::typeChrome;
+ }
+@@ -5218,17 +5218,17 @@ nsContentUtils::ProcessViewportInfo(nsID
+ 
+ /* static */
+ void
+ nsContentUtils::HidePopupsInDocument(nsIDocument* aDocument)
+ {
+ #ifdef MOZ_XUL
+   nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
+   if (pm && aDocument) {
+-    nsCOMPtr<nsISupports> container = aDocument->GetContainer();
++    nsCOMPtr<nsIDocShell> container = aDocument->GetContainer();
+     nsCOMPtr<nsIDocShellTreeItem> docShellToHide = do_QueryInterface(container);
+     if (docShellToHide)
+       pm->HidePopupsInDocShell(docShellToHide);
+   }
+ #endif
+ }
+ 
+ /* static */
+@@ -6297,18 +6297,17 @@ nsContentUtils::IsSubDocumentTabbable(ns
+ 
+   // XXXbz should this use OwnerDoc() for GetSubDocumentFor?
+   // sXBL/XBL2 issue!
+   nsIDocument* subDoc = doc->GetSubDocumentFor(aContent);
+   if (!subDoc) {
+     return false;
+   }
+ 
+-  nsCOMPtr<nsISupports> container = subDoc->GetContainer();
+-  nsCOMPtr<nsIDocShell> docShell = do_QueryInterface(container);
++  nsCOMPtr<nsIDocShell> docShell = subDoc->GetContainer();
+   if (!docShell) {
+     return false;
+   }
+ 
+   nsCOMPtr<nsIContentViewer> contentViewer;
+   docShell->GetContentViewer(getter_AddRefs(contentViewer));
+   if (!contentViewer) {
+     return false;
+@@ -6383,17 +6382,17 @@ nsContentUtils::WidgetForDocument(nsIDoc
+ {
+   nsIDocument* doc = aDoc;
+   nsIDocument* displayDoc = doc->GetDisplayDocument();
+   if (displayDoc) {
+     doc = displayDoc;
+   }
+ 
+   nsIPresShell* shell = doc->GetShell();
+-  nsCOMPtr<nsISupports> container = doc->GetContainer();
++  nsCOMPtr<nsIDocShell> container = doc->GetContainer();
+   nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem = do_QueryInterface(container);
+   while (!shell && docShellTreeItem) {
+     // We may be in a display:none subdocument, or we may not have a presshell
+     // created yet.
+     // Walk the docshell tree to find the nearest container that has a presshell,
+     // and find the root widget from that.
+     nsCOMPtr<nsIDocShell> docShell = do_QueryInterface(docShellTreeItem);
+     nsCOMPtr<nsIPresShell> presShell;
+diff --git a/content/base/src/nsCopySupport.cpp b/content/base/src/nsCopySupport.cpp
+--- a/content/base/src/nsCopySupport.cpp
++++ b/content/base/src/nsCopySupport.cpp
+@@ -305,17 +305,17 @@ nsCopySupport::GetTransferableForNode(ns
+ 
+ nsresult nsCopySupport::DoHooks(nsIDocument *aDoc, nsITransferable *aTrans,
+                                 bool *aDoPutOnClipboard)
+ {
+   NS_ENSURE_ARG(aDoc);
+ 
+   *aDoPutOnClipboard = true;
+ 
+-  nsCOMPtr<nsISupports> container = aDoc->GetContainer();
++  nsCOMPtr<nsIDocShell> container = aDoc->GetContainer();
+   nsCOMPtr<nsIClipboardDragDropHookList> hookObj = do_GetInterface(container);
+   if (!hookObj) return NS_ERROR_FAILURE;
+ 
+   nsCOMPtr<nsISimpleEnumerator> enumerator;
+   hookObj->GetHookEnumerator(getter_AddRefs(enumerator));
+   if (!enumerator) return NS_ERROR_FAILURE;
+ 
+   // the logic here should follow the behavior specified in
+diff --git a/content/base/src/nsDocument.cpp b/content/base/src/nsDocument.cpp
+--- a/content/base/src/nsDocument.cpp
++++ b/content/base/src/nsDocument.cpp
+@@ -3731,22 +3731,48 @@ NotifyActivityChanged(nsIContent *aConte
+   nsCOMPtr<nsIObjectLoadingContent> objectLoadingContent(do_QueryInterface(aContent));
+   if (objectLoadingContent) {
+     nsObjectLoadingContent* olc = static_cast<nsObjectLoadingContent*>(objectLoadingContent.get());
+     olc->NotifyOwnerDocumentActivityChanged();
+   }
+ }
+ 
+ void
+-nsIDocument::SetContainer(nsISupports* aContainer)
++nsIDocument::SetContainer(nsIDocShell* aContainer)
+ {
+   mDocumentContainer = do_GetWeakReference(aContainer);
+   EnumerateFreezableElements(NotifyActivityChanged, nsnull);
+ }
+ 
++already_AddRefed<nsIDocShell>
++nsIDocument::GetContainer() const
++{
++  nsCOMPtr<nsIDocShell> container = do_QueryReferent(mDocumentContainer);
++  return container.forget();
++}
++
++bool
++nsIDocument::HasContainer() const
++{
++  nsCOMPtr<nsIDocShell> container = GetContainer();
++  return !!container;
++}
++
++nsILoadContext*
++nsIDocument::GetLoadContext() const
++{
++  nsCOMPtr<nsIDocShell> container = GetContainer();
++  if (!container) {
++    return nullptr;
++  }
++  nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(container);
++  return loadContext;
++}
++
++
+ void
+ nsDocument::SetScriptGlobalObject(nsIScriptGlobalObject *aScriptGlobalObject)
+ {
+ #ifdef DEBUG
+   {
+     nsCOMPtr<nsPIDOMWindow> win(do_QueryInterface(aScriptGlobalObject));
+ 
+     NS_ASSERTION(!win || win->IsInnerWindow(),
+@@ -7511,17 +7537,17 @@ nsDocument::CloneDocHelper(nsDocument* c
+     if (channel && loadGroup) {
+       clone->Reset(channel, loadGroup);
+     } else {
+       nsIURI* uri = static_cast<const nsIDocument*>(this)->GetDocumentURI();
+       if (uri) {
+         clone->ResetToURI(uri, loadGroup, NodePrincipal());
+       }
+     }
+-    nsCOMPtr<nsISupports> container = GetContainer();
++    nsCOMPtr<nsIDocShell> container = GetContainer();
+     clone->SetContainer(container);
+   }
+ 
+   // Set scripting object
+   bool hasHadScriptObject = true;
+   nsIScriptGlobalObject* scriptObject =
+     GetScriptHandlingObject(hasHadScriptObject);
+   NS_ENSURE_STATE(scriptObject || !hasHadScriptObject);
+@@ -7989,24 +8015,24 @@ nsIDocument::FlushPendingLinkUpdates()
+     
+   nsAutoScriptBlocker scriptBlocker;
+   mLinksToUpdate.EnumerateEntries(EnumeratePendingLinkUpdates, nsnull);
+   mLinksToUpdate.Clear();
+   mHasLinksToUpdate = false;
+ }
+ 
+ already_AddRefed<nsIDocument>
+-nsIDocument::CreateStaticClone(nsISupports* aCloneContainer)
++nsIDocument::CreateStaticClone(nsIDocShell* aCloneContainer)
+ {
+   nsCOMPtr<nsIDOMDocument> domDoc = do_QueryInterface(this);
+   NS_ENSURE_TRUE(domDoc, nsnull);
+   mCreatingStaticClone = true;
+ 
+   // Make document use different container during cloning.
+-  nsCOMPtr<nsISupports> originalContainer = GetContainer();
++  nsCOMPtr<nsIDocShell> originalContainer = GetContainer();
+   SetContainer(aCloneContainer);
+   nsCOMPtr<nsIDOMNode> clonedNode;
+   nsresult rv = domDoc->CloneNode(true, 1, getter_AddRefs(clonedNode));
+   SetContainer(originalContainer);
+ 
+   nsCOMPtr<nsIDocument> clonedDoc;
+   if (NS_SUCCEEDED(rv)) {
+     clonedDoc = do_QueryInterface(clonedNode);
+@@ -8851,29 +8877,28 @@ nsDocument::FullScreenStackTop()
+   NS_ASSERTION(element->OwnerDoc() == this, "Full-screen element should be in this doc");
+   return element;
+ }
+ 
+ // Returns true if aDoc is in the focused tab in the active window.
+ static bool
+ IsInActiveTab(nsIDocument* aDoc)
+ {
+-  nsCOMPtr<nsISupports> container = aDoc->GetContainer();
+-  nsCOMPtr<nsIDocShell> docshell = do_QueryInterface(container);
++  nsCOMPtr<nsIDocShell> docshell = aDoc->GetContainer();
+   if (!docshell) {
+     return false;
+   }
+ 
+   bool isActive = false;
+   docshell->GetIsActive(&isActive);
+   if (!isActive) {
+     return false;
+   }
+   
+-  nsCOMPtr<nsIDocShellTreeItem> dsti = do_QueryInterface(container);
++  nsCOMPtr<nsIDocShellTreeItem> dsti = do_QueryInterface(docshell);
+   if (!dsti) {
+     return false;
+   }
+   nsCOMPtr<nsIDocShellTreeItem> rootItem;
+   dsti->GetRootTreeItem(getter_AddRefs(rootItem));
+   if (!rootItem) {
+     return false;
+   }
+diff --git a/content/base/src/nsFrameLoader.cpp b/content/base/src/nsFrameLoader.cpp
+--- a/content/base/src/nsFrameLoader.cpp
++++ b/content/base/src/nsFrameLoader.cpp
+@@ -1463,18 +1463,17 @@ nsFrameLoader::MaybeCreateDocShell()
+   }
+ 
+   if (doc->IsResourceDoc() || !doc->IsActive()) {
+     // Don't allow subframe loads in resource documents, nor
+     // in non-active documents.
+     return NS_ERROR_NOT_AVAILABLE;
+   }
+ 
+-  nsCOMPtr<nsISupports> container =
+-    doc->GetContainer();
++  nsCOMPtr<nsIDocShell> container = doc->GetContainer();
+   nsCOMPtr<nsIWebNavigation> parentAsWebNav = do_QueryInterface(container);
+   NS_ENSURE_STATE(parentAsWebNav);
+ 
+   // Create the docshell...
+   mDocShell = do_CreateInstance("@mozilla.org/docshell;1");
+   NS_ENSURE_TRUE(mDocShell, NS_ERROR_FAILURE);
+ 
+   if (OwnerIsBrowserFrame() &&
+diff --git a/content/base/src/nsTreeSanitizer.cpp b/content/base/src/nsTreeSanitizer.cpp
+--- a/content/base/src/nsTreeSanitizer.cpp
++++ b/content/base/src/nsTreeSanitizer.cpp
+@@ -1381,22 +1381,19 @@ nsTreeSanitizer::Sanitize(nsIContent* aF
+ }
+ 
+ void
+ nsTreeSanitizer::Sanitize(nsIDocument* aDocument)
+ {
+   // If you want to relax these preconditions, be sure to check the code in
+   // here that notifies / does not notify or that fires mutation events if
+   // in tree.
+-#ifdef DEBUG
+-  nsCOMPtr<nsISupports> container = aDocument->GetContainer();
+-  NS_PRECONDITION(!container, "The document is in a shell.");
+-  nsRefPtr<mozilla::dom::Element> root = aDocument->GetRootElement();
+-  NS_PRECONDITION(root->IsHTML(nsGkAtoms::html), "Not HTML root.");
+-#endif
++  NS_PRECONDITION(!aDocument->HasContainer(), "The document is in a shell.");
++  NS_PRECONDITION(aDocument->GetRootElement()->IsHTML(nsGkAtoms::html),
++                  "Not HTML root.");
+ 
+   mFullDocument = true;
+   SanitizeChildren(aDocument);
+ }
+ 
+ void
+ nsTreeSanitizer::SanitizeChildren(nsINode* aRoot)
+ {
+diff --git a/content/html/content/src/nsHTMLFormElement.cpp b/content/html/content/src/nsHTMLFormElement.cpp
+--- a/content/html/content/src/nsHTMLFormElement.cpp
++++ b/content/html/content/src/nsHTMLFormElement.cpp
+@@ -790,17 +790,17 @@ nsHTMLFormElement::SubmitSubmission(nsFo
+ 
+   if (!actionURI) {
+     mIsSubmitting = false;
+     return NS_OK;
+   }
+ 
+   // If there is no link handler, then we won't actually be able to submit.
+   nsIDocument* doc = GetCurrentDoc();
+-  nsCOMPtr<nsISupports> container = doc ? doc->GetContainer() : nsnull;
++  nsCOMPtr<nsIDocShell> container = doc ? doc->GetContainer() : nsnull;
+   nsCOMPtr<nsILinkHandler> linkHandler(do_QueryInterface(container));
+   if (!linkHandler || IsEditable()) {
+     mIsSubmitting = false;
+     return NS_OK;
+   }
+ 
+   // javascript URIs are not really submissions; they just call a function.
+   // Also, they may synchronously call submit(), and we want them to be able to
+diff --git a/content/xtf/src/nsXTFElementWrapper.cpp b/content/xtf/src/nsXTFElementWrapper.cpp
+--- a/content/xtf/src/nsXTFElementWrapper.cpp
++++ b/content/xtf/src/nsXTFElementWrapper.cpp
+@@ -26,16 +26,17 @@
+ #include "nsDOMAttributeMap.h"
+ #include "nsUnicharUtils.h"
+ #include "nsEventDispatcher.h"
+ #include "nsIProgrammingLanguage.h"
+ #include "nsIXPConnect.h"
+ #include "nsXTFWeakTearoff.h"
+ #include "mozAutoDocUpdate.h"
+ #include "nsFocusManager.h"
++#include "nsIDocShell.h"
+ 
+ nsXTFElementWrapper::nsXTFElementWrapper(already_AddRefed<nsINodeInfo> aNodeInfo,
+                                          nsIXTFElement* aXTFElement)
+     : nsXTFElementWrapperBase(aNodeInfo),
+       mXTFElement(aXTFElement),
+       mNotificationMask(0),
+       mIntrinsicState(0),
+       mTmpAttrName(nsGkAtoms::_asterix) // XXX this is a hack, but names
+@@ -798,17 +799,17 @@ nsXTFElementWrapper::GetDocumentFrameEle
+ {
+   *aDocumentFrameElement = nsnull;
+   
+   nsIDocument *doc = GetCurrentDoc();
+   if (!doc) {
+     NS_WARNING("no document");
+     return NS_OK;
+   }
+-  nsCOMPtr<nsISupports> container = doc->GetContainer();
++  nsCOMPtr<nsIDocShell> container = doc->GetContainer();
+   if (!container) {
+     NS_ERROR("no docshell");
+     return NS_ERROR_FAILURE;
+   }
+   nsCOMPtr<nsPIDOMWindow> pidomwin = do_GetInterface(container);
+   if (!pidomwin) {
+     NS_ERROR("no nsPIDOMWindow interface on docshell");
+     return NS_ERROR_FAILURE;
+diff --git a/content/xul/content/src/nsXULElement.cpp b/content/xul/content/src/nsXULElement.cpp
+--- a/content/xul/content/src/nsXULElement.cpp
++++ b/content/xul/content/src/nsXULElement.cpp
+@@ -1713,17 +1713,17 @@ nsXULElement::HideWindowChrome(bool aSho
+ 
+ nsIWidget*
+ nsXULElement::GetWindowWidget()
+ {
+     nsIDocument* doc = GetCurrentDoc();
+ 
+     // only top level chrome documents can set the titlebar color
+     if (doc->IsRootDisplayDocument()) {
+-        nsCOMPtr<nsISupports> container = doc->GetContainer();
++        nsCOMPtr<nsIDocShell> container = doc->GetContainer();
+         nsCOMPtr<nsIBaseWindow> baseWindow = do_QueryInterface(container);
+         if (baseWindow) {
+             nsCOMPtr<nsIWidget> mainWidget;
+             baseWindow->GetMainWidget(getter_AddRefs(mainWidget));
+             return mainWidget;
+         }
+     }
+     return nsnull;
+diff --git a/content/xul/document/src/nsXULDocument.cpp b/content/xul/document/src/nsXULDocument.cpp
+--- a/content/xul/document/src/nsXULDocument.cpp
++++ b/content/xul/document/src/nsXULDocument.cpp
+@@ -3125,17 +3125,17 @@ nsXULDocument::DoneWalking()
+         // happen.
+         mDocumentLoaded = true;
+ 
+         NotifyPossibleTitleChange(false);
+ 
+         // Before starting layout, check whether we're a toplevel chrome
+         // window.  If we are, set our chrome flags now, so that we don't have
+         // to restyle the whole frame tree after StartLayout.
+-        nsCOMPtr<nsISupports> container = GetContainer();
++        nsCOMPtr<nsIDocShell> container = GetContainer();
+         nsCOMPtr<nsIDocShellTreeItem> item = do_QueryInterface(container);
+         if (item) {
+             nsCOMPtr<nsIDocShellTreeOwner> owner;
+             item->GetTreeOwner(getter_AddRefs(owner));
+             nsCOMPtr<nsIXULWindow> xulWin = do_GetInterface(owner);
+             if (xulWin) {
+                 nsCOMPtr<nsIDocShell> xulWinShell;
+                 xulWin->GetDocShell(getter_AddRefs(xulWinShell));
+diff --git a/dom/base/nsFocusManager.cpp b/dom/base/nsFocusManager.cpp
+--- a/dom/base/nsFocusManager.cpp
++++ b/dom/base/nsFocusManager.cpp
+@@ -813,17 +813,17 @@ nsFocusManager::ContentRemoved(nsIDocume
+     else {
+       // Check if the node that was focused is an iframe or similar by looking
+       // if it has a subdocument. This would indicate that this focused iframe
+       // and its descendants will be going away. We will need to move the
+       // focus somewhere else, so just clear the focus in the toplevel window
+       // so that no element is focused.
+       nsIDocument* subdoc = aDocument->GetSubDocumentFor(content);
+       if (subdoc) {
+-        nsCOMPtr<nsISupports> container = subdoc->GetContainer();
++        nsCOMPtr<nsIDocShell> container = subdoc->GetContainer();
+         nsCOMPtr<nsPIDOMWindow> childWindow = do_GetInterface(container);
+         if (childWindow && IsSameOrAncestor(childWindow, mFocusedWindow)) {
+           ClearFocus(mActiveWindow);
+         }
+       }
+     }
+ 
+     NotifyFocusStateChange(content, shouldShowFocusRing, false);
+diff --git a/dom/ipc/TabChild.h b/dom/ipc/TabChild.h
+--- a/dom/ipc/TabChild.h
++++ b/dom/ipc/TabChild.h
+@@ -317,18 +317,17 @@ GetTabChildFrom(nsIDocShell* aDocShell)
+ 
+ inline TabChild*
+ GetTabChildFrom(nsIPresShell* aPresShell)
+ {
+     nsIDocument* doc = aPresShell->GetDocument();
+     if (!doc) {
+         return nsnull;
+     }
+-    nsCOMPtr<nsISupports> container = doc->GetContainer();
+-    nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(container));
++    nsCOMPtr<nsIDocShell> docShell = doc->GetContainer();
+     return GetTabChildFrom(docShell);
+ }
+ 
+ inline TabChild*
+ GetTabChildFrom(nsIDOMWindow* aWindow)
+ {
+     nsCOMPtr<nsIWebNavigation> webNav = do_GetInterface(aWindow);
+     nsCOMPtr<nsIDocShell> docShell = do_QueryInterface(webNav);
+diff --git a/dom/plugins/base/nsJSNPRuntime.cpp b/dom/plugins/base/nsJSNPRuntime.cpp
+--- a/dom/plugins/base/nsJSNPRuntime.cpp
++++ b/dom/plugins/base/nsJSNPRuntime.cpp
+@@ -19,16 +19,17 @@
+ #include "nsIDocument.h"
+ #include "nsIJSRuntimeService.h"
+ #include "nsIJSContextStack.h"
+ #include "nsIXPConnect.h"
+ #include "nsIDOMElement.h"
+ #include "prmem.h"
+ #include "nsIContent.h"
+ #include "nsIPluginInstanceOwner.h"
++#include "nsIDocShell.h"
+ #include "mozilla/HashFunctions.h"
+ 
+ #define NPRUNTIME_JSCLASS_NAME "NPObject JS wrapper class"
+ 
+ using namespace mozilla::plugins::parent;
+ using namespace mozilla;
+ 
+ #include "mozilla/plugins/PluginScriptableObjectParent.h"
+@@ -324,17 +325,17 @@ GetJSContext(NPP npp)
+   nsCOMPtr<nsIPluginInstanceOwner> owner;
+   inst->GetOwner(getter_AddRefs(owner));
+   NS_ENSURE_TRUE(owner, nsnull);
+ 
+   nsCOMPtr<nsIDocument> doc;
+   owner->GetDocument(getter_AddRefs(doc));
+   NS_ENSURE_TRUE(doc, nsnull);
+ 
+-  nsCOMPtr<nsISupports> documentContainer = doc->GetContainer();
++  nsCOMPtr<nsIDocShell> documentContainer = doc->GetContainer();
+   nsCOMPtr<nsIScriptGlobalObject> sgo(do_GetInterface(documentContainer));
+   NS_ENSURE_TRUE(sgo, nsnull);
+ 
+   nsIScriptContext *scx = sgo->GetContext();
+   NS_ENSURE_TRUE(scx, nsnull);
+ 
+   return scx->GetNativeContext();
+ }
+diff --git a/editor/libeditor/base/nsEditorUtils.cpp b/editor/libeditor/base/nsEditorUtils.cpp
+--- a/editor/libeditor/base/nsEditorUtils.cpp
++++ b/editor/libeditor/base/nsEditorUtils.cpp
+@@ -185,18 +185,17 @@ nsEditorUtils::IsLeafNode(nsIDOMNode *aN
+ 
+ nsresult
+ nsEditorHookUtils::GetHookEnumeratorFromDocument(nsIDOMDocument *aDoc,
+                                                  nsISimpleEnumerator **aResult)
+ {
+   nsCOMPtr<nsIDocument> doc = do_QueryInterface(aDoc);
+   NS_ENSURE_TRUE(doc, NS_ERROR_FAILURE);
+ 
+-  nsCOMPtr<nsISupports> container = doc->GetContainer();
+-  nsCOMPtr<nsIDocShell> docShell = do_QueryInterface(container);
++  nsCOMPtr<nsIDocShell> docShell = doc->GetContainer();
+   nsCOMPtr<nsIClipboardDragDropHookList> hookObj = do_GetInterface(docShell);
+   NS_ENSURE_TRUE(hookObj, NS_ERROR_FAILURE);
+ 
+   return hookObj->GetHookEnumerator(aResult);
+ }
+ 
+ bool
+ nsEditorHookUtils::DoInsertionHook(nsIDOMDocument *aDoc, nsIDOMEvent *aDropEvent,  
+diff --git a/editor/libeditor/html/nsHTMLDataTransfer.cpp b/editor/libeditor/html/nsHTMLDataTransfer.cpp
+--- a/editor/libeditor/html/nsHTMLDataTransfer.cpp
++++ b/editor/libeditor/html/nsHTMLDataTransfer.cpp
+@@ -1175,17 +1175,17 @@ nsHTMLEditor::ParseCFHTML(nsCString & aC
+ 
+ bool nsHTMLEditor::IsSafeToInsertData(nsIDOMDocument* aSourceDoc)
+ {
+   // Try to determine whether we should use a sanitizing fragment sink
+   bool isSafe = false;
+ 
+   nsCOMPtr<nsIDocument> destdoc = GetDocument();
+   NS_ASSERTION(destdoc, "Where is our destination doc?");
+-  nsCOMPtr<nsISupports> container = destdoc->GetContainer();
++  nsCOMPtr<nsIDocShell> container = destdoc->GetContainer();
+   nsCOMPtr<nsIDocShellTreeItem> dsti = do_QueryInterface(container);
+   nsCOMPtr<nsIDocShellTreeItem> root;
+   if (dsti)
+     dsti->GetRootTreeItem(getter_AddRefs(root));
+   nsCOMPtr<nsIDocShell> docShell = do_QueryInterface(root);
+   uint32_t appType;
+   if (docShell && NS_SUCCEEDED(docShell->GetAppType(&appType)))
+     isSafe = appType == nsIDocShell::APP_TYPE_EDITOR;
+diff --git a/layout/base/nsDocumentViewer.cpp b/layout/base/nsDocumentViewer.cpp
+--- a/layout/base/nsDocumentViewer.cpp
++++ b/layout/base/nsDocumentViewer.cpp
+@@ -1313,17 +1313,17 @@ AttachContainerRecurse(nsIDocShell* aShe
+ }
+ 
+ NS_IMETHODIMP
+ DocumentViewerImpl::Open(nsISupports *aState, nsISHEntry *aSHEntry)
+ {
+   NS_ENSURE_TRUE(mPresShell, NS_ERROR_NOT_INITIALIZED);
+ 
+   if (mDocument)
+-    mDocument->SetContainer(nsCOMPtr<nsISupports>(do_QueryReferent(mContainer)));
++    mDocument->SetContainer(nsCOMPtr<nsIDocShell>(do_QueryReferent(mContainer)));
+ 
+   nsresult rv = InitInternal(mParentWidget, aState, mBounds, false);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   mHidden = false;
+ 
+   if (mPresShell)
+     mPresShell->SetForwardingContainer(nsnull);
+@@ -1702,17 +1702,17 @@ DocumentViewerImpl::SetDOMDocument(nsIDO
+ 
+ NS_IMETHODIMP
+ DocumentViewerImpl::SetDocumentInternal(nsIDocument* aDocument,
+                                         bool aForceReuseInnerWindow)
+ {
+   MOZ_ASSERT(aDocument);
+ 
+   // Set new container
+-  nsCOMPtr<nsISupports> container = do_QueryReferent(mContainer);
++  nsCOMPtr<nsIDocShell> container = do_QueryReferent(mContainer);
+   aDocument->SetContainer(container);
+ 
+   if (mDocument != aDocument) {
+     if (mDocument->IsStaticDocument()) {
+       mDocument->SetScriptGlobalObject(nsnull);
+       mDocument->Destroy();
+     }
+     // Replace the old document with the new one. Do this only when
+@@ -2119,17 +2119,17 @@ DocumentViewerImpl::CreateStyleSet(nsIDo
+   nsStyleSet *styleSet = new nsStyleSet();
+ 
+   styleSet->BeginUpdate();
+   
+   // The document will fill in the document sheets when we create the presshell
+   
+   // Handle the user sheets.
+ #ifdef DEBUG
+-  nsCOMPtr<nsISupports> debugDocContainer = aDocument->GetContainer();
++  nsCOMPtr<nsIDocShell> debugDocContainer = aDocument->GetContainer();
+   nsCOMPtr<nsIDocShellTreeItem> debugDocShell(do_QueryReferent(mContainer));
+   NS_ASSERTION(SameCOMIdentity(debugDocContainer, debugDocShell),
+                "Unexpected containers");
+ #endif
+   nsCSSStyleSheet* sheet = nsnull;
+   if (nsContentUtils::IsInChromeDocshell(aDocument)) {
+     sheet = nsLayoutStylesheetCache::UserChromeSheet();
+   }
+diff --git a/layout/base/nsPresContext.cpp b/layout/base/nsPresContext.cpp
+--- a/layout/base/nsPresContext.cpp
++++ b/layout/base/nsPresContext.cpp
+@@ -946,17 +946,17 @@ nsPresContext::Init(nsDeviceContext* aDe
+     NS_ASSERTION(!parent || mDocument->IsStaticDocument() || parent->GetShell(),
+                  "How did we end up with a presshell if our parent doesn't "
+                  "have one?");
+     if (parent && parent->GetShell()) {
+       NS_ASSERTION(parent->GetShell()->GetPresContext(),
+                    "How did we get a presshell?");
+ 
+       // We don't have our container set yet at this point
+-      nsCOMPtr<nsISupports> ourContainer = mDocument->GetContainer();
++      nsCOMPtr<nsIDocShell> ourContainer = mDocument->GetContainer();
+ 
+       nsCOMPtr<nsIDocShellTreeItem> ourItem = do_QueryInterface(ourContainer);
+       if (ourItem) {
+         nsCOMPtr<nsIDocShellTreeItem> parentItem;
+         ourItem->GetSameTypeParent(getter_AddRefs(parentItem));
+         if (parentItem) {
+           mRefreshDriver = parent->GetShell()->GetPresContext()->RefreshDriver();
+         }
+diff --git a/layout/generic/nsContainerFrame.cpp b/layout/generic/nsContainerFrame.cpp
+--- a/layout/generic/nsContainerFrame.cpp
++++ b/layout/generic/nsContainerFrame.cpp
+@@ -30,16 +30,18 @@
+ #include "nsRegion.h"
+ #include "nsLayoutErrors.h"
+ #include "nsDisplayList.h"
+ #include "nsContentErrors.h"
+ #include "nsListControlFrame.h"
+ #include "nsIBaseWindow.h"
+ #include "nsThemeConstants.h"
+ #include "nsCSSFrameConstructor.h"
++#include "nsIDocShell.h"
++
+ #include "mozilla/dom/Element.h"
+ 
+ #ifdef DEBUG
+ #undef NOISY
+ #else
+ #undef NOISY
+ #endif
+ 
+@@ -603,17 +605,17 @@ nsContainerFrame::ReparentFrameViewList(
+   }
+ 
+   return NS_OK;
+ }
+ 
+ static nsIWidget*
+ GetPresContextContainerWidget(nsPresContext* aPresContext)
+ {
+-  nsCOMPtr<nsISupports> container = aPresContext->Document()->GetContainer();
++  nsCOMPtr<nsIDocShell> container = aPresContext->Document()->GetContainer();
+   nsCOMPtr<nsIBaseWindow> baseWindow = do_QueryInterface(container);
+   if (!baseWindow)
+     return nsnull;
+ 
+   nsCOMPtr<nsIWidget> mainWidget;
+   baseWindow->GetMainWidget(getter_AddRefs(mainWidget));
+   return mainWidget;
+ }
+diff --git a/layout/generic/nsSubDocumentFrame.cpp b/layout/generic/nsSubDocumentFrame.cpp
+--- a/layout/generic/nsSubDocumentFrame.cpp
++++ b/layout/generic/nsSubDocumentFrame.cpp
+@@ -918,18 +918,17 @@ nsSubDocumentFrame::BeginSwapDocShells(n
+ static bool
+ EndSwapDocShellsForDocument(nsIDocument* aDocument, void*)
+ {
+   NS_PRECONDITION(aDocument, "");
+ 
+   // Our docshell and view trees have been updated for the new hierarchy.
+   // Now also update all nsDeviceContext::mWidget to that of the
+   // container view in the new hierarchy.
+-  nsCOMPtr<nsISupports> container = aDocument->GetContainer();
+-  nsCOMPtr<nsIDocShell> ds = do_QueryInterface(container);
++  nsCOMPtr<nsIDocShell> ds = aDocument->GetContainer();
+   if (ds) {
+     nsCOMPtr<nsIContentViewer> cv;
+     ds->GetContentViewer(getter_AddRefs(cv));
+     while (cv) {
+       nsCOMPtr<nsPresContext> pc;
+       cv->GetPresContext(getter_AddRefs(pc));
+       nsDeviceContext* dc = pc ? pc->DeviceContext() : nsnull;
+       if (dc) {
+diff --git a/layout/printing/nsPrintEngine.cpp b/layout/printing/nsPrintEngine.cpp
+--- a/layout/printing/nsPrintEngine.cpp
++++ b/layout/printing/nsPrintEngine.cpp
+@@ -1273,18 +1273,17 @@ nsPrintEngine::MapContentForPO(nsPrintOb
+ 
+   nsIDocument* doc = aContent->GetDocument();
+ 
+   NS_ASSERTION(doc, "Content without a document from a document tree?");
+ 
+   nsIDocument* subDoc = doc->GetSubDocumentFor(aContent);
+ 
+   if (subDoc) {
+-    nsCOMPtr<nsISupports> container = subDoc->GetContainer();
+-    nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(container));
++    nsCOMPtr<nsIDocShell> docShell = subDoc->GetContainer();
+ 
+     if (docShell) {
+       nsPrintObject * po = nsnull;
+       int32_t cnt = aPO->mKids.Length();
+       for (int32_t i=0;i<cnt;i++) {
+         nsPrintObject* kid = aPO->mKids.ElementAt(i);
+         if (kid->mDocument == subDoc) {
+           po = kid;
+diff --git a/layout/style/nsRuleProcessorData.h b/layout/style/nsRuleProcessorData.h
+--- a/layout/style/nsRuleProcessorData.h
++++ b/layout/style/nsRuleProcessorData.h
+@@ -14,16 +14,18 @@
+ #include "nsPresContext.h" // for nsCompatibility
+ #include "nsString.h"
+ #include "nsChangeHint.h"
+ #include "nsIContent.h"
+ #include "nsCSSPseudoElements.h"
+ #include "nsRuleWalker.h"
+ #include "nsNthIndexCache.h"
+ #include "nsILoadContext.h"
++#include "nsIDocShell.h"
++
+ #include "mozilla/BloomFilter.h"
+ #include "mozilla/GuardObjects.h"
+ 
+ class nsIStyleSheet;
+ class nsIAtom;
+ class nsICSSPseudoComparator;
+ class nsAttrValue;
+ 
+@@ -207,17 +209,17 @@ struct NS_STACK_CLASS TreeMatchContext {
+     , mVisitedHandling(aVisitedHandling)
+     , mDocument(aDocument)
+     , mScopedRoot(nsnull)
+     , mIsHTMLDocument(aDocument->IsHTML())
+     , mCompatMode(aDocument->GetCompatibilityMode())
+     , mUsingPrivateBrowsing(false)
+   {
+     if (aMatchVisited != eNeverMatchVisited) {
+-      nsCOMPtr<nsISupports> container = mDocument->GetContainer();
++      nsCOMPtr<nsIDocShell> container = mDocument->GetContainer();
+       if (container) {
+         nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(container);
+         NS_ASSERTION(loadContext, "Couldn't get loadContext from container; assuming no private browsing.");
+         if (loadContext) {
+           mUsingPrivateBrowsing = loadContext->UsePrivateBrowsing();
+         }
+       }
+     }
+diff --git a/layout/xul/base/src/nsContainerBoxObject.cpp b/layout/xul/base/src/nsContainerBoxObject.cpp
+--- a/layout/xul/base/src/nsContainerBoxObject.cpp
++++ b/layout/xul/base/src/nsContainerBoxObject.cpp
+@@ -75,23 +75,19 @@ NS_IMETHODIMP nsContainerBoxObject::GetD
+   }
+   
+   nsIDocument *sub_doc = doc->GetSubDocumentFor(mContent);
+ 
+   if (!sub_doc) {
+     return NS_OK;
+   }
+ 
+-  nsCOMPtr<nsISupports> container = sub_doc->GetContainer();
+-
+-  if (!container) {
+-    return NS_OK;
+-  }
+-
+-  return CallQueryInterface(container, aResult);
++  nsCOMPtr<nsIDocShell> container = sub_doc->GetContainer();
++  container.forget(aResult);
++  return NS_OK;
+ }
+ 
+ nsresult
+ NS_NewContainerBoxObject(nsIBoxObject** aResult)
+ {
+   *aResult = new nsContainerBoxObject();
+   if (!*aResult)
+     return NS_ERROR_OUT_OF_MEMORY;
+diff --git a/layout/xul/base/src/nsXULPopupManager.cpp b/layout/xul/base/src/nsXULPopupManager.cpp
+--- a/layout/xul/base/src/nsXULPopupManager.cpp
++++ b/layout/xul/base/src/nsXULPopupManager.cpp
+@@ -993,17 +993,17 @@ nsXULPopupManager::HidePopupsInList(cons
+   }
+ 
+   SetCaptureState(nsnull);
+ }
+ 
+ bool
+ nsXULPopupManager::IsChildOfDocShell(nsIDocument* aDoc, nsIDocShellTreeItem* aExpected)
+ {
+-  nsCOMPtr<nsISupports> doc = aDoc->GetContainer();
++  nsCOMPtr<nsIDocShell> doc = aDoc->GetContainer();
+   nsCOMPtr<nsIDocShellTreeItem> docShellItem(do_QueryInterface(doc));
+   while(docShellItem) {
+     if (docShellItem == aExpected)
+       return true;
+ 
+     nsCOMPtr<nsIDocShellTreeItem> parent;
+     docShellItem->GetParent(getter_AddRefs(parent));
+     docShellItem = parent;
+diff --git a/uriloader/prefetch/nsOfflineCacheUpdateService.cpp b/uriloader/prefetch/nsOfflineCacheUpdateService.cpp
+--- a/uriloader/prefetch/nsOfflineCacheUpdateService.cpp
++++ b/uriloader/prefetch/nsOfflineCacheUpdateService.cpp
+@@ -14,16 +14,17 @@
+ #include "nsIApplicationCacheContainer.h"
+ #include "nsIApplicationCacheChannel.h"
+ #include "nsIApplicationCacheService.h"
+ #include "nsICache.h"
+ #include "nsICacheService.h"
+ #include "nsICacheSession.h"
+ #include "nsICachingChannel.h"
+ #include "nsIContent.h"
++#include "nsIDocShell.h"
+ #include "nsIDocumentLoader.h"
+ #include "nsIDOMElement.h"
+ #include "nsIDOMWindow.h"
+ #include "nsIDOMOfflineResourceList.h"
+ #include "nsIDocument.h"
+ #include "nsIObserverService.h"
+ #include "nsIURL.h"
+ #include "nsIWebProgress.h"
+@@ -301,17 +302,17 @@ NS_IMETHODIMP
+ nsOfflineCacheUpdateService::ScheduleOnDocumentStop(nsIURI *aManifestURI,
+                                                     nsIURI *aDocumentURI,
+                                                     nsIDOMDocument *aDocument)
+ {
+     LOG(("nsOfflineCacheUpdateService::ScheduleOnDocumentStop [%p, manifestURI=%p, documentURI=%p doc=%p]",
+          this, aManifestURI, aDocumentURI, aDocument));
+ 
+     nsCOMPtr<nsIDocument> doc = do_QueryInterface(aDocument);
+-    nsCOMPtr<nsISupports> container = doc->GetContainer();
++    nsCOMPtr<nsIDocShell> container = doc->GetContainer();
+     nsCOMPtr<nsIWebProgress> progress = do_QueryInterface(container);
+     NS_ENSURE_TRUE(progress, NS_ERROR_INVALID_ARG);
+ 
+     // Proceed with cache update
+     nsRefPtr<nsOfflineCachePendingUpdate> update =
+         new nsOfflineCachePendingUpdate(this, aManifestURI,
+                                         aDocumentURI, aDocument);
+     NS_ENSURE_TRUE(update, NS_ERROR_OUT_OF_MEMORY);

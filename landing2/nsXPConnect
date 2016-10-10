@@ -1,0 +1,661 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -196,18 +196,18 @@
+ #include "nsITimedChannel.h"
+ #include "nsICookiePermission.h"
+ #ifdef MOZ_XUL
+ #include "nsXULPopupManager.h"
+ #include "nsIDOMXULControlElement.h"
+ #include "nsMenuPopupFrame.h"
+ #endif
+ 
+-#include "xpcprivate.h"
+ #include "JSObject2JSObjectMap.h"
++#include "mozilla/xpc/CompartmentPrivate.h"
+ 
+ #ifdef NS_PRINTING
+ #include "nsIPrintSettings.h"
+ #include "nsIPrintSettingsService.h"
+ #include "nsIWebBrowserPrint.h"
+ #endif
+ 
+ #include "nsWindowRoot.h"
+diff --git a/dom/base/nsWrapperCache.cpp b/dom/base/nsWrapperCache.cpp
+--- a/dom/base/nsWrapperCache.cpp
++++ b/dom/base/nsWrapperCache.cpp
+@@ -32,17 +32,17 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsWrapperCache.h"
+ 
+-#include "xpcprivate.h" // xpc::CompartmentPrivate
++#include "mozilla/xpc/CompartmentPrivate.h"
+ 
+ #include "jsapi.h"
+ #include "jsgc.h" // js::GetObjectCompartment
+ 
+ #include "nsWrapperCacheInlines.h"
+ 
+ void
+ nsWrapperCache::RemoveExpandoObject()
+diff --git a/js/xpconnect/loader/Makefile.in b/js/xpconnect/loader/Makefile.in
+--- a/js/xpconnect/loader/Makefile.in
++++ b/js/xpconnect/loader/Makefile.in
+@@ -40,17 +40,16 @@ srcdir		= @srcdir@
+ VPATH		= @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ MODULE		= jsloader
+ LIBRARY_NAME	= jsloader_s
+ FORCE_STATIC_LIB = 1
+ LIBXUL_LIBRARY = 1
+-LOCAL_INCLUDES += -I$(srcdir)/../src
+ 
+ CPPSRCS		= mozJSComponentLoader.cpp mozJSSubScriptLoader.cpp mozJSLoaderUtils.cpp
+ 
+ EXTRA_JS_MODULES = XPCOMUtils.jsm
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+ DEFINES		+= -DJSFILE -DJS_THREADSAFE
+diff --git a/js/xpconnect/loader/mozJSComponentLoader.cpp b/js/xpconnect/loader/mozJSComponentLoader.cpp
+--- a/js/xpconnect/loader/mozJSComponentLoader.cpp
++++ b/js/xpconnect/loader/mozJSComponentLoader.cpp
+@@ -82,17 +82,17 @@
+ #include "nsIConsoleService.h"
+ #include "nsIStorageStream.h"
+ #include "nsIStringStream.h"
+ #include "prmem.h"
+ #if defined(XP_WIN)
+ #include "nsILocalFileWin.h"
+ #endif
+ #include "xpcpublic.h"
+-#include "xpcprivate.h"
++#include "nsXPConnect.h"
+ #include "nsIResProtocolHandler.h"
+ 
+ #include "mozilla/scache/StartupCache.h"
+ #include "mozilla/scache/StartupCacheUtils.h"
+ #include "mozilla/xpc/Base64.h"
+ #include "mozilla/Omnijar.h"
+ 
+ #include "jsdbgapi.h"
+diff --git a/js/xpconnect/src/CompartmentPrivate.h b/js/xpconnect/src/CompartmentPrivate.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/CompartmentPrivate.h
+@@ -0,0 +1,151 @@
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is __________________________________________.
++ *
++ * The Initial Developer of the Original Code is
++ * ____________________________________________.
++ * Portions created by the Initial Developer are Copyright (C) 2___
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#ifndef mozilla_xpc_CompartmentPrivate_h
++#define mozilla_xpc_CompartmentPrivate_h
++
++#include "JSObject2JSObjectMap.h"
++#include "mozilla/xpc/PtrAndPrincipalHashKey.h"
++#include "XPCWrappedNative.h"
++
++namespace xpc {
++
++struct CompartmentPrivate
++{
++    CompartmentPrivate(PtrAndPrincipalHashKey *key, bool wantXrays, bool cycleCollectionEnabled)
++        : key(key),
++          ptr(nsnull),
++          wantXrays(wantXrays),
++          cycleCollectionEnabled(cycleCollectionEnabled)
++    {
++        MOZ_COUNT_CTOR(xpc::CompartmentPrivate);
++    }
++
++    CompartmentPrivate(nsISupports *ptr, bool wantXrays, bool cycleCollectionEnabled)
++        : key(nsnull),
++          ptr(ptr),
++          wantXrays(wantXrays),
++          cycleCollectionEnabled(cycleCollectionEnabled)
++    {
++        MOZ_COUNT_CTOR(xpc::CompartmentPrivate);
++    }
++
++    ~CompartmentPrivate()
++    {
++        MOZ_COUNT_DTOR(xpc::CompartmentPrivate);
++    }
++
++
++    // NB: key and ptr are mutually exclusive.
++    nsAutoPtr<PtrAndPrincipalHashKey> key;
++    nsCOMPtr<nsISupports> ptr;
++    bool wantXrays;
++    bool cycleCollectionEnabled;
++    nsAutoPtr<JSObject2JSObjectMap> waiverWrapperMap;
++    // NB: we don't want this map to hold a strong reference to the wrapper.
++    nsAutoPtr<nsDataHashtable<nsPtrHashKey<XPCWrappedNative>, JSObject *> > expandoMap;
++    nsAutoPtr<nsTHashtable<nsPtrHashKey<JSObject> > > domExpandoMap;
++    nsCString location;
++
++    bool RegisterExpandoObject(XPCWrappedNative *wn, JSObject *expando) {
++        if (!expandoMap) {
++            expandoMap = new nsDataHashtable<nsPtrHashKey<XPCWrappedNative>, JSObject *>();
++            if (!expandoMap->Init(8)) {
++                expandoMap = nsnull;
++                return false;
++            }
++        }
++        wn->SetHasExpandoObject();
++        return expandoMap->Put(wn, expando);
++    }
++
++    /**
++     * This lookup does not change the color of the JSObject meaning that the
++     * object returned is not guaranteed to be kept alive past the next CC.
++     *
++     * This should only be called if you are certain that the return value won't
++     * be passed into a JS API function and that it won't be stored without
++     * being rooted (or otherwise signaling the stored value to the CC).
++     */
++    JSObject *LookupExpandoObjectPreserveColor(XPCWrappedNative *wn) {
++        return expandoMap ? expandoMap->Get(wn) : nsnull;
++    }
++
++    /**
++     * This lookup clears the gray bit before handing out the JSObject which
++     * means that the object is guaranteed to be kept alive past the next CC.
++     */
++    JSObject *LookupExpandoObject(XPCWrappedNative *wn) {
++        JSObject *obj = LookupExpandoObjectPreserveColor(wn);
++        xpc_UnmarkGrayObject(obj);
++        return obj;
++    }
++
++    bool RegisterDOMExpandoObject(JSObject *expando) {
++        if (!domExpandoMap) {
++            domExpandoMap = new nsTHashtable<nsPtrHashKey<JSObject> >();
++            if (!domExpandoMap->Init(8)) {
++                domExpandoMap = nsnull;
++                return false;
++            }
++        }
++        return domExpandoMap->PutEntry(expando);
++    }
++    void RemoveDOMExpandoObject(JSObject *expando) {
++        if (domExpandoMap)
++            domExpandoMap->RemoveEntry(expando);
++    }
++};
++
++inline bool
++CompartmentParticipatesInCycleCollection(JSContext *cx, JSCompartment *compartment)
++{
++    CompartmentPrivate *priv =
++        static_cast<CompartmentPrivate *>(JS_GetCompartmentPrivate(cx, compartment));
++    NS_ASSERTION(priv, "This should never be null!");
++
++    return priv->cycleCollectionEnabled;
++}
++
++inline bool
++ParticipatesInCycleCollection(JSContext *cx, js::gc::Cell *cell)
++{
++    return CompartmentParticipatesInCycleCollection(cx, cell->compartment());
++}
++
++} // namespace xpc
++
++#endif // mozilla_xpc_CompartmentPrivate_h
+diff --git a/js/xpconnect/src/Makefile.in b/js/xpconnect/src/Makefile.in
+--- a/js/xpconnect/src/Makefile.in
++++ b/js/xpconnect/src/Makefile.in
+@@ -47,22 +47,25 @@ include $(DEPTH)/config/autoconf.mk
+ MODULE		= xpconnect
+ 
+ LIBRARY_NAME    = xpconnect_s
+ FORCE_STATIC_LIB = 1
+ LIBXUL_LIBRARY = 1
+ EXPORTS = \
+   xpcpublic.h \
+   dombindings_gen.h \
++  nsXPConnect.h \
+   JSObject2JSObjectMap.h \
++  XPCWrappedNative.h \
+   $(NULL)
+ 
+ EXPORTS_NAMESPACES = mozilla/xpc
+ EXPORTS_mozilla/xpc = \
+   Base64.h \
++  CompartmentPrivate.h \
+   PtrAndPrincipalHashKey.h \
+   QuickStubs.h \
+   $(NULL)
+ 
+ CPPSRCS		= \
+ 		Base64.cpp \
+ 		QuickStubs.cpp \
+ 		nsScriptError.cpp \
+diff --git a/js/xpconnect/src/XPCInlines.h b/js/xpconnect/src/XPCInlines.h
+--- a/js/xpconnect/src/XPCInlines.h
++++ b/js/xpconnect/src/XPCInlines.h
+@@ -40,16 +40,17 @@
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* private inline methods (#include'd by xpcprivate.h). */
+ 
+ #ifndef xpcinlines_h___
+ #define xpcinlines_h___
+ 
+ #include "nsXPCWrappedJS.h"
++#include "nsXPConnect.h"
+ #include "XPCJSObjectHolder.h"
+ #include "XPCTraceableVariant.h"
+ 
+ #include "jsfriendapi.h"
+ 
+ /***************************************************************************/
+ bool
+ xpc::PtrAndPrincipalHashKey::KeyEquals(const PtrAndPrincipalHashKey* aKey) const
+diff --git a/js/xpconnect/src/XPCJSRuntime.cpp b/js/xpconnect/src/XPCJSRuntime.cpp
+--- a/js/xpconnect/src/XPCJSRuntime.cpp
++++ b/js/xpconnect/src/XPCJSRuntime.cpp
+@@ -52,16 +52,17 @@
+ #include "jsgcchunk.h"
+ #include "jsscope.h"
+ #include "nsIMemoryReporter.h"
+ #include "nsPrintfCString.h"
+ #include "mozilla/FunctionTimer.h"
+ #include "prsystem.h"
+ #include "mozilla/Preferences.h"
+ #include "mozilla/Telemetry.h"
++#include "mozilla/xpc/CompartmentPrivate.h"
+ 
+ #ifdef MOZ_CRASHREPORTER
+ #include "nsExceptionHandler.h"
+ #endif
+ 
+ using namespace mozilla;
+ using namespace mozilla::xpconnect::memory;
+ 
+@@ -246,21 +247,16 @@ ContextCallback(JSContext *cx, uintN ope
+                 return false;
+         } else if (operation == JSCONTEXT_DESTROY) {
+             delete XPCContext::GetXPCContext(cx);
+         }
+     }
+     return true;
+ }
+ 
+-xpc::CompartmentPrivate::~CompartmentPrivate()
+-{
+-    MOZ_COUNT_DTOR(xpc::CompartmentPrivate);
+-}
+-
+ static JSBool
+ CompartmentCallback(JSContext *cx, JSCompartment *compartment, uintN op)
+ {
+     JS_ASSERT(op == JSCOMPARTMENT_DESTROY);
+ 
+     XPCJSRuntime* self = nsXPConnect::GetRuntimeInstance();
+     if (!self)
+         return true;
+diff --git a/js/xpconnect/src/XPCWrappedNative.cpp b/js/xpconnect/src/XPCWrappedNative.cpp
+--- a/js/xpconnect/src/XPCWrappedNative.cpp
++++ b/js/xpconnect/src/XPCWrappedNative.cpp
+@@ -47,16 +47,17 @@
+ #include "nsWrapperCacheInlines.h"
+ #include "XPCLog.h"
+ #include "nsINode.h"
+ #include "XPCQuickStubs.h"
+ #include "jsproxy.h"
+ #include "AccessCheck.h"
+ #include "WrapperFactory.h"
+ #include "dombindings.h"
++#include "mozilla/xpc/CompartmentPrivate.h"
+ 
+ bool
+ xpc_OkToHandOutWrapper(nsWrapperCache *cache)
+ {
+     NS_ABORT_IF_FALSE(cache->GetWrapper(), "Must have wrapper");
+     NS_ABORT_IF_FALSE(cache->IsProxy() || IS_WN_WRAPPER(cache->GetWrapper()),
+                       "Must have proxy or XPCWrappedNative wrapper");
+     return cache->IsProxy() ?
+diff --git a/js/xpconnect/src/XPCWrapper.h b/js/xpconnect/src/XPCWrapper.h
+--- a/js/xpconnect/src/XPCWrapper.h
++++ b/js/xpconnect/src/XPCWrapper.h
+@@ -39,16 +39,17 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #ifndef XPC_WRAPPER_H
+ #define XPC_WRAPPER_H 1
+ 
+ #include "xpcprivate.h"
++#include "nsXPConnect.h"
+ 
+ namespace XPCNativeWrapper {
+ 
+ // Given an XPCWrappedNative pointer and the name of the function on
+ // XPCNativeScriptableFlags corresponding with a flag, returns 'true'
+ // if the flag is set.
+ // XXX Convert to using GetFlags() and not a macro.
+ #define NATIVE_HAS_FLAG(_wn, _flag)                                           \
+diff --git a/js/xpconnect/src/dombindings.cpp b/js/xpconnect/src/dombindings.cpp
+--- a/js/xpconnect/src/dombindings.cpp
++++ b/js/xpconnect/src/dombindings.cpp
+@@ -42,16 +42,17 @@
+ #include "dombindings.h"
+ #include "xpcprivate.h"
+ #include "XPCQuickStubs.h"
+ #include "XPCWrapper.h"
+ #include "WrapperFactory.h"
+ #include "nsDOMClassInfo.h"
+ #include "nsGlobalWindow.h"
+ #include "nsWrapperCacheInlines.h"
++#include "mozilla/xpc/CompartmentPrivate.h"
+ 
+ #include "jsapi.h"
+ 
+ #include "jscntxt.h" // js::AutoIdVector
+ 
+ using namespace JS;
+ using namespace xpc;
+ using js::AutoIdVector;
+diff --git a/js/xpconnect/src/nsXPConnect.cpp b/js/xpconnect/src/nsXPConnect.cpp
+--- a/js/xpconnect/src/nsXPConnect.cpp
++++ b/js/xpconnect/src/nsXPConnect.cpp
+@@ -37,17 +37,18 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* High level class and public functions implementation. */
+ 
+-#include "xpcprivate.h"
++#include "nsXPConnect.h"
++
+ #include "XPCWrapper.h"
+ #include "nsBaseHashtable.h"
+ #include "nsHashKeys.h"
+ #include "jsatom.h"
+ #include "jsobj.h"
+ #include "jsfriendapi.h"
+ #include "jsfun.h"
+ #include "jsgc.h"
+@@ -61,16 +62,18 @@
+ #include "XrayWrapper.h"
+ #include "WrapperFactory.h"
+ #include "AccessCheck.h"
+ 
+ #include "jsdIDebuggerService.h"
+ 
+ #include "XPCQuickStubs.h"
+ #include "dombindings.h"
++#include "mozilla/xpc/CompartmentPrivate.h"
++
+ #include "nsWrapperCacheInlines.h"
+ 
+ NS_IMPL_THREADSAFE_ISUPPORTS7(nsXPConnect,
+                               nsIXPConnect,
+                               nsISupportsWeakReference,
+                               nsIThreadObserver,
+                               nsIJSRuntimeService,
+                               nsIJSContextStack,
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -46,29 +46,31 @@
+ #ifndef xpcprivate_h___
+ #define xpcprivate_h___
+ 
+ #include <string.h>
+ #include <stdlib.h>
+ #include <stdarg.h>
+ #include <math.h>
+ #include "xpcpublic.h"
++#include "nsXPConnect.h"
++#include "XPCWrappedNative.h"
+ #include "mozilla/xpc/PtrAndPrincipalHashKey.h"
+ #include "XPCWrappedNativeTearOff.h"
+ #include "XPCWrappedNativeTearOffChunk.h"
+ 
+ #include "jsapi.h"
+ #include "jsdhash.h"
+ #include "jsprf.h"
+-#include "prprf.h"
+ #include "jscntxt.h"
+ #include "jsdbgapi.h"
+ #include "jsfriendapi.h"
+ #include "jsgc.h"
+ #include "jswrapper.h"
++
+ #include "nscore.h"
+ #include "nsXPCOM.h"
+ #include "nsAutoPtr.h"
+ #include "nsCycleCollectionParticipant.h"
+ #include "nsCycleCollector.h"
+ #include "nsDebug.h"
+ #include "nsISupports.h"
+ #include "nsIServiceManager.h"
+@@ -102,18 +104,16 @@
+ #include "nsAutoJSValHolder.h"
+ #include "mozilla/AutoRestore.h"
+ #include "mozilla/ReentrantMonitor.h"
+ #include "mozilla/Mutex.h"
+ #include "nsDataHashtable.h"
+ 
+ #include "nsThreadUtils.h"
+ #include "nsIJSContextStack.h"
+-#include "nsIJSEngineTelemetryStats.h"
+-#include "nsDeque.h"
+ 
+ #include "nsIConsoleService.h"
+ #include "nsIScriptError.h"
+ #include "nsIExceptionService.h"
+ 
+ #include "nsVariant.h"
+ #include "nsIPropertyBag.h"
+ #include "nsIProperty.h"
+@@ -3956,119 +3423,16 @@ xpc_NewSystemInheritingJSObject(JSContex
+ inline JSBool
+ xpc_SameScope(XPCWrappedNativeScope *objectscope,
+               XPCWrappedNativeScope *xpcscope,
+               JSBool *sameOrigin);
+ 
+ nsISupports *
+ XPC_GetIdentityObject(JSContext *cx, JSObject *obj);
+ 
+-namespace xpc {
+-
+-struct CompartmentPrivate
+-{
+-    CompartmentPrivate(PtrAndPrincipalHashKey *key, bool wantXrays, bool cycleCollectionEnabled)
+-        : key(key),
+-          ptr(nsnull),
+-          wantXrays(wantXrays),
+-          cycleCollectionEnabled(cycleCollectionEnabled)
+-    {
+-        MOZ_COUNT_CTOR(xpc::CompartmentPrivate);
+-    }
+-
+-    CompartmentPrivate(nsISupports *ptr, bool wantXrays, bool cycleCollectionEnabled)
+-        : key(nsnull),
+-          ptr(ptr),
+-          wantXrays(wantXrays),
+-          cycleCollectionEnabled(cycleCollectionEnabled)
+-    {
+-        MOZ_COUNT_CTOR(xpc::CompartmentPrivate);
+-    }
+-
+-    ~CompartmentPrivate();
+-
+-    // NB: key and ptr are mutually exclusive.
+-    nsAutoPtr<PtrAndPrincipalHashKey> key;
+-    nsCOMPtr<nsISupports> ptr;
+-    bool wantXrays;
+-    bool cycleCollectionEnabled;
+-    nsAutoPtr<JSObject2JSObjectMap> waiverWrapperMap;
+-    // NB: we don't want this map to hold a strong reference to the wrapper.
+-    nsAutoPtr<nsDataHashtable<nsPtrHashKey<XPCWrappedNative>, JSObject *> > expandoMap;
+-    nsAutoPtr<nsTHashtable<nsPtrHashKey<JSObject> > > domExpandoMap;
+-    nsCString location;
+-
+-    bool RegisterExpandoObject(XPCWrappedNative *wn, JSObject *expando) {
+-        if (!expandoMap) {
+-            expandoMap = new nsDataHashtable<nsPtrHashKey<XPCWrappedNative>, JSObject *>();
+-            if (!expandoMap->Init(8)) {
+-                expandoMap = nsnull;
+-                return false;
+-            }
+-        }
+-        wn->SetHasExpandoObject();
+-        return expandoMap->Put(wn, expando);
+-    }
+-
+-    /**
+-     * This lookup does not change the color of the JSObject meaning that the
+-     * object returned is not guaranteed to be kept alive past the next CC.
+-     *
+-     * This should only be called if you are certain that the return value won't
+-     * be passed into a JS API function and that it won't be stored without
+-     * being rooted (or otherwise signaling the stored value to the CC).
+-     */
+-    JSObject *LookupExpandoObjectPreserveColor(XPCWrappedNative *wn) {
+-        return expandoMap ? expandoMap->Get(wn) : nsnull;
+-    }
+-
+-    /**
+-     * This lookup clears the gray bit before handing out the JSObject which
+-     * means that the object is guaranteed to be kept alive past the next CC.
+-     */
+-    JSObject *LookupExpandoObject(XPCWrappedNative *wn) {
+-        JSObject *obj = LookupExpandoObjectPreserveColor(wn);
+-        xpc_UnmarkGrayObject(obj);
+-        return obj;
+-    }
+-
+-    bool RegisterDOMExpandoObject(JSObject *expando) {
+-        if (!domExpandoMap) {
+-            domExpandoMap = new nsTHashtable<nsPtrHashKey<JSObject> >();
+-            if (!domExpandoMap->Init(8)) {
+-                domExpandoMap = nsnull;
+-                return false;
+-            }
+-        }
+-        return domExpandoMap->PutEntry(expando);
+-    }
+-    void RemoveDOMExpandoObject(JSObject *expando) {
+-        if (domExpandoMap)
+-            domExpandoMap->RemoveEntry(expando);
+-    }
+-};
+-
+-inline bool
+-CompartmentParticipatesInCycleCollection(JSContext *cx, JSCompartment *compartment)
+-{
+-    CompartmentPrivate *priv =
+-        static_cast<CompartmentPrivate *>(JS_GetCompartmentPrivate(cx, compartment));
+-    NS_ASSERTION(priv, "This should never be null!");
+-
+-    return priv->cycleCollectionEnabled;
+-}
+-
+-inline bool
+-ParticipatesInCycleCollection(JSContext *cx, js::gc::Cell *cell)
+-{
+-    return CompartmentParticipatesInCycleCollection(cx, cell->compartment());
+-}
+-
+-}
+-
+ /***************************************************************************/
+ // Inlines use the above - include last.
+ 
+ #include "XPCInlines.h"
+ 
+ /***************************************************************************/
+ // Maps have inlines that use the above - include last.
+ 
+diff --git a/js/xpconnect/wrappers/WrapperFactory.cpp b/js/xpconnect/wrappers/WrapperFactory.cpp
+--- a/js/xpconnect/wrappers/WrapperFactory.cpp
++++ b/js/xpconnect/wrappers/WrapperFactory.cpp
+@@ -42,16 +42,17 @@
+ #include "FilteringWrapper.h"
+ #include "XrayWrapper.h"
+ #include "AccessCheck.h"
+ #include "XPCWrapper.h"
+ 
+ #include "xpcprivate.h"
+ #include "dombindings.h"
+ #include "XPCMaps.h"
++#include "mozilla/xpc/CompartmentPrivate.h"
+ 
+ using namespace js;
+ 
+ namespace xpc {
+ 
+ // When chrome pulls a naked property across the membrane using
+ // .wrappedJSObject, we want it to cross the membrane into the
+ // chrome compartment without automatically being wrapped into an
+diff --git a/js/xpconnect/wrappers/XrayWrapper.cpp b/js/xpconnect/wrappers/XrayWrapper.cpp
+--- a/js/xpconnect/wrappers/XrayWrapper.cpp
++++ b/js/xpconnect/wrappers/XrayWrapper.cpp
+@@ -45,16 +45,17 @@
+ 
+ #include "jscntxt.h"
+ 
+ #include "nsINode.h"
+ #include "nsIDocument.h"
+ 
+ #include "XPCWrapper.h"
+ #include "xpcprivate.h"
++#include "mozilla/xpc/CompartmentPrivate.h"
+ 
+ namespace xpc {
+ 
+ using namespace js;
+ 
+ static const uint32 JSSLOT_WN = 0;
+ static const uint32 JSSLOT_RESOLVING = 1;
+ static const uint32 JSSLOT_EXPANDO = 2;

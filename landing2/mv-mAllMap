@@ -1,0 +1,305 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/document/src/HTMLAllCollection.cpp b/content/html/document/src/HTMLAllCollection.cpp
+--- a/content/html/document/src/HTMLAllCollection.cpp
++++ b/content/html/document/src/HTMLAllCollection.cpp
+@@ -47,37 +47,41 @@ JSClass sHTMLDocumentAllClass = {
+ namespace mozilla {
+ namespace dom {
+ 
+ HTMLAllCollection::HTMLAllCollection(nsHTMLDocument* aDocument)
+   : mDocument(aDocument)
+ {
+   MOZ_ASSERT(mDocument);
+   NS_HOLD_JS_OBJECTS(this, HTMLAllCollection);
++
++  mAllMap.Init();
+ }
+ 
+ HTMLAllCollection::~HTMLAllCollection()
+ {
+   mObject = nullptr;
+   NS_DROP_JS_OBJECTS(this, HTMLAllCollection);
+ }
+ 
+ NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(HTMLAllCollection, AddRef)
+ NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(HTMLAllCollection, Release)
+ 
+ NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLAllCollection)
+ 
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(HTMLAllCollection)
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocument)
++  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAllMap)
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+ 
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(HTMLAllCollection)
+   tmp->mObject = nullptr;
+   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocument)
++  NS_IMPL_CYCLE_COLLECTION_UNLINK(mAllMap)
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+ 
+ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(HTMLAllCollection)
+   NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mObject)
+ NS_IMPL_CYCLE_COLLECTION_TRACE_END
+ 
+ uint32_t
+ HTMLAllCollection::Length()
+@@ -122,22 +126,78 @@ HTMLAllCollection::Collection()
+   if (!mCollection) {
+     nsIDocument* document = mDocument;
+     mCollection = document->GetElementsByTagName(NS_LITERAL_STRING("*"));
+     MOZ_ASSERT(mCollection);
+   }
+   return mCollection;
+ }
+ 
++static bool
++DocAllResultMatch(nsIContent* aContent, int32_t aNamespaceID, nsIAtom* aAtom,
++                  void* aData)
++{
++  if (aContent->GetID() == aAtom) {
++    return true;
++  }
++
++  nsGenericHTMLElement* elm = nsGenericHTMLElement::FromContent(aContent);
++  if (!elm) {
++    return false;
++  }
++
++  nsIAtom* tag = elm->Tag();
++  if (tag != nsGkAtoms::a &&
++      tag != nsGkAtoms::applet &&
++      tag != nsGkAtoms::button &&
++      tag != nsGkAtoms::embed &&
++      tag != nsGkAtoms::form &&
++      tag != nsGkAtoms::iframe &&
++      tag != nsGkAtoms::img &&
++      tag != nsGkAtoms::input &&
++      tag != nsGkAtoms::map &&
++      tag != nsGkAtoms::meta &&
++      tag != nsGkAtoms::object &&
++      tag != nsGkAtoms::select &&
++      tag != nsGkAtoms::textarea) {
++    return false;
++  }
++
++  const nsAttrValue* val = elm->GetParsedAttr(nsGkAtoms::name);
++  return val && val->Type() == nsAttrValue::eAtom &&
++         val->GetAtomValue() == aAtom;
++}
++
++nsContentList*
++HTMLAllCollection::GetDocumentAllList(const nsAString& aID, nsresult* aResult)
++{
++  *aResult = NS_OK;
++
++  if (nsContentList* docAllList = mAllMap.GetWeak(aID)) {
++    return docAllList;
++  }
++
++  Element* root = mDocument->GetRootElement();
++  if (!root) {
++    return nullptr;
++  }
++
++  nsCOMPtr<nsIAtom> id = do_GetAtom(aID);
++  nsRefPtr<nsContentList> docAllList =
++    new nsContentList(root, DocAllResultMatch, nullptr, nullptr, true, id);
++  mAllMap.Put(aID, docAllList);
++  return docAllList;
++}
++
+ nsISupports*
+ HTMLAllCollection::GetNamedItem(const nsAString& aID,
+                                 nsWrapperCache** aCache,
+                                 nsresult* aResult)
+ {
+-  nsContentList* docAllList = mDocument->GetDocumentAllList(aID, aResult);
++  nsContentList* docAllList = GetDocumentAllList(aID, aResult);
+   if (!docAllList) {
+     return nullptr;
+   }
+ 
+   // Check if there are more than 1 entries. Do this by getting the second one
+   // rather than the length since getting the length always requires walking
+   // the entire document.
+ 
+diff --git a/content/html/document/src/HTMLAllCollection.h b/content/html/document/src/HTMLAllCollection.h
+--- a/content/html/document/src/HTMLAllCollection.h
++++ b/content/html/document/src/HTMLAllCollection.h
+@@ -6,16 +6,17 @@
+ 
+ #ifndef mozilla_dom_HTMLAllCollection_h
+ #define mozilla_dom_HTMLAllCollection_h
+ 
+ #include "js/RootingAPI.h"
+ #include "nsAutoPtr.h"
+ #include "nsCycleCollectionParticipant.h"
+ #include "nsISupportsImpl.h"
++#include "nsRefPtrHashtable.h"
+ 
+ #include <stdint.h>
+ 
+ class nsContentList;
+ class nsHTMLDocument;
+ class nsIContent;
+ class nsWrapperCache;
+ 
+@@ -36,19 +37,21 @@ public:
+   uint32_t Length();
+   nsIContent* Item(uint32_t aIndex);
+ 
+   JSObject* GetObject(JSContext* aCx, ErrorResult& aRv);
+ 
+   nsContentList* Collection();
+   nsISupports* GetNamedItem(const nsAString& aID, nsWrapperCache** aCache,
+                             nsresult* aResult);
++  nsContentList* GetDocumentAllList(const nsAString& aID, nsresult* aResult);
+ 
+ private:
+   JS::Heap<JSObject*> mObject;
+   nsRefPtr<nsHTMLDocument> mDocument;
+   nsRefPtr<nsContentList> mCollection;
++  nsRefPtrHashtable<nsStringHashKey, nsContentList> mAllMap;
+ };
+ 
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #endif // mozilla_dom_HTMLAllCollection_h
+diff --git a/content/html/document/src/nsHTMLDocument.cpp b/content/html/document/src/nsHTMLDocument.cpp
+--- a/content/html/document/src/nsHTMLDocument.cpp
++++ b/content/html/document/src/nsHTMLDocument.cpp
+@@ -242,18 +242,16 @@ nsHTMLDocument::WrapNode(JSContext* aCx,
+ }
+ 
+ nsresult
+ nsHTMLDocument::Init()
+ {
+   nsresult rv = nsDocument::Init();
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+-  mAllMap.Init();
+-
+   // Now reset the compatibility mode of the CSSLoader
+   // to match our compat mode.
+   CSSLoader()->SetCompatibilityMode(mCompatMode);
+ 
+   return NS_OK;
+ }
+ 
+ 
+@@ -2611,73 +2609,16 @@ nsHTMLDocument::DeferredContentEditableC
+         if (spellChecker) {
+           rv = spellChecker->SpellCheckRange(range);
+         }
+       }
+     }
+   }
+ }
+ 
+-static bool
+-DocAllResultMatch(nsIContent* aContent, int32_t aNamespaceID, nsIAtom* aAtom,
+-                  void* aData)
+-{
+-  if (aContent->GetID() == aAtom) {
+-    return true;
+-  }
+-
+-  nsGenericHTMLElement* elm = nsGenericHTMLElement::FromContent(aContent);
+-  if (!elm) {
+-    return false;
+-  }
+-
+-  nsIAtom* tag = elm->Tag();
+-  if (tag != nsGkAtoms::a &&
+-      tag != nsGkAtoms::applet &&
+-      tag != nsGkAtoms::button &&
+-      tag != nsGkAtoms::embed &&
+-      tag != nsGkAtoms::form &&
+-      tag != nsGkAtoms::iframe &&
+-      tag != nsGkAtoms::img &&
+-      tag != nsGkAtoms::input &&
+-      tag != nsGkAtoms::map &&
+-      tag != nsGkAtoms::meta &&
+-      tag != nsGkAtoms::object &&
+-      tag != nsGkAtoms::select &&
+-      tag != nsGkAtoms::textarea) {
+-    return false;
+-  }
+-
+-  const nsAttrValue* val = elm->GetParsedAttr(nsGkAtoms::name);
+-  return val && val->Type() == nsAttrValue::eAtom &&
+-         val->GetAtomValue() == aAtom;
+-}
+-
+-
+-nsContentList*
+-nsHTMLDocument::GetDocumentAllList(const nsAString& aID, nsresult *aResult)
+-{
+-  *aResult = NS_OK;
+-
+-  if (nsContentList* docAllList = mAllMap.GetWeak(aID)) {
+-    return docAllList;
+-  }
+-
+-  Element* root = GetRootElement();
+-  if (!root) {
+-    return nullptr;
+-  }
+-
+-  nsCOMPtr<nsIAtom> id = do_GetAtom(aID);
+-  nsRefPtr<nsContentList> docAllList =
+-    new nsContentList(root, DocAllResultMatch, nullptr, nullptr, true, id);
+-  mAllMap.Put(aID, docAllList);
+-  return docAllList;
+-}
+-
+ HTMLAllCollection*
+ nsHTMLDocument::All()
+ {
+   if (!mAll) {
+     mAll = new HTMLAllCollection(this);
+   }
+   return mAll;
+ }
+diff --git a/content/html/document/src/nsHTMLDocument.h b/content/html/document/src/nsHTMLDocument.h
+--- a/content/html/document/src/nsHTMLDocument.h
++++ b/content/html/document/src/nsHTMLDocument.h
+@@ -102,17 +102,16 @@ public:
+   // nsIDOMHTMLDocument interface
+   NS_DECL_NSIDOMHTMLDOCUMENT
+ 
+   /**
+    * Returns the result of document.all[aID] which can either be a node
+    * or a nodelist depending on if there are multiple nodes with the same
+    * id.
+    */
+-  nsContentList* GetDocumentAllList(const nsAString& aID, nsresult* aResult);
+   mozilla::dom::HTMLAllCollection* All();
+   JSObject* GetAll(JSContext* aCx, mozilla::ErrorResult& aRv);
+ 
+   nsISupports* ResolveName(const nsAString& aName, nsWrapperCache **aCache);
+ 
+   virtual void AddedForm() MOZ_OVERRIDE;
+   virtual void RemovedForm() MOZ_OVERRIDE;
+   virtual int32_t GetNumFormsSynchronous() MOZ_OVERRIDE;
+@@ -294,17 +293,16 @@ protected:
+   nsRefPtr<nsContentList> mEmbeds;
+   nsRefPtr<nsContentList> mLinks;
+   nsRefPtr<nsContentList> mAnchors;
+   nsRefPtr<nsContentList> mScripts;
+   nsRefPtr<nsContentList> mForms;
+   nsRefPtr<nsContentList> mFormControls;
+ 
+   nsRefPtr<mozilla::dom::HTMLAllCollection> mAll;
+-  nsRefPtrHashtable<nsStringHashKey, nsContentList> mAllMap;
+ 
+   /** # of forms in the document, synchronously set */
+   int32_t mNumForms;
+ 
+   static uint32_t gWyciwygSessionCnt;
+ 
+   static void TryHintCharset(nsIMarkupDocumentViewer* aMarkupDV,
+                              int32_t& aCharsetSource,

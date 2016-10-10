@@ -1,0 +1,153 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsDocument.cpp b/content/base/src/nsDocument.cpp
+--- a/content/base/src/nsDocument.cpp
++++ b/content/base/src/nsDocument.cpp
+@@ -236,19 +236,16 @@ nsIdentifierMapEntry::~nsIdentifierMapEn
+ 
+ void
+ nsIdentifierMapEntry::Traverse(nsCycleCollectionTraversalCallback* aCallback)
+ {
+   NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(*aCallback,
+                                      "mIdentifierMap mNameContentList");
+   aCallback->NoteXPCOMChild(static_cast<nsIDOMNodeList*>(mNameContentList));
+ 
+-  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(*aCallback, "mIdentifierMap mDocAllList");
+-  aCallback->NoteXPCOMChild(static_cast<nsIDOMNodeList*>(mDocAllList));
+-
+   if (mImageElement) {
+     NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(*aCallback,
+                                        "mIdentifierMap mImageElement element");
+     nsIContent* imageElement = mImageElement;
+     aCallback->NoteXPCOMChild(imageElement);
+   }
+ }
+ 
+diff --git a/content/base/src/nsDocument.h b/content/base/src/nsDocument.h
+--- a/content/base/src/nsDocument.h
++++ b/content/base/src/nsDocument.h
+@@ -180,19 +180,16 @@ public:
+   bool HasContentChangeCallback() { return mChangeCallbacks != nullptr; }
+   void AddContentChangeCallback(nsIDocument::IDTargetObserver aCallback,
+                                 void* aData, bool aForImage);
+   void RemoveContentChangeCallback(nsIDocument::IDTargetObserver aCallback,
+                                 void* aData, bool aForImage);
+ 
+   void Traverse(nsCycleCollectionTraversalCallback* aCallback);
+ 
+-  void SetDocAllList(nsContentList* aContentList) { mDocAllList = aContentList; }
+-  nsContentList* GetDocAllList() { return mDocAllList; }
+-
+   struct ChangeCallback {
+     nsIDocument::IDTargetObserver mCallback;
+     void* mData;
+     bool mForImage;
+   };
+ 
+   struct ChangeCallbackEntry : public PLDHashEntryHdr {
+     typedef const ChangeCallback KeyType;
+@@ -227,17 +224,16 @@ public:
+ private:
+   void FireChangeCallbacks(Element* aOldElement, Element* aNewElement,
+                            bool aImageOnly = false);
+ 
+   // empty if there are no elements with this ID.
+   // The elements are stored as weak pointers.
+   nsSmallVoidArray mIdContentList;
+   nsRefPtr<nsBaseContentList> mNameContentList;
+-  nsRefPtr<nsContentList> mDocAllList;
+   nsAutoPtr<nsTHashtable<ChangeCallbackEntry> > mChangeCallbacks;
+   nsRefPtr<Element> mImageElement;
+ };
+ 
+ class nsDocHeaderData
+ {
+ public:
+   nsDocHeaderData(nsIAtom* aField, const nsAString& aData)
+diff --git a/content/html/document/src/nsHTMLDocument.cpp b/content/html/document/src/nsHTMLDocument.cpp
+--- a/content/html/document/src/nsHTMLDocument.cpp
++++ b/content/html/document/src/nsHTMLDocument.cpp
+@@ -242,16 +242,18 @@ nsHTMLDocument::WrapNode(JSContext* aCx,
+ }
+ 
+ nsresult
+ nsHTMLDocument::Init()
+ {
+   nsresult rv = nsDocument::Init();
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
++  mAllMap.Init();
++
+   // Now reset the compatibility mode of the CSSLoader
+   // to match our compat mode.
+   CSSLoader()->SetCompatibilityMode(mCompatMode);
+ 
+   return NS_OK;
+ }
+ 
+ 
+@@ -2650,37 +2652,29 @@ DocAllResultMatch(nsIContent* aContent, 
+ }
+ 
+ 
+ nsContentList*
+ nsHTMLDocument::GetDocumentAllList(const nsAString& aID, nsresult *aResult)
+ {
+   *aResult = NS_OK;
+ 
+-  nsIdentifierMapEntry *entry = mIdentifierMap.PutEntry(aID);
+-  if (!entry) {
+-    *aResult = NS_ERROR_OUT_OF_MEMORY;
+-
+-    return nullptr;
++  if (nsContentList* docAllList = mAllMap.GetWeak(aID)) {
++    return docAllList;
+   }
+ 
+   Element* root = GetRootElement();
+   if (!root) {
+     return nullptr;
+   }
+ 
+-  nsRefPtr<nsContentList> docAllList = entry->GetDocAllList();
+-  if (!docAllList) {
+-    nsCOMPtr<nsIAtom> id = do_GetAtom(aID);
+-
+-    docAllList = new nsContentList(root, DocAllResultMatch,
+-                                   nullptr, nullptr, true, id);
+-    entry->SetDocAllList(docAllList);
+-  }
+-
++  nsCOMPtr<nsIAtom> id = do_GetAtom(aID);
++  nsRefPtr<nsContentList> docAllList =
++    new nsContentList(root, DocAllResultMatch, nullptr, nullptr, true, id);
++  mAllMap.Put(aID, docAllList);
+   return docAllList;
+ }
+ 
+ HTMLAllCollection*
+ nsHTMLDocument::All()
+ {
+   if (!mAll) {
+     mAll = new HTMLAllCollection(this);
+diff --git a/content/html/document/src/nsHTMLDocument.h b/content/html/document/src/nsHTMLDocument.h
+--- a/content/html/document/src/nsHTMLDocument.h
++++ b/content/html/document/src/nsHTMLDocument.h
+@@ -294,16 +294,17 @@ protected:
+   nsRefPtr<nsContentList> mEmbeds;
+   nsRefPtr<nsContentList> mLinks;
+   nsRefPtr<nsContentList> mAnchors;
+   nsRefPtr<nsContentList> mScripts;
+   nsRefPtr<nsContentList> mForms;
+   nsRefPtr<nsContentList> mFormControls;
+ 
+   nsRefPtr<mozilla::dom::HTMLAllCollection> mAll;
++  nsRefPtrHashtable<nsStringHashKey, nsContentList> mAllMap;
+ 
+   /** # of forms in the document, synchronously set */
+   int32_t mNumForms;
+ 
+   static uint32_t gWyciwygSessionCnt;
+ 
+   static void TryHintCharset(nsIMarkupDocumentViewer* aMarkupDV,
+                              int32_t& aCharsetSource,

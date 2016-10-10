@@ -1,0 +1,339 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/canvas/src/CustomQS_WebGL.h b/content/canvas/src/CustomQS_WebGL.h
+--- a/content/canvas/src/CustomQS_WebGL.h
++++ b/content/canvas/src/CustomQS_WebGL.h
+@@ -53,137 +53,16 @@
+ #define GET_UINT32_ARG(var, index) \
+   uint32_t var; \
+   do { \
+     if (!JS_ValueToECMAUint32(cx, argv[index], &(var))) \
+       return JS_FALSE; \
+   } while (0)
+ 
+ 
+-/*
+- * TexImage2D takes:
+- *    TexImage2D(uint, int, uint, int, int, int, uint, uint, ArrayBufferView)
+- *    TexImage2D(uint, int, uint, uint, uint, nsIDOMElement)
+- *    TexImage2D(uint, int, uint, uint, uint, ImageData)
+- */
+-static JSBool
+-nsIDOMWebGLRenderingContext_TexImage2D(JSContext *cx, uintN argc, jsval *vp)
+-{
+-    XPC_QS_ASSERT_CONTEXT_OK(cx);
+-    JSObject *obj = JS_THIS_OBJECT(cx, vp);
+-    if (!obj)
+-        return JS_FALSE;
+-
+-    nsresult rv;
+-
+-    nsIDOMWebGLRenderingContext *self;
+-    xpc_qsSelfRef selfref;
+-    JS::AutoValueRooter tvr(cx);
+-    if (!xpc_qsUnwrapThis(cx, obj, &self, &selfref.ptr, tvr.jsval_addr(), nsnull))
+-        return JS_FALSE;
+-
+-    if (argc < 6 || argc == 7 || argc == 8)
+-        return xpc_qsThrow(cx, NS_ERROR_XPC_NOT_ENOUGH_ARGS);
+-
+-    jsval *argv = JS_ARGV(cx, vp);
+-
+-    // arguments common to all cases
+-    GET_UINT32_ARG(argv0, 0);
+-    GET_INT32_ARG(argv1, 1);
+-
+-    if (argc > 5 &&
+-        !JSVAL_IS_PRIMITIVE(argv[5]))
+-    {
+-        // implement the variants taking a DOMElement as argv[5]
+-        GET_UINT32_ARG(argv2, 2);
+-        GET_UINT32_ARG(argv3, 3);
+-        GET_UINT32_ARG(argv4, 4);
+-
+-        nsIDOMElement *elt;
+-        xpc_qsSelfRef eltRef;
+-        rv = xpc_qsUnwrapArg<nsIDOMElement>(cx, argv[5], &elt, &eltRef.ptr, &argv[5]);
+-        if (NS_FAILED(rv)) return JS_FALSE;
+-
+-        rv = self->TexImage2D_dom(argv0, argv1, argv2, argv3, argv4, elt);
+-
+-        // NS_ERROR_DOM_SECURITY_ERR indicates we tried to load a cross-domain element, so
+-        // bail out immediately, don't try to interprete as ImageData
+-        if (rv == NS_ERROR_DOM_SECURITY_ERR) {
+-            xpc_qsThrowBadArg(cx, rv, vp, 5);
+-            return JS_FALSE;
+-        }
+-
+-        if (NS_FAILED(rv)) {
+-            // failed to interprete argv[5] as a DOMElement, now try to interprete it as ImageData
+-            JSObject *argv5 = JSVAL_TO_OBJECT(argv[5]);
+-
+-            jsval js_width, js_height, js_data;
+-            JS_GetProperty(cx, argv5, "width", &js_width);
+-            JS_GetProperty(cx, argv5, "height", &js_height);
+-            JS_GetProperty(cx, argv5, "data", &js_data);
+-            if (js_width  == JSVAL_VOID ||
+-                js_height == JSVAL_VOID ||
+-                !js_data.isObject())
+-            {
+-                xpc_qsThrowBadArg(cx, NS_ERROR_FAILURE, vp, 5);
+-                return JS_FALSE;
+-            }
+-            int32_t int_width, int_height;
+-            JSObject *obj_data = JSVAL_TO_OBJECT(js_data);
+-            if (!JS_ValueToECMAInt32(cx, js_width, &int_width) ||
+-                !JS_ValueToECMAInt32(cx, js_height, &int_height))
+-            {
+-                return JS_FALSE;
+-            }
+-            if (!js_IsTypedArray(obj_data))
+-            {
+-                xpc_qsThrowBadArg(cx, NS_ERROR_FAILURE, vp, 5);
+-                return JS_FALSE;
+-            }
+-            rv = self->TexImage2D_imageData(argv0, argv1, argv2,
+-                                            int_width, int_height, 0,
+-                                            argv3, argv4, js::TypedArray::getTypedArray(obj_data));
+-        }
+-    } else if (argc > 8 &&
+-               JSVAL_IS_OBJECT(argv[8])) // here, we allow null !
+-    {
+-        // implement the variants taking a buffer/array as argv[8]
+-        GET_UINT32_ARG(argv2, 2);
+-        GET_INT32_ARG(argv3, 3);
+-        GET_INT32_ARG(argv4, 4);
+-        GET_INT32_ARG(argv5, 5);
+-        GET_UINT32_ARG(argv6, 6);
+-        GET_UINT32_ARG(argv7, 7);
+-
+-        JSObject *argv8 = JSVAL_TO_OBJECT(argv[8]);
+-
+-        // then try to grab either a js::TypedArray, or null
+-        if (argv8 == nsnull) {
+-            rv = self->TexImage2D_array(argv0, argv1, argv2, argv3,
+-                                        argv4, argv5, argv6, argv7,
+-                                        nsnull);
+-        } else if (js_IsTypedArray(argv8)) {
+-            rv = self->TexImage2D_array(argv0, argv1, argv2, argv3,
+-                                        argv4, argv5, argv6, argv7,
+-                                        js::TypedArray::getTypedArray(argv8));
+-        } else {
+-            xpc_qsThrowBadArg(cx, NS_ERROR_FAILURE, vp, 8);
+-            return JS_FALSE;
+-        }
+-    } else {
+-        xpc_qsThrow(cx, NS_ERROR_XPC_NOT_ENOUGH_ARGS);
+-        return JS_FALSE;
+-    }
+-
+-    if (NS_FAILED(rv))
+-        return xpc_qsThrowMethodFailed(cx, rv, vp);
+-
+-    *vp = JSVAL_VOID;
+-    return JS_TRUE;
+-}
+ 
+ /* TexSubImage2D takes:
+  *    TexSubImage2D(uint, int, int, int, int, int, uint, uint, ArrayBufferView)
+  *    TexSubImage2D(uint, int, int, int, uint, uint, nsIDOMElement)
+  *    TexSubImage2D(uint, int, int, int, uint, uint, ImageData)
+  */
+ static JSBool
+ nsIDOMWebGLRenderingContext_TexSubImage2D(JSContext *cx, uintN argc, jsval *vp)
+diff --git a/content/canvas/src/WebGLContextGL.cpp b/content/canvas/src/WebGLContextGL.cpp
+--- a/content/canvas/src/WebGLContextGL.cpp
++++ b/content/canvas/src/WebGLContextGL.cpp
+@@ -4813,24 +4813,125 @@ WebGLContext::VertexAttribPointer(WebGLu
+     gl->fVertexAttribPointer(index, size, type, normalized,
+                              stride,
+                              reinterpret_cast<void*>(byteOffset));
+ 
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+-WebGLContext::TexImage2D(int32_t)
++WebGLContext::TexImage2D(uint32_t target, int32_t level, uint32_t internalformat,
++                         int32_t widthOrFormat, int32_t heightOrType,
++                         const JS::Value& borderOrPixelsOrElement,
++                         uint32_t format, uint32_t type, const JS::Value& pixels,
++                         JSContext* cx, uint8_t optionalArgc)
+ {
+-    if (!IsContextStable())
+-        return NS_OK;
+-
++    /**
++     * TexImage2D takes:
++     *    TexImage2D(uint, int, uint, int,  int,  int, uint, uint, ArrayBufferView)
++     *    TexImage2D(uint, int, uint, uint, uint, Element)
++     *    TexImage2D(uint, int, uint, uint, uint, ImageData)
++     */
++    if (optionalArgc == 0) {
++        // Element or ImageData
++        return TexImage2DElementOrImageData(target, level, internalFormat,
++                                            uint32_t(widthOrFormat),
++                                            uint32_t(heightOrType),
++                                            borderOrPixelsOrElement);
++    }
++
++    if (optionalArgc == 3) {
++        // ArrayBufferView
++        int32_t border;
++        if (!JS_ValueToECMAInt32(cx, borderOrPixelsOrElement, &border)) {
++            return NS_ERROR_FAILURE;
++        }
++        return TexImage2DArrayBufferView(target, level, internalFormat,
++                                         widthOrFormat, heightOrType,
++                                         border, format, type, pixels);
++    }
++
++    // Unupported signature.
+     return NS_ERROR_FAILURE;
+ }
+ 
++nsresult
++WebGLContext::TexImage2DArrayBufferView(uint32_t target, int32_t level,
++                                        uint32_t internalformat,
++                                        int32_t width, int32_t height,
++                                        int32_t border, uint32_t format,
++                                        uint32_t type, const JS::Value& pixels)
++{
++    if (pixels.isNull()) {
++        return TexImage2D_array(target, level, internalformat, width, height,
++                                border, format, type, NULL);
++    }
++
++    if (pixels.isObject() && js_IsTypedArray(&pixels.toObject())) {
++        return TexImage2D_array(target, level, internalformat, width, height,
++                                border, format, type, &pixels.toObject());
++    }
++
++    return NS_ERROR_FAILURE;
++}
++
++nsresult
++WebGLContext::TexImage2DElementOrImageData(uint32_t target, int32_t level,
++                                           uint32_t internalformat,
++                                           uint32_t format, uint32_t type,
++                                           const JS::Value& pixelsOrElement)
++{
++    nsIDOMElement* elt;
++    xpc_qsSelfRef eltRef;
++    nsresult rv = xpc_qsUnwrapArg<nsIDOMElement>(cx, pixelsOrElement, &elt,
++                                                 &eltRef.ptr, &pixelsOrElement);
++    NS_ENSURE_SUCCESS(rv, rv);
++
++    rv = TexImage2D_dom(target, level, internalFormat, format, type, elt);
++
++    // NS_ERROR_DOM_SECURITY_ERR indicates we tried to load a cross-domain element, so
++    // bail out immediately, don't try to interprete as ImageData
++    if (rv == NS_ERROR_DOM_SECURITY_ERR) {
++        return rv;
++    }
++
++    if (NS_SUCCEEDED(rv)) {
++        // All is good.
++        return rv;
++    }
++
++    // failed to interprete argv[5] as a DOMElement, now try to interprete it as ImageData
++    JSObject *argv5 = JSVAL_TO_OBJECT(argv[5]);
++
++    JS::Value js_width;
++    if (!JS_GetProperty(cx, argv5, "width", &js_width) ||
++        !js_width.isInt32()) {
++        return NS_ERROR_FAILURE;
++    }
++    int32_t int_width = js_width.toInt32();
++
++    JS::Value js_height;
++    if (!JS_GetProperty(cx, argv5, "height", &js_height) ||
++        !js_height.isInt32()) {
++        return NS_ERROR_FAILURE;
++    }
++    int32_t int_height = js_height.toInt32();
++
++    JS::Value js_data;
++    if (!JS_GetProperty(cx, argv5, "data", &js_data) ||
++        !js_data.isObject() ||
++        !js_IsTypedArray(&js_data.toObject())) {
++        return NS_ERROR_FAILURE;
++    }
++    JSObject& obj_data = js_data.toObject();
++
++    return TexImage2D_imageData(target, level, internalFormat, int_width,
++                                int_height, 0, format, type, obj_data);
++}
++
+ GLenum WebGLContext::CheckedTexImage2D(GLenum target,
+                                        GLint level,
+                                        GLenum internalFormat,
+                                        GLsizei width,
+                                        GLsizei height,
+                                        GLint border,
+                                        GLenum format,
+                                        GLenum type,
+@@ -5021,28 +5122,28 @@ WebGLContext::TexImage2D_array(WebGLenum
+ 
+     return TexImage2D_base(target, level, internalformat, width, height, 0, border, format, type,
+                            pixels ? JS_GetTypedArrayData(pixels) : 0,
+                            pixels ? JS_GetTypedArrayByteLength(pixels) : 0,
+                            pixels ? (int)JS_GetTypedArrayType(pixels) : -1,
+                            WebGLTexelFormat::Auto, false);
+ }
+ 
+-NS_IMETHODIMP
++nsresult
+ WebGLContext::TexImage2D_imageData(WebGLenum target, WebGLint level, WebGLenum internalformat,
+-                               WebGLsizei width, WebGLsizei height, WebGLint border,
+-                               WebGLenum format, WebGLenum type,
+-                               JSObject *pixels)
++                                   WebGLsizei width, WebGLsizei height, WebGLint border,
++                                   WebGLenum format, WebGLenum type,
++                                   JSObject& pixels)
+ {
+     if (!IsContextStable())
+         return NS_OK;
+ 
+     return TexImage2D_base(target, level, internalformat, width, height, 4*width, border, format, type,
+-                           pixels ? JS_GetTypedArrayData(pixels) : 0,
+-                           pixels ? JS_GetTypedArrayByteLength(pixels) : 0,
++                           JS_GetTypedArrayData(&pixels),
++                           JS_GetTypedArrayByteLength(&pixels),
+                            -1,
+                            WebGLTexelFormat::RGBA8, false);
+ }
+ 
+ NS_IMETHODIMP
+ WebGLContext::TexImage2D_dom(WebGLenum target, WebGLint level, WebGLenum internalformat,
+                              WebGLenum format, GLenum type, nsIDOMElement *elt)
+ {
+diff --git a/dom/interfaces/canvas/nsIDOMWebGLRenderingContext.idl b/dom/interfaces/canvas/nsIDOMWebGLRenderingContext.idl
+--- a/dom/interfaces/canvas/nsIDOMWebGLRenderingContext.idl
++++ b/dom/interfaces/canvas/nsIDOMWebGLRenderingContext.idl
+@@ -754,17 +754,23 @@ interface nsIDOMWebGLRenderingContext : 
+ 
+   void stencilFunc(in WebGLenum func, in WebGLint ref, in WebGLuint mask);
+   void stencilFuncSeparate(in WebGLenum face, in WebGLenum func, in WebGLint ref, in WebGLuint mask);
+   void stencilMask(in WebGLuint mask);
+   void stencilMaskSeparate(in WebGLenum face, in WebGLuint mask);
+   void stencilOp(in WebGLenum fail, in WebGLenum zfail, in WebGLenum zpass);
+   void stencilOpSeparate(in WebGLenum face, in WebGLenum fail, in WebGLenum zfail, in WebGLenum zpass);
+ 
+-  void texImage2D([optional] in long dummy);
++  [implicit_jscontext,optional_argc]
++  void texImage2D(in unsigned long target, in long level,
++                  in unsigned long internalformat, in long widthOrFormat,
++                  in long heightOrType, in jsval borderOrPixelsOrElement,
++                  [optional] in unsigned long format,
++                  [optional] in unsigned long type,
++                  [optional] in jsval pixels);
+   [noscript] void texImage2D_array(in WebGLenum target, in WebGLint level, in WebGLenum internalformat,
+                                    in WebGLsizei width, in WebGLsizei height,
+                                    in WebGLint border, in WebGLenum format, in WebGLenum type, in WebGLJSObjectPtr pixels);
+   [noscript] void texImage2D_imageData(in WebGLenum target, in WebGLint level, in WebGLenum internalformat,
+                                    in WebGLsizei width, in WebGLsizei height,
+                                    in WebGLint border, in WebGLenum format, in WebGLenum type, in WebGLJSObjectPtr pixels);
+ 
+   // HTMLImageElement, HTMLCanvasElement, HTMLVideoElement

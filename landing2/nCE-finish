@@ -1,0 +1,91 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/netwerk/cache/nsCacheEntry.cpp b/netwerk/cache/nsCacheEntry.cpp
+--- a/netwerk/cache/nsCacheEntry.cpp
++++ b/netwerk/cache/nsCacheEntry.cpp
+@@ -32,17 +32,16 @@ nsCacheEntry::nsCacheEntry(const nsACStr
+       mFlags(0),
+       mPredictedDataSize(-1),
+       mDataSize(0),
+       mCacheDevice(nullptr),
+       mCustomDevice(nullptr),
+       mData(nullptr)
+ {
+     MOZ_COUNT_CTOR(nsCacheEntry);
+-    PR_INIT_CLIST(static_cast<PRCList*>(this));
+     PR_INIT_CLIST(&mRequestQ);
+     PR_INIT_CLIST(&mDescriptorQ);
+ 
+     if (streamBased) MarkStreamBased();
+     SetStoragePolicy(storagePolicy);
+ 
+     MarkPublic();
+ 
+diff --git a/netwerk/cache/nsCacheEntry.h b/netwerk/cache/nsCacheEntry.h
+--- a/netwerk/cache/nsCacheEntry.h
++++ b/netwerk/cache/nsCacheEntry.h
+@@ -24,18 +24,17 @@
+ class nsCacheDevice;
+ class nsCacheMetaData;
+ class nsCacheRequest;
+ class nsCacheEntryDescriptor;
+ 
+ /******************************************************************************
+ * nsCacheEntry
+ *******************************************************************************/
+-class nsCacheEntry : public PRCList
+-                   , public mozilla::LinkedListElement<nsCacheEntry>
++class nsCacheEntry : public mozilla::LinkedListElement<nsCacheEntry>
+ {
+ public:
+ 
+     nsCacheEntry(const nsACString &   key,
+                  bool                 streamBased,
+                  nsCacheStoragePolicy storagePolicy);
+     ~nsCacheEntry();
+ 
+diff --git a/netwerk/cache/nsCacheService.cpp b/netwerk/cache/nsCacheService.cpp
+--- a/netwerk/cache/nsCacheService.cpp
++++ b/netwerk/cache/nsCacheService.cpp
+@@ -2338,18 +2338,17 @@ nsCacheService::DoomEntry_Internal(nsCac
+     if (entry->IsActive()) {
+         // remove from active entries
+         mActiveEntries.RemoveEntry(entry);
+         CACHE_LOG_DEBUG(("Removed entry %p from mActiveEntries\n", entry));
+         entry->MarkInactive();
+      }
+ 
+     // put on doom list to wait for descriptors to close
+-    NS_ASSERTION(PR_CLIST_IS_EMPTY(static_cast<PRCList*>(entry)),
+-                 "doomed entry still on device list");
++    NS_ASSERTION(!entry->isInList(), "doomed entry still on device list");
+     mDoomedEntries.insertBack(entry);
+ 
+     // handle pending requests only if we're supposed to
+     if (doProcessPendingRequests) {
+         // tell pending requests to get on with their lives...
+         rv = ProcessPendingRequests(entry);
+ 
+         // All requests have been removed, but there may still be open descriptors
+diff --git a/netwerk/cache/nsMemoryCacheDevice.cpp b/netwerk/cache/nsMemoryCacheDevice.cpp
+--- a/netwerk/cache/nsMemoryCacheDevice.cpp
++++ b/netwerk/cache/nsMemoryCacheDevice.cpp
+@@ -345,17 +345,17 @@ void
+ nsMemoryCacheDevice::EvictEntry(nsCacheEntry * entry, bool deleteEntry)
+ {
+     CACHE_LOG_DEBUG(("Evicting entry 0x%p from memory cache, deleting: %d\n",
+                      entry, deleteEntry));
+     // remove entry from our hashtable
+     mMemCacheEntries.RemoveEntry(entry);
+     
+     // remove entry from the eviction list
+-    PR_REMOVE_AND_INIT_LINK(static_cast<PRCList*>(entry));
++    entry->remove();
+     
+     // update statistics
+     int32_t memoryRecovered = (int32_t)entry->DataSize();
+     mTotalSize    -= memoryRecovered;
+     if (!entry->IsDoomed())
+         mInactiveSize -= memoryRecovered;
+     --mEntryCount;
+     

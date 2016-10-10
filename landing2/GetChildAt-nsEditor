@@ -1,0 +1,638 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/public/nsINode.h b/content/base/public/nsINode.h
+--- a/content/base/public/nsINode.h
++++ b/content/base/public/nsINode.h
+@@ -1006,17 +1006,18 @@ public:
+    * user does "Select All" while the focus is in this node. Note that if this
+    * node is not in an editor, the result comes from the nsFrameSelection that
+    * is related to aPresShell, so the result might not be the ancestor of this
+    * node. Be aware that if this node and the computed selection limiter are
+    * not in same subtree, this returns the root content of the closeset subtree.
+    */
+   nsIContent* GetSelectionRootContent(nsIPresShell* aPresShell);
+ 
+-  virtual nsINodeList* GetChildNodesList();
++  // Never returns null.
++  nsINodeList* GetChildNodesList();
+   nsIContent* GetFirstChild() const { return mFirstChild; }
+   nsIContent* GetLastChild() const
+   {
+     uint32_t count;
+     nsIContent* const* children = GetChildArray(&count);
+ 
+     return count > 0 ? children[count - 1] : nsnull;
+   }
+@@ -1404,28 +1405,30 @@ public:
+    * Returns the length of this node, as specified at
+    * <http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#concept-node-length>
+    */
+   uint32_t Length() const;
+ 
+ protected:
+ 
+   // Override this function to create a custom slots class.
++  // Must not return null.
+   virtual nsINode::nsSlots* CreateSlots();
+ 
+   bool HasSlots() const
+   {
+     return mSlots != nsnull;
+   }
+ 
+   nsSlots* GetExistingSlots() const
+   {
+     return mSlots;
+   }
+ 
++  // Never returns null.
+   nsSlots* GetSlots()
+   {
+     if (!HasSlots()) {
+       mSlots = CreateSlots();
+     }
+     return GetExistingSlots();
+   }
+ 
+diff --git a/content/base/public/nsISelection.idl b/content/base/public/nsISelection.idl
+--- a/content/base/public/nsISelection.idl
++++ b/content/base/public/nsISelection.idl
+@@ -52,16 +52,17 @@ interface nsINode;
+ 
+ [scriptable, uuid(5ac0cd5d-3c08-4c4c-8e70-230c433f5d5c)]
+ interface nsISelection : nsISupports
+ {
+     /**
+      * Returns the node in which the selection begins.
+      */
+     readonly attribute nsIDOMNode anchorNode;
++    [noscript,notxpcom,nostdcall] nsINode getNativeAnchorNode();
+ 
+     /**
+      * The offset within the (text) node where the selection begins.
+      */
+     readonly attribute long anchorOffset;
+ 
+     /**
+      * Returns the node in which the selection ends.
+diff --git a/content/base/src/nsGenericElement.cpp b/content/base/src/nsGenericElement.cpp
+--- a/content/base/src/nsGenericElement.cpp
++++ b/content/base/src/nsGenericElement.cpp
+@@ -391,25 +391,19 @@ nsINode::GetSelectionRootContent(nsIPres
+   return nsContentUtils::IsInSameAnonymousTree(this, content) ?
+            content : GetRootForContentSubtree(static_cast<nsIContent*>(this));
+ }
+ 
+ nsINodeList*
+ nsINode::GetChildNodesList()
+ {
+   nsSlots *slots = GetSlots();
+-  if (!slots) {
+-    return nsnull;
+-  }
+-
+   if (!slots->mChildNodes) {
+     slots->mChildNodes = new nsChildContentList(this);
+-    if (slots->mChildNodes) {
+-      NS_ADDREF(slots->mChildNodes);
+-    }
++    NS_ADDREF(slots->mChildNodes);
+   }
+ 
+   return slots->mChildNodes;
+ }
+ 
+ #ifdef DEBUG
+ void
+ nsINode::CheckNotNativeAnonymous() const
+@@ -444,22 +438,17 @@ nsINode::GetParentElement(nsIDOMElement*
+   nsINode* parent = GetElementParent();
+   return parent ? CallQueryInterface(parent, aParentElement) : NS_OK;
+ }
+ 
+ nsresult
+ nsINode::GetChildNodes(nsIDOMNodeList** aChildNodes)
+ {
+   *aChildNodes = GetChildNodesList();
+-  if (!*aChildNodes) {
+-    return NS_ERROR_OUT_OF_MEMORY;
+-  }
+-
+   NS_ADDREF(*aChildNodes);
+-
+   return NS_OK;
+ }
+ 
+ nsresult
+ nsINode::GetFirstChild(nsIDOMNode** aNode)
+ {
+   nsIContent* child = GetFirstChild();
+   if (child) {
+diff --git a/editor/libeditor/base/nsEditor.cpp b/editor/libeditor/base/nsEditor.cpp
+--- a/editor/libeditor/base/nsEditor.cpp
++++ b/editor/libeditor/base/nsEditor.cpp
+@@ -3702,50 +3702,29 @@ nsEditor::IsEditable(nsIContent *aNode)
+ bool
+ nsEditor::IsMozEditorBogusNode(nsIContent *element)
+ {
+   return element &&
+          element->AttrValueIs(kNameSpaceID_None, kMOZEditorBogusNodeAttrAtom,
+                               kMOZEditorBogusNodeValue, eCaseMatters);
+ }
+ 
+-nsresult
+-nsEditor::CountEditableChildren(nsIDOMNode *aNode, uint32_t &outCount) 
+-{
+-  outCount = 0;
+-  if (!aNode) { return NS_ERROR_NULL_POINTER; }
+-  nsresult res=NS_OK;
+-  bool hasChildNodes;
+-  aNode->HasChildNodes(&hasChildNodes);
+-  if (hasChildNodes)
+-  {
+-    nsCOMPtr<nsIDOMNodeList>nodeList;
+-    res = aNode->GetChildNodes(getter_AddRefs(nodeList));
+-    if (NS_SUCCEEDED(res) && nodeList) 
+-    {
+-      uint32_t i;
+-      uint32_t len;
+-      nodeList->GetLength(&len);
+-      for (i=0 ; i<len; i++)
+-      {
+-        nsCOMPtr<nsIDOMNode> child;
+-        res = nodeList->Item((int32_t)i, getter_AddRefs(child));
+-        if ((NS_SUCCEEDED(res)) && (child))
+-        {
+-          if (IsEditable(child))
+-          {
+-            outCount++;
+-          }
+-        }
+-      }
++uint32_t
++nsEditor::CountEditableChildren(nsINode* aNode)
++{
++  MOZ_ASSERT(aNode);
++  uint32_t count = 0;
++  for (nsIContent* child = aNode->GetFirstChild();
++       child;
++       child = child->GetNextSibling()) {
++    if (IsEditable(child)) {
++      count++;
+     }
+-    else if (!nodeList)
+-      res = NS_ERROR_NULL_POINTER;
+   }
+-  return res;
++  return count;
+ }
+ 
+ //END nsEditor static utility methods
+ 
+ 
+ NS_IMETHODIMP nsEditor::IncrementModificationCount(int32_t inNumMods)
+ {
+   uint32_t oldModCount = mModCount;
+@@ -3898,28 +3877,25 @@ nsEditor::GetIndexOf(nsIDOMNode *parent,
+ 
+   return parentNode->IndexOf(cChild);
+ }
+   
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // GetChildAt: returns the node at this position index in the parent
+ //
+-nsCOMPtr<nsIDOMNode> 
++already_AddRefed<nsIDOMNode>
+ nsEditor::GetChildAt(nsIDOMNode *aParent, int32_t aOffset)
+ {
+-  nsCOMPtr<nsIDOMNode> resultNode;
+-  
+   nsCOMPtr<nsIContent> parent = do_QueryInterface(aParent);
+ 
+-  NS_ENSURE_TRUE(parent, resultNode);
+-
+-  resultNode = do_QueryInterface(parent->GetChildAt(aOffset));
+-
+-  return resultNode;
++  NS_ENSURE_TRUE(parent, NULL);
++
++  nsCOMPtr<nsIDOMNode> resultNode = do_QueryInterface(parent->GetChildAt(aOffset));
++  return resultNode.forget();
+ }
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // GetNodeAtRangeOffsetPoint: returns the node at this position in a range,
+ // assuming that aParentOrNode is the node itself if it's a text node, or
+ // the node's parent otherwise.
+ //
+ nsCOMPtr<nsIDOMNode>
+diff --git a/editor/libeditor/base/nsEditor.h b/editor/libeditor/base/nsEditor.h
+--- a/editor/libeditor/base/nsEditor.h
++++ b/editor/libeditor/base/nsEditor.h
+@@ -556,17 +556,17 @@ public:
+   bool IsEditable(nsIContent *aNode);
+ 
+   virtual bool IsTextInDirtyFrameVisible(nsIContent *aNode);
+ 
+   /** returns true if aNode is a MozEditorBogus node */
+   bool IsMozEditorBogusNode(nsIContent *aNode);
+ 
+   /** counts number of editable child nodes */
+-  nsresult CountEditableChildren(nsIDOMNode *aNode, uint32_t &outCount);
++  uint32_t CountEditableChildren(nsINode* aNode);
+   
+   /** Find the deep first and last children. */
+   nsINode* GetFirstEditableNode(nsINode* aRoot);
+ 
+   nsresult GetIMEBufferLength(int32_t* length);
+   bool     IsIMEComposing();    /* test if IME is in composition state */
+   void     SetIsIMEComposing(); /* call this before |IsIMEComposing()| */
+ 
+@@ -574,17 +574,17 @@ public:
+   static nsresult GetTagString(nsIDOMNode *aNode, nsAString& outString);
+   static nsIAtom *GetTag(nsIDOMNode *aNode);
+   virtual bool NodesSameType(nsIDOMNode *aNode1, nsIDOMNode *aNode2);
+   static bool IsTextOrElementNode(nsIDOMNode *aNode);
+   static bool IsTextNode(nsIDOMNode *aNode);
+   static bool IsTextNode(nsINode *aNode);
+   
+   static int32_t GetIndexOf(nsIDOMNode *aParent, nsIDOMNode *aChild);
+-  static nsCOMPtr<nsIDOMNode> GetChildAt(nsIDOMNode *aParent, int32_t aOffset);
++  static already_AddRefed<nsIDOMNode> GetChildAt(nsIDOMNode *aParent, int32_t aOffset);
+   static nsCOMPtr<nsIDOMNode> GetNodeAtRangeOffsetPoint(nsIDOMNode* aParentOrNode, int32_t aOffset);
+ 
+   static nsresult GetStartNodeAndOffset(nsISelection *aSelection, nsIDOMNode **outStartNode, int32_t *outStartOffset);
+   static nsresult GetEndNodeAndOffset(nsISelection *aSelection, nsIDOMNode **outEndNode, int32_t *outEndOffset);
+ #if DEBUG_JOE
+   static void DumpNode(nsIDOMNode *aNode, int32_t indent=0);
+ #endif
+ 
+diff --git a/editor/libeditor/html/nsHTMLEditRules.cpp b/editor/libeditor/html/nsHTMLEditRules.cpp
+--- a/editor/libeditor/html/nsHTMLEditRules.cpp
++++ b/editor/libeditor/html/nsHTMLEditRules.cpp
+@@ -6118,60 +6118,63 @@ nsHTMLEditRules::GetListActionNodes(nsCO
+ ///////////////////////////////////////////////////////////////////////////
+ // LookInsideDivBQandList: 
+ //                       
+ nsresult 
+ nsHTMLEditRules::LookInsideDivBQandList(nsCOMArray<nsIDOMNode>& aNodeArray)
+ {
+   // if there is only one node in the array, and it is a list, div, or blockquote,
+   // then look inside of it until we find inner list or content.
+-  nsresult res = NS_OK;
+   int32_t listCount = aNodeArray.Count();
+-  if (listCount == 1)
+-  {
+-    nsCOMPtr<nsIDOMNode> curNode = aNodeArray[0];
+-    
+-    while (nsHTMLEditUtils::IsDiv(curNode)
+-           || nsHTMLEditUtils::IsList(curNode)
+-           || nsHTMLEditUtils::IsBlockquote(curNode))
+-    {
+-      // dive as long as there is only one child, and it is a list, div, blockquote
+-      uint32_t numChildren;
+-      res = mHTMLEditor->CountEditableChildren(curNode, numChildren);
+-      NS_ENSURE_SUCCESS(res, res);
+-      
+-      if (numChildren == 1)
+-      {
+-        // keep diving
+-        nsCOMPtr <nsIDOMNode> tmpNode = nsEditor::GetChildAt(curNode, 0);
+-        if (nsHTMLEditUtils::IsDiv(tmpNode)
+-            || nsHTMLEditUtils::IsList(tmpNode)
+-            || nsHTMLEditUtils::IsBlockquote(tmpNode))
+-        {
+-          // check editablility XXX floppy moose
+-          curNode = tmpNode;
+-        }
+-        else break;
+-      }
+-      else break;
+-    }
+-    // we've found innermost list/blockquote/div: 
+-    // replace the one node in the array with these nodes
+-    aNodeArray.RemoveObjectAt(0);
+-    if ((nsHTMLEditUtils::IsDiv(curNode) || nsHTMLEditUtils::IsBlockquote(curNode)))
+-    {
+-      int32_t j=0;
+-      res = GetInnerContent(curNode, aNodeArray, &j, false, false);
+-    }
+-    else
+-    {
+-      aNodeArray.AppendObject(curNode);
+-    }
+-  }
+-  return res;
++  if (listCount != 1) {
++    return NS_OK;
++  }
++
++  nsCOMPtr<nsINode> curNode = do_QueryInterface(aNodeArray[0]);
++  
++  while (curNode->IsElement() &&
++         (curNode->AsElement()->IsHTML(nsGkAtoms::div) ||
++          nsHTMLEditUtils::IsList(curNode->AsElement()) ||
++          curNode->AsElement()->IsHTML(nsGkAtoms::blockquote))
++  {
++    // dive as long as there is only one child, and it is a list, div, blockquote
++    uint32_t numChildren = mHTMLEditor->CountEditableChildren(curNode);
++    if (numChildren != 1) {
++      break;
++    }
++
++    // keep diving
++    // XXX One would expect to dive into the one editable node.
++    nsIContent* tmp = curNode->GetFirstChild();
++    if (!tmp->IsElement()) {
++      break;
++    }
++
++    dom::Element* element = tmp->AsElement();
++    if (!element->IsHTML(nsGkAtoms::div) &&
++        !nsHTMLEditUtils::IsList(element) &&
++        !element->IsHTML(nsGkAtoms::blockquote)) {
++      break;
++    }
++
++    // check editablility XXX floppy moose
++    curNode = tmp;
++  }
++
++  // we've found innermost list/blockquote/div: 
++  // replace the one node in the array with these nodes
++  aNodeArray.RemoveObjectAt(0);
++  if (curNode->IsHTML(nsGkAtoms::div) ||
++      curNode->IsHTML(nsGkAtoms::blockquote)) {
++    int32_t j = 0;
++    return GetInnerContent(curNode, aNodeArray, &j, false, false);
++  }
++
++  aNodeArray.AppendObject(curNode);
++  return NS_OK;
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // GetDefinitionListItemTypes: 
+ //                       
+ nsresult 
+ nsHTMLEditRules::GetDefinitionListItemTypes(nsIDOMNode *aNode, bool &aDT, bool &aDD)
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -2559,30 +2559,25 @@ nsHTMLEditor::GetElementOrParentByTagNam
+   else
+   {
+     // If no node supplied, get it from anchor node of current selection
+     nsCOMPtr<nsISelection>selection;
+     res = GetSelection(getter_AddRefs(selection));
+     NS_ENSURE_SUCCESS(res, res);
+     NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
+ 
+-    nsCOMPtr<nsIDOMNode> anchorNode;
+-    res = selection->GetAnchorNode(getter_AddRefs(anchorNode));
+-    if(NS_FAILED(res)) return res;
++    nsINode* anchorNode = selection->GetNativeAnchorNode()
+     NS_ENSURE_TRUE(anchorNode, NS_ERROR_FAILURE);
+ 
+     // Try to get the actual selected node
+-    bool hasChildren = false;
+-    anchorNode->HasChildNodes(&hasChildren);
+-    if (hasChildren)
+-    {
++    if (anchorNode->HasChildren()) {
+       int32_t offset;
+       res = selection->GetAnchorOffset(&offset);
+       if(NS_FAILED(res)) return res;
+-      currentNode = nsEditor::GetChildAt(anchorNode, offset);
++      currentNode = do_QueryInterface(anchorNode->GetChildAt(offset));
+     }
+     // anchor node is probably a text node - just use that
+     if (!currentNode)
+       currentNode = anchorNode;
+   }
+    
+   nsAutoString TagName(aTagName);
+   ToLowerCase(TagName);
+diff --git a/editor/libeditor/html/nsTableEditor.cpp b/editor/libeditor/html/nsTableEditor.cpp
+--- a/editor/libeditor/html/nsTableEditor.cpp
++++ b/editor/libeditor/html/nsTableEditor.cpp
+@@ -2941,17 +2941,22 @@ nsHTMLEditor::GetCellFromRange(nsIDOMRan
+   nsresult res = aRange->GetStartContainer(getter_AddRefs(startParent));
+   NS_ENSURE_SUCCESS(res, res);
+   NS_ENSURE_TRUE(startParent, NS_ERROR_FAILURE);
+ 
+   int32_t startOffset;
+   res = aRange->GetStartOffset(&startOffset);
+   NS_ENSURE_SUCCESS(res, res);
+ 
+-  nsCOMPtr<nsIDOMNode> childNode = GetChildAt(startParent, startOffset);
++  nsCOMPtr<nsIContent> parent = do_QueryInterface(startParent);
++  if (!parent) {
++    return NS_ERROR_FAILURE;
++  }
++
++  nsIContent* childNode = parent->GetChildAt(startOffset);
+   // This means selection is probably at a text node (or end of doc?)
+   if (!childNode) {
+     return NS_ERROR_FAILURE;
+   }
+ 
+   nsCOMPtr<nsIDOMNode> endParent;
+   res = aRange->GetEndContainer(getter_AddRefs(endParent));
+   NS_ENSURE_SUCCESS(res, res);
+@@ -2959,25 +2964,24 @@ nsHTMLEditor::GetCellFromRange(nsIDOMRan
+ 
+   int32_t endOffset;
+   res = aRange->GetEndOffset(&endOffset);
+   NS_ENSURE_SUCCESS(res, res);
+   
+   // If a cell is deleted, the range is collapse
+   //   (startOffset == endOffset)
+   //   so tell caller the cell wasn't found
+-  if (startParent == endParent && 
+-      endOffset == startOffset+1 &&
+-      nsHTMLEditUtils::IsTableCell(childNode))
+-  {
++  if (startParent == endParent &&
++      endOffset == startOffset + 1 &&
++      childNode->IsElement() &&
++      nsHTMLEditUtils::IsTableCell(childNode->AsElement())) {
+     // Should we also test if frame is selected? (Use GetCellDataAt())
+     // (Let's not for now -- more efficient)
+     nsCOMPtr<nsIDOMElement> cellElement = do_QueryInterface(childNode);
+-    *aCell = cellElement.get();
+-    NS_ADDREF(*aCell);
++    cellElement.forget(aCell);
+     return NS_OK;
+   }
+   return NS_EDITOR_ELEMENT_NOT_FOUND;
+ }
+ 
+ NS_IMETHODIMP 
+ nsHTMLEditor::GetFirstSelectedCell(nsIDOMRange **aRange, nsIDOMElement **aCell)
+ {
+@@ -3220,91 +3224,62 @@ nsHTMLEditor::GetSelectedOrParentTableEl
+ 
+   // Try to get the first selected cell
+   nsCOMPtr<nsIDOMElement> tableOrCellElement;
+   res = GetFirstSelectedCell(nsnull, getter_AddRefs(tableOrCellElement));
+   NS_ENSURE_SUCCESS(res, res);
+ 
+   NS_NAMED_LITERAL_STRING(tdName, "td");
+ 
+-  if (tableOrCellElement)
+-  {
+-      // Each cell is in its own selection range,
+-      //  so count signals multiple-cell selection
+-      res = selection->GetRangeCount(aSelectedCount);
+-      NS_ENSURE_SUCCESS(res, res);
++  if (tableOrCellElement) {
++    // Each cell is in its own selection range,
++    //  so count signals multiple-cell selection
++    res = selection->GetRangeCount(aSelectedCount);
++    NS_ENSURE_SUCCESS(res, res);
++    aTagName = tdName;
++    tableOrCellElement.forget(aTableElement);
++    return NS_OK;
++  }
++
++  nsINode* anchorNode = selection->GetNativeAnchorNode();
++  NS_ENSURE_TRUE(anchorNode, NS_ERROR_FAILURE);
++
++  // Get child of anchor node, if exists
++  if (anchorNode->HasChildren()) {
++    int32_t anchorOffset;
++    res = selection->GetAnchorOffset(&anchorOffset);
++    NS_ENSURE_SUCCESS(res, res);
++    if (nsIContent* selectedNode = anchorNode->GetChildAt(anchorOffset)) {
++      if (selectedNode->IsHTML(nsGkAtoms::td)) {
++        tableOrCellElement = do_QueryInterface(selectedNode);
++        aTagName = tdName;
++        // Each cell is in its own selection range,
++        //  so count signals multiple-cell selection
++        res = selection->GetRangeCount(aSelectedCount);
++        NS_ENSURE_SUCCESS(res, res);
++      } else if (selectedNode->IsHTML(nsGkAtoms::table) {
++        tableOrCellElement = do_QueryInterface(selectedNode);
++        aTagName.AssignLiteral("table");
++        *aSelectedCount = 1;
++      } else if (selectedNode->IsHTML(nsGkAtoms::tr)) {
++        tableOrCellElement = do_QueryInterface(selectedNode);
++        aTagName.AssignLiteral("tr");
++        *aSelectedCount = 1;
++      }
++    }
++  }
++  if (!tableOrCellElement) {
++    // Didn't find a table element -- find a cell parent
++    res = GetElementOrParentByTagName(tdName, anchorNode, getter_AddRefs(tableOrCellElement));
++    NS_ENSURE_SUCCESS(res, res);
++    if (tableOrCellElement)
+       aTagName = tdName;
+   }
+-  else
+-  {
+-    nsCOMPtr<nsIDOMNode> anchorNode;
+-    res = selection->GetAnchorNode(getter_AddRefs(anchorNode));
+-    if(NS_FAILED(res)) return res;
+-    NS_ENSURE_TRUE(anchorNode, NS_ERROR_FAILURE);
+-
+-    nsCOMPtr<nsIDOMNode> selectedNode;
+-
+-    // Get child of anchor node, if exists
+-    bool hasChildren;
+-    anchorNode->HasChildNodes(&hasChildren);
+-
+-    if (hasChildren)
+-    {
+-      int32_t anchorOffset;
+-      res = selection->GetAnchorOffset(&anchorOffset);
+-      NS_ENSURE_SUCCESS(res, res);
+-      selectedNode = GetChildAt(anchorNode, anchorOffset);
+-      if (!selectedNode)
+-      {
+-        selectedNode = anchorNode;
+-        // If anchor doesn't have a child, we can't be selecting a table element,
+-        //  so don't do the following:
+-      }
+-      else
+-      {
+-        nsCOMPtr<nsIAtom> atom = nsEditor::GetTag(selectedNode);
+-
+-        if (atom == nsEditProperty::td)
+-        {
+-          tableOrCellElement = do_QueryInterface(selectedNode);
+-          aTagName = tdName;
+-          // Each cell is in its own selection range,
+-          //  so count signals multiple-cell selection
+-          res = selection->GetRangeCount(aSelectedCount);
+-          NS_ENSURE_SUCCESS(res, res);
+-        }
+-        else if (atom == nsEditProperty::table)
+-        {
+-          tableOrCellElement = do_QueryInterface(selectedNode);
+-          aTagName.AssignLiteral("table");
+-          *aSelectedCount = 1;
+-        }
+-        else if (atom == nsEditProperty::tr)
+-        {
+-          tableOrCellElement = do_QueryInterface(selectedNode);
+-          aTagName.AssignLiteral("tr");
+-          *aSelectedCount = 1;
+-        }
+-      }
+-    }
+-    if (!tableOrCellElement)
+-    {
+-      // Didn't find a table element -- find a cell parent
+-      res = GetElementOrParentByTagName(tdName, anchorNode, getter_AddRefs(tableOrCellElement));
+-      if(NS_FAILED(res)) return res;
+-      if (tableOrCellElement)
+-        aTagName = tdName;
+-    }
+-  }
+-  if (tableOrCellElement)
+-  {
+-    *aTableElement = tableOrCellElement.get();
+-    NS_ADDREF(*aTableElement);
+-  }
+-  return res;
++  tableOrCellElement.forget(aTableElement);
++  return NS_OK;
+ }
+ 
+ NS_IMETHODIMP 
+ nsHTMLEditor::GetSelectedCellsType(nsIDOMElement *aElement, uint32_t *aSelectionType)
+ {
+   NS_ENSURE_ARG_POINTER(aSelectionType);
+   *aSelectionType = 0;
+ 
+diff --git a/layout/generic/nsSelection.cpp b/layout/generic/nsSelection.cpp
+--- a/layout/generic/nsSelection.cpp
++++ b/layout/generic/nsSelection.cpp
+@@ -3458,16 +3458,23 @@ NS_IMETHODIMP
+ nsTypedSelection::SetPresShell(nsIPresShell *aPresShell)
+ {
+   mPresShellWeak = do_GetWeakReference(aPresShell);
+   return NS_OK;
+ }
+ 
+ 
+ 
++/* virtual */
++nsINode*
++nsTypedSelection::GetNativeAnchorNode()
++{
++  return GetAnchorNode();
++}
++
+ NS_IMETHODIMP
+ nsTypedSelection::GetAnchorNode(nsIDOMNode** aAnchorNode)
+ {
+   nsINode* anchorNode = GetAnchorNode();
+   if (anchorNode) {
+     return CallQueryInterface(anchorNode, aAnchorNode);
+   }
+ 

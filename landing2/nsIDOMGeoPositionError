@@ -1,0 +1,267 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -4133,17 +4133,16 @@ const InterfaceShimEntry kInterfaceShimM
+   { "nsIDOMEvent", "Event" },
+   { "nsIDOMNSEvent", "Event" },
+   { "nsIDOMKeyEvent", "KeyEvent" },
+   { "nsIDOMMouseEvent", "MouseEvent" },
+   { "nsIDOMMouseScrollEvent", "MouseScrollEvent" },
+   { "nsIDOMMutationEvent", "MutationEvent" },
+   { "nsIDOMSimpleGestureEvent", "SimpleGestureEvent" },
+   { "nsIDOMUIEvent", "UIEvent" },
+-  { "nsIDOMGeoPositionError", "GeoPositionError" },
+   { "nsIDOMHTMLMediaElement", "HTMLMediaElement" },
+   { "nsIDOMMediaError", "MediaError" },
+   { "nsIDOMLoadStatus", "LoadStatus" },
+   { "nsIDOMOfflineResourceList", "OfflineResourceList" },
+   { "nsIDOMRange", "Range" },
+   { "nsIDOMSVGFETurbulenceElement", "SVGFETurbulenceElement" },
+   { "nsIDOMSVGFEMorphologyElement", "SVGFEMorphologyElement" },
+   { "nsIDOMSVGFEConvolveMatrixElement", "SVGFEConvolveMatrixElement" },
+diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
+--- a/dom/bindings/Bindings.conf
++++ b/dom/bindings/Bindings.conf
+@@ -801,17 +801,18 @@ DOMInterfaces = {
+     'resultNotAddRefed': [ 'item', 'namedItem' ]
+ },
+ 
+ 'Position': {
+     'headerFile': 'nsGeoPosition.h'
+ },
+ 
+ 'PositionError': {
+-    'headerFile': 'nsGeolocation.h'
++    'headerFile': 'nsGeolocation.h',
++    'nativeOwnership': 'refcounted',
+ },
+ 
+ 'Promise': {
+     'implicitJSContext': [ 'constructor' ]
+ },
+ 
+ 'PropertyNodeList': {
+     'headerFile': 'HTMLPropertiesCollection.h',
+diff --git a/dom/interfaces/geolocation/moz.build b/dom/interfaces/geolocation/moz.build
+--- a/dom/interfaces/geolocation/moz.build
++++ b/dom/interfaces/geolocation/moz.build
+@@ -4,17 +4,16 @@
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ XPIDL_SOURCES += [
+     'nsIDOMGeoGeolocation.idl',
+     'nsIDOMGeoPosition.idl',
+     'nsIDOMGeoPositionCallback.idl',
+     'nsIDOMGeoPositionCoords.idl',
+-    'nsIDOMGeoPositionError.idl',
+     'nsIDOMGeoPositionErrorCallback.idl',
+     'nsIDOMNavigatorGeolocation.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_geolocation'
+ 
+ XPIDL_FLAGS += [
+     '-I$(topsrcdir)/dom/interfaces/base',
+diff --git a/dom/interfaces/geolocation/nsIDOMGeoPositionError.idl b/dom/interfaces/geolocation/nsIDOMGeoPositionError.idl
+deleted file mode 100644
+--- a/dom/interfaces/geolocation/nsIDOMGeoPositionError.idl
++++ /dev/null
+@@ -1,17 +0,0 @@
+-/* This Source Code Form is subject to the terms of the Mozilla Public
+- * License, v. 2.0. If a copy of the MPL was not distributed with this
+- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+-
+-
+-#include "domstubs.idl"
+-
+-[scriptable, uuid(85255CC3-07BA-49FD-BC9B-18D2963DAF7F)]
+-interface nsIDOMGeoPositionError : nsISupports
+-{
+-  const unsigned short PERMISSION_DENIED  = 1;
+-  const unsigned short POSITION_UNAVAILABLE = 2;
+-  const unsigned short TIMEOUT = 3;
+-
+-  readonly attribute short code;
+-  readonly attribute AString message;
+-};
+diff --git a/dom/src/geolocation/nsGeolocation.cpp b/dom/src/geolocation/nsGeolocation.cpp
+--- a/dom/src/geolocation/nsGeolocation.cpp
++++ b/dom/src/geolocation/nsGeolocation.cpp
+@@ -222,68 +222,36 @@ public:
+ private:
+   nsRefPtr<nsGeolocationRequest> mRequest;
+ };
+ 
+ ////////////////////////////////////////////////////
+ // PositionError
+ ////////////////////////////////////////////////////
+ 
+-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(PositionError)
+-  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
+-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMGeoPositionError)
+-  NS_INTERFACE_MAP_ENTRY(nsIDOMGeoPositionError)
+-NS_INTERFACE_MAP_END
++NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(PositionError, mParent)
++NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(PositionError, AddRef)
++NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(PositionError, Release)
+ 
+-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(PositionError, mParent)
+-NS_IMPL_CYCLE_COLLECTING_ADDREF(PositionError)
+-NS_IMPL_CYCLE_COLLECTING_RELEASE(PositionError)
+-
+-PositionError::PositionError(Geolocation* aParent, int16_t aCode)
+-  : mCode(aCode)
+-  , mParent(aParent)
++void
++PositionError::GetMessage(nsString& aMessage) const
+ {
+-  SetIsDOMBinding();
+-}
+-
+-PositionError::~PositionError(){}
+-
+-
+-NS_IMETHODIMP
+-PositionError::GetCode(int16_t *aCode)
+-{
+-  NS_ENSURE_ARG_POINTER(aCode);
+-  *aCode = Code();
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+-PositionError::GetMessage(nsAString& aMessage)
+-{
+-  switch (mCode)
+-  {
++  switch (mCode) {
+     case nsIDOMGeoPositionError::PERMISSION_DENIED:
+       aMessage = NS_LITERAL_STRING("User denied geolocation prompt");
+       break;
+     case nsIDOMGeoPositionError::POSITION_UNAVAILABLE:
+       aMessage = NS_LITERAL_STRING("Unknown error acquiring position");
+       break;
+     case nsIDOMGeoPositionError::TIMEOUT:
+       aMessage = NS_LITERAL_STRING("Position acquisition timed out");
+       break;
+     default:
+       break;
+   }
+-  return NS_OK;
+-}
+-
+-Geolocation*
+-PositionError::GetParentObject() const
+-{
+-  return mParent;
+ }
+ 
+ JSObject*
+ PositionError::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+ {
+   return PositionErrorBinding::Wrap(aCx, aScope, this);
+ }
+ 
+diff --git a/dom/src/geolocation/nsGeolocation.h b/dom/src/geolocation/nsGeolocation.h
+--- a/dom/src/geolocation/nsGeolocation.h
++++ b/dom/src/geolocation/nsGeolocation.h
+@@ -20,17 +20,16 @@
+ #include "nsWrapperCache.h"
+ 
+ #include "nsWeakPtr.h"
+ #include "nsCycleCollectionParticipant.h"
+ 
+ #include "nsGeoPosition.h"
+ #include "nsIDOMGeoGeolocation.h"
+ #include "nsIDOMGeoPosition.h"
+-#include "nsIDOMGeoPositionError.h"
+ #include "nsIDOMGeoPositionCallback.h"
+ #include "nsIDOMGeoPositionErrorCallback.h"
+ #include "nsIDOMNavigatorGeolocation.h"
+ #include "mozilla/dom/GeolocationBinding.h"
+ #include "mozilla/dom/PositionErrorBinding.h"
+ #include "mozilla/dom/CallbackObject.h"
+ 
+ #include "nsPIDOMWindow.h"
+@@ -271,39 +270,47 @@ private:
+       GetCurrentPosition,
+       WatchPosition
+     } type;
+   };
+ 
+   nsTArray<PendingRequest> mPendingRequests;
+ };
+ 
+-class PositionError MOZ_FINAL : public nsIDOMGeoPositionError,
+-                                public nsWrapperCache
++class PositionError MOZ_FINAL : public nsWrapperCache
+ {
+ public:
+-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(PositionError)
++  NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(PositionError)
++  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(PositionError)
+ 
+-  NS_DECL_NSIDOMGEOPOSITIONERROR
++  PositionError(Geolocation* aParent, int16_t aCode)
++    : mCode(aCode)
++    , mParent(aParent)
++  {
++    SetIsDOMBinding();
++  }
+ 
+-  PositionError(Geolocation* aParent, int16_t aCode);
+-
+-  Geolocation* GetParentObject() const;
++  Geolocation* GetParentObject() const
++  {
++    return mParent;
++  }
+ 
+   virtual JSObject* WrapObject(JSContext* aCx,
+                                JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+ 
+-  int16_t Code() const {
++  int16_t Code() const
++  {
+     return mCode;
+   }
+ 
++  void GetMessage(nsString& aRetVal) const;
++
+   void NotifyCallback(const GeoPositionErrorCallback& callback);
+ private:
+-  ~PositionError();
++  ~PositionError() {}
+   int16_t mCode;
+   nsRefPtr<Geolocation> mParent;
+ };
+ 
+ }
+ 
+ inline nsISupports*
+ ToSupports(dom::Geolocation* aGeolocation)
+diff --git a/dom/tests/mochitest/general/test_interfaces.html b/dom/tests/mochitest/general/test_interfaces.html
+--- a/dom/tests/mochitest/general/test_interfaces.html
++++ b/dom/tests/mochitest/general/test_interfaces.html
+@@ -133,17 +133,16 @@ var interfaceNamesInGlobalScope =
+     "Gamepad",
+     "GamepadAxisMoveEvent",
+     "GamepadButtonEvent",
+     "GamepadEvent",
+     "GeoGeolocation",
+     "GeoPosition",
+     "GeoPositionCallback",
+     "GeoPositionCoords",
+-    "GeoPositionError",
+     "GeoPositionErrorCallback",
+     "GetUserMediaErrorCallback",
+     "GetUserMediaSuccessCallback",
+     "GlobalObjectConstructor",
+     "GlobalPropertyInitializer",
+     "HashChangeEvent",
+     "History",
+     "HTMLAnchorElement",

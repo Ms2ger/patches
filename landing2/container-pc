@@ -1,0 +1,1394 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsDocument.cpp b/content/base/src/nsDocument.cpp
+--- a/content/base/src/nsDocument.cpp
++++ b/content/base/src/nsDocument.cpp
+@@ -5322,17 +5322,17 @@ nsDocument::DoNotifyPossibleTitleChange(
+   mPendingTitleChangeEvent.Forget();
+   mHaveFiredTitleChange = true;
+ 
+   nsAutoString title;
+   GetTitle(title);
+ 
+   nsCOMPtr<nsIPresShell> shell = GetShell();
+   if (shell) {
+-    nsCOMPtr<nsISupports> container = shell->GetPresContext()->GetContainer();
++    nsCOMPtr<nsIDocShell> container = shell->GetPresContext()->GetContainer();
+     if (container) {
+       nsCOMPtr<nsIBaseWindow> docShellWin = do_QueryInterface(container);
+       if (docShellWin) {
+         docShellWin->SetTitle(title.get());
+       }
+     }
+   }
+ 
+@@ -9279,17 +9279,17 @@ nsDocument::ShouldLockPointer(Element* a
+     return false;
+   }
+ 
+   // Check if the element is in a document with a docshell.
+   nsCOMPtr<nsIDocument> ownerDoc = aElement->OwnerDoc();
+   if (!ownerDoc) {
+     return false;
+   }
+-  if (!nsCOMPtr<nsISupports>(ownerDoc->GetContainer())) {
++  if (!nsCOMPtr<nsIDocShell>(ownerDoc->GetContainer())) {
+     return false;
+   }
+   nsCOMPtr<nsPIDOMWindow> ownerWindow = ownerDoc->GetWindow();
+   if (!ownerWindow) {
+     return false;
+   }
+   nsCOMPtr<nsPIDOMWindow> ownerInnerWindow = ownerDoc->GetInnerWindow();
+   if (!ownerInnerWindow) {
+diff --git a/content/base/src/nsGenericElement.cpp b/content/base/src/nsGenericElement.cpp
+--- a/content/base/src/nsGenericElement.cpp
++++ b/content/base/src/nsGenericElement.cpp
+@@ -300,17 +300,17 @@ nsINode::GetTextEditorRootContent(nsIEdi
+       editor.swap(*aEditor);
+     return rootContent;
+   }
+   return nsnull;
+ }
+ 
+ static nsIEditor* GetHTMLEditor(nsPresContext* aPresContext)
+ {
+-  nsCOMPtr<nsISupports> container = aPresContext->GetContainer();
++  nsCOMPtr<nsIDocShell> container = aPresContext->GetContainer();
+   nsCOMPtr<nsIEditorDocShell> editorDocShell(do_QueryInterface(container));
+   bool isEditable;
+   if (!editorDocShell ||
+       NS_FAILED(editorDocShell->GetEditable(&isEditable)) || !isEditable)
+     return nsnull;
+ 
+   nsCOMPtr<nsIEditor> editor;
+   editorDocShell->GetEditor(getter_AddRefs(editor));
+diff --git a/content/events/src/nsDOMUIEvent.cpp b/content/events/src/nsDOMUIEvent.cpp
+--- a/content/events/src/nsDOMUIEvent.cpp
++++ b/content/events/src/nsDOMUIEvent.cpp
+@@ -45,16 +45,17 @@
+ #include "nsIInterfaceRequestorUtils.h"
+ #include "nsIDOMWindow.h"
+ #include "nsIDOMNode.h"
+ #include "nsIContent.h"
+ #include "nsContentUtils.h"
+ #include "nsEventStateManager.h"
+ #include "nsIFrame.h"
+ #include "nsIScrollableFrame.h"
++#include "nsIDocShell.h"
+ #include "DictionaryHelpers.h"
+ 
+ nsDOMUIEvent::nsDOMUIEvent(nsPresContext* aPresContext, nsGUIEvent* aEvent)
+   : nsDOMEvent(aPresContext, aEvent ?
+                static_cast<nsEvent *>(aEvent) :
+                static_cast<nsEvent *>(new nsUIEvent(false, 0, 0)))
+   , mClientPoint(0, 0), mLayerPoint(0, 0), mPagePoint(0, 0)
+   , mIsPointerLocked(nsEventStateManager::sIsPointerLocked)
+@@ -87,26 +88,19 @@ nsDOMUIEvent::nsDOMUIEvent(nsPresContext
+       break;
+     }
+ 
+     default:
+       mDetail = 0;
+       break;
+   }
+ 
+-  mView = nsnull;
+-  if (mPresContext)
+-  {
+-    nsCOMPtr<nsISupports> container = mPresContext->GetContainer();
+-    if (container)
+-    {
+-       nsCOMPtr<nsIDOMWindow> window = do_GetInterface(container);
+-       if (window)
+-          mView = do_QueryInterface(window);
+-    }
++  if (mPresContext) {
++    nsCOMPtr<nsIDocShell> container = mPresContext->GetContainer();
++    mView = do_GetInterface(container);
+   }
+ }
+ 
+ NS_IMPL_CYCLE_COLLECTION_CLASS(nsDOMUIEvent)
+ 
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsDOMUIEvent, nsDOMEvent)
+   NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mView)
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+diff --git a/content/events/src/nsEventStateManager.cpp b/content/events/src/nsEventStateManager.cpp
+--- a/content/events/src/nsEventStateManager.cpp
++++ b/content/events/src/nsEventStateManager.cpp
+@@ -1427,17 +1427,17 @@ nsEventStateManager::PreHandleEvent(nsPr
+       }
+     }
+     break;
+   }
+   return NS_OK;
+ }
+ 
+ static int32_t
+-GetAccessModifierMask(nsISupports* aDocShell)
++GetAccessModifierMask(nsIDocShell* aDocShell)
+ {
+   nsCOMPtr<nsIDocShellTreeItem> treeItem(do_QueryInterface(aDocShell));
+   if (!treeItem)
+     return -1; // invalid modifier
+ 
+   int32_t itemType;
+   treeItem->GetItemType(&itemType);
+   switch (itemType) {
+@@ -1547,17 +1547,17 @@ nsEventStateManager::ExecuteAccessKey(ns
+ 
+ bool
+ nsEventStateManager::GetAccessKeyLabelPrefix(nsAString& aPrefix)
+ {
+   aPrefix.Truncate();
+   nsAutoString separator, modifierText;
+   nsContentUtils::GetModifierSeparatorText(separator);
+ 
+-  nsCOMPtr<nsISupports> container = mPresContext->GetContainer();
++  nsCOMPtr<nsIDocShell> container = mPresContext->GetContainer();
+   int32_t modifier = GetAccessModifierMask(container);
+ 
+   if (modifier & NS_MODIFIER_CONTROL) {
+     nsContentUtils::GetControlText(modifierText);
+     aPrefix.Append(modifierText + separator);
+   }
+   if (modifier & NS_MODIFIER_META) {
+     nsContentUtils::GetMetaText(modifierText);
+@@ -1577,17 +1577,17 @@ nsEventStateManager::GetAccessKeyLabelPr
+ void
+ nsEventStateManager::HandleAccessKey(nsPresContext* aPresContext,
+                                      nsKeyEvent *aEvent,
+                                      nsEventStatus* aStatus,
+                                      nsIDocShellTreeItem* aBubbledFrom,
+                                      ProcessingAccessKeyState aAccessKeyState,
+                                      int32_t aModifierMask)
+ {
+-  nsCOMPtr<nsISupports> pcContainer = aPresContext->GetContainer();
++  nsCOMPtr<nsIDocShell> pcContainer = aPresContext->GetContainer();
+ 
+   // Alt or other accesskey modifier is down, we may need to do an accesskey
+   if (mAccessKeys.Count() > 0 &&
+       aModifierMask == GetAccessModifierMask(pcContainer)) {
+     // Someone registered an accesskey.  Find and activate it.
+     bool isTrusted = NS_IS_TRUSTED_EVENT(aEvent);
+     nsAutoTArray<uint32_t, 10> accessCharCodes;
+     nsContentUtils::GetAccessKeyCandidates(aEvent, accessCharCodes);
+@@ -2199,17 +2199,17 @@ void
+ nsEventStateManager::DetermineDragTarget(nsPresContext* aPresContext,
+                                          nsIContent* aSelectionTarget,
+                                          nsDOMDataTransfer* aDataTransfer,
+                                          nsISelection** aSelection,
+                                          nsIContent** aTargetNode)
+ {
+   *aTargetNode = nsnull;
+ 
+-  nsCOMPtr<nsISupports> container = aPresContext->GetContainer();
++  nsCOMPtr<nsIDocShell> container = aPresContext->GetContainer();
+   nsCOMPtr<nsIDOMWindow> window = do_GetInterface(container);
+ 
+   // GetDragData determines if a selection, link or image in the content
+   // should be dragged, and places the data associated with the drag in the
+   // data transfer.
+   // mGestureDownContent is the node where the mousedown event for the drag
+   // occurred, and aSelectionTarget is the node to use when a selection is used
+   bool canDrag;
+@@ -2415,20 +2415,17 @@ nsEventStateManager::GetMarkupDocumentVi
+   nsIDocument *doc = GetDocumentFromWindow(contentWindow);
+   if(!doc) return NS_ERROR_FAILURE;
+ 
+   nsIPresShell *presShell = doc->GetShell();
+   if(!presShell) return NS_ERROR_FAILURE;
+   nsPresContext *presContext = presShell->GetPresContext();
+   if(!presContext) return NS_ERROR_FAILURE;
+ 
+-  nsCOMPtr<nsISupports> pcContainer = presContext->GetContainer();
+-  if(!pcContainer) return NS_ERROR_FAILURE;
+-
+-  nsCOMPtr<nsIDocShell> docshell(do_QueryInterface(pcContainer));
++  nsCOMPtr<nsIDocShell> docshell = presContext->GetContainer();
+   if(!docshell) return NS_ERROR_FAILURE;
+ 
+   nsCOMPtr<nsIContentViewer> cv;
+   docshell->GetContentViewer(getter_AddRefs(cv));
+   if(!cv) return NS_ERROR_FAILURE;
+ 
+   nsCOMPtr<nsIMarkupDocumentViewer> mv(do_QueryInterface(cv));
+   if(!mv) return NS_ERROR_FAILURE;
+@@ -2479,17 +2476,17 @@ nsEventStateManager::ChangeFullZoom(PRIn
+   mv->SetFullZoom(fullzoom);
+ 
+   return NS_OK;
+ }
+ 
+ void
+ nsEventStateManager::DoScrollHistory(int32_t direction)
+ {
+-  nsCOMPtr<nsISupports> pcContainer(mPresContext->GetContainer());
++  nsCOMPtr<nsIDocShell> pcContainer = mPresContext->GetContainer();
+   if (pcContainer) {
+     nsCOMPtr<nsIWebNavigation> webNav(do_QueryInterface(pcContainer));
+     if (webNav) {
+       // positive direction to go back one step, nonpositive to go forward
+       if (direction > 0)
+         webNav->GoBack();
+       else
+         webNav->GoForward();
+@@ -3572,18 +3569,17 @@ nsEventStateManager::UpdateCursor(nsPres
+       container = framecursor.mContainer;
+       haveHotspot = framecursor.mHaveHotspot;
+       hotspotX = framecursor.mHotspotX;
+       hotspotY = framecursor.mHotspotY;
+   }
+ 
+   if (Preferences::GetBool("ui.use_activity_cursor", false)) {
+     // Check whether or not to show the busy cursor
+-    nsCOMPtr<nsISupports> pcContainer = aPresContext->GetContainer();
+-    nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(pcContainer));
++    nsCOMPtr<nsIDocShell> docShell = aPresContext->GetContainer();
+     if (!docShell) return;
+     uint32_t busyFlags = nsIDocShell::BUSY_FLAGS_NONE;
+     docShell->GetBusyFlags(&busyFlags);
+ 
+     // Show busy cursor everywhere before page loads
+     // and just replace the arrow cursor after page starts loading
+     if (busyFlags & nsIDocShell::BUSY_FLAGS_BUSY &&
+           (cursor == NS_STYLE_CURSOR_AUTO || cursor == NS_STYLE_CURSOR_DEFAULT))
+diff --git a/content/html/content/src/nsHTMLBodyElement.cpp b/content/html/content/src/nsHTMLBodyElement.cpp
+--- a/content/html/content/src/nsHTMLBodyElement.cpp
++++ b/content/html/content/src/nsHTMLBodyElement.cpp
+@@ -239,54 +239,51 @@ BodyRule::MapRuleInfoInto(nsRuleData* aD
+       }
+     }
+ 
+   }
+ 
+   // if marginwidth or marginheight is set in the <frame> and not set in the <body>
+   // reflect them as margin in the <body>
+   if (bodyMarginWidth == -1 || bodyMarginHeight == -1) {
+-    nsCOMPtr<nsISupports> container = aData->mPresContext->GetContainer();
+-    if (container) {
+-      nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(container));
+-      if (docShell) {
+-        nscoord frameMarginWidth=-1;  // default value
+-        nscoord frameMarginHeight=-1; // default value
+-        docShell->GetMarginWidth(&frameMarginWidth); // -1 indicates not set   
+-        docShell->GetMarginHeight(&frameMarginHeight); 
+-        if ((frameMarginWidth >= 0) && (bodyMarginWidth == -1)) { // set in <frame> & not in <body> 
+-          if (eCompatibility_NavQuirks == mode) {
+-            if ((bodyMarginHeight == -1) && (0 > frameMarginHeight)) // nav quirk 
+-              frameMarginHeight = 0;
+-          }
++    nsCOMPtr<nsIDocShell> docShell = aData->mPresContext->GetContainer();
++    if (docShell) {
++      nscoord frameMarginWidth=-1;  // default value
++      nscoord frameMarginHeight=-1; // default value
++      docShell->GetMarginWidth(&frameMarginWidth); // -1 indicates not set   
++      docShell->GetMarginHeight(&frameMarginHeight); 
++      if ((frameMarginWidth >= 0) && (bodyMarginWidth == -1)) { // set in <frame> & not in <body> 
++        if (eCompatibility_NavQuirks == mode) {
++          if ((bodyMarginHeight == -1) && (0 > frameMarginHeight)) // nav quirk 
++            frameMarginHeight = 0;
+         }
+-        if ((frameMarginHeight >= 0) && (bodyMarginHeight == -1)) { // set in <frame> & not in <body> 
+-          if (eCompatibility_NavQuirks == mode) {
+-            if ((bodyMarginWidth == -1) && (0 > frameMarginWidth)) // nav quirk
+-              frameMarginWidth = 0;
+-          }
++      }
++      if ((frameMarginHeight >= 0) && (bodyMarginHeight == -1)) { // set in <frame> & not in <body> 
++        if (eCompatibility_NavQuirks == mode) {
++          if ((bodyMarginWidth == -1) && (0 > frameMarginWidth)) // nav quirk
++            frameMarginWidth = 0;
+         }
++      }
+ 
+-        if ((bodyMarginWidth == -1) && (frameMarginWidth >= 0)) {
+-          nsCSSValue* marginLeft = aData->ValueForMarginLeftValue();
+-          if (marginLeft->GetUnit() == eCSSUnit_Null)
+-            marginLeft->SetFloatValue((float)frameMarginWidth, eCSSUnit_Pixel);
+-          nsCSSValue* marginRight = aData->ValueForMarginRightValue();
+-          if (marginRight->GetUnit() == eCSSUnit_Null)
+-            marginRight->SetFloatValue((float)frameMarginWidth, eCSSUnit_Pixel);
+-        }
++      if ((bodyMarginWidth == -1) && (frameMarginWidth >= 0)) {
++        nsCSSValue* marginLeft = aData->ValueForMarginLeftValue();
++        if (marginLeft->GetUnit() == eCSSUnit_Null)
++          marginLeft->SetFloatValue((float)frameMarginWidth, eCSSUnit_Pixel);
++        nsCSSValue* marginRight = aData->ValueForMarginRightValue();
++        if (marginRight->GetUnit() == eCSSUnit_Null)
++          marginRight->SetFloatValue((float)frameMarginWidth, eCSSUnit_Pixel);
++      }
+ 
+-        if ((bodyMarginHeight == -1) && (frameMarginHeight >= 0)) {
+-          nsCSSValue* marginTop = aData->ValueForMarginTop();
+-          if (marginTop->GetUnit() == eCSSUnit_Null)
+-            marginTop->SetFloatValue((float)frameMarginHeight, eCSSUnit_Pixel);
+-          nsCSSValue* marginBottom = aData->ValueForMarginBottom();
+-          if (marginBottom->GetUnit() == eCSSUnit_Null)
+-            marginBottom->SetFloatValue((float)frameMarginHeight, eCSSUnit_Pixel);
+-        }
++      if ((bodyMarginHeight == -1) && (frameMarginHeight >= 0)) {
++        nsCSSValue* marginTop = aData->ValueForMarginTop();
++        if (marginTop->GetUnit() == eCSSUnit_Null)
++          marginTop->SetFloatValue((float)frameMarginHeight, eCSSUnit_Pixel);
++        nsCSSValue* marginBottom = aData->ValueForMarginBottom();
++        if (marginBottom->GetUnit() == eCSSUnit_Null)
++          marginBottom->SetFloatValue((float)frameMarginHeight, eCSSUnit_Pixel);
+       }
+     }
+   }
+ }
+ 
+ #ifdef DEBUG
+ /* virtual */ void
+ BodyRule::List(FILE* out, int32_t aIndent) const
+@@ -489,17 +486,17 @@ nsHTMLBodyElement::GetAssociatedEditor()
+   }
+ 
+   // For designmode, try to get document's editor
+   nsPresContext* presContext = GetPresContext();
+   if (!presContext) {
+     return nsnull;
+   }
+ 
+-  nsCOMPtr<nsISupports> container = presContext->GetContainer();
++  nsCOMPtr<nsIDocShell> container = presContext->GetContainer();
+   nsCOMPtr<nsIEditorDocShell> editorDocShell = do_QueryInterface(container);
+   if (!editorDocShell) {
+     return nsnull;
+   }
+ 
+   editorDocShell->GetEditor(&editor);
+   return editor;
+ }
+diff --git a/content/smil/nsDOMTimeEvent.cpp b/content/smil/nsDOMTimeEvent.cpp
+--- a/content/smil/nsDOMTimeEvent.cpp
++++ b/content/smil/nsDOMTimeEvent.cpp
+@@ -35,16 +35,17 @@
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsDOMTimeEvent.h"
+ #include "nsGUIEvent.h"
+ #include "nsPresContext.h"
+ #include "nsIInterfaceRequestorUtils.h"
+ #include "nsDOMClassInfoID.h"
++#include "nsIDocShell.h"
+ 
+ nsDOMTimeEvent::nsDOMTimeEvent(nsPresContext* aPresContext, nsEvent* aEvent)
+   : nsDOMEvent(aPresContext, aEvent ? aEvent : new nsUIEvent(false, 0, 0)),
+     mDetail(0)
+ {
+   if (aEvent) {
+     mEventIsInternal = false;
+   } else {
+@@ -56,23 +57,18 @@ nsDOMTimeEvent::nsDOMTimeEvent(nsPresCon
+     nsUIEvent* event = static_cast<nsUIEvent*>(mEvent);
+     mDetail = event->detail;
+   }
+ 
+   mEvent->flags |= NS_EVENT_FLAG_CANT_BUBBLE |
+                    NS_EVENT_FLAG_CANT_CANCEL;
+ 
+   if (mPresContext) {
+-    nsCOMPtr<nsISupports> container = mPresContext->GetContainer();
+-    if (container) {
+-      nsCOMPtr<nsIDOMWindow> window = do_GetInterface(container);
+-      if (window) {
+-        mView = do_QueryInterface(window);
+-      }
+-    }
++    nsCOMPtr<nsIDocShell> container = mPresContext->GetContainer();
++    mView = do_GetInterface(container);
+   }
+ }
+ 
+ NS_IMPL_CYCLE_COLLECTION_CLASS(nsDOMTimeEvent)
+ 
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsDOMTimeEvent, nsDOMEvent)
+   NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mView)
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+diff --git a/content/xul/document/src/nsXULDocument.cpp b/content/xul/document/src/nsXULDocument.cpp
+--- a/content/xul/document/src/nsXULDocument.cpp
++++ b/content/xul/document/src/nsXULDocument.cpp
+@@ -2024,22 +2024,17 @@ nsXULDocument::StartLayout(void)
+     nsCOMPtr<nsIPresShell> shell = GetShell();
+     if (shell) {
+         // Resize-reflow this time
+         nsPresContext *cx = shell->GetPresContext();
+         NS_ASSERTION(cx != nsnull, "no pres context");
+         if (! cx)
+             return NS_ERROR_UNEXPECTED;
+ 
+-        nsCOMPtr<nsISupports> container = cx->GetContainer();
+-        NS_ASSERTION(container != nsnull, "pres context has no container");
+-        if (! container)
+-            return NS_ERROR_UNEXPECTED;
+-
+-        nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(container));
++        nsCOMPtr<nsIDocShell> docShell = cx->GetContainer();
+         NS_ASSERTION(docShell != nsnull, "container is not a docshell");
+         if (! docShell)
+             return NS_ERROR_UNEXPECTED;
+ 
+         nsresult rv = NS_OK;
+         nsRect r = cx->GetVisibleArea();
+         rv = shell->InitialReflow(r.width, r.height);
+         NS_ENSURE_SUCCESS(rv, rv);
+diff --git a/docshell/base/nsDocShell.cpp b/docshell/base/nsDocShell.cpp
+--- a/docshell/base/nsDocShell.cpp
++++ b/docshell/base/nsDocShell.cpp
+@@ -6568,17 +6568,17 @@ nsDocShell::CreateAboutBlankContentViewe
+       blankDoc->SetContainer(static_cast<nsIDocShell *>(this));
+ 
+       // create a content viewer for us and the new document
+       docFactory->CreateInstanceForDocument(this, blankDoc, "view",
+                                             getter_AddRefs(viewer));
+ 
+       // hook 'em up
+       if (viewer) {
+-        viewer->SetContainer(static_cast<nsIContentViewerContainer *>(this));
++        viewer->SetContainer(static_cast<nsIDocShell *>(this));
+         Embed(viewer, "", 0);
+ 
+         SetCurrentURI(blankDoc->GetDocumentURI(), nsnull, true, 0);
+         rv = mIsBeingDestroyed ? NS_ERROR_NOT_AVAILABLE : NS_OK;
+       }
+     }
+   }
+   mCreatingDocument = false;
+@@ -6910,17 +6910,17 @@ nsDocShell::RestorePresentation(nsISHEnt
+     }
+ 
+     // We need to make sure the content viewer's container is this docshell.
+     // In subframe navigation, it's possible for the docshell that the
+     // content viewer was originally loaded into to be replaced with a
+     // different one.  We don't currently support restoring the presentation
+     // in that case.
+ 
+-    nsCOMPtr<nsISupports> container;
++    nsCOMPtr<nsIDocShell> container;
+     viewer->GetContainer(getter_AddRefs(container));
+     if (!::SameCOMIdentity(container, GetAsSupports(this))) {
+ #ifdef DEBUG_PAGE_CACHE
+         printf("No valid container, clearing presentation\n");
+ #endif
+         aSHEntry->SetContentViewer(nsnull);
+         return NS_ERROR_FAILURE;
+     }
+@@ -7590,17 +7590,17 @@ nsDocShell::NewContentViewerObj(const ch
+     // Now create an instance of the content viewer
+     // nsLayoutDLF makes the determination if it should be a "view-source" instead of "view"
+     nsresult rv = docLoaderFactory->CreateInstance("view", aOpenedChannel,
+                                                    aLoadGroup, aContentType,
+                                                    this, nsnull,
+                                                    aContentHandler, aViewer);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+-    (*aViewer)->SetContainer(static_cast<nsIContentViewerContainer *>(this));
++    (*aViewer)->SetContainer(static_cast<nsIDocShell *>(this));
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsDocShell::SetupNewViewer(nsIContentViewer * aNewViewer)
+ {
+     //
+     // Copy content viewer state from previous or parent content viewer.
+diff --git a/docshell/base/nsIContentViewer.idl b/docshell/base/nsIContentViewer.idl
+--- a/docshell/base/nsIContentViewer.idl
++++ b/docshell/base/nsIContentViewer.idl
+@@ -35,16 +35,17 @@
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsISupports.idl"
+ 
+ interface nsIDOMDocument;
+ interface nsISHEntry;
+ interface nsIPrintSettings;
++interface nsIDocShell;
+ 
+ 
+ %{ C++
+ class nsIWidget;
+ class nsIDocument;
+ struct nsIntRect;
+ class nsIPresShell;
+ class nsPresContext;
+@@ -62,17 +63,17 @@ class nsDOMNavigationTiming;
+ 
+ [scriptable, builtinclass, uuid(26b2380b-4a1a-46cd-b7d8-7600e41c1688)]
+ interface nsIContentViewer : nsISupports
+ {
+ 
+   [noscript] void init(in nsIWidgetPtr aParentWidget,
+                        [const] in nsIntRectRef aBounds);
+ 
+-  attribute nsISupports container;
++  attribute nsIDocShell container;
+ 
+   void loadStart(in nsISupports aDoc);
+   void loadComplete(in unsigned long aStatus);
+ 
+   /**
+    * Checks if the document wants to prevent unloading by firing beforeunload on
+    * the document, and if it does, prompts the user. The result is returned.
+    *
+diff --git a/docshell/shistory/src/nsSHEntryShared.cpp b/docshell/shistory/src/nsSHEntryShared.cpp
+--- a/docshell/shistory/src/nsSHEntryShared.cpp
++++ b/docshell/shistory/src/nsSHEntryShared.cpp
+@@ -193,17 +193,17 @@ nsSHEntryShared::DropPresentationState()
+ void
+ nsSHEntryShared::Expire()
+ {
+   // This entry has timed out. If we still have a content viewer, we need to
+   // evict it.
+   if (!mContentViewer) {
+     return;
+   }
+-  nsCOMPtr<nsISupports> container;
++  nsCOMPtr<nsIDocShell> container;
+   mContentViewer->GetContainer(getter_AddRefs(container));
+   nsCOMPtr<nsIDocShellTreeItem> treeItem = do_QueryInterface(container);
+   if (!treeItem) {
+     return;
+   }
+   // We need to find the root DocShell since only that object has an
+   // SHistory and we need the SHistory to evict content viewers
+   nsCOMPtr<nsIDocShellTreeItem> root;
+diff --git a/dom/plugins/base/nsPluginInstanceOwner.cpp b/dom/plugins/base/nsPluginInstanceOwner.cpp
+--- a/dom/plugins/base/nsPluginInstanceOwner.cpp
++++ b/dom/plugins/base/nsPluginInstanceOwner.cpp
+@@ -95,16 +95,17 @@ using mozilla::DefaultXDisplay;
+ #include "nsIDOMHTMLAppletElement.h"
+ #include "nsAttrName.h"
+ #include "nsIFocusManager.h"
+ #include "nsFocusManager.h"
+ #include "nsIDOMDragEvent.h"
+ #include "nsIScrollableFrame.h"
+ #include "nsIImageLoadingContent.h"
+ #include "nsIObjectLoadingContent.h"
++#include "nsIDocShell.h"
+ 
+ #include "nsContentCID.h"
+ #include "nsWidgetsCID.h"
+ static NS_DEFINE_CID(kWidgetCID, NS_CHILD_CID);
+ static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
+ 
+ #ifdef XP_WIN
+ #include <wtypes.h>
+@@ -523,17 +524,17 @@ NS_IMETHODIMP nsPluginInstanceOwner::Get
+   }
+ 
+   nsPresContext *presContext = presShell->GetPresContext();
+   if (!presContext) {
+     return NS_ERROR_FAILURE;
+   }
+ 
+   // the container of the pres context will give us the link handler
+-  nsCOMPtr<nsISupports> container = presContext->GetContainer();
++  nsCOMPtr<nsIDocShell> container = presContext->GetContainer();
+   NS_ENSURE_TRUE(container,NS_ERROR_FAILURE);
+   nsCOMPtr<nsILinkHandler> lh = do_QueryInterface(container);
+   NS_ENSURE_TRUE(lh, NS_ERROR_FAILURE);
+ 
+   nsAutoString  unitarget;
+   unitarget.AssignASCII(aTarget); // XXX could this be nonascii?
+ 
+   nsCOMPtr<nsIURI> baseURI = mContent->GetBaseURI();
+@@ -579,17 +580,17 @@ NS_IMETHODIMP nsPluginInstanceOwner::Sho
+ 
+ NS_IMETHODIMP nsPluginInstanceOwner::ShowStatus(const PRUnichar *aStatusMsg)
+ {
+   nsresult  rv = NS_ERROR_FAILURE;
+ 
+   if (!mObjectFrame) {
+     return rv;
+   }
+-  nsCOMPtr<nsISupports> cont = mObjectFrame->PresContext()->GetContainer();
++  nsCOMPtr<nsIDocShell> cont = mObjectFrame->PresContext()->GetContainer();
+   if (!cont) {
+     return NS_OK;
+   }
+ 
+   nsCOMPtr<nsIDocShellTreeItem> docShellItem(do_QueryInterface(cont, &rv));
+   if (NS_FAILED(rv) || !docShellItem) {
+     return rv;
+   }
+diff --git a/editor/composer/src/nsComposerDocumentCommands.cpp b/editor/composer/src/nsComposerDocumentCommands.cpp
+--- a/editor/composer/src/nsComposerDocumentCommands.cpp
++++ b/editor/composer/src/nsComposerDocumentCommands.cpp
+@@ -129,23 +129,18 @@ nsSetDocumentOptionsCommand::DoCommandPa
+   {
+     // for possible values of animation mode, see:
+     // http://lxr.mozilla.org/seamonkey/source/image/public/imgIContainer.idl
+     presContext->SetImageAnimationMode(animationMode);
+   }
+ 
+   bool allowPlugins; 
+   rv = aParams->GetBooleanValue("plugins", &allowPlugins);
+-  if (NS_SUCCEEDED(rv))
+-  {
+-    nsCOMPtr<nsISupports> container = presContext->GetContainer();
+-    NS_ENSURE_TRUE(container, NS_ERROR_FAILURE);
+-
+-    nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(container, &rv));
+-    NS_ENSURE_SUCCESS(rv, rv);
++  if (NS_SUCCEEDED(rv)) {
++    nsCOMPtr<nsIDocShell> docShell = presContext->GetContainer();
+     NS_ENSURE_TRUE(docShell, NS_ERROR_FAILURE);
+ 
+     rv = docShell->SetAllowPlugins(allowPlugins);
+     NS_ENSURE_SUCCESS(rv, rv);
+   }
+ 
+   return NS_OK;
+ }
+@@ -182,23 +177,18 @@ nsSetDocumentOptionsCommand::GetCommandS
+     // http://lxr.mozilla.org/seamonkey/source/image/public/imgIContainer.idl
+     rv = aParams->SetLongValue("imageAnimation",
+                                presContext->ImageAnimationMode());
+     NS_ENSURE_SUCCESS(rv, rv);
+   }
+ 
+   bool allowPlugins; 
+   rv = aParams->GetBooleanValue("plugins", &allowPlugins);
+-  if (NS_SUCCEEDED(rv))
+-  {
+-    nsCOMPtr<nsISupports> container = presContext->GetContainer();
+-    NS_ENSURE_TRUE(container, NS_ERROR_FAILURE);
+-
+-    nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(container, &rv));
+-    NS_ENSURE_SUCCESS(rv, rv);
++  if (NS_SUCCEEDED(rv)) {
++    nsCOMPtr<nsIDocShell> docShell = presContext->GetContainer();
+     NS_ENSURE_TRUE(docShell, NS_ERROR_FAILURE);
+ 
+     rv = docShell->GetAllowPlugins(&allowPlugins);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     rv = aParams->SetBooleanValue("plugins", allowPlugins);
+     NS_ENSURE_SUCCESS(rv, rv);
+   }
+diff --git a/layout/base/nsDocumentViewer.cpp b/layout/base/nsDocumentViewer.cpp
+--- a/layout/base/nsDocumentViewer.cpp
++++ b/layout/base/nsDocumentViewer.cpp
+@@ -686,38 +686,37 @@ DocumentViewerImpl::SyncParentSubDocMap(
+       }
+     }
+   }
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+-DocumentViewerImpl::SetContainer(nsISupports* aContainer)
++DocumentViewerImpl::SetContainer(nsIDocShell* aContainer)
+ {
+   mContainer = do_GetWeakReference(aContainer);
+   if (mPresContext) {
+     mPresContext->SetContainer(aContainer);
+   }
+ 
+   // We're loading a new document into the window where this document
+   // viewer lives, sync the parent document's frame element -> sub
+   // document map
+ 
+   return SyncParentSubDocMap();
+ }
+ 
+ NS_IMETHODIMP
+-DocumentViewerImpl::GetContainer(nsISupports** aResult)
++DocumentViewerImpl::GetContainer(nsIDocShell** aResult)
+ {
+    NS_ENSURE_ARG_POINTER(aResult);
+ 
+-   *aResult = nsnull;
+-   nsCOMPtr<nsISupports> container = do_QueryReferent(mContainer);
+-   container.swap(*aResult);
++   nsCOMPtr<nsIDocShell> container = do_QueryReferent(mContainer);
++   container.forget(aResult);
+    return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ DocumentViewerImpl::Init(nsIWidget* aParentWidget,
+                          const nsIntRect& aBounds)
+ {
+   return InitInternal(aParentWidget, nsnull, aBounds, true);
+@@ -958,17 +957,18 @@ DocumentViewerImpl::InitInternal(nsIWidg
+ 
+   nsCOMPtr<nsIInterfaceRequestor> requestor(do_QueryReferent(mContainer));
+   if (requestor) {
+     if (mPresContext) {
+       nsCOMPtr<nsILinkHandler> linkHandler;
+       requestor->GetInterface(NS_GET_IID(nsILinkHandler),
+                               getter_AddRefs(linkHandler));
+ 
+-      mPresContext->SetContainer(requestor);
++      nsCOMPtr<nsIDocShell> docshell = do_QueryInterface(requestor);
++      mPresContext->SetContainer(docshell);
+       mPresContext->SetLinkHandler(linkHandler);
+     }
+ 
+     // Set script-context-owner in the document
+ 
+     nsCOMPtr<nsPIDOMWindow> window;
+     requestor->GetInterface(NS_GET_IID(nsPIDOMWindow),
+                             getter_AddRefs(window));
+@@ -2036,17 +2036,18 @@ DocumentViewerImpl::Show(void)
+ 
+     if (mPresContext && base_win) {
+       nsCOMPtr<nsILinkHandler> linkHandler(do_GetInterface(base_win));
+ 
+       if (linkHandler) {
+         mPresContext->SetLinkHandler(linkHandler);
+       }
+ 
+-      mPresContext->SetContainer(base_win);
++      nsCOMPtr<nsIDocShell> docshell = do_QueryInterface(base_win);
++      mPresContext->SetContainer(docshell);
+     }
+ 
+     if (mPresContext) {
+       Hide();
+ 
+       rv = InitPresentationStuff(mDocument->MayStartLayout());
+     }
+ 
+diff --git a/layout/base/nsPresContext.cpp b/layout/base/nsPresContext.cpp
+--- a/layout/base/nsPresContext.cpp
++++ b/layout/base/nsPresContext.cpp
+@@ -1470,36 +1470,33 @@ nsPresContext::SetupBorderImageLoaders(n
+ void
+ nsPresContext::StopImagesFor(nsIFrame* aTargetFrame)
+ {
+   for (uint32_t i = 0; i < IMAGE_LOAD_TYPE_COUNT; ++i)
+     SetImageLoaders(aTargetFrame, ImageLoadType(i), nsnull);
+ }
+ 
+ void
+-nsPresContext::SetContainer(nsISupports* aHandler)
++nsPresContext::SetContainer(nsIDocShell* aHandler)
+ {
+   mContainer = do_GetWeakReference(aHandler);
+   InvalidateIsChromeCache();
+   if (mContainer) {
+     GetDocumentColorPreferences();
+   }
+ }
+ 
+-already_AddRefed<nsISupports>
++already_AddRefed<nsIDocShell>
+ nsPresContext::GetContainerInternal() const
+ {
+-  nsISupports *result = nsnull;
+-  if (mContainer)
+-    CallQueryReferent(mContainer.get(), &result);
+-
+-  return result;
++  nsCOMPtr<nsIDocShell> result = do_QueryReferent(mContainer);
++  return result.forget();
+ }
+ 
+-already_AddRefed<nsISupports>
++already_AddRefed<nsIDocShell>
+ nsPresContext::GetContainerExternal() const
+ {
+   return GetContainerInternal();
+ }
+ 
+ #ifdef IBMBIDI
+ void
+ nsPresContext::SetBidiEnabled() const
+@@ -1830,17 +1827,17 @@ nsPresContext::CountReflows(const char *
+   }
+ }
+ #endif
+ 
+ bool
+ nsPresContext::IsChromeSlow() const
+ {
+   bool isChrome = false;
+-  nsCOMPtr<nsISupports> container = GetContainer();
++  nsCOMPtr<nsIDocShell> container = GetContainer();
+   if (container) {
+     nsresult result;
+     nsCOMPtr<nsIDocShellTreeItem> docShell(do_QueryInterface(container, &result));
+     if (NS_SUCCEEDED(result) && docShell) {
+       int32_t docShellType;
+       result = docShell->GetItemType(&docShellType);
+       if (NS_SUCCEEDED(result)) {
+         isChrome = nsIDocShellTreeItem::typeChrome == docShellType;
+diff --git a/layout/base/nsPresContext.h b/layout/base/nsPresContext.h
+--- a/layout/base/nsPresContext.h
++++ b/layout/base/nsPresContext.h
+@@ -422,25 +422,25 @@ public:
+                                            const nsStyleBorder* aStyleBorder);
+ 
+   /**
+    * This method is called when a frame is being destroyed to
+    * ensure that the image loads get disassociated from the prescontext
+    */
+   NS_HIDDEN_(void) StopImagesFor(nsIFrame* aTargetFrame);
+ 
+-  NS_HIDDEN_(void) SetContainer(nsISupports* aContainer);
++  NS_HIDDEN_(void) SetContainer(nsIDocShell* aContainer);
+ 
+-  virtual NS_HIDDEN_(already_AddRefed<nsISupports>) GetContainerExternal() const;
+-  NS_HIDDEN_(already_AddRefed<nsISupports>) GetContainerInternal() const;
++  virtual NS_HIDDEN_(already_AddRefed<nsIDocShell>) GetContainerExternal() const;
++  NS_HIDDEN_(already_AddRefed<nsIDocShell>) GetContainerInternal() const;
+ #ifdef _IMPL_NS_LAYOUT
+-  already_AddRefed<nsISupports> GetContainer() const
++  already_AddRefed<nsIDocShell> GetContainer() const
+   { return GetContainerInternal(); }
+ #else
+-  already_AddRefed<nsISupports> GetContainer() const
++  already_AddRefed<nsIDocShell> GetContainer() const
+   { return GetContainerExternal(); }
+ #endif
+ 
+   // XXX this are going to be replaced with set/get container
+   void SetLinkHandler(nsILinkHandler* aHandler) { mLinkHandler = aHandler; }
+   nsILinkHandler* GetLinkHandler() { return mLinkHandler; }
+ 
+   /**
+diff --git a/layout/base/nsPresShell.cpp b/layout/base/nsPresShell.cpp
+--- a/layout/base/nsPresShell.cpp
++++ b/layout/base/nsPresShell.cpp
+@@ -1449,18 +1449,17 @@ nsresult PresShell::SetPrefNoFramesRule(
+   if (!mPrefStyleSheet) {
+     rv = CreatePreferenceStyleSheet();
+     NS_ENSURE_SUCCESS(rv, rv);
+   }
+   
+   NS_ASSERTION(mPrefStyleSheet, "prefstylesheet should not be null");
+   
+   bool allowSubframes = true;
+-  nsCOMPtr<nsISupports> container = mPresContext->GetContainer();     
+-  nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(container));
++  nsCOMPtr<nsIDocShell> docShell = mPresContext->GetContainer();
+   if (docShell) {
+     docShell->GetAllowSubframes(&allowSubframes);
+   }
+   if (!allowSubframes) {
+     uint32_t index = 0;
+     rv = mPrefStyleSheet->
+       InsertRuleInternal(NS_LITERAL_STRING("noframes{display:block}"),
+                          sInsertPrefSheetRulesAt, &index);
+@@ -3642,21 +3641,17 @@ PresShell::CaptureHistoryState(nsILayout
+   NS_PRECONDITION(nsnull != aState, "null state pointer");
+ 
+   // We actually have to mess with the docshell here, since we want to
+   // store the state back in it.
+   // XXXbz this isn't really right, since this is being called in the
+   // content viewer's Hide() method...  by that point the docshell's
+   // state could be wrong.  We should sort out a better ownership
+   // model for the layout history state.
+-  nsCOMPtr<nsISupports> container = mPresContext->GetContainer();
+-  if (!container)
+-    return NS_ERROR_FAILURE;
+-
+-  nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(container));
++  nsCOMPtr<nsIDocShell> docShell = mPresContext->GetContainer();
+   if (!docShell)
+     return NS_ERROR_FAILURE;
+ 
+   nsCOMPtr<nsILayoutHistoryState> historyState;
+   docShell->GetLayoutHistoryState(getter_AddRefs(historyState));
+   if (!historyState) {
+     // Create the document state object
+     rv = NS_NewLayoutHistoryState(getter_AddRefs(historyState));
+@@ -4999,17 +4994,17 @@ nsresult PresShell::AddCanvasBackgroundC
+   }
+ 
+   return aList.AppendNewToBottom(
+       new (&aBuilder) nsDisplaySolidColor(&aBuilder, aFrame, aBounds, bgcolor));
+ }
+ 
+ static bool IsTransparentContainerElement(nsPresContext* aPresContext)
+ {
+-  nsCOMPtr<nsISupports> container = aPresContext->GetContainerInternal();
++  nsCOMPtr<nsIDocShell> container = aPresContext->GetContainerInternal();
+   nsCOMPtr<nsIDocShellTreeItem> docShellItem = do_QueryInterface(container);
+   nsCOMPtr<nsPIDOMWindow> pwin(do_GetInterface(docShellItem));
+   if (!pwin)
+     return false;
+   nsCOMPtr<nsIContent> containerElement =
+     do_QueryInterface(pwin->GetFrameElementInternal());
+   return containerElement &&
+          containerElement->HasAttr(kNameSpaceID_None, nsGkAtoms::transparent);
+@@ -5574,17 +5569,17 @@ PresShell::GetRootWindow()
+   NS_ENSURE_TRUE(parent, nsnull);
+   return parent->GetRootWindow();
+ }
+ 
+ already_AddRefed<nsIPresShell>
+ PresShell::GetParentPresShell()
+ {
+   NS_ENSURE_TRUE(mPresContext, nsnull);
+-  nsCOMPtr<nsISupports> container = mPresContext->GetContainer();
++  nsCOMPtr<nsIDocShell> container = mPresContext->GetContainer();
+   if (!container) {
+     container = do_QueryReferent(mForwardingContainer);
+   }
+ 
+   // Now, find the parent pres shell and send the event there
+   nsCOMPtr<nsIDocShellTreeItem> treeItem = do_QueryInterface(container);
+   // Might have gone away, or never been around to start with
+   NS_ENSURE_TRUE(treeItem, nsnull);
+@@ -5896,18 +5891,18 @@ PresShell::HandleEvent(nsIFrame        *
+ 
+     bool captureRetarget = false;
+     if (capturingContent) {
+       // If a capture is active, determine if the docshell is visible. If not,
+       // clear the capture and target the mouse event normally instead. This
+       // would occur if the mouse button is held down while a tab change occurs.
+       // If the docshell is visible, look for a scrolling container.
+       bool vis;
+-      nsCOMPtr<nsISupports> supports = mPresContext->GetContainer();
+-      nsCOMPtr<nsIBaseWindow> baseWin(do_QueryInterface(supports));
++      nsCOMPtr<nsIDocShell> docshell = mPresContext->GetContainer();
++      nsCOMPtr<nsIBaseWindow> baseWin(do_QueryInterface(docshell));
+       if (baseWin && NS_SUCCEEDED(baseWin->GetVisibility(&vis)) && vis) {
+         captureRetarget = gCaptureInfo.mRetargetToElement;
+         if (!captureRetarget) {
+           // A check was already done above to ensure that capturingContent is
+           // in this presshell.
+           NS_ASSERTION(capturingContent->GetCurrentDoc() == GetDocument(),
+                        "Unexpected document");
+           nsIFrame* captureFrame = capturingContent->GetPrimaryFrame();
+@@ -6373,17 +6368,17 @@ PresShell::HandleEventInternal(nsEvent* 
+   if (aEvent->eventStructType == NS_ACCESSIBLE_EVENT)
+   {
+     nsAccessibleEvent *accEvent = static_cast<nsAccessibleEvent*>(aEvent);
+     accEvent->mAccessible = nsnull;
+ 
+     nsCOMPtr<nsIAccessibilityService> accService =
+       do_GetService("@mozilla.org/accessibilityService;1");
+     if (accService) {
+-      nsCOMPtr<nsISupports> container = mPresContext->GetContainer();
++      nsCOMPtr<nsIDocShell> container = mPresContext->GetContainer();
+       if (!container) {
+         // This presshell is not active. This often happens when a
+         // preshell is being held onto for fastback.
+         return NS_OK;
+       }
+ 
+       // Accessible creation might be not safe so we make sure it's not created
+       // at unsafe times.
+@@ -6724,17 +6719,17 @@ PresShell::HandleDOMEventWithTarget(nsIC
+ 
+   PushCurrentEventInfo(nsnull, aTargetContent);
+ 
+   // Bug 41013: Check if the event should be dispatched to content.
+   // It's possible that we are in the middle of destroying the window
+   // and the js context is out of date. This check detects the case
+   // that caused a crash in bug 41013, but there may be a better way
+   // to handle this situation!
+-  nsCOMPtr<nsISupports> container = mPresContext->GetContainer();
++  nsCOMPtr<nsIDocShell> container = mPresContext->GetContainer();
+   if (container) {
+ 
+     // Dispatch event to content
+     rv = nsEventDispatcher::Dispatch(aTargetContent, mPresContext, aEvent, nsnull,
+                                      aStatus);
+   }
+ 
+   PopCurrentEventInfo();
+@@ -6745,17 +6740,17 @@ PresShell::HandleDOMEventWithTarget(nsIC
+ nsresult
+ PresShell::HandleDOMEventWithTarget(nsIContent* aTargetContent,
+                                     nsIDOMEvent* aEvent,
+                                     nsEventStatus* aStatus)
+ {
+   nsresult rv = NS_OK;
+ 
+   PushCurrentEventInfo(nsnull, aTargetContent);
+-  nsCOMPtr<nsISupports> container = mPresContext->GetContainer();
++  nsCOMPtr<nsIDocShell> container = mPresContext->GetContainer();
+   if (container) {
+     rv = nsEventDispatcher::DispatchDOMEvent(aTargetContent, nsnull, aEvent,
+                                              mPresContext, aStatus);
+   }
+ 
+   PopCurrentEventInfo();
+   return rv;
+ }
+@@ -9012,35 +9007,34 @@ void nsIPresShell::InitializeStatics()
+ void nsIPresShell::ReleaseStatics()
+ {
+   NS_ASSERTION(inited, "ReleaseStatics called without Initialize!");
+ }
+ 
+ // Asks our docshell whether we're active.
+ void PresShell::QueryIsActive()
+ {
+-  nsCOMPtr<nsISupports> container = mPresContext->GetContainer();
++  nsCOMPtr<nsIDocShell> docshell = mPresContext->GetContainer();
+   if (mDocument) {
+     nsIDocument* displayDoc = mDocument->GetDisplayDocument();
+     if (displayDoc) {
+       // Ok, we're an external resource document -- we need to use our display
+       // document's docshell to determine "IsActive" status, since we lack
+       // a container.
+-      NS_ABORT_IF_FALSE(!container,
++      NS_ABORT_IF_FALSE(!docshell,
+                         "external resource doc shouldn't have "
+                         "its own container");
+ 
+       nsIPresShell* displayPresShell = displayDoc->GetShell();
+       if (displayPresShell) {
+-        container = displayPresShell->GetPresContext()->GetContainer();
++        docshell = displayPresShell->GetPresContext()->GetContainer();
+       }
+     }
+   }
+ 
+-  nsCOMPtr<nsIDocShell> docshell(do_QueryInterface(container));
+   if (docshell) {
+     bool isActive;
+     nsresult rv = docshell->GetIsActive(&isActive);
+     if (NS_SUCCEEDED(rv))
+       SetIsActive(isActive);
+   }
+ }
+ 
+diff --git a/layout/generic/nsGfxScrollFrame.cpp b/layout/generic/nsGfxScrollFrame.cpp
+--- a/layout/generic/nsGfxScrollFrame.cpp
++++ b/layout/generic/nsGfxScrollFrame.cpp
+@@ -2291,17 +2291,17 @@ nsGfxScrollFrameInner::GetScrollbarStyle
+   if (!presContext->IsDynamic() &&
+       !(mIsRoot && presContext->HasPaginatedScrolling())) {
+     return ScrollbarStyles(NS_STYLE_OVERFLOW_HIDDEN, NS_STYLE_OVERFLOW_HIDDEN);
+   }
+ 
+   if (mIsRoot) {
+     result = presContext->GetViewportOverflowOverride();
+ 
+-    nsCOMPtr<nsISupports> container = presContext->GetContainer();
++    nsCOMPtr<nsIDocShell> container = presContext->GetContainer();
+     nsCOMPtr<nsIScrollable> scrollable = do_QueryInterface(container);
+     if (scrollable) {
+       HandleScrollPref(scrollable, nsIScrollable::ScrollOrientation_X,
+                        result.mHorizontal);
+       HandleScrollPref(scrollable, nsIScrollable::ScrollOrientation_Y,
+                        result.mVertical);
+       // XXX EVIL COMPILER BUG BE CAREFUL WHEN CHANGING
+       //     There is a bug in the Android compiler :(
+diff --git a/layout/mathml/nsMathMLmactionFrame.cpp b/layout/mathml/nsMathMLmactionFrame.cpp
+--- a/layout/mathml/nsMathMLmactionFrame.cpp
++++ b/layout/mathml/nsMathMLmactionFrame.cpp
+@@ -41,16 +41,17 @@
+ #include "nsPresContext.h"
+ #include "nsStyleContext.h"
+ #include "nsStyleConsts.h"
+ #include "nsINameSpaceManager.h"
+ 
+ #include "nsCSSRendering.h"
+ #include "prprf.h"         // For PR_snprintf()
+ 
++#include "nsIDocShell.h"
+ #include "nsIDocShellTreeItem.h"
+ #include "nsIDocShellTreeOwner.h"
+ #include "nsIWebBrowserChrome.h"
+ #include "nsIInterfaceRequestor.h"
+ #include "nsIInterfaceRequestorUtils.h"
+ #include "nsIDOMElement.h"
+ 
+ #include "nsIDOMEventTarget.h"
+@@ -319,17 +320,17 @@ NS_IMPL_ISUPPORTS1(nsMathMLmactionFrame:
+                    nsIDOMEventListener)
+ 
+ 
+ // helper to show a msg on the status bar
+ // curled from nsObjectFrame.cpp ...
+ void
+ ShowStatus(nsPresContext* aPresContext, nsString& aStatusMsg)
+ {
+-  nsCOMPtr<nsISupports> cont = aPresContext->GetContainer();
++  nsCOMPtr<nsIDocShell> cont = aPresContext->GetContainer();
+   if (cont) {
+     nsCOMPtr<nsIDocShellTreeItem> docShellItem(do_QueryInterface(cont));
+     if (docShellItem) {
+       nsCOMPtr<nsIDocShellTreeOwner> treeOwner;
+       docShellItem->GetTreeOwner(getter_AddRefs(treeOwner));
+       if (treeOwner) {
+         nsCOMPtr<nsIWebBrowserChrome> browserChrome(do_GetInterface(treeOwner));
+         if (browserChrome) {
+diff --git a/layout/printing/nsPrintEngine.cpp b/layout/printing/nsPrintEngine.cpp
+--- a/layout/printing/nsPrintEngine.cpp
++++ b/layout/printing/nsPrintEngine.cpp
+@@ -1964,18 +1964,18 @@ nsPrintEngine::ReflowPrintObject(nsPrint
+     aPO->mPresContext->SetPaginatedScrolling(canCreateScrollbars);
+   }
+ 
+   // Setup hierarchical relationship in view manager
+   aPO->mViewManager->SetRootView(rootView);
+ 
+   // This docshell stuff is weird; will go away when we stop having multiple
+   // presentations per document
+-  nsCOMPtr<nsISupports> supps(do_QueryInterface(aPO->mDocShell));
+-  aPO->mPresContext->SetContainer(supps);
++  // XXX We have stopped having multiple presentations per document.
++  aPO->mPresContext->SetContainer(aPO->mDocShell);
+ 
+   aPO->mPresShell->BeginObservingDocument();
+ 
+   aPO->mPresContext->SetPageSize(adjSize);
+   aPO->mPresContext->SetIsRootPaginatedDocument(documentIsTopLevel);
+   aPO->mPresContext->SetPageScale(aPO->mZoomRatio);
+   // Calculate scale factor from printer to screen
+   float printDPI = float(mPrt->mPrintDC->AppUnitsPerCSSInch()) /
+diff --git a/layout/svg/base/src/nsSVGOuterSVGFrame.cpp b/layout/svg/base/src/nsSVGOuterSVGFrame.cpp
+--- a/layout/svg/base/src/nsSVGOuterSVGFrame.cpp
++++ b/layout/svg/base/src/nsSVGOuterSVGFrame.cpp
+@@ -47,16 +47,17 @@
+ #include "nsIDOMSVGSVGElement.h"
+ #include "nsIDOMWindow.h"
+ #include "nsIInterfaceRequestorUtils.h"
+ #include "nsIObjectLoadingContent.h"
+ #include "nsRenderingContext.h"
+ #include "nsStubMutationObserver.h"
+ #include "nsSVGSVGElement.h"
+ #include "nsSVGTextFrame.h"
++#include "nsIDocShell.h"
+ 
+ namespace dom = mozilla::dom;
+ 
+ class nsSVGMutationObserver : public nsStubMutationObserver
+ {
+ public:
+   // nsIMutationObserver interface
+   NS_DECL_NSIMUTATIONOBSERVER_ATTRIBUTECHANGED
+@@ -748,17 +749,17 @@ nsSVGOuterSVGFrame::GetCanvasTM()
+ //----------------------------------------------------------------------
+ // Implementation helpers
+ 
+ bool
+ nsSVGOuterSVGFrame::IsRootOfReplacedElementSubDoc(nsIFrame **aEmbeddingFrame)
+ {
+   if (!mContent->GetParent()) {
+     // Our content is the document element
+-    nsCOMPtr<nsISupports> container = PresContext()->GetContainer();
++    nsCOMPtr<nsIDocShell> container = PresContext()->GetContainer();
+     nsCOMPtr<nsIDOMWindow> window = do_GetInterface(container);
+     if (window) {
+       nsCOMPtr<nsIDOMElement> frameElement;
+       window->GetFrameElement(getter_AddRefs(frameElement));
+       nsCOMPtr<nsIObjectLoadingContent> olc = do_QueryInterface(frameElement);
+       if (olc) {
+         // Our document is inside an HTML 'object', 'embed' or 'applet' element
+         if (aEmbeddingFrame) {
+diff --git a/layout/xul/base/src/nsMenuPopupFrame.cpp b/layout/xul/base/src/nsMenuPopupFrame.cpp
+--- a/layout/xul/base/src/nsMenuPopupFrame.cpp
++++ b/layout/xul/base/src/nsMenuPopupFrame.cpp
+@@ -72,16 +72,17 @@
+ #include "nsLayoutUtils.h"
+ #include "nsContentUtils.h"
+ #include "nsCSSFrameConstructor.h"
+ #include "nsEventStateManager.h"
+ #include "nsIPopupBoxObject.h"
+ #include "nsPIWindowRoot.h"
+ #include "nsIReflowCallback.h"
+ #include "nsBindingManager.h"
++#include "nsIDocShell.h"
+ #include "nsIDocShellTreeOwner.h"
+ #include "nsIBaseWindow.h"
+ #include "nsISound.h"
+ #include "nsIScreenManager.h"
+ #include "nsIServiceManager.h"
+ #include "nsThemeConstants.h"
+ #include "nsDisplayList.h"
+ #include "mozilla/Preferences.h"
+@@ -177,17 +178,17 @@ nsMenuPopupFrame::Init(nsIContent*      
+   }
+ 
+   if (mPopupType == ePopupTypePanel &&
+       aContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
+                             nsGkAtoms::drag, eIgnoreCase)) {
+     mIsDragPopup = true;
+   }
+ 
+-  nsCOMPtr<nsISupports> cont = PresContext()->GetContainer();
++  nsCOMPtr<nsIDocShell> cont = PresContext()->GetContainer();
+   nsCOMPtr<nsIDocShellTreeItem> dsti = do_QueryInterface(cont);
+   int32_t type = -1;
+   if (dsti && NS_SUCCEEDED(dsti->GetItemType(&type)) &&
+       type == nsIDocShellTreeItem::typeChrome)
+     mInContentShell = false;
+ 
+   // To improve performance, create the widget for the popup only if it is not
+   // a leaf. Leaf popups such as menus will create their widgets later when
+@@ -309,17 +310,17 @@ nsMenuPopupFrame::CreateWidgetForView(ns
+   widgetData.mDropShadow = !(viewHasTransparentContent || tag == nsGkAtoms::menulist);
+   widgetData.mPopupLevel = PopupLevel(widgetData.mNoAutoHide);
+ 
+   // panels which have a parent level need a parent widget. This allows them to
+   // always appear in front of the parent window but behind other windows that
+   // should be in front of it.
+   nsCOMPtr<nsIWidget> parentWidget;
+   if (widgetData.mPopupLevel != ePopupLevelTop) {
+-    nsCOMPtr<nsISupports> cont = PresContext()->GetContainer();
++    nsCOMPtr<nsIDocShell> cont = PresContext()->GetContainer();
+     nsCOMPtr<nsIDocShellTreeItem> dsti = do_QueryInterface(cont);
+     if (!dsti)
+       return NS_ERROR_FAILURE;
+ 
+     nsCOMPtr<nsIDocShellTreeOwner> treeOwner;
+     dsti->GetTreeOwner(getter_AddRefs(treeOwner));
+     if (!treeOwner) return NS_ERROR_FAILURE;
+ 
+diff --git a/layout/xul/base/src/nsResizerFrame.cpp b/layout/xul/base/src/nsResizerFrame.cpp
+--- a/layout/xul/base/src/nsResizerFrame.cpp
++++ b/layout/xul/base/src/nsResizerFrame.cpp
+@@ -342,17 +342,17 @@ nsResizerFrame::GetContentToResize(nsIPr
+       if (popup->GetType() == nsGkAtoms::menuPopupFrame) {
+         return popup->GetContent();
+       }
+       popup = popup->GetParent();
+     }
+ 
+     // don't allow resizing windows in content shells
+     bool isChromeShell = false;
+-    nsCOMPtr<nsISupports> cont = aPresShell->GetPresContext()->GetContainer();
++    nsCOMPtr<nsIDocShell> cont = aPresShell->GetPresContext()->GetContainer();
+     nsCOMPtr<nsIDocShellTreeItem> dsti = do_QueryInterface(cont);
+     if (dsti) {
+       int32_t type = -1;
+       isChromeShell = (NS_SUCCEEDED(dsti->GetItemType(&type)) &&
+                        type == nsIDocShellTreeItem::typeChrome);
+     }
+ 
+     if (!isChromeShell) {
+diff --git a/layout/xul/base/src/nsTitleBarFrame.cpp b/layout/xul/base/src/nsTitleBarFrame.cpp
+--- a/layout/xul/base/src/nsTitleBarFrame.cpp
++++ b/layout/xul/base/src/nsTitleBarFrame.cpp
+@@ -41,16 +41,17 @@
+ #include "nsIContent.h"
+ #include "nsIDocument.h"
+ #include "nsIDOMXULDocument.h"
+ #include "nsIDOMNodeList.h"
+ #include "nsGkAtoms.h"
+ #include "nsIWidget.h"
+ #include "nsMenuPopupFrame.h"
+ #include "nsPresContext.h"
++#include "nsIDocShell.h"
+ #include "nsIDocShellTreeItem.h"
+ #include "nsPIDOMWindow.h"
+ #include "nsGUIEvent.h"
+ #include "nsEventDispatcher.h"
+ #include "nsDisplayList.h"
+ #include "nsContentUtils.h"
+ 
+ //
+@@ -102,17 +103,17 @@ nsTitleBarFrame::HandleEvent(nsPresConte
+   switch (aEvent->message) {
+ 
+    case NS_MOUSE_BUTTON_DOWN:  {
+        if (aEvent->eventStructType == NS_MOUSE_EVENT &&
+            static_cast<nsMouseEvent*>(aEvent)->button ==
+              nsMouseEvent::eLeftButton)
+        {
+          // titlebar has no effect in non-chrome shells
+-         nsCOMPtr<nsISupports> cont = aPresContext->GetContainer();
++         nsCOMPtr<nsIDocShell> cont = aPresContext->GetContainer();
+          nsCOMPtr<nsIDocShellTreeItem> dsti = do_QueryInterface(cont);
+          if (dsti) {
+            int32_t type = -1;
+            if (NS_SUCCEEDED(dsti->GetItemType(&type)) &&
+                type == nsIDocShellTreeItem::typeChrome) {
+              // we're tracking.
+              mTrackingMouseMove = true;
+ 
+diff --git a/layout/xul/base/src/nsXULPopupManager.cpp b/layout/xul/base/src/nsXULPopupManager.cpp
+--- a/layout/xul/base/src/nsXULPopupManager.cpp
++++ b/layout/xul/base/src/nsXULPopupManager.cpp
+@@ -1462,17 +1462,17 @@ nsXULPopupManager::MayShowPopup(nsMenuPo
+     return false;
+   }
+ 
+   // if the popup was just rolled up, don't reopen it
+   nsCOMPtr<nsIWidget> widget = aPopup->GetWidget();
+   if (widget && widget->GetLastRollup() == aPopup->GetContent())
+       return false;
+ 
+-  nsCOMPtr<nsISupports> cont = aPopup->PresContext()->GetContainer();
++  nsCOMPtr<nsIDocShell> cont = aPopup->PresContext()->GetContainer();
+   nsCOMPtr<nsIDocShellTreeItem> dsti = do_QueryInterface(cont);
+   nsCOMPtr<nsIBaseWindow> baseWin = do_QueryInterface(dsti);
+   if (!baseWin)
+     return false;
+ 
+   int32_t type = -1;
+   if (NS_FAILED(dsti->GetItemType(&type)))
+     return false;
+diff --git a/toolkit/components/typeaheadfind/nsTypeAheadFind.cpp b/toolkit/components/typeaheadfind/nsTypeAheadFind.cpp
+--- a/toolkit/components/typeaheadfind/nsTypeAheadFind.cpp
++++ b/toolkit/components/typeaheadfind/nsTypeAheadFind.cpp
+@@ -338,41 +338,40 @@ nsTypeAheadFind::FindItNow(nsIPresShell 
+     GetSelection(presShell, getter_AddRefs(selectionController),
+                  getter_AddRefs(selection)); // cache for reuse
+     mSelectionController = do_GetWeakReference(selectionController);
+   } else {
+     selectionController->GetSelection(
+       nsISelectionController::SELECTION_NORMAL, getter_AddRefs(selection));
+   }
+  
+-  nsCOMPtr<nsISupports> startingContainer = presContext->GetContainer();
+-  nsCOMPtr<nsIDocShellTreeItem> treeItem(do_QueryInterface(startingContainer));
++  nsCOMPtr<nsIDocShell> startingDocShell = presContext->GetContainer();
++  nsCOMPtr<nsIDocShellTreeItem> treeItem(do_QueryInterface(startingDocShell));
+   NS_ASSERTION(treeItem, "Bug 175321 Crashes with Type Ahead Find [@ nsTypeAheadFind::FindItNow]");
+   if (!treeItem)
+     return NS_ERROR_FAILURE;
+ 
+   nsCOMPtr<nsIDocShellTreeItem> rootContentTreeItem;
+   nsCOMPtr<nsIDocShell> currentDocShell;
+-  nsCOMPtr<nsIDocShell> startingDocShell(do_QueryInterface(startingContainer));
+ 
+   treeItem->GetSameTypeRootTreeItem(getter_AddRefs(rootContentTreeItem));
+   nsCOMPtr<nsIDocShell> rootContentDocShell =
+     do_QueryInterface(rootContentTreeItem);
+ 
+   if (!rootContentDocShell)
+     return NS_ERROR_FAILURE;
+ 
+   nsCOMPtr<nsISimpleEnumerator> docShellEnumerator;
+   rootContentDocShell->GetDocShellEnumerator(nsIDocShellTreeItem::typeContent,
+                                              nsIDocShell::ENUMERATE_FORWARDS,
+                                              getter_AddRefs(docShellEnumerator));
+ 
+   // Default: can start at the current document
+-  nsCOMPtr<nsISupports> currentContainer = startingContainer =
+-    do_QueryInterface(rootContentDocShell);
++  nsCOMPtr<nsISupports> currentContainer = rootContentDocShell.get();
++  startingDocShell = rootContentDocShell;
+ 
+   // Iterate up to current shell, if there's more than 1 that we're
+   // dealing with
+   bool hasMoreDocShells;
+ 
+   while (NS_SUCCEEDED(docShellEnumerator->HasMoreElements(&hasMoreDocShells)) && hasMoreDocShells) {
+     docShellEnumerator->GetNext(getter_AddRefs(currentContainer));
+     currentDocShell = do_QueryInterface(currentContainer);
+@@ -1201,15 +1200,15 @@ nsTypeAheadFind::GetPresShell()
+ {
+   if (!mPresShell)
+     return nsnull;
+ 
+   nsIPresShell *shell = nsnull;
+   CallQueryReferent(mPresShell.get(), &shell);
+   if (shell) {
+     nsPresContext *pc = shell->GetPresContext();
+-    if (!pc || !nsCOMPtr<nsISupports>(pc->GetContainer())) {
++    if (!pc || !nsCOMPtr<nsIDocShell>(pc->GetContainer())) {
+       NS_RELEASE(shell);
+     }
+   }
+ 
+   return shell;
+ }

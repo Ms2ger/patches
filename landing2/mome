@@ -1,0 +1,153 @@
+diff --git a/js/src/jsfriendapi.cpp b/js/src/jsfriendapi.cpp
+--- a/js/src/jsfriendapi.cpp
++++ b/js/src/jsfriendapi.cpp
+@@ -180,22 +180,16 @@ AutoSwitchCompartment::AutoSwitchCompart
+ 
+ AutoSwitchCompartment::~AutoSwitchCompartment()
+ {
+     /* The old compartment may have been destroyed, so we can't use cx->setCompartment. */
+     cx->compartment = oldCompartment;
+ }
+ 
+ JS_FRIEND_API(bool)
+-js::IsSystemCompartment(const JSCompartment *c)
+-{
+-    return c->isSystemCompartment;
+-}
+-
+-JS_FRIEND_API(bool)
+ js::IsScopeObject(const JSObject *obj)
+ {
+     return obj->isInternalScope();
+ }
+ 
+ JS_FRIEND_API(JSObject *)
+ js::GetObjectParentMaybeScope(const JSObject *obj)
+ {
+diff --git a/js/src/jsfriendapi.h b/js/src/jsfriendapi.h
+--- a/js/src/jsfriendapi.h
++++ b/js/src/jsfriendapi.h
+@@ -185,19 +185,16 @@ class JS_FRIEND_API(AutoSwitchCompartmen
+     JS_DECL_USE_GUARD_OBJECT_NOTIFIER
+ };
+ 
+ #ifdef OLD_GETTER_SETTER_METHODS
+ JS_FRIEND_API(JSBool) obj_defineGetter(JSContext *cx, uintN argc, js::Value *vp);
+ JS_FRIEND_API(JSBool) obj_defineSetter(JSContext *cx, uintN argc, js::Value *vp);
+ #endif
+ 
+-extern JS_FRIEND_API(bool)
+-IsSystemCompartment(const JSCompartment *compartment);
+-
+ /*
+  * Check whether it is OK to assign an undeclared property with name
+  * propname of the global object in the current script on cx.  Reports
+  * an error if one needs to be reported (in particular in all cases
+  * when it returns false).
+  */
+ extern JS_FRIEND_API(bool)
+ CheckUndeclaredVarAssignment(JSContext *cx, JSString *propname);
+diff --git a/js/xpconnect/src/XPCJSRuntime.cpp b/js/xpconnect/src/XPCJSRuntime.cpp
+--- a/js/xpconnect/src/XPCJSRuntime.cpp
++++ b/js/xpconnect/src/XPCJSRuntime.cpp
+@@ -1253,23 +1253,41 @@ XPCJSRuntime::~XPCJSRuntime()
+ 
+     XPCPerThreadData::ShutDown();
+ }
+ 
+ namespace {
+ 
+ NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(JsMallocSizeOf, "js")
+ 
++static const char*
++GetCompartmentLocation(void *vdata, size_t *length)
++{
++    xpc::CompartmentPrivate *compartmentPrivate =
++        static_cast<xpc::CompartmentPrivate*>(vdata);
++    if (!compartmentPrivate) {
++        *length = 0;
++        return NULL;
++    }
++
++    nsCString location = compartmentPrivate->location;
++    *length = location.Length();
++    return location.get();
++}
++
+ void
+ CompartmentMemoryCallback(JSContext *cx, void *vdata, JSCompartment *compartment)
+ {
+     // Append a new CompartmentStats to the vector.
+     IterateData *data = static_cast<IterateData *>(vdata);
+-    CompartmentStats compartmentStats(cx, compartment);
+-    CompartmentStats *curr =
++    JS::CompartmentStats compartmentStats;
++    if (!compartmentStats.init(cx, compartment, GetCompartmentLocation))
++        return;
++
++    JS::CompartmentStats *curr =
+         data->compartmentStatsVector.AppendElement(compartmentStats);
+     data->currCompartmentStats = curr;
+ 
+     // Get the compartment-level numbers.
+ #ifdef JS_METHODJIT
+     curr->mjitCode = JS::SizeOfCompartmentMjitCode(compartment);
+ #endif
+     JS::SizeOfCompartmentTypeInferenceData(cx, compartment,
+@@ -1515,56 +1533,16 @@ NS_MEMORY_REPORTER_IMPLEMENT(XPConnectJS
+                              "and 'js-compartments-system' might not match the number of "
+                              "compartments listed under 'js' if a garbage collection occurs at an "
+                              "inopportune time, but such cases should be rare.")
+ 
+ namespace mozilla {
+ namespace xpconnect {
+ namespace memory {
+ 
+-CompartmentStats::CompartmentStats(JSContext *cx, JSCompartment *c)
+-{
+-    memset(this, 0, sizeof(*this));
+-
+-    if (c == cx->runtime->atomsCompartment) {
+-        name.AssignLiteral("atoms");
+-    } else if (JSPrincipals *principals = JS_GetCompartmentPrincipals(c)) {
+-        if (principals->codebase) {
+-            name.Assign(principals->codebase);
+-
+-            // If it's the system compartment, append the address.
+-            // This means that multiple system compartments (and there
+-            // can be many) can be distinguished.
+-            if (js::IsSystemCompartment(c)) {
+-                xpc::CompartmentPrivate *compartmentPrivate =
+-                        static_cast<xpc::CompartmentPrivate*>(JS_GetCompartmentPrivate(cx, c));
+-                if (compartmentPrivate &&
+-                    !compartmentPrivate->location.IsEmpty()) {
+-                    name.AppendLiteral(", ");
+-                    name.Append(compartmentPrivate->location);
+-                }
+-
+-                // ample; 64-bit address max is 18 chars
+-                static const int maxLength = 31;
+-                nsPrintfCString address(maxLength, ", 0x%llx", uint64_t(c));
+-                name.Append(address);
+-            }
+-
+-            // A hack: replace forward slashes with '\\' so they aren't
+-            // treated as path separators.  Users of the reporters
+-            // (such as about:memory) have to undo this change.
+-            name.ReplaceChar('/', '\\');
+-        } else {
+-            name.AssignLiteral("null-codebase");
+-        }
+-    } else {
+-        name.AssignLiteral("null-principal");
+-    }
+-}
+-
+ JSBool
+ CollectCompartmentStatsForRuntime(JSRuntime *rt, IterateData *data)
+ {
+     JSContext *cx = JS_NewContext(rt, 0);
+     if (!cx) {
+         NS_ERROR("couldn't create context for memory tracing");
+         return false;
+     }

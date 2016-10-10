@@ -1,0 +1,223 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/accessible/src/base/nsCoreUtils.cpp b/accessible/src/base/nsCoreUtils.cpp
+--- a/accessible/src/base/nsCoreUtils.cpp
++++ b/accessible/src/base/nsCoreUtils.cpp
+@@ -104,65 +104,65 @@ nsCoreUtils::DispatchClickEvent(nsITreeB
+   nsWeakFrame tcFrame = tcContent->GetPrimaryFrame();
+   nsIFrame* rootFrame = presShell->GetRootFrame();
+ 
+   nsPoint offset;
+   nsIWidget *rootWidget =
+     rootFrame->GetViewExternal()->GetNearestWidget(&offset);
+ 
+   nsRefPtr<nsPresContext> presContext = presShell->GetPresContext();
++  LayoutDeviceIntPoint point =
++    LayoutDeviceIntPoint::FromAppUnits(
++      CSSIntPoint::ToAppUnits(CSSIntPoint(tcX + x + 1, tcY + y + 1)) + offset,
++      presContext->AppUnitsPerDevPixel());
+ 
+-  int32_t cnvdX = presContext->CSSPixelsToDevPixels(tcX + x + 1) +
+-    presContext->AppUnitsToDevPixels(offset.x);
+-  int32_t cnvdY = presContext->CSSPixelsToDevPixels(tcY + y + 1) +
+-    presContext->AppUnitsToDevPixels(offset.y);
+-
+-  // XUL is just desktop, so there is no real reason for senfing touch events.
+-  DispatchMouseEvent(NS_MOUSE_BUTTON_DOWN, cnvdX, cnvdY,
++  // XUL is just desktop, so there is no real reason for sending touch events.
++  DispatchMouseEvent(NS_MOUSE_BUTTON_DOWN, point,
+                      tcContent, tcFrame, presShell, rootWidget);
+ 
+-  DispatchMouseEvent(NS_MOUSE_BUTTON_UP, cnvdX, cnvdY,
++  DispatchMouseEvent(NS_MOUSE_BUTTON_UP, point,
+                      tcContent, tcFrame, presShell, rootWidget);
+ }
+ 
+ void
+-nsCoreUtils::DispatchMouseEvent(uint32_t aEventType, int32_t aX, int32_t aY,
++nsCoreUtils::DispatchMouseEvent(uint32_t aEventType,
++                                const LayoutDeviceIntPoint& aPoint,
+                                 nsIContent *aContent, nsIFrame *aFrame,
+                                 nsIPresShell *aPresShell, nsIWidget *aRootWidget)
+ {
+   nsMouseEvent event(true, aEventType, aRootWidget,
+                      nsMouseEvent::eReal, nsMouseEvent::eNormal);
+ 
+-  event.refPoint = LayoutDeviceIntPoint(aX, aY);
++  event.refPoint = aPoint;
+ 
+   event.clickCount = 1;
+   event.button = nsMouseEvent::eLeftButton;
+   event.time = PR_IntervalNow();
+   event.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN;
+ 
+   nsEventStatus status = nsEventStatus_eIgnore;
+   aPresShell->HandleEventWithTarget(&event, aFrame, aContent, &status);
+ }
+ 
+ void
+-nsCoreUtils::DispatchTouchEvent(uint32_t aEventType, int32_t aX, int32_t aY,
++nsCoreUtils::DispatchTouchEvent(uint32_t aEventType,
++                                const LayoutDeviceIntPoint& aPoint,
+                                 nsIContent* aContent, nsIFrame* aFrame,
+                                 nsIPresShell* aPresShell, nsIWidget* aRootWidget)
+ {
+   if (!nsDOMTouchEvent::PrefEnabled())
+     return;
+ 
+   nsTouchEvent event(true, aEventType, aRootWidget);
+ 
+   event.time = PR_IntervalNow();
+ 
+   // XXX: Touch has an identifier of -1 to hint that it is synthesized.
+   nsRefPtr<mozilla::dom::Touch> t =
+-    new mozilla::dom::Touch(-1, LayoutDeviceIntPoint(aX, aY),
+-                            nsIntPoint(1, 1), 0.0f, 1.0f);
++    new mozilla::dom::Touch(-1, aPoint, nsIntPoint(1, 1), 0.0f, 1.0f);
+   t->SetTarget(aContent);
+   event.touches.AppendElement(t);
+   nsEventStatus status = nsEventStatus_eIgnore;
+   aPresShell->HandleEventWithTarget(&event, aFrame, aContent, &status);
+ }
+ 
+ uint32_t
+ nsCoreUtils::GetAccessKeyFor(nsIContent* aContent)
+diff --git a/accessible/src/base/nsCoreUtils.h b/accessible/src/base/nsCoreUtils.h
+--- a/accessible/src/base/nsCoreUtils.h
++++ b/accessible/src/base/nsCoreUtils.h
+@@ -8,16 +8,17 @@
+ 
+ #include "nsIContent.h"
+ #include "nsIBoxObject.h"
+ #include "nsIPresShell.h"
+ 
+ #include "nsIDOMDOMStringList.h"
+ #include "nsPoint.h"
+ #include "nsTArray.h"
++#include "Units.h"
+ 
+ class nsRange;
+ class nsIFrame;
+ class nsIDocShell;
+ class nsITreeColumn;
+ class nsITreeBoxObject;
+ class nsIWidget;
+ 
+@@ -45,39 +46,39 @@ public:
+   static void DispatchClickEvent(nsITreeBoxObject *aTreeBoxObj,
+                                  int32_t aRowIndex, nsITreeColumn *aColumn,
+                                  const nsCString& aPseudoElt = EmptyCString());
+ 
+   /**
+    * Send mouse event to the given element.
+    *
+    * @param aEventType   [in] an event type (see nsGUIEvent.h for constants)
+-   * @param aX           [in] x coordinate in dev pixels
+-   * @param aY           [in] y coordinate in dev pixels
++   * @param aPoint       [in] the target point
+    * @param aContent     [in] the element
+    * @param aFrame       [in] frame of the element
+    * @param aPresShell   [in] the presshell for the element
+    * @param aRootWidget  [in] the root widget of the element
+    */
+-  static void DispatchMouseEvent(uint32_t aEventType, int32_t aX, int32_t aY,
++  static void DispatchMouseEvent(uint32_t aEventType,
++                                 const mozilla::LayoutDeviceIntPoint& aPoint,
+                                  nsIContent *aContent, nsIFrame *aFrame,
+                                  nsIPresShell *aPresShell, nsIWidget *aRootWidget);
+ 
+   /**
+    * Send a touch event with a single touch point to the given element.
+    *
+    * @param aEventType   [in] an event type (see nsGUIEvent.h for constants)
+-   * @param aX           [in] x coordinate in dev pixels
+-   * @param aY           [in] y coordinate in dev pixels
++   * @param aPoint       [in] the target point
+    * @param aContent     [in] the element
+    * @param aFrame       [in] frame of the element
+    * @param aPresShell   [in] the presshell for the element
+    * @param aRootWidget  [in] the root widget of the element
+    */
+-  static void DispatchTouchEvent(uint32_t aEventType, int32_t aX, int32_t aY,
++  static void DispatchTouchEvent(uint32_t aEventType,
++                                 const mozilla::LayoutDeviceIntPoint& aPoint,
+                                  nsIContent* aContent, nsIFrame* aFrame,
+                                  nsIPresShell* aPresShell, nsIWidget* aRootWidget);
+ 
+   /**
+    * Return an accesskey registered on the given element by
+    * nsEventStateManager or 0 if there is no registered accesskey.
+    *
+    * @param aContent - the given element.
+diff --git a/accessible/src/generic/Accessible.cpp b/accessible/src/generic/Accessible.cpp
+--- a/accessible/src/generic/Accessible.cpp
++++ b/accessible/src/generic/Accessible.cpp
+@@ -2292,32 +2292,34 @@ Accessible::DispatchClickEvent(nsIConten
+                                    nsIPresShell::ScrollAxis(),
+                                    nsIPresShell::SCROLL_OVERFLOW_HIDDEN);
+ 
+   nsWeakFrame frame = aContent->GetPrimaryFrame();
+   if (!frame)
+     return;
+ 
+   // Compute x and y coordinates.
+-  nsPoint point;
+-  nsCOMPtr<nsIWidget> widget = frame->GetNearestWidget(point);
++  nsPoint corner;
++  nsCOMPtr<nsIWidget> widget = frame->GetNearestWidget(corner);
+   if (!widget)
+     return;
+ 
+   nsSize size = frame->GetSize();
+ 
+   nsRefPtr<nsPresContext> presContext = presShell->GetPresContext();
+-  int32_t x = presContext->AppUnitsToDevPixels(point.x + size.width / 2);
+-  int32_t y = presContext->AppUnitsToDevPixels(point.y + size.height / 2);
++  LayoutDeviceIntPoint point =
++    LayoutDeviceIntPoint::FromAppUnits(
++      corner + nsPoint(size.width, size.height) / 2,
++      presContext->AppUnitsPerDevPixel());
+ 
+   // Simulate a touch interaction by dispatching touch events with mouse events.
+-  nsCoreUtils::DispatchTouchEvent(NS_TOUCH_START, x, y, aContent, frame, presShell, widget);
+-  nsCoreUtils::DispatchMouseEvent(NS_MOUSE_BUTTON_DOWN, x, y, aContent, frame, presShell, widget);
+-  nsCoreUtils::DispatchTouchEvent(NS_TOUCH_END, x, y, aContent, frame, presShell, widget);
+-  nsCoreUtils::DispatchMouseEvent(NS_MOUSE_BUTTON_UP, x, y, aContent, frame, presShell, widget);
++  nsCoreUtils::DispatchTouchEvent(NS_TOUCH_START, point, aContent, frame, presShell, widget);
++  nsCoreUtils::DispatchMouseEvent(NS_MOUSE_BUTTON_DOWN, point, aContent, frame, presShell, widget);
++  nsCoreUtils::DispatchTouchEvent(NS_TOUCH_END, point, aContent, frame, presShell, widget);
++  nsCoreUtils::DispatchMouseEvent(NS_MOUSE_BUTTON_UP, point, aContent, frame, presShell, widget);
+ }
+ 
+ NS_IMETHODIMP
+ Accessible::ScrollTo(uint32_t aHow)
+ {
+   if (IsDefunct())
+     return NS_ERROR_FAILURE;
+ 
+diff --git a/layout/base/Units.h b/layout/base/Units.h
+--- a/layout/base/Units.h
++++ b/layout/base/Units.h
+@@ -150,16 +150,22 @@ struct LayoutDevicePixel {
+ 
+   static LayoutDeviceRect FromAppUnits(const nsRect& aRect, nscoord aAppUnitsPerDevPixel) {
+     return LayoutDeviceRect(NSAppUnitsToFloatPixels(aRect.x, float(aAppUnitsPerDevPixel)),
+                             NSAppUnitsToFloatPixels(aRect.y, float(aAppUnitsPerDevPixel)),
+                             NSAppUnitsToFloatPixels(aRect.width, float(aAppUnitsPerDevPixel)),
+                             NSAppUnitsToFloatPixels(aRect.height, float(aAppUnitsPerDevPixel)));
+   }
+ 
++  static LayoutDeviceIntPoint FromAppUnits(const nsPoint& aPoint, int32_t aAppUnitsPerDevPixel)
++  {
++    return LayoutDeviceIntPoint(NSAppUnitsToIntPixels(aPoint.x, float(aAppUnitsPerDevPixel)),
++                                NSAppUnitsToIntPixels(aPoint.y, float(aAppUnitsPerDevPixel)));
++  }
++
+   static LayoutDeviceIntPoint FromAppUnitsRounded(const nsPoint& aPoint, nscoord aAppUnitsPerDevPixel) {
+     return LayoutDeviceIntPoint(NSAppUnitsToIntPixels(aPoint.x, aAppUnitsPerDevPixel),
+                                 NSAppUnitsToIntPixels(aPoint.y, aAppUnitsPerDevPixel));
+   }
+ 
+   static LayoutDeviceIntPoint FromAppUnitsToNearest(const nsPoint& aPoint, nscoord aAppUnitsPerDevPixel) {
+     return FromUntyped(aPoint.ToNearestPixels(aAppUnitsPerDevPixel));
+   }

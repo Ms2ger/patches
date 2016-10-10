@@ -1,0 +1,141 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/imptests/importTestsuite.py b/dom/imptests/importTestsuite.py
+--- a/dom/imptests/importTestsuite.py
++++ b/dom/imptests/importTestsuite.py
+@@ -17,51 +17,83 @@ import shutil
+ import subprocess
+ import sys
+ 
+ import parseManifest
+ import writeBuildFiles
+ 
+ HEADERS_SUFFIX = "^headers^"
+ 
++class Path(object):
++    def __init__(self, repo, path):
++        self.repo = repo
++        self.path = path
++
++
++class SourcePath(Path):
++    def __init__(self, repo, path):
++        Path.__init__(self, repo, path)
++
++    def get(self):
++        return "hg-%s/%s" % (self.repo, self.path)
++
++
++class DestPath(Path):
++    def shorten(self, path):
++        path = path.replace('dom-tree-accessors', 'dta')
++        path = path.replace('document.getElementsByName', 'doc.gEBN')
++        path = path.replace('requirements-for-implementations', 'implreq')
++        path = path.replace('other-elements-attributes-and-apis', 'oeaaa')
++        return path
++
++    def __init__(self, repo, path):
++        Path.__init__(self, repo, path)
++
++    def get(self):
++        return "%s/%s" % (self.repo, self.shorten(self.path))
++
++
+ def parseManifestFile(dest, dir):
+-    subdirs, mochitests, _, __, supportfiles = parseManifest.parseManifestFile("hg-%s/%s/MANIFEST" % (dest, dir))
++    path = SourcePath(dest, "%s/MANIFEST" % dir)
++    subdirs, mochitests, _, __, supportfiles = parseManifest.parseManifestFile(path.get())
+     return subdirs, mochitests, supportfiles
+ 
+ def getData(confFile):
+     """This function parses a file of the form
+     URL of remote repository|Name of the destination directory
+     First directory of tests
+     ...
+     Last directory of tests"""
+     vcs = ""
+-    repo = ""
+-    dest = ""
++    url = ""
++    dest = None
+     directories = []
+     try:
+         with open(confFile, 'r') as fp:
+             first = True
+             for line in fp:
+                 if first:
+-                    vcs, repo, dest = line.strip().split("|")
++                    vcs, url, dest = line.strip().split("|")
+                     first = False
+                 else:
+                     directories.append(line.strip())
+     finally:
+-        return vcs, repo, dest, directories
++        return vcs, url, dest, directories
+ 
+ def makePath(a, b):
+     if not b:
+         # Empty directory, i.e., the repository root.
+         return a
+     return "%s/%s" % (a, b)
+ 
+ def copyTest(source, dest):
+     """Copy the file at source to dest, as well as any ^headers^ file associated
+     with it."""
++    assert isinstance(source, SourcePath)
++    assert isinstance(dest, DestPath)
+     shutil.copy(source, dest)
+     if os.path.exists(source + HEADERS_SUFFIX):
+         shutil.copy(source + HEADERS_SUFFIX, dest + HEADERS_SUFFIX)
+ 
+ def copy(dest, directories):
+     """Copy mochitests and support files from the external HG directory to their
+     place in mozilla-central.
+     """
+@@ -128,34 +160,35 @@ def hgadd(dest, directories):
+     print("hg addremoving...")
+     for d in directories:
+         subprocess.check_call(["hg", "addremove", "%s/%s" % (dest, d)])
+ 
+ def importDirs(dest, directories):
+     copy(dest, directories)
+     printBuildFiles(dest, directories)
+ 
+-def removeAndCloneRepo(vcs, src, dest):
++def removeAndCloneRepo(vcs, url, dest):
+     assert vcs in ('hg', 'git')
++    assert isinstance(dest, SourcePath)
+ 
+-    print("Removing %s..." % dest)
+-    subprocess.check_call(["rm", "-rf", dest])
++    print("Removing %s..." % dest.get())
++    subprocess.check_call(["rm", "-rf", dest.get()])
+ 
+-    print("Cloning %s to %s with %s..." % (src, dest, vcs))
+-    subprocess.check_call([vcs, "clone", src, dest])
++    print("Cloning %s to %s with %s..." % (url, dest.get(), vcs))
++    subprocess.check_call([vcs, "clone", url, dest.get()])
+ 
+ def importRepo(confFile):
+     try:
+-        vcs, repo, dest, directories = getData(confFile)
+-        hgdest = "hg-%s" % (dest, )
+-        print("Going to clone %s to %s..." % (repo, hgdest))
+-        print("Removing %s..." % dest)
+-        subprocess.check_call(["rm", "-rf", dest])
++        vcs, repo, iden, directories = getData(confFile)
++        src = SourcePath(iden, "")
++        dest = DestPath(iden, "")
++        print("Removing %s..." % dest.get())
++        subprocess.check_call(["rm", "-rf", dest.get()])
+ 
+-        removeAndCloneRepo(vcs, repo, hgdest)
++        removeAndCloneRepo(vcs, repo, src)
+ 
+         print("Going to import %s..." % directories)
+         importDirs(dest, directories)
+         printMozbuildFile(dest, directories)
+         hgadd(dest, directories)
+         print("Removing %s again..." % hgdest)
+         subprocess.check_call(["rm", "-rf", hgdest])
+     except subprocess.CalledProcessError as e:

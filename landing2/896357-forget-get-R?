@@ -1,0 +1,762 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsDocument.cpp b/content/base/src/nsDocument.cpp
+--- a/content/base/src/nsDocument.cpp
++++ b/content/base/src/nsDocument.cpp
+@@ -1166,17 +1166,17 @@ IMPL_SHIM(nsIApplicationCacheContainer)
+       nsCOMPtr<_i> real = do_GetInterface(mCallbacks);                     \
+       if (!real) {                                                         \
+         return NS_NOINTERFACE;                                             \
+       }                                                                    \
+       nsCOMPtr<_i> shim = new _i##Shim(this, real);                        \
+       if (!shim) {                                                         \
+         return NS_ERROR_OUT_OF_MEMORY;                                     \
+       }                                                                    \
+-      *aSink = shim.forget().get();                                        \
++      shim.forget(aSink);                                                  \
+       return NS_OK;                                                        \
+     }                                                                      \
+   PR_END_MACRO
+ 
+ NS_IMETHODIMP
+ nsExternalResourceMap::LoadgroupCallbacks::GetInterface(const nsIID & aIID,
+                                                         void **aSink)
+ {
+@@ -5301,18 +5301,17 @@ nsDocument::Register(JSContext* aCx, con
+ 
+ NS_IMETHODIMP
+ nsDocument::GetElementsByTagName(const nsAString& aTagname,
+                                  nsIDOMNodeList** aReturn)
+ {
+   nsRefPtr<nsContentList> list = GetElementsByTagName(aTagname);
+   NS_ENSURE_TRUE(list, NS_ERROR_OUT_OF_MEMORY);
+ 
+-  // transfer ref to aReturn
+-  *aReturn = list.forget().get();
++  list.forget(aReturn);
+   return NS_OK;
+ }
+ 
+ already_AddRefed<nsContentList>
+ nsIDocument::GetElementsByTagNameNS(const nsAString& aNamespaceURI,
+                                     const nsAString& aLocalName)
+ {
+   int32_t nameSpaceId = kNameSpaceID_Wildcard;
+@@ -5333,18 +5332,17 @@ NS_IMETHODIMP
+ nsDocument::GetElementsByTagNameNS(const nsAString& aNamespaceURI,
+                                    const nsAString& aLocalName,
+                                    nsIDOMNodeList** aReturn)
+ {
+   nsRefPtr<nsContentList> list =
+     nsIDocument::GetElementsByTagNameNS(aNamespaceURI, aLocalName);
+   NS_ENSURE_TRUE(list, NS_ERROR_OUT_OF_MEMORY);
+ 
+-  // transfer ref to aReturn
+-  *aReturn = list.forget().get();
++  list.forget(aReturn);
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsDocument::GetAsync(bool *aAsync)
+ {
+   NS_ERROR("nsDocument::GetAsync() should be overriden by subclass!");
+ 
+diff --git a/content/html/content/src/nsFormSubmission.cpp b/content/html/content/src/nsFormSubmission.cpp
+--- a/content/html/content/src/nsFormSubmission.cpp
++++ b/content/html/content/src/nsFormSubmission.cpp
+@@ -559,18 +559,17 @@ nsFSMultipartFormData::GetEncodedSubmiss
+ 
+   nsAutoCString contentType;
+   GetContentType(contentType);
+   mimeStream->AddHeader("Content-Type", contentType.get());
+   mimeStream->SetAddContentLength(true);
+   uint64_t unused;
+   mimeStream->SetData(GetSubmissionBody(&unused));
+ 
+-  *aPostDataStream = mimeStream.forget().get();
+-
++  mimeStream.forget(aPostDataStream);
+   return NS_OK;
+ }
+ 
+ nsresult
+ nsFSMultipartFormData::AddPostDataStream()
+ {
+   nsresult rv = NS_OK;
+   
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -8895,18 +8895,17 @@ nsGlobalWindow::GetComputedStyleHelper(n
+ 
+   nsCOMPtr<dom::Element> element = do_QueryInterface(aElt);
+   NS_ENSURE_TRUE(element, NS_ERROR_FAILURE);
+   nsRefPtr<nsComputedDOMStyle> compStyle =
+     NS_NewComputedDOMStyle(element, aPseudoElt, presShell,
+                            aDefaultStylesOnly ? nsComputedDOMStyle::eDefaultOnly :
+                                                 nsComputedDOMStyle::eAll);
+ 
+-  *aReturn = compStyle.forget().get();
+-
++  compStyle.forget(aReturn);
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsGlobalWindow::GetSessionStorage(nsIDOMStorage ** aSessionStorage)
+ {
+   FORWARD_TO_INNER(GetSessionStorage, (aSessionStorage), NS_ERROR_UNEXPECTED);
+ 
+diff --git a/dom/gamepad/Gamepad.cpp b/dom/gamepad/Gamepad.cpp
+--- a/dom/gamepad/Gamepad.cpp
++++ b/dom/gamepad/Gamepad.cpp
+@@ -86,17 +86,17 @@ Gamepad::GetButtons(nsIVariant** aButton
+     nsresult rv = out->SetAsArray(nsIDataType::VTYPE_DOUBLE,
+                                   nullptr,
+                                   mButtons.Length(),
+                                   reinterpret_cast<void*>(array));
+     NS_Free(array);
+     NS_ENSURE_SUCCESS(rv, rv);
+   }
+ 
+-  *aButtons = out.forget().get();
++  out.forget(aButtons);
+   return NS_OK;
+ }
+ 
+ nsresult
+ Gamepad::GetAxes(nsIVariant** aAxes)
+ {
+   nsRefPtr<nsVariant> out = new nsVariant();
+   NS_ENSURE_STATE(out);
+@@ -117,17 +117,17 @@ Gamepad::GetAxes(nsIVariant** aAxes)
+     nsresult rv = out->SetAsArray(nsIDataType::VTYPE_DOUBLE,
+                                   nullptr,
+                                   mAxes.Length(),
+                                   reinterpret_cast<void*>(array));
+     NS_Free(array);
+     NS_ENSURE_SUCCESS(rv, rv);
+   }
+ 
+-  *aAxes = out.forget().get();
++  out.forget(aAxes);
+   return NS_OK;
+ }
+ 
+ void
+ Gamepad::SyncState(Gamepad* aOther)
+ {
+   if (mButtons.Length() != aOther->mButtons.Length() ||
+       mAxes.Length() != aOther->mAxes.Length()) {
+diff --git a/dom/plugins/base/nsNPAPIPlugin.cpp b/dom/plugins/base/nsNPAPIPlugin.cpp
+--- a/dom/plugins/base/nsNPAPIPlugin.cpp
++++ b/dom/plugins/base/nsNPAPIPlugin.cpp
+@@ -460,17 +460,17 @@ nsNPAPIPlugin::CreatePlugin(nsPluginTag 
+ #elif defined(MOZ_WIDGET_GONK)
+ #else
+   rv = pluginLib->NP_Initialize(&sBrowserFuncs, &plugin->mPluginFuncs, &pluginCallError);
+   if (rv != NS_OK || pluginCallError != NPERR_NO_ERROR) {
+     return NS_ERROR_FAILURE;
+   }
+ #endif
+ 
+-  *aResult = plugin.forget().get();
++  plugin.forget(aResult);
+   return NS_OK;
+ }
+ 
+ PluginLibrary*
+ nsNPAPIPlugin::GetLibrary()
+ {
+   return mLibrary;
+ }
+diff --git a/dom/plugins/base/nsPluginHost.cpp b/dom/plugins/base/nsPluginHost.cpp
+--- a/dom/plugins/base/nsPluginHost.cpp
++++ b/dom/plugins/base/nsPluginHost.cpp
+@@ -3319,17 +3319,17 @@ nsPluginHost::CreateTempFileToPost(const
+       rv = outStream->Write(buf, bw, &br);
+       if (NS_FAILED(rv) || (bw != br))
+         break;
+     }
+ 
+     inStream->Close();
+     outStream->Close();
+     if (NS_SUCCEEDED(rv))
+-      *aTmpFile = tempFile.forget().get();
++      tempFile.forget(aTmpFile);
+   }
+   return rv;
+ }
+ 
+ nsresult
+ nsPluginHost::NewPluginNativeWindow(nsPluginNativeWindow ** aPluginNativeWindow)
+ {
+   return PLUG_NewPluginNativeWindow(aPluginNativeWindow);
+diff --git a/dom/plugins/ipc/PluginInstanceParent.cpp b/dom/plugins/ipc/PluginInstanceParent.cpp
+--- a/dom/plugins/ipc/PluginInstanceParent.cpp
++++ b/dom/plugins/ipc/PluginInstanceParent.cpp
+@@ -822,18 +822,17 @@ PluginInstanceParent::BeginUpdateBackgro
+ 
+ #ifdef DEBUG
+     gfxIntSize sz = mBackground->GetSize();
+     NS_ABORT_IF_FALSE(nsIntRect(0, 0, sz.width, sz.height).Contains(aRect),
+                       "Update outside of background area");
+ #endif
+ 
+     nsRefPtr<gfxContext> ctx = new gfxContext(mBackground);
+-    *aCtx = ctx.forget().get();
+-
++    ctx.forget(aCtx);
+     return NS_OK;
+ }
+ 
+ nsresult
+ PluginInstanceParent::EndUpdateBackground(gfxContext* aCtx,
+                                           const nsIntRect& aRect)
+ {
+     PLUGIN_LOG_DEBUG(
+diff --git a/extensions/spellcheck/src/mozInlineSpellChecker.cpp b/extensions/spellcheck/src/mozInlineSpellChecker.cpp
+--- a/extensions/spellcheck/src/mozInlineSpellChecker.cpp
++++ b/extensions/spellcheck/src/mozInlineSpellChecker.cpp
+@@ -62,16 +62,17 @@
+ #include "nsGUIEvent.h"
+ #include "nsRange.h"
+ #include "nsContentUtils.h"
+ #include "nsEditor.h"
+ #include "mozilla/Services.h"
+ #include "nsIObserverService.h"
+ #include "nsITextControlElement.h"
+ 
++using namespace mozilla;
+ using namespace mozilla::dom;
+ 
+ // Set to spew messages to the console about what is happening.
+ //#define DEBUG_INLINESPELL
+ 
+ // the number of milliseconds that we will take at once to do spellchecking
+ #define INLINESPELL_CHECK_TIMEOUT 50
+ 
+@@ -1133,21 +1134,23 @@ mozInlineSpellChecker::MakeSpellCheckRan
+   *aRange = nullptr;
+ 
+   nsCOMPtr<nsIEditor> editor (do_QueryReferent(mEditor));
+   NS_ENSURE_TRUE(editor, NS_ERROR_NULL_POINTER);
+ 
+   nsCOMPtr<nsIDOMDocument> doc;
+   rv = editor->GetDocument(getter_AddRefs(doc));
+   NS_ENSURE_SUCCESS(rv, rv);
+-  NS_ENSURE_TRUE(doc, NS_ERROR_FAILURE);
+ 
+-  nsCOMPtr<nsIDOMRange> range;
+-  rv = doc->CreateRange(getter_AddRefs(range));
+-  NS_ENSURE_SUCCESS(rv, rv);
++  nsCOMPtr<nsIDocument> document = do_QueryInterface(doc);
++  NS_ENSURE_TRUE(document, NS_ERROR_FAILURE);
++
++  ErrorResult res;
++  nsRefPtr<nsRange> range = document->CreateRange(res);
++  NS_ENSURE_SUCCESS(res.ErrorCode(), res.ErrorCode());
+ 
+   // possibly use full range of the editor
+   nsCOMPtr<nsIDOMElement> rootElem;
+   if (! aStartNode || ! aEndNode) {
+     rv = editor->GetRootElement(getter_AddRefs(rootElem));
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     aStartNode = rootElem;
+@@ -1177,17 +1180,17 @@ mozInlineSpellChecker::MakeSpellCheckRan
+   rv = range->SetStart(aStartNode, aStartOffset);
+   NS_ENSURE_SUCCESS(rv, rv);
+   if (aEndOffset)
+     rv = range->SetEnd(aEndNode, aEndOffset);
+   else
+     rv = range->SetEndAfter(aEndNode);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+-  *aRange = static_cast<nsRange*>(range.forget().get());
++  range.forget(aRange);
+   return NS_OK;
+ }
+ 
+ nsresult
+ mozInlineSpellChecker::SpellCheckBetweenNodes(nsIDOMNode *aStartNode,
+                                               int32_t aStartOffset,
+                                               nsIDOMNode *aEndNode,
+                                               int32_t aEndOffset)
+diff --git a/gfx/layers/basic/BasicImageLayer.cpp b/gfx/layers/basic/BasicImageLayer.cpp
+--- a/gfx/layers/basic/BasicImageLayer.cpp
++++ b/gfx/layers/basic/BasicImageLayer.cpp
+@@ -161,17 +161,17 @@ BasicImageLayer::GetAsSurface(gfxASurfac
+                               SurfaceDescriptor* aDescriptor)
+ {
+   if (!mContainer) {
+     return false;
+   }
+ 
+   gfxIntSize dontCare;
+   nsRefPtr<gfxASurface> surface = mContainer->GetCurrentAsSurface(&dontCare);
+-  *aSurface = surface.forget().get();
++  surface.forget(aSurface);
+   return true;
+ }
+ 
+ already_AddRefed<ImageLayer>
+ BasicLayerManager::CreateImageLayer()
+ {
+   NS_ASSERTION(InConstruction(), "Only allowed in construction phase");
+   nsRefPtr<ImageLayer> layer = new BasicImageLayer(this);
+diff --git a/gfx/layers/client/ContentClient.cpp b/gfx/layers/client/ContentClient.cpp
+--- a/gfx/layers/client/ContentClient.cpp
++++ b/gfx/layers/client/ContentClient.cpp
+@@ -257,17 +257,17 @@ ContentClientRemoteBuffer::CreateBuffer(
+                                         uint32_t aFlags,
+                                         gfxASurface** aWhiteSurface)
+ {
+   BuildDeprecatedTextureClients(aType, aRect, aFlags);
+ 
+   nsRefPtr<gfxASurface> ret = mDeprecatedTextureClient->LockSurface();
+   if (aFlags & BUFFER_COMPONENT_ALPHA) {
+     nsRefPtr<gfxASurface> retWhite = mDeprecatedTextureClientOnWhite->LockSurface();
+-    *aWhiteSurface = retWhite.forget().get();
++    retWhite.forget(aWhiteSurface);
+   }
+   return ret.forget();
+ }
+ 
+ nsIntRegion
+ ContentClientRemoteBuffer::GetUpdatedRegion(const nsIntRegion& aRegionToDraw,
+                                             const nsIntRegion& aVisibleRegion,
+                                             bool aDidSelfCopy)
+diff --git a/gfx/layers/ipc/ShadowLayers.cpp b/gfx/layers/ipc/ShadowLayers.cpp
+--- a/gfx/layers/ipc/ShadowLayers.cpp
++++ b/gfx/layers/ipc/ShadowLayers.cpp
+@@ -621,33 +621,33 @@ ShadowLayerForwarder::GetDescriptorSurfa
+   gfxContentType content;
+   if (PlatformGetDescriptorSurfaceContentType(aDescriptor, aMode,
+                                               &content, aSurface)) {
+     return content;
+   }
+ 
+   nsRefPtr<gfxASurface> surface = OpenDescriptor(aMode, aDescriptor);
+   content = surface->GetContentType();
+-  *aSurface = surface.forget().get();
++  surface.forget(aSurface);
+   return content;
+ }
+ 
+ /*static*/ gfxIntSize
+ ShadowLayerForwarder::GetDescriptorSurfaceSize(
+   const SurfaceDescriptor& aDescriptor, OpenMode aMode,
+   gfxASurface** aSurface)
+ {
+   gfxIntSize size;
+   if (PlatformGetDescriptorSurfaceSize(aDescriptor, aMode, &size, aSurface)) {
+     return size;
+   }
+ 
+   nsRefPtr<gfxASurface> surface = OpenDescriptor(aMode, aDescriptor);
+   size = surface->GetSize();
+-  *aSurface = surface.forget().get();
++  surface.forget(aSurface);
+   return size;
+ }
+ 
+ /*static*/ gfxImageFormat
+ ShadowLayerForwarder::GetDescriptorSurfaceImageFormat(
+   const SurfaceDescriptor& aDescriptor, OpenMode aMode,
+   gfxASurface** aSurface)
+ {
+diff --git a/gfx/thebes/gfxPlatformGtk.cpp b/gfx/thebes/gfxPlatformGtk.cpp
+--- a/gfx/thebes/gfxPlatformGtk.cpp
++++ b/gfx/thebes/gfxPlatformGtk.cpp
+@@ -692,18 +692,17 @@ gfxPlatformGtk::FindFontForChar(uint32_t
+ 
+     // find fonts that support the character
+     gPlatformFonts->Enumerate(FindFontForCharProc, &data);
+ 
+     if (data.mBestMatch) {
+         nsRefPtr<gfxFT2Font> font =
+             gfxFT2Font::GetOrMakeFont(static_cast<FontEntry*>(data.mBestMatch.get()),
+                                       aFont->GetStyle()); 
+-        gfxFont* ret = font.forget().get();
+-        return already_AddRefed<gfxFont>(ret);
++        return font.forget();
+     }
+ 
+     // no match? add to set of non-matching codepoints
+     gCodepointsWithNoFonts->set(aCh);
+ 
+     return nullptr;
+ }
+ 
+diff --git a/gfx/thebes/gfxQtPlatform.cpp b/gfx/thebes/gfxQtPlatform.cpp
+--- a/gfx/thebes/gfxQtPlatform.cpp
++++ b/gfx/thebes/gfxQtPlatform.cpp
+@@ -565,18 +565,17 @@ gfxQtPlatform::FindFontForChar(uint32_t 
+ 
+     // find fonts that support the character
+     gPlatformFonts->Enumerate(FindFontForCharProc, &data);
+ 
+     if (data.mBestMatch) {
+         nsRefPtr<gfxFT2Font> font =
+             gfxFT2Font::GetOrMakeFont(static_cast<FontEntry*>(data.mBestMatch.get()),
+                                       aFont->GetStyle()); 
+-        gfxFont* ret = font.forget().get();
+-        return already_AddRefed<gfxFont>(ret);
++        return font.forget();
+     }
+ 
+     // no match? add to set of non-matching codepoints
+     gCodepointsWithNoFonts->set(aCh);
+ 
+     return nullptr;
+ }
+ 
+diff --git a/image/src/RasterImage.cpp b/image/src/RasterImage.cpp
+--- a/image/src/RasterImage.cpp
++++ b/image/src/RasterImage.cpp
+@@ -857,17 +857,17 @@ RasterImage::CopyFrame(uint32_t aWhichFr
+                                                              gfxASurface::ImageFormatARGB32);
+   gfxContext ctx(imgsurface);
+   ctx.SetOperator(gfxContext::OPERATOR_SOURCE);
+   ctx.Rectangle(framerect);
+   ctx.Translate(framerect.TopLeft());
+   ctx.SetPattern(pattern);
+   ctx.Fill();
+ 
+-  *_retval = imgsurface.forget().get();
++  imgsurface.forget(_retval);
+   return NS_OK;
+ }
+ 
+ //******************************************************************************
+ /* [noscript] gfxASurface getFrame(in uint32_t aWhichFrame,
+  *                                 in uint32_t aFlags); */
+ NS_IMETHODIMP
+ RasterImage::GetFrame(uint32_t aWhichFrame,
+@@ -919,18 +919,17 @@ RasterImage::GetFrame(uint32_t aWhichFra
+   // The image doesn't have a surface because it's been optimized away. Create
+   // one.
+   if (!framesurf) {
+     nsRefPtr<gfxImageSurface> imgsurf;
+     rv = CopyFrame(aWhichFrame, aFlags, getter_AddRefs(imgsurf));
+     framesurf = imgsurf;
+   }
+ 
+-  *_retval = framesurf.forget().get();
+-
++  framesurf.forget(_retval);
+   return rv;
+ }
+ 
+ already_AddRefed<layers::Image>
+ RasterImage::GetCurrentImage()
+ {
+   if (!mDecoded) {
+     // We can't call StartDecoding because that can synchronously notify
+diff --git a/image/src/VectorImage.cpp b/image/src/VectorImage.cpp
+--- a/image/src/VectorImage.cpp
++++ b/image/src/VectorImage.cpp
+@@ -656,17 +656,17 @@ VectorImage::GetFrame(uint32_t aWhichFra
+   // --------------------
+   nsresult rv = Draw(context, gfxPattern::FILTER_NEAREST, gfxMatrix(),
+                      gfxRect(gfxPoint(0,0), gfxIntSize(imageIntSize.width,
+                                                        imageIntSize.height)),
+                      nsIntRect(nsIntPoint(0,0), imageIntSize),
+                      imageIntSize, nullptr, aWhichFrame, aFlags);
+ 
+   NS_ENSURE_SUCCESS(rv, rv);
+-  *_retval = surface.forget().get();
++  surface.forget(_retval);
+   return rv;
+ }
+ 
+ //******************************************************************************
+ /* [noscript] ImageContainer getImageContainer(); */
+ NS_IMETHODIMP
+ VectorImage::GetImageContainer(LayerManager* aManager,
+                                mozilla::layers::ImageContainer** _retval)
+diff --git a/js/xpconnect/src/XPCConvert.cpp b/js/xpconnect/src/XPCConvert.cpp
+--- a/js/xpconnect/src/XPCConvert.cpp
++++ b/js/xpconnect/src/XPCConvert.cpp
+@@ -921,41 +921,41 @@ XPCConvert::NativeInterface2JSObject(jsv
+ 
+     // If we're not creating security wrappers, we can return the
+     // XPCWrappedNative as-is here.
+     flat = wrapper->GetFlatJSObject();
+     jsval v = OBJECT_TO_JSVAL(flat);
+     if (!allowNativeWrapper) {
+         *d = v;
+         if (dest)
+-            *dest = strongWrapper.forget().get();
++            strongWrapper.forget(dest);
+         if (pErr)
+             *pErr = NS_OK;
+         return true;
+     }
+ 
+     // The call to wrap here handles both cross-compartment and same-compartment
+     // security wrappers.
+     RootedObject original(cx, flat);
+     if (!JS_WrapObject(cx, flat.address()))
+         return false;
+ 
+     *d = OBJECT_TO_JSVAL(flat);
+ 
+     if (dest) {
+         // The strongWrapper still holds the original flat object.
+         if (flat == original) {
+-            *dest = strongWrapper.forget().get();
++            strongWrapper.forget(dest);
+         } else {
+             nsRefPtr<XPCJSObjectHolder> objHolder =
+                 XPCJSObjectHolder::newHolder(flat);
+             if (!objHolder)
+                 return false;
+ 
+-            *dest = objHolder.forget().get();
++            objHolder.forget(dest);
+         }
+     }
+ 
+     if (pErr)
+         *pErr = NS_OK;
+ 
+     return true;
+ }
+diff --git a/js/xpconnect/src/XPCWrappedJSClass.cpp b/js/xpconnect/src/XPCWrappedJSClass.cpp
+--- a/js/xpconnect/src/XPCWrappedJSClass.cpp
++++ b/js/xpconnect/src/XPCWrappedJSClass.cpp
+@@ -697,19 +697,17 @@ nsXPCWrappedJSClass::DelegatedQueryInter
+             return rv;
+ 
+         bool isSystem;
+         rv = secMan->IsSystemPrincipal(objPrin, &isSystem);
+         if ((NS_FAILED(rv) || !isSystem) && !IS_WN_REFLECTOR(selfObj)) {
+             // A content object.
+             nsRefPtr<SameOriginCheckedComponent> checked =
+                 new SameOriginCheckedComponent(self);
+-            if (!checked)
+-                return NS_ERROR_OUT_OF_MEMORY;
+-            *aInstancePtr = checked.forget().get();
++            checked.forget(aInstancePtr);
+             return NS_OK;
+         }
+     }
+ 
+     // check if the JSObject claims to implement this interface
+     RootedObject jsobj(ccx, CallQueryInterfaceOnJSObject(ccx, self->GetJSObject(),
+                                                          aIID));
+     if (jsobj) {
+diff --git a/js/xpconnect/src/XPCWrappedNative.cpp b/js/xpconnect/src/XPCWrappedNative.cpp
+--- a/js/xpconnect/src/XPCWrappedNative.cpp
++++ b/js/xpconnect/src/XPCWrappedNative.cpp
+@@ -456,17 +456,17 @@ XPCWrappedNative::GetNewOrUsed(xpcObject
+         wrapper = map->Find(identity);
+     }
+ 
+     if (wrapper) {
+         if (!wrapper->FindTearOff(Interface, false, &rv)) {
+             MOZ_ASSERT(NS_FAILED(rv), "returning NS_OK on failure");
+             return rv;
+         }
+-        *resultWrapper = wrapper.forget().get();
++        wrapper.forget(resultWrapper);
+         return NS_OK;
+     }
+ 
+     // There is a chance that the object wants to have the self-same JSObject
+     // reflection regardless of the scope into which we are reflecting it.
+     // Many DOM objects require this. The scriptable helper specifies this
+     // in preCreate by indicating a 'parent' of a particular scope.
+     //
+@@ -550,17 +550,17 @@ XPCWrappedNative::GetNewOrUsed(xpcObject
+             wrapper = map->Find(identity);
+         }
+ 
+         if (wrapper) {
+             if (wrapper->FindTearOff(Interface, false, &rv)) {
+                 MOZ_ASSERT(NS_FAILED(rv), "returning NS_OK on failure");
+                 return rv;
+             }
+-            *resultWrapper = wrapper.forget().get();
++            wrapper.forget(resultWrapper);
+             return NS_OK;
+         }
+     } else {
+         ac.construct(static_cast<JSContext*>(cx), parent);
+ 
+         nsISupports *Object = helper.Object();
+         if (nsXPCWrappedJSClass::IsWrappedJS(Object)) {
+             nsCOMPtr<nsIXPConnectWrappedJS> wrappedjs(do_QueryInterface(Object));
+@@ -705,17 +705,17 @@ FinishCreate(XPCWrappedNativeScope* Scop
+                     cache->ClearWrapper();
+                 wrapper->Release();
+                 return rv;
+             }
+         }
+     }
+ 
+     DEBUG_CheckClassInfoClaims(wrapper);
+-    *resultWrapper = wrapper.forget().get();
++    wrapper.forget(resultWrapper);
+     return NS_OK;
+ }
+ 
+ // static
+ nsresult
+ XPCWrappedNative::GetUsedOnly(nsISupports* Object,
+                               XPCWrappedNativeScope* Scope,
+                               XPCNativeInterface* Interface,
+diff --git a/media/mtransport/nriceresolver.cpp b/media/mtransport/nriceresolver.cpp
+--- a/media/mtransport/nriceresolver.cpp
++++ b/media/mtransport/nriceresolver.cpp
+@@ -164,17 +164,17 @@ int NrIceResolver::resolve(nr_resolver_r
+     ABORT(R_NOT_FOUND);
+   }
+   // Because the C API offers no "finished" method to release the handle we
+   // return, we cannot return the request we got from AsyncResolve directly.
+   //
+   // Instead, we return an addref'ed reference to PendingResolution itself,
+   // which in turn holds the request and coordinates between cancel and
+   // OnLookupComplete to release it only once.
+-  *handle = pr.forget().get();
++  pr.forget(handle);
+ 
+   _status=0;
+ abort:
+   return _status;
+ }
+ 
+ nsresult NrIceResolver::PendingResolution::OnLookupComplete(
+     nsICancelable *request, nsIDNSRecord *record, nsresult status) {
+diff --git a/media/webrtc/signaling/src/peerconnection/PeerConnectionImpl.cpp b/media/webrtc/signaling/src/peerconnection/PeerConnectionImpl.cpp
+--- a/media/webrtc/signaling/src/peerconnection/PeerConnectionImpl.cpp
++++ b/media/webrtc/signaling/src/peerconnection/PeerConnectionImpl.cpp
+@@ -708,17 +708,17 @@ PeerConnectionImpl::CreateFakeMediaStrea
+       new Fake_AudioGenerator(stream);
+     } else {
+ #ifdef MOZILLA_INTERNAL_API
+     new Fake_VideoGenerator(stream);
+ #endif
+     }
+   }
+ 
+-  *aRetval = stream.forget().get();
++  stream.forget(aRetval);
+   return NS_OK;
+ }
+ 
+ // Stubbing this call out for now.
+ // We can remove it when we are confident of datachannels being started
+ // correctly on SDP negotiation (bug 852908)
+ NS_IMETHODIMP
+ PeerConnectionImpl::ConnectDataConnection(uint16_t aLocalport,
+diff --git a/modules/libjar/nsZipArchive.cpp b/modules/libjar/nsZipArchive.cpp
+--- a/modules/libjar/nsZipArchive.cpp
++++ b/modules/libjar/nsZipArchive.cpp
+@@ -203,17 +203,17 @@ nsresult nsZipHandle::Init(nsIFile *file
+   if (aFd) {
+     *aFd = fd.forget();
+   }
+ #endif
+   handle->mMap = map;
+   handle->mFile.Init(file);
+   handle->mLen = (uint32_t) size;
+   handle->mFileData = buf;
+-  *ret = handle.forget().get();
++  handle.forget(ret);
+   return NS_OK;
+ }
+ 
+ nsresult nsZipHandle::Init(nsZipArchive *zip, const char *entry,
+                            nsZipHandle **ret)
+ {
+   nsRefPtr<nsZipHandle> handle = new nsZipHandle();
+   if (!handle)
+@@ -225,17 +225,17 @@ nsresult nsZipHandle::Init(nsZipArchive 
+ 
+   if (!handle->mBuf->Buffer())
+     return NS_ERROR_UNEXPECTED;
+ 
+   handle->mMap = nullptr;
+   handle->mFile.Init(zip, entry);
+   handle->mLen = handle->mBuf->Length();
+   handle->mFileData = handle->mBuf->Buffer();
+-  *ret = handle.forget().get();
++  handle.forget(ret);
+   return NS_OK;
+ }
+ 
+ int64_t nsZipHandle::SizeOfMapping()
+ {
+     return mLen;
+ }
+ 
+diff --git a/netwerk/protocol/about/nsAboutCacheEntry.cpp b/netwerk/protocol/about/nsAboutCacheEntry.cpp
+--- a/netwerk/protocol/about/nsAboutCacheEntry.cpp
++++ b/netwerk/protocol/about/nsAboutCacheEntry.cpp
+@@ -134,17 +134,17 @@ nsAboutCacheEntry::GetContentStream(nsIU
+     uint32_t n;
+     rv = mOutputStream->Write(buffer.get(), buffer.Length(), &n);
+     if (NS_FAILED(rv)) return rv;
+     if (n != buffer.Length()) return NS_ERROR_UNEXPECTED;
+ 
+     rv = OpenCacheEntry(uri);
+     if (NS_FAILED(rv)) return rv;
+ 
+-    *result = inputStream.forget().get();
++    inputStream.forget(result);
+     return NS_OK;
+ }
+ 
+ nsresult
+ nsAboutCacheEntry::OpenCacheEntry(nsIURI *uri)
+ {
+     nsresult rv;
+     nsAutoCString clientID, key;
+diff --git a/netwerk/protocol/wyciwyg/nsWyciwygProtocolHandler.cpp b/netwerk/protocol/wyciwyg/nsWyciwygProtocolHandler.cpp
+--- a/netwerk/protocol/wyciwyg/nsWyciwygProtocolHandler.cpp
++++ b/netwerk/protocol/wyciwyg/nsWyciwygProtocolHandler.cpp
+@@ -214,17 +214,17 @@ nsWyciwygProtocolHandler::NewChannel(nsI
+     nsWyciwygChannel *wc = new nsWyciwygChannel();
+     channel = wc;
+     rv = wc->Init(url);
+   }
+ 
+   if (NS_FAILED(rv))
+     return rv;
+ 
+-  *result = channel.forget().get();
++  channel.forget(result);
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsWyciwygProtocolHandler::GetProtocolFlags(uint32_t *result) 
+ {
+   // Should this be an an nsINestedURI?  We don't really want random webpages
+   // loading these URIs...
+diff --git a/widget/xpwidgets/GfxInfoBase.cpp b/widget/xpwidgets/GfxInfoBase.cpp
+--- a/widget/xpwidgets/GfxInfoBase.cpp
++++ b/widget/xpwidgets/GfxInfoBase.cpp
+@@ -335,17 +335,17 @@ BlacklistNodeGetChildByName(nsIDOMElemen
+       !nodelist) {
+     return false;
+   }
+ 
+   nsCOMPtr<nsIDOMNode> node;
+   if (NS_FAILED(nodelist->Item(0, getter_AddRefs(node))) || !node)
+     return false;
+ 
+-  *firstchild = node.forget().get();
++  node.forget(firstchild);
+   return true;
+ }
+ 
+ /*
+ 
+ <gfxBlacklistEntry>
+   <os>WINNT 6.0</os>
+   <vendor>0x8086</vendor>

@@ -1,0 +1,152 @@
+diff --git a/js/xpconnect/src/XPCNativeSetKey.h b/js/xpconnect/src/XPCNativeSetKey.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCNativeSetKey.h
+@@ -0,0 +1,58 @@
++#ifndef XPCNativeSetKey_h
++#define XPCNativeSetKey_h
++
++#include "prtypes.h"
++
++class XPCNativeSet;
++class XPCNativeInterface;
++
++// XPCNativeSetKey is used to key a XPCNativeSet in a NativeSetMap.
++
++class XPCNativeSetKey
++{
++public:
++    XPCNativeSetKey(XPCNativeSet*       aBaseSet  = nsnull,
++                    XPCNativeInterface* aAddition = nsnull,
++                    uint16_t            aPosition = 0)
++        : mIsAKey(IS_A_KEY), mPosition(aPosition), mBaseSet(aBaseSet)
++        , mAddition(aAddition) {}
++    ~XPCNativeSetKey() {}
++
++    XPCNativeSet*           GetBaseSet()  const {return mBaseSet;}
++    XPCNativeInterface*     GetAddition() const {return mAddition;}
++    uint16_t                GetPosition() const {return mPosition;}
++
++    // This is a fun little hack...
++    // We build these keys only on the stack. We use them for lookup in
++    // NativeSetMap. Because we don't want to pay the cost of cloning a key and
++    // sticking it into the hashtable, when the XPCNativeSet actually
++    // gets added to the table the 'key' in the table is a pointer to the
++    // set itself and not this key. Our key compare function expects to get
++    // a key and a set. When we do external lookups in the map we pass in one
++    // of these keys and our compare function gets passed a key and a set.
++    // (see compare_NativeKeyToSet in xpcmaps.cpp). This is all well and good.
++    // Except, when the table decides to resize itself. Then it tries to use
++    // our compare function with the 'keys' that are in the hashtable (which are
++    // really XPCNativeSet objects and not XPCNativeSetKey objects!
++    //
++    // So, the hack is to have the compare function assume it is getting a
++    // XPCNativeSetKey pointer and call this IsAKey method. If that fails then
++    // it realises that it really has a XPCNativeSet pointer and deals with that
++    // fact. This is safe because we know that both of these classes have no
++    // virtual methods and their first data member is a uint16_t. We are
++    // confident that XPCNativeSet->mMemberCount will never be 0xffff.
++
++    JSBool                  IsAKey() const {return mIsAKey == IS_A_KEY;}
++
++    enum {IS_A_KEY = 0xffff};
++
++    // Allow shallow copy
++
++private:
++    uint16_t                mIsAKey;    // must be first data member
++    uint16_t                mPosition;
++    XPCNativeSet*           mBaseSet;
++    XPCNativeInterface*     mAddition;
++};
++
++#endif // XPCNativeSetKey_h
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -151,16 +151,17 @@
+ #include "XPCJSRuntime.h"
+ #include "XPCContext.h"
+ #include "XPCReadableJSStringWrapper.h"
+ #include "XPCCallContext.h"
+ #include "XPCLazyCallContext.h"
+ #include "XPCWrappedNativeScope.h"
+ #include "XPCNativeMember.h"
+ #include "XPCNativeInterface.h"
++#include "XPCNativeSetKey.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -449,67 +450,16 @@ enum WrapperType {
+     COW             = 1 << 4,
+     SOW             = 1 << 5
+ };
+ 
+ }
+ 
+ /***************************************************************************/
+ /***************************************************************************/
+-/***************************************************************************/
+-// XPCNativeSetKey is used to key a XPCNativeSet in a NativeSetMap.
+-
+-class XPCNativeSetKey
+-{
+-public:
+-    XPCNativeSetKey(XPCNativeSet*       BaseSet  = nsnull,
+-                    XPCNativeInterface* Addition = nsnull,
+-                    uint16_t            Position = 0)
+-        : mIsAKey(IS_A_KEY), mPosition(Position), mBaseSet(BaseSet),
+-          mAddition(Addition) {}
+-    ~XPCNativeSetKey() {}
+-
+-    XPCNativeSet*           GetBaseSet()  const {return mBaseSet;}
+-    XPCNativeInterface*     GetAddition() const {return mAddition;}
+-    uint16_t                GetPosition() const {return mPosition;}
+-
+-    // This is a fun little hack...
+-    // We build these keys only on the stack. We use them for lookup in
+-    // NativeSetMap. Becasue we don't want to pay the cost of cloning a key and
+-    // sticking it into the hashtable, when the XPCNativeSet actually
+-    // gets added to the table the 'key' in the table is a pointer to the
+-    // set itself and not this key. Our key compare function expects to get
+-    // a key and a set. When we do external lookups in the map we pass in one
+-    // of these keys and our compare function gets passed a key and a set.
+-    // (see compare_NativeKeyToSet in xpcmaps.cpp). This is all well and good.
+-    // Except, when the table decides to resize itself. Then it tries to use
+-    // our compare function with the 'keys' that are in the hashtable (which are
+-    // really XPCNativeSet objects and not XPCNativeSetKey objects!
+-    //
+-    // So, the hack is to have the compare function assume it is getting a
+-    // XPCNativeSetKey pointer and call this IsAKey method. If that fails then
+-    // it realises that it really has a XPCNativeSet pointer and deals with that
+-    // fact. This is safe because we know that both of these classes have no
+-    // virtual methods and their first data member is a uint16_t. We are
+-    // confident that XPCNativeSet->mMemberCount will never be 0xffff.
+-
+-    JSBool                  IsAKey() const {return mIsAKey == IS_A_KEY;}
+-
+-    enum {IS_A_KEY = 0xffff};
+-
+-    // Allow shallow copy
+-
+-private:
+-    uint16_t                mIsAKey;    // must be first data member
+-    uint16_t                mPosition;
+-    XPCNativeSet*           mBaseSet;
+-    XPCNativeInterface*     mAddition;
+-};
+-
+-/***************************************************************************/
+ // XPCNativeScriptableFlags is a wrapper class that holds the flags returned
+ // from calls to nsIXPCScriptable::GetScriptableFlags(). It has convenience
+ // methods to check for particular bitflags. Since we also use this class as
+ // a member of the gc'd class XPCNativeScriptableShared, this class holds the
+ // bit and exposes the inlined methods to support marking.
+ 
+ #define XPC_WN_SJSFLAGS_MARK_FLAG JS_BIT(31) // only high bit of 32 is set
+ 

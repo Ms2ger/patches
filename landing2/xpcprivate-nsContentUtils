@@ -1,0 +1,357 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/Makefile.in b/content/base/src/Makefile.in
+--- a/content/base/src/Makefile.in
++++ b/content/base/src/Makefile.in
+@@ -176,17 +176,16 @@ INCLUDES	+= \
+ 		-I$(srcdir)/../../base/src \
+ 		-I$(srcdir)/../../xbl/src \
+ 		-I$(srcdir)/../../../layout/generic \
+ 		-I$(srcdir)/../../../layout/style \
+ 		-I$(srcdir)/../../../dom/base \
+ 		-I$(srcdir)/../../xml/document/src \
+ 		-I$(topsrcdir)/xpcom/io \
+ 		-I$(topsrcdir)/dom/ipc \
+-		-I$(topsrcdir)/js/xpconnect/src \
+ 		-I$(topsrcdir)/caps/include \
+ 		-I$(topsrcdir)/netwerk/base/src \
+ 		$(NULL)
+ 
+ DEFINES += -D_IMPL_NS_LAYOUT
+ DEFINES += -DHB_DONT_DEFINE_STDINT
+ 
+ # gcc requires -msse2 for this file since it uses SSE2 intrinsics.  (See bug
+diff --git a/content/base/src/nsContentUtils.cpp b/content/base/src/nsContentUtils.cpp
+--- a/content/base/src/nsContentUtils.cpp
++++ b/content/base/src/nsContentUtils.cpp
+@@ -129,17 +129,17 @@ static NS_DEFINE_CID(kXTFServiceCID, NS_
+ 
+ // for ReportToConsole
+ #include "nsIStringBundle.h"
+ #include "nsIScriptError.h"
+ #include "nsIConsoleService.h"
+ 
+ #include "mozAutoDocUpdate.h"
+ #include "imgICache.h"
+-#include "xpcprivate.h" // nsXPConnect
++#include "xpcpublic.h"
+ #include "nsScriptSecurityManager.h"
+ #include "nsIChannelPolicy.h"
+ #include "nsChannelPolicy.h"
+ #include "nsIContentSecurityPolicy.h"
+ #include "nsContentDLF.h"
+ #ifdef MOZ_MEDIA
+ #include "nsHTMLMediaElement.h"
+ #endif
+@@ -335,21 +335,21 @@ nsContentUtils::Init()
+     NS_WARNING("Init() called twice");
+ 
+     return NS_OK;
+   }
+ 
+   nsresult rv = NS_GetNameSpaceManager(&sNameSpaceManager);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+-  nsXPConnect* xpconnect = nsXPConnect::GetXPConnect();
+-  NS_ENSURE_TRUE(xpconnect, NS_ERROR_FAILURE);
+-
+-  sXPConnect = xpconnect;
+-  sThreadJSContextStack = xpconnect;
++  sXPConnect = xpc::GetXPConnect();
++  NS_ENSURE_TRUE(sXPConnect, NS_ERROR_FAILURE);
++
++  sThreadJSContextStack = xpc::GetThreadJSContextStack();
++  NS_ENSURE_TRUE(sThreadJSContextStack, NS_ERROR_FAILURE);
+ 
+   sSecurityManager = nsScriptSecurityManager::GetScriptSecurityManager();
+   if(!sSecurityManager)
+     return NS_ERROR_FAILURE;
+   NS_ADDREF(sSecurityManager);
+ 
+   rv = CallGetService(NS_IOSERVICE_CONTRACTID, &sIOService);
+   if (NS_FAILED(rv)) {
+@@ -6763,20 +6763,17 @@ nsContentUtils::ReleaseWrapper(nsISuppor
+                                nsWrapperCache* aCache)
+ {
+   if (aCache->PreservingWrapper()) {
+     // PreserveWrapper puts new DOM bindings in the JS holders hash, but they
+     // can also be in the DOM expando hash, so we need to try to remove them
+     // from both here.
+     JSObject* obj = aCache->GetWrapperPreserveColor();
+     if (aCache->IsDOMBinding() && obj) {
+-      JSCompartment *compartment = js::GetObjectCompartment(obj);
+-      xpc::CompartmentPrivate *priv =
+-        static_cast<xpc::CompartmentPrivate *>(JS_GetCompartmentPrivate(compartment));
+-      priv->RemoveDOMExpandoObject(obj);
++      xpc::RemoveDOMExpandoObject(obj);
+     }
+     DropJSObjects(aScriptObjectHolder);
+ 
+     aCache->SetPreservingWrapper(false);
+   }
+ }
+ 
+ // static
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -27,20 +27,16 @@
+ #undef GetClassName
+ #endif // GetClassName
+ #endif // XP_WIN
+ 
+ // Helper Classes
+ #include "nsXPIDLString.h"
+ #include "nsJSUtils.h"
+ #include "prmem.h"
+-#include "jsapi.h"              // for JSAutoRequest
+-#include "jsdbgapi.h"           // for JS_ClearWatchPointsForObject
+-#include "jsfriendapi.h"        // for JS_GetGlobalForFrame
+-#include "jswrapper.h"
+ #include "nsReadableUtils.h"
+ #include "nsDOMClassInfo.h"
+ #include "nsJSEnvironment.h"
+ #include "nsCharSeparatedTokenizer.h" // for Accept-Language parsing
+ #include "nsUnicharUtils.h"
+ #include "mozilla/Preferences.h"
+ 
+ // Other Classes
+@@ -55,17 +51,16 @@
+ #include "nsPluginHost.h"
+ #include "nsIPluginInstanceOwner.h"
+ #include "nsGeolocation.h"
+ #include "nsDesktopNotification.h"
+ #include "nsContentCID.h"
+ #include "nsLayoutStatics.h"
+ #include "nsCycleCollector.h"
+ #include "nsCCUncollectableMarker.h"
+-#include "nsAutoJSValHolder.h"
+ #include "nsDOMMediaQueryList.h"
+ #include "mozilla/dom/workers/Workers.h"
+ #include "nsJSPrincipals.h"
+ #include "mozilla/Attributes.h"
+ 
+ // Interfaces Needed
+ #include "nsIFrame.h"
+ #include "nsCanvasFrame.h"
+@@ -163,18 +158,16 @@
+ #include "nsICookiePermission.h"
+ #include "nsServiceManagerUtils.h"
+ #ifdef MOZ_XUL
+ #include "nsXULPopupManager.h"
+ #include "nsIDOMXULControlElement.h"
+ #include "nsMenuPopupFrame.h"
+ #endif
+ 
+-#include "xpcprivate.h"
+-
+ #ifdef NS_PRINTING
+ #include "nsIPrintSettings.h"
+ #include "nsIPrintSettingsService.h"
+ #include "nsIWebBrowserPrint.h"
+ #endif
+ 
+ #include "nsWindowRoot.h"
+ #include "nsNetCID.h"
+@@ -187,47 +180,51 @@
+ 
+ #include "nsBindingManager.h"
+ #include "nsXBLService.h"
+ 
+ // used for popup blocking, needs to be converted to something
+ // belonging to the back-end like nsIContentPolicy
+ #include "nsIPopupWindowManager.h"
+ 
++#include "mozAutoDocUpdate.h"
++#include "mozilla/dom/Element.h"
++#include "mozilla/dom/indexedDB/IDBFactory.h"
++#include "mozilla/dom/indexedDB/IndexedDatabaseManager.h"
++#include "mozilla/dom/StructuredCloneTags.h"
++#include "mozilla/FunctionTimer.h"
++#include "mozilla/Telemetry.h"
++#include "mozIThirdPartyUtil.h"
++#include "nsDOMEventTargetHelper.h"
++#include "nsFrameLoader.h"
++#include "nsIAppsService.h"
+ #include "nsIDragService.h"
+-#include "mozilla/dom/Element.h"
+-#include "nsFrameLoader.h"
+ #include "nsISupportsPrimitives.h"
++#include "nsLocation.h"
++#include "nsRefreshDriver.h"
++#include "nsWrapperCacheInlines.h"
+ #include "nsXPCOMCID.h"
+-
+-#include "mozilla/FunctionTimer.h"
+-#include "mozIThirdPartyUtil.h"
++#include "prrng.h"
++
++// JS includes.
++#include "jsapi.h"              // for JSAutoRequest
++#include "jsdbgapi.h"
++#include "jsfriendapi.h"
++#include "jswrapper.h"
++
++// XPConnect includes.
++#include "xpcpublic.h"
+ 
+ #ifdef MOZ_LOGGING
+ // so we can get logging even in release builds
+ #define FORCE_PR_LOG 1
+ #endif
+ #include "prlog.h"
+ #include "prenv.h"
+ 
+-#include "mozilla/dom/indexedDB/IDBFactory.h"
+-#include "mozilla/dom/indexedDB/IndexedDatabaseManager.h"
+-
+-#include "mozilla/dom/StructuredCloneTags.h"
+-
+-#include "nsRefreshDriver.h"
+-#include "mozAutoDocUpdate.h"
+-
+-#include "mozilla/Telemetry.h"
+-#include "nsLocation.h"
+-#include "nsWrapperCacheInlines.h"
+-#include "nsDOMEventTargetHelper.h"
+-#include "nsIAppsService.h"
+-#include "prrng.h"
+-
+ #ifdef ANDROID
+ #include <android/log.h>
+ #endif
+ 
+ #ifdef PR_LOGGING
+ static PRLogModuleInfo* gDOMLeakPRLog;
+ #endif
+ 
+@@ -1994,24 +1991,17 @@ nsGlobalWindow::SetNewDocument(nsIDocume
+           NS_ERROR("unable to enter a compartment");
+           return NS_ERROR_FAILURE;
+         }
+ 
+         JS_SetParent(cx, mJSObject, newInnerWindow->mJSObject);
+ 
+         SetOuterObject(cx, mJSObject);
+ 
+-        JSCompartment *compartment = js::GetObjectCompartment(mJSObject);
+-        xpc::CompartmentPrivate *priv =
+-          static_cast<xpc::CompartmentPrivate*>(JS_GetCompartmentPrivate(compartment));
+-        if (priv && priv->waiverWrapperMap) {
+-          NS_ASSERTION(!JS_IsExceptionPending(cx),
+-                       "We might overwrite a pending exception!");
+-          priv->waiverWrapperMap->Reparent(cx, newInnerWindow->mJSObject);
+-        }
++        xpc::ReparentWrappers(cx, mJSObject, newInnerWindow->mJSObject);
+       }
+     }
+ 
+     // Enter the new global's compartment.
+     JSAutoEnterCompartment ac;
+     if (!ac.enter(cx, mJSObject)) {
+       NS_ERROR("unable to enter a compartment");
+       return NS_ERROR_FAILURE;
+diff --git a/js/xpconnect/src/nsXPConnect.cpp b/js/xpconnect/src/nsXPConnect.cpp
+--- a/js/xpconnect/src/nsXPConnect.cpp
++++ b/js/xpconnect/src/nsXPConnect.cpp
+@@ -3008,8 +3008,47 @@ JS_EXPORT_API(void) DumpJSValue(JS::Valu
+     } else if (val.isUndefined()) {
+         printf("Value is undefined\n");
+     } else {
+         printf("No idea what this value is.\n");
+     }
+ }
+ JS_END_EXTERN_C
+ 
++namespace xpc {
++
++nsIXPConnect*
++GetXPConnect()
++{
++    return nsXPConnect::GetXPConnect();
++}
++
++nsIThreadJSContextStack*
++GetThreadJSContextStack()
++{
++    return nsXPConnect::GetXPConnect();
++}
++
++void
++RemoveDOMExpandoObject(JSObject *obj)
++{
++    MOZ_ASSERT(obj);
++    CompartmentPrivate *priv = GetCompartmentPrivate(obj);
++    priv->RemoveDOMExpandoObject(obj);
++}
++
++void
++ReparentWrappers(JSContext *cx, JSObject *oldInner, JSObject *newInner)
++{
++    MOZ_ASSERT(cx);
++    MOZ_ASSERT(oldInner);
++    MOZ_ASSERT(newInner);
++
++    CompartmentPrivate *priv = GetCompartmentPrivate(oldInner);
++    if (!priv || !priv->waiverWrapperMap)
++        return;
++
++    NS_ASSERTION(!JS_IsExceptionPending(cx),
++                 "We might overwrite a pending exception!");
++    priv->waiverWrapperMap->Reparent(cx, newInner);
++}
++
++} // namespace xpc
+diff --git a/js/xpconnect/src/xpcpublic.h b/js/xpconnect/src/xpcpublic.h
+--- a/js/xpconnect/src/xpcpublic.h
++++ b/js/xpconnect/src/xpcpublic.h
+@@ -20,16 +20,18 @@
+ #include "nsIPrincipal.h"
+ #include "nsWrapperCache.h"
+ #include "nsStringGlue.h"
+ #include "nsTArray.h"
+ #include "mozilla/dom/DOMJSClass.h"
+ #include "nsMathUtils.h"
+ 
+ class nsIPrincipal;
++class nsIThreadJSContextStack;
++class nsIXPConnect;
+ class nsIXPConnectWrappedJS;
+ class nsScriptNameSpaceManager;
+ 
+ #ifndef BAD_TLS_INDEX
+ #define BAD_TLS_INDEX ((uint32_t) -1)
+ #endif
+ 
+ namespace xpc {
+@@ -344,16 +346,30 @@ JSObject *
+ Unwrap(JSContext *cx, JSObject *wrapper, bool stopAtOuter = true);
+ 
+ /**
+  * Throws an exception on cx and returns false.
+  */
+ bool
+ Throw(JSContext *cx, nsresult rv);
+ 
++nsIXPConnect *GetXPConnect();
++nsIThreadJSContextStack *GetThreadJSContextStack();
++
++void RemoveDOMExpandoObject(JSObject *obj);
++
++/**
++ * Reparents those wrappers in the waiverWrapperMap for |oldInner|'s compartment
++ * that have as their parent an inner window whose outer has newInner as its
++ * current inner.
++ *
++ * Not for casual consumers.
++ */
++void ReparentWrappers(JSContext *cx, JSObject *oldInner, JSObject *newInner);
++
+ } // namespace xpc
+ 
+ nsCycleCollectionParticipant *
+ xpc_JSCompartmentParticipant();
+ 
+ namespace mozilla {
+ namespace dom {
+ namespace binding {

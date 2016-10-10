@@ -1,0 +1,162 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/public/nsIContent.h b/content/base/public/nsIContent.h
+--- a/content/base/public/nsIContent.h
++++ b/content/base/public/nsIContent.h
+@@ -837,16 +837,26 @@ public:
+   virtual already_AddRefed<nsIURI> GetBaseURI() const;
+ 
+   virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor);
+ 
+   virtual bool IsPurple() = 0;
+   virtual void RemovePurple() = 0;
+ 
+   virtual bool OwnedOnlyByTheDOMTree() { return false; }
++
++  /**
++   * Fire mutation events for changes caused by parsing directly into this node.
++   *
++   * Implemented in nsGenericHTMLElement.cpp.
++   *
++   * @param aOldChildCount the number of children the node had before parsing
++   */
++  void FireMutationEventsForDirectParsing(int32_t aOldChildCount);
++
+ protected:
+   /**
+    * Hook for implementing GetID.  This is guaranteed to only be
+    * called if HasID() is true.
+    */
+   virtual nsIAtom* DoGetID() const = 0;
+ 
+ private:
+diff --git a/content/html/content/src/nsGenericHTMLElement.cpp b/content/html/content/src/nsGenericHTMLElement.cpp
+--- a/content/html/content/src/nsGenericHTMLElement.cpp
++++ b/content/html/content/src/nsGenericHTMLElement.cpp
+@@ -1296,35 +1296,40 @@ nsGenericHTMLElement::GetInnerHTML(nsASt
+ }
+ 
+ NS_IMETHODIMP
+ nsGenericHTMLElement::GetOuterHTML(nsAString& aOuterHTML) {
+   return GetMarkup(true, aOuterHTML);
+ }
+ 
+ void
+-nsGenericHTMLElement::FireMutationEventsForDirectParsing(nsIDocument* aDoc,
+-                                                         nsIContent* aDest,
+-                                                         int32_t aOldChildCount)
++nsIContent::FireMutationEventsForDirectParsing(int32_t aOldChildCount)
+ {
+   // Fire mutation events. Optimize for the case when there are no listeners
+-  int32_t newChildCount = aDest->GetChildCount();
+-  if (newChildCount && nsContentUtils::
+-        HasMutationListeners(aDoc, NS_EVENT_BITS_MUTATION_NODEINSERTED)) {
+-    nsAutoTArray<nsCOMPtr<nsIContent>, 50> childNodes;
+-    NS_ASSERTION(newChildCount - aOldChildCount >= 0,
+-                 "What, some unexpected dom mutation has happened?");
+-    childNodes.SetCapacity(newChildCount - aOldChildCount);
+-    for (nsIContent* child = aDest->GetFirstChild();
+-         child;
+-         child = child->GetNextSibling()) {
+-      childNodes.AppendElement(child);
+-    }
+-    nsGenericElement::FireNodeInserted(aDoc, aDest, childNodes);
++  int32_t newChildCount = GetChildCount();
++  if (!newChildCount) {
++    return;
+   }
++
++  nsIDocument* document = OwnerDoc();
++  if (!nsContentUtils::
++        HasMutationListeners(document, NS_EVENT_BITS_MUTATION_NODEINSERTED)) {
++    return;
++  }
++
++  nsAutoTArray<nsCOMPtr<nsIContent>, 50> childNodes;
++  NS_ASSERTION(newChildCount - aOldChildCount >= 0,
++               "What, some unexpected dom mutation has happened?");
++  childNodes.SetCapacity(newChildCount - aOldChildCount);
++  for (nsIContent* child = GetFirstChild();
++       child;
++       child = child->GetNextSibling()) {
++    childNodes.AppendElement(child);
++  }
++  nsGenericElement::FireNodeInserted(document, this, childNodes);
+ }
+ 
+ NS_IMETHODIMP
+ nsGenericHTMLElement::SetInnerHTML(const nsAString& aInnerHTML)
+ {
+   nsIDocument* doc = OwnerDoc();
+ 
+   // Batch possible DOMSubtreeModified events.
+@@ -1352,17 +1357,17 @@ nsGenericHTMLElement::SetInnerHTML(const
+                                            this,
+                                            Tag(),
+                                            GetNameSpaceID(),
+                                            doc->GetCompatibilityMode() ==
+                                              eCompatibility_NavQuirks,
+                                            true);
+     mb.NodesAdded();
+     // HTML5 parser has notified, but not fired mutation events.
+-    FireMutationEventsForDirectParsing(doc, this, oldChildCount);
++    FireMutationEventsForDirectParsing(oldChildCount);
+   } else {
+     nsCOMPtr<nsIDOMDocumentFragment> df;
+     rv = nsContentUtils::CreateContextualFragment(this, aInnerHTML,
+                                                   true,
+                                                   getter_AddRefs(df));
+     nsCOMPtr<nsINode> fragment = do_QueryInterface(df);
+     if (NS_SUCCEEDED(rv)) {
+       // Suppress assertion about node removal mutation events that can't have
+@@ -1506,17 +1511,17 @@ nsGenericHTMLElement::InsertAdjacentHTML
+     rv = nsContentUtils::ParseFragmentHTML(aText,
+                                            destination,
+                                            contextLocal,
+                                            contextNs,
+                                            doc->GetCompatibilityMode() ==
+                                              eCompatibility_NavQuirks,
+                                            true);
+     // HTML5 parser has notified, but not fired mutation events.
+-    FireMutationEventsForDirectParsing(doc, destination, oldChildCount);
++    destination->FireMutationEventsForDirectParsing(oldChildCount);
+     return rv;
+   }
+ 
+   // couldn't parse directly
+   nsCOMPtr<nsIDOMDocumentFragment> df;
+   rv = nsContentUtils::CreateContextualFragment(destination,
+                                                 aText,
+                                                 true,
+diff --git a/content/html/content/src/nsGenericHTMLElement.h b/content/html/content/src/nsGenericHTMLElement.h
+--- a/content/html/content/src/nsGenericHTMLElement.h
++++ b/content/html/content/src/nsGenericHTMLElement.h
+@@ -591,28 +591,16 @@ protected:
+   void UnregAccessKey()
+   {
+     if (HasFlag(NODE_HAS_ACCESSKEY)) {
+       RegUnRegAccessKey(false);
+     }
+   }
+ 
+ private:
+-  /**
+-   * Fire mutation events for changes caused by parsing directly into a
+-   * context node.
+-   *
+-   * @param aDoc the document of the node
+-   * @param aDest the destination node that got stuff appended to it
+-   * @param aOldChildCount the number of children the node had before parsing
+-   */
+-  void FireMutationEventsForDirectParsing(nsIDocument* aDoc,
+-                                          nsIContent* aDest,
+-                                          int32_t aOldChildCount);
+-
+   void RegUnRegAccessKey(bool aDoReg);
+ 
+ protected:
+   /**
+    * Determine whether an attribute is an event (onclick, etc.)
+    * @param aName the attribute
+    * @return whether the name is an event handler name
+    */

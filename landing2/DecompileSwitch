@@ -1,0 +1,108 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/src/jsopcode.cpp b/js/src/jsopcode.cpp
+--- a/js/src/jsopcode.cpp
++++ b/js/src/jsopcode.cpp
+@@ -1673,56 +1673,48 @@ SprintDoubleValue(Sprinter *sp, jsval v,
+ static jsbytecode *
+ Decompile(SprintStack *ss, jsbytecode *pc, int nb);
+ 
+ static JSBool
+ DecompileSwitch(SprintStack *ss, TableEntry *table, unsigned tableLength,
+                 jsbytecode *pc, ptrdiff_t switchLength,
+                 ptrdiff_t defaultOffset, JSBool isCondSwitch)
+ {
+-    JSContext *cx;
+-    JSPrinter *jp;
+-    ptrdiff_t off, off2, diff, caseExprOff, todo;
+-    const char *rval;
+-    unsigned i;
+-    jsval key;
+-    JSString *str;
+-
+-    cx = ss->sprinter.context;
+-    jp = ss->printer;
++    JSContext *cx = ss->sprinter.context;
++    JSPrinter *jp = ss->printer;
+ 
+     jsbytecode *lvalpc;
+     const char *lval = PopStr(ss, JSOP_NOP, &lvalpc);
+ 
+     /* JSOP_CONDSWITCH doesn't pop, unlike JSOP_{LOOKUP,TABLE}SWITCH. */
+     if (isCondSwitch)
+         ss->top++;
+ 
+     js_printf(jp, "\tswitch (");
+     SprintOpcodePermanent(jp, lval, lvalpc);
+     js_printf(jp, ") {\n");
+ 
+     if (tableLength) {
+-        diff = table[0].offset - defaultOffset;
++        ptrdiff_t diff = table[0].offset - defaultOffset;
+         if (diff > 0) {
+             jp->indent += 2;
+             js_printf(jp, "\t%s:\n", js_default_str);
+             jp->indent += 2;
+             if (!Decompile(ss, pc + defaultOffset, diff))
+                 return JS_FALSE;
+             jp->indent -= 4;
+         }
+ 
+-        caseExprOff = isCondSwitch ? JSOP_CONDSWITCH_LENGTH : 0;
+-
+-        for (i = 0; i < tableLength; i++) {
+-            off = table[i].offset;
+-            off2 = (i + 1 < tableLength) ? table[i + 1].offset : switchLength;
+-
+-            key = table[i].key;
++        ptrdiff_t caseExprOff = isCondSwitch ? JSOP_CONDSWITCH_LENGTH : 0;
++
++        for (unsigned i = 0; i < tableLength; i++) {
++            ptrdiff_t off = table[i].offset;
++            ptrdiff_t off2 = (i + 1 < tableLength) ? table[i + 1].offset : switchLength;
++
++            RootedValue key(cx, table[i].key);
+             if (isCondSwitch) {
+                 ptrdiff_t nextCaseExprOff;
+ 
+                 /*
+                  * key encodes the JSOP_CASE bytecode's offset from switchtop.
+                  * The next case expression follows immediately, unless we are
+                  * at the last case.
+                  */
+@@ -1739,32 +1731,34 @@ DecompileSwitch(SprintStack *ss, TableEn
+                 /*
+                  * key comes from an atom, not the decompiler, so we need to
+                  * quote it if it's a string literal.  But if table[i].label
+                  * is non-null, key was constant-propagated and label is the
+                  * name of the const we should show as the case label.  We set
+                  * key to undefined so this identifier is escaped, if required
+                  * by non-ASCII characters, but not quoted, by QuoteString.
+                  */
+-                todo = -1;
++                RootedString str(cx);
++                ptrdiff_t todo = -1;
+                 if (table[i].label) {
+                     str = table[i].label;
+                     key = JSVAL_VOID;
+                 } else if (JSVAL_IS_DOUBLE(key)) {
+                     JSOp junk;
+ 
+                     todo = SprintDoubleValue(&ss->sprinter, key, &junk);
+                     if (todo < 0)
+                         return JS_FALSE;
+                     str = NULL;
+                 } else {
+                     str = ToString(cx, key);
+                     if (!str)
+                         return JS_FALSE;
+                 }
++                const char *rval;
+                 if (todo >= 0) {
+                     rval = ss->sprinter.stringAt(todo);
+                 } else {
+                     rval = QuoteString(&ss->sprinter, str, (jschar)
+                                        (JSVAL_IS_STRING(key) ? '"' : 0));
+                     if (!rval)
+                         return JS_FALSE;
+                 }

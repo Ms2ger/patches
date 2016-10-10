@@ -1,0 +1,431 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/base/nsEditor.cpp b/editor/libeditor/base/nsEditor.cpp
+--- a/editor/libeditor/base/nsEditor.cpp
++++ b/editor/libeditor/base/nsEditor.cpp
+@@ -3290,16 +3290,35 @@ nsEditor::GetNextNode(nsIDOMNode* aCurre
+ 
+   *aResultNode = do_QueryInterface(GetNextNode(currentNode, aEditableNode,
+                                                bNoBlockCrossing,
+                                                aActiveEditorRoot));
+   return NS_OK;
+ }
+ 
+ nsIContent*
++nsEditor::GetPriorNode(nsINode* aCurrentNode,
++                       bool aEditableNode,
++                       bool bNoBlockCrossing,
++                       nsIContent* aActiveEditorRoot)
++{
++  MOZ_ASSERT(aCurrentNode);
++
++  if (!IsDescendantOfBody(aCurrentNode) ||
++      (aActiveEditorRoot &&
++       !nsContentUtils::ContentIsDescendantOf(aCurrentNode,
++                                              aActiveEditorRoot))) {
++    return nsnull;
++  }
++
++  return FindNode(aCurrentNode, false, aEditableNode, bNoBlockCrossing,
++                  aActiveEditorRoot);
++}
++
++nsIContent*
+ nsEditor::GetNextNode(nsINode* aCurrentNode,
+                       bool aEditableNode,
+                       bool bNoBlockCrossing,
+                       nsIContent* aActiveEditorRoot)
+ {
+   MOZ_ASSERT(aCurrentNode);
+ 
+   if (!IsDescendantOfBody(aCurrentNode) ||
+diff --git a/editor/libeditor/base/nsEditor.h b/editor/libeditor/base/nsEditor.h
+--- a/editor/libeditor/base/nsEditor.h
++++ b/editor/libeditor/base/nsEditor.h
+@@ -479,16 +479,20 @@ public:
+     * @param bNoBlockCrossing If true, don't move across "block" nodes, whatever that means.
+     * @param aActiveEditorRoot If non-null, only return descendants of aActiveEditorRoot.
+     */
+   nsresult GetPriorNode(nsIDOMNode  *aCurrentNode, 
+                         bool         aEditableNode,
+                         nsCOMPtr<nsIDOMNode> *aResultNode,
+                         bool         bNoBlockCrossing = false,
+                         nsIContent  *aActiveEditorRoot = nsnull);
++  nsIContent* GetPriorNode(nsINode* aCurrentNode,
++                           bool aEditableNode,
++                           bool bNoBlockCrossing = false,
++                           nsIContent* aActiveEditorRoot = nsnull);
+ 
+   // and another version that takes a {parent,offset} pair rather than a node
+   nsresult GetPriorNode(nsIDOMNode  *aParentNode, 
+                         int32_t      aOffset, 
+                         bool         aEditableNode, 
+                         nsCOMPtr<nsIDOMNode> *aResultNode,
+                         bool         bNoBlockCrossing = false,
+                         nsIContent  *aActiveEditorRoot = nsnull);
+diff --git a/editor/libeditor/base/nsEditorUtils.cpp b/editor/libeditor/base/nsEditorUtils.cpp
+--- a/editor/libeditor/base/nsEditorUtils.cpp
++++ b/editor/libeditor/base/nsEditorUtils.cpp
+@@ -45,16 +45,18 @@
+ // hooks
+ #include "nsIClipboardDragDropHooks.h"
+ #include "nsIClipboardDragDropHookList.h"
+ #include "nsISimpleEnumerator.h"
+ #include "nsIDocShell.h"
+ #include "nsIDocument.h"
+ #include "nsIInterfaceRequestorUtils.h"
+ 
++#include "nsContentUtils.h"
++
+ 
+ /******************************************************************************
+  * nsAutoSelectionReset
+  *****************************************************************************/
+ 
+ nsAutoSelectionReset::nsAutoSelectionReset(nsISelection *aSel, nsEditor *aEd) : 
+ mSel(nsnull)
+ ,mEd(nsnull)
+@@ -200,25 +202,16 @@ nsEditorUtils::IsDescendantOf(nsIDOMNode
+       return true;
+     }
+     node = parent;
+   } while (parent);
+   
+   return false;
+ }
+ 
+-bool
+-nsEditorUtils::IsLeafNode(nsIDOMNode *aNode)
+-{
+-  bool hasChildren = false;
+-  if (aNode)
+-    aNode->HasChildNodes(&hasChildren);
+-  return !hasChildren;
+-}
+-
+ /******************************************************************************
+  * utility methods for drag/drop/copy/paste hooks
+  *****************************************************************************/
+ 
+ nsresult
+ nsEditorHookUtils::GetHookEnumeratorFromDocument(nsIDOMDocument *aDoc,
+                                                  nsISimpleEnumerator **aResult)
+ {
+diff --git a/editor/libeditor/base/nsEditorUtils.h b/editor/libeditor/base/nsEditorUtils.h
+--- a/editor/libeditor/base/nsEditorUtils.h
++++ b/editor/libeditor/base/nsEditorUtils.h
+@@ -249,17 +249,16 @@ struct NS_STACK_CLASS DOMPoint
+ };
+ 
+ 
+ class nsEditorUtils
+ {
+   public:
+     static bool IsDescendantOf(nsIDOMNode* aNode, nsIDOMNode* aParent);
+     static bool IsDescendantOf(nsIDOMNode* aNode, nsIDOMNode* aParent, int32_t* aOffset);
+-    static bool IsLeafNode(nsIDOMNode *aNode);
+ };
+ 
+ 
+ class nsITransferable;
+ class nsIDOMEvent;
+ class nsISimpleEnumerator;
+ 
+ class nsEditorHookUtils
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -93,16 +93,18 @@
+ #include "TextEditorTest.h"
+ #include "nsEditorUtils.h"
+ #include "nsWSRunObject.h"
+ #include "nsGkAtoms.h"
+ #include "nsIWidget.h"
+ 
+ #include "nsIFrame.h"
+ #include "nsIParserService.h"
++#include "nsContentUtils.h"
++
+ #include "mozilla/dom/Element.h"
+ 
+ using namespace mozilla;
+ using namespace mozilla::widget;
+ 
+ // Some utilities to handle annoying overloading of "A" tag for link and named anchor
+ static char hrefText[] = "href";
+ static char anchorTxt[] = "anchor";
+@@ -4363,36 +4365,40 @@ nsHTMLEditor::GetNextHTMLSibling(nsIDOMN
+ }
+ 
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // GetPriorHTMLNode: returns the previous editable leaf node, if there is
+ //                   one within the <body>
+ //
++
++nsIContent*
++nsHTMLEditor::GetPriorHTMLNode(nsINode* aNode, bool aNoBlockCrossing)
++{
++  MOZ_ASSERT(aNode);
++  nsIContent* next = GetPriorNode(aNode, true, aNoBlockCrossing);
++  if (next && !IsNodeInActiveEditor(next)) {
++    return NULL;
++  }
++  return next;
++}
++
+ nsresult
+ nsHTMLEditor::GetPriorHTMLNode(nsIDOMNode *inNode, nsCOMPtr<nsIDOMNode> *outNode, bool bNoBlockCrossing)
+ {
+   NS_ENSURE_TRUE(outNode, NS_ERROR_NULL_POINTER);
+ 
+-  nsIContent* activeEditingHost = GetActiveEditingHost();
+-  if (!activeEditingHost) {
+-    *outNode = nsnull;
+-    return NS_OK;
+-  }
+-
+-  nsresult res = GetPriorNode(inNode, true, address_of(*outNode), bNoBlockCrossing, activeEditingHost);
+-  NS_ENSURE_SUCCESS(res, res);
+-  
+-  NS_ASSERTION(!*outNode || IsNodeInActiveEditor(*outNode),
+-               "GetPriorNode screwed up");
+-  return res;
++  nsCOMPtr<nsINode> node = do_QueryInterface(inNode);
++  NS_ENSURE_TRUE(node, NS_ERROR_NULL_POINTER);
++
++  *outNode = do_QueryInterface(GetPriorHTMLNode(node, bNoBlockCrossing));
++  return NS_OK;
+ }
+ 
+-
+ ///////////////////////////////////////////////////////////////////////////
+ // GetPriorHTMLNode: same as above but takes {parent,offset} instead of node
+ //                       
+ nsresult
+ nsHTMLEditor::GetPriorHTMLNode(nsIDOMNode *inParent, int32_t inOffset, nsCOMPtr<nsIDOMNode> *outNode, bool bNoBlockCrossing)
+ {
+   NS_ENSURE_TRUE(outNode, NS_ERROR_NULL_POINTER);
+ 
+@@ -4409,29 +4415,38 @@ nsHTMLEditor::GetPriorHTMLNode(nsIDOMNod
+                "GetPriorNode screwed up");
+   return res;
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // GetNextHTMLNode: returns the next editable leaf node, if there is
+ //                   one within the <body>
+-//                       
++//
++nsIContent*
++nsHTMLEditor::GetNextHTMLNode(nsINode* aNode, bool aNoBlockCrossing)
++{
++  MOZ_ASSERT(aNode);
++  nsIContent* next = GetNextNode(aNode, true, aNoBlockCrossing);
++  if (next && !IsNodeInActiveEditor(next)) {
++    return NULL;
++  }
++  return next;
++}
++
+ nsresult
+ nsHTMLEditor::GetNextHTMLNode(nsIDOMNode *inNode, nsCOMPtr<nsIDOMNode> *outNode, bool bNoBlockCrossing)
+ {
+   NS_ENSURE_TRUE(outNode, NS_ERROR_NULL_POINTER);
+-  nsresult res = GetNextNode(inNode, true, address_of(*outNode), bNoBlockCrossing);
+-  NS_ENSURE_SUCCESS(res, res);
+-  
+-  // if it's not in the body, then zero it out
+-  if (*outNode && !IsNodeInActiveEditor(*outNode)) {
+-    *outNode = nsnull;
+-  }
+-  return res;
++
++  nsCOMPtr<nsINode> node = do_QueryInterface(inNode);
++  NS_ENSURE_TRUE(node, NS_ERROR_NULL_POINTER);
++
++  *outNode = do_QueryInterface(GetNextHTMLNode(node, bNoBlockCrossing));
++  return NS_OK;
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // GetNHTMLextNode: same as above but takes {parent,offset} instead of node
+ //                       
+ nsresult
+ nsHTMLEditor::GetNextHTMLNode(nsIDOMNode *inParent, int32_t inOffset, nsCOMPtr<nsIDOMNode> *outNode, bool bNoBlockCrossing)
+@@ -4543,79 +4558,89 @@ nsHTMLEditor::GetLastEditableChild( nsID
+     child = tmp;
+   }
+   
+   *aOutLastChild = child;
+   return res;
+ }
+ 
+ nsresult 
+-nsHTMLEditor::GetFirstEditableLeaf( nsIDOMNode *aNode, nsCOMPtr<nsIDOMNode> *aOutFirstLeaf)
++nsHTMLEditor::GetFirstEditableLeaf(nsIDOMNode* aNode, nsCOMPtr<nsIDOMNode>* aOutFirstLeaf)
+ {
+-  // check parms
+-  NS_ENSURE_TRUE(aOutFirstLeaf && aNode, NS_ERROR_NULL_POINTER);
+-  
+-  // init out parms
+-  *aOutFirstLeaf = aNode;
+-  
++  NS_ENSURE_TRUE(aOutFirstLeaf, NS_ERROR_NULL_POINTER);
++  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
++  NS_ENSURE_TRUE(node, NS_ERROR_NULL_POINTER);
++
++  bool ok;
++  *aOutFirstLeaf = do_QueryInterface(GetFirstEditableLeaf(node, &ok));
++  return ok ? NS_OK : NS_ERROR_FAILURE;
++}
++
++nsIContent*
++nsHTMLEditor::GetFirstEditableLeaf(nsINode* aNode, bool* aSuccess)
++{
++  MOZ_ASSERT(aNode);
++  MOZ_ASSERT(aSuccess);
++
+   // find leftmost leaf
+-  nsCOMPtr<nsIDOMNode> child;
+-  nsresult res = NS_OK;
+-  child = GetLeftmostChild(aNode);  
+-  while (child && (!IsEditable(child) || !nsEditorUtils::IsLeafNode(child)))
+-  {
+-    nsCOMPtr<nsIDOMNode> tmp;
+-    res = GetNextHTMLNode(child, address_of(tmp));
+-    NS_ENSURE_SUCCESS(res, res);
+-    NS_ENSURE_TRUE(tmp, NS_ERROR_FAILURE);
+-    
++  nsIContent* child = GetLeftmostChild(aNode);
++  while (child && (!IsEditable(child) || child->HasChildren())) {
++    child = GetNextHTMLNode(child);
++    if (!child) {
++      *aSuccess = false;
++      return NULL;
++    }
++
+     // only accept nodes that are descendants of aNode
+-    if (nsEditorUtils::IsDescendantOf(tmp, aNode))
+-      child = tmp;
+-    else
+-    {
+-      child = nsnull;  // this will abort the loop
++    if (!nsContentUtils::ContentIsDescendantOf(child, aNode)) {
++      *aSuccess = true;
++      return NULL;
+     }
+   }
+   
+-  *aOutFirstLeaf = child;
+-  return res;
++  *aSuccess = true;
++  return child;
+ }
+ 
+-
+ nsresult 
+-nsHTMLEditor::GetLastEditableLeaf(nsIDOMNode *aNode, nsCOMPtr<nsIDOMNode> *aOutLastLeaf)
++nsHTMLEditor::GetLastEditableLeaf(nsIDOMNode* aNode, nsCOMPtr<nsIDOMNode>* aOutLastLeaf)
+ {
+-  // check parms
+-  NS_ENSURE_TRUE(aOutLastLeaf && aNode, NS_ERROR_NULL_POINTER);
+-  
+-  // init out parms
+-  *aOutLastLeaf = nsnull;
+-  
++  NS_ENSURE_TRUE(aOutLastLeaf, NS_ERROR_NULL_POINTER);
++  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
++  NS_ENSURE_TRUE(node, NS_ERROR_NULL_POINTER);
++
++  bool ok;
++  *aOutLastLeaf = do_QueryInterface(GetLastEditableLeaf(node, &ok));
++  return ok ? NS_OK : NS_ERROR_FAILURE;
++}
++
++nsIContent*
++nsHTMLEditor::GetLastEditableLeaf(nsINode* aNode, bool* aSuccess)
++{
++  MOZ_ASSERT(aNode);
++  MOZ_ASSERT(aSuccess);
++
+   // find rightmost leaf
+-  nsCOMPtr<nsIDOMNode> child = GetRightmostChild(aNode, false);
+-  nsresult res = NS_OK;
+-  while (child && (!IsEditable(child) || !nsEditorUtils::IsLeafNode(child)))
+-  {
+-    nsCOMPtr<nsIDOMNode> tmp;
+-    res = GetPriorHTMLNode(child, address_of(tmp));
+-    NS_ENSURE_SUCCESS(res, res);
+-    NS_ENSURE_TRUE(tmp, NS_ERROR_FAILURE);
+-    
++  nsIContent* child = GetRightmostChild(aNode);
++  while (child && (!IsEditable(child) || child->HasChildren())) {
++    child = GetPriorHTMLNode(child);
++    if (!child) {
++      *aSuccess = false;
++      return NULL;
++    }
++
+     // only accept nodes that are descendants of aNode
+-    if (nsEditorUtils::IsDescendantOf(tmp, aNode))
+-      child = tmp;
+-    else
+-    {
+-      child = nsnull;
++    if (!nsContentUtils::ContentIsDescendantOf(child, aNode)) {
++      *aSuccess = true;
++      return NULL;
+     }
+   }
+   
+-  *aOutLastLeaf = child;
+-  return res;
++  *aSuccess = true;
++  return child;
+ }
+ 
+ bool
+ nsHTMLEditor::IsTextInDirtyFrameVisible(nsIContent *aNode)
+ {
+   bool isEmptyTextNode;
+   nsresult rv = IsVisTextNode(aNode, &isEmptyTextNode, false);
+   if (NS_FAILED(rv)) {
+diff --git a/editor/libeditor/html/nsHTMLEditor.h b/editor/libeditor/html/nsHTMLEditor.h
+--- a/editor/libeditor/html/nsHTMLEditor.h
++++ b/editor/libeditor/html/nsHTMLEditor.h
+@@ -718,27 +718,31 @@ protected:
+   bool IsAtEndOfNode(nsIDOMNode *aNode, int32_t aOffset);
+   bool IsOnlyAttribute(nsIDOMNode *aElement, const nsAString *aAttribute);
+ 
+   nsresult RemoveBlockContainer(nsIDOMNode *inNode);
+   nsresult GetPriorHTMLSibling(nsIDOMNode *inNode, nsCOMPtr<nsIDOMNode> *outNode);
+   nsresult GetPriorHTMLSibling(nsIDOMNode *inParent, int32_t inOffset, nsCOMPtr<nsIDOMNode> *outNode);
+   nsresult GetNextHTMLSibling(nsIDOMNode *inNode, nsCOMPtr<nsIDOMNode> *outNode);
+   nsresult GetNextHTMLSibling(nsIDOMNode *inParent, int32_t inOffset, nsCOMPtr<nsIDOMNode> *outNode);
++  nsIContent* GetPriorHTMLNode(nsINode* aNode, bool aNoBlockCrossing = false);
+   nsresult GetPriorHTMLNode(nsIDOMNode *inNode, nsCOMPtr<nsIDOMNode> *outNode, bool bNoBlockCrossing = false);
+   nsresult GetPriorHTMLNode(nsIDOMNode *inParent, int32_t inOffset, nsCOMPtr<nsIDOMNode> *outNode, bool bNoBlockCrossing = false);
++  nsIContent* GetNextHTMLNode(nsINode* aNode, bool aNoBlockCrossing = false);
+   nsresult GetNextHTMLNode(nsIDOMNode *inNode, nsCOMPtr<nsIDOMNode> *outNode, bool bNoBlockCrossing = false);
+   nsresult GetNextHTMLNode(nsIDOMNode *inParent, int32_t inOffset, nsCOMPtr<nsIDOMNode> *outNode, bool bNoBlockCrossing = false);
+ 
+   nsresult IsFirstEditableChild( nsIDOMNode *aNode, bool *aOutIsFirst);
+   nsresult IsLastEditableChild( nsIDOMNode *aNode, bool *aOutIsLast);
+   nsresult GetFirstEditableChild( nsIDOMNode *aNode, nsCOMPtr<nsIDOMNode> *aOutFirstChild);
+   nsresult GetLastEditableChild( nsIDOMNode *aNode, nsCOMPtr<nsIDOMNode> *aOutLastChild);
+ 
++  nsIContent* GetFirstEditableLeaf(nsINode* aNode, bool* aSuccess);
+   nsresult GetFirstEditableLeaf( nsIDOMNode *aNode, nsCOMPtr<nsIDOMNode> *aOutFirstLeaf);
++  nsIContent* GetLastEditableLeaf(nsINode* aNode, bool* aSuccess);
+   nsresult GetLastEditableLeaf( nsIDOMNode *aNode, nsCOMPtr<nsIDOMNode> *aOutLastLeaf);
+ 
+   nsresult GetInlinePropertyBase(nsIAtom *aProperty, 
+                              const nsAString *aAttribute,
+                              const nsAString *aValue,
+                              bool *aFirst, 
+                              bool *aAny, 
+                              bool *aAll,

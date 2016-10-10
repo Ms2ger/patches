@@ -1,0 +1,330 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/public/nsIAttribute.h b/content/base/public/nsIAttribute.h
+--- a/content/base/public/nsIAttribute.h
++++ b/content/base/public/nsIAttribute.h
+@@ -1,16 +1,17 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef nsIAttribute_h___
+ #define nsIAttribute_h___
+ 
++#include "nsAutoPtr.h"
+ #include "nsINode.h"
+ 
+ class nsDOMAttributeMap;
+ class nsIContent;
+ 
+ #define NS_IATTRIBUTE_IID  \
+ { 0x8d9d7dbf, 0xc42d, 0x4715, \
+   { 0x95, 0xcf, 0x7a, 0x5e, 0xd5, 0xa4, 0x47, 0x70 } }
+diff --git a/content/base/public/nsIDocument.h b/content/base/public/nsIDocument.h
+--- a/content/base/public/nsIDocument.h
++++ b/content/base/public/nsIDocument.h
+@@ -1,36 +1,39 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ #ifndef nsIDocument_h___
+ #define nsIDocument_h___
+ 
++#include "mozFlushType.h"                // for enum
+ #include "mozilla/Attributes.h"
+-#include "mozFlushType.h"                // for enum
++#include "mozilla/dom/DocumentBinding.h"
+ #include "nsAutoPtr.h"                   // for member
+ #include "nsCOMArray.h"                  // for member
+-#include "nsCRT.h"                       // for NS_DECL_AND_IMPL_ZEROING_OPERATOR_NEW
+ #include "nsCompatibility.h"             // for member
+ #include "nsCOMPtr.h"                    // for member
++#include "nsCRT.h"                       // for NS_DECL_AND_IMPL_ZEROING_OPERATOR_NEW
+ #include "nsGkAtoms.h"                   // for static class members
++#include "nsHashKeys.h"                  // for nsPtrHashKey
+ #include "nsIChannel.h"                  // for member
+ #include "nsIDocumentEncoder.h"          // for member (in nsCOMPtr)
+ #include "nsIDocumentObserver.h"         // for typedef (nsUpdateType)
+ #include "nsIFrameRequestCallback.h"     // for member (in nsCOMPtr)
+ #include "nsILoadContext.h"              // for member (in nsCOMPtr)
+ #include "nsILoadGroup.h"                // for member (in nsCOMPtr)
+ #include "nsINode.h"                     // for base class
++#include "nsIObserver.h"
+ #include "nsIScriptGlobalObject.h"       // for member (in nsCOMPtr)
+ #include "nsIStructuredCloneContainer.h" // for member (in nsCOMPtr)
+ #include "nsPIDOMWindow.h"               // for use in inline functions
+ #include "nsPropertyTable.h"             // for member
+ #include "nsTHashtable.h"                // for member
+-#include "mozilla/dom/DocumentBinding.h"
++#include "nsWeakReference.h"             // for nsWeakPtr, do_QueryReferent
+ #include "Units.h"
+ 
+ class imgIRequest;
+ class nsAString;
+ class nsBindingManager;
+ class nsCSSStyleSheet;
+ class nsDOMNavigationTiming;
+ class nsDOMTouchList;
+diff --git a/content/base/public/nsINode.h b/content/base/public/nsINode.h
+--- a/content/base/public/nsINode.h
++++ b/content/base/public/nsINode.h
+@@ -1,30 +1,29 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef nsINode_h___
+ #define nsINode_h___
+ 
++#include "js/TypeDecls.h"     // for Handle, Value, JSObject, JSContext
++#include "mozilla/dom/EventTarget.h" // for base class
++#include "mozilla/ErrorResult.h"
+ #include "mozilla/Likely.h"
++#include "mozilla/MemoryReporting.h"
+ #include "nsCOMPtr.h"               // for member, local
+ #include "nsGkAtoms.h"              // for nsGkAtoms::baseURIProperty
+ #include "nsIDOMNode.h"
+ #include "nsINodeInfo.h"            // member (in nsCOMPtr)
+ #include "nsIVariant.h"             // for use in GetUserData()
+ #include "nsNodeInfoManager.h"      // for use in NodePrincipal()
+ #include "nsPropertyTable.h"        // for typedefs
+ #include "nsTObserverArray.h"       // for member
+-#include "nsWindowMemoryReporter.h" // for NS_DECL_SIZEOF_EXCLUDING_THIS
+-#include "mozilla/ErrorResult.h"
+-#include "mozilla/MemoryReporting.h"
+-#include "mozilla/dom/EventTarget.h" // for base class
+-#include "js/TypeDecls.h"     // for Handle, Value, JSObject, JSContext
+ 
+ // Including 'windows.h' will #define GetClassInfo to something else.
+ #ifdef XP_WIN
+ #ifdef GetClassInfo
+ #undef GetClassInfo
+ #endif
+ #endif
+ 
+@@ -63,16 +62,23 @@ inline bool IsSpaceCharacter(char aChar)
+ }
+ class Element;
+ class EventHandlerNonNull;
+ class OnErrorEventHandlerNonNull;
+ template<typename T> class Optional;
+ } // namespace dom
+ } // namespace mozilla
+ 
++// This should be used for any nsINode sub-class that has fields of its own
++// that it needs to measure;  any sub-class that doesn't use it will inherit
++// SizeOfExcludingThis from its super-class.  SizeOfIncludingThis() need not be
++// defined, it is inherited from nsINode.
++#define NS_DECL_SIZEOF_EXCLUDING_THIS \
++  virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
++
+ #define NODE_FLAG_BIT(n_) (1U << (WRAPPER_CACHE_FLAGS_BITS_USED + (n_)))
+ 
+ enum {
+   // This bit will be set if the node has a listener manager.
+   NODE_HAS_LISTENERMANAGER =              NODE_FLAG_BIT(0),
+ 
+   // Whether this node has had any properties set on it
+   NODE_HAS_PROPERTIES =                   NODE_FLAG_BIT(1),
+diff --git a/content/base/src/Attr.cpp b/content/base/src/Attr.cpp
+--- a/content/base/src/Attr.cpp
++++ b/content/base/src/Attr.cpp
+@@ -22,16 +22,17 @@
+ #include "nsGkAtoms.h"
+ #include "nsCOMArray.h"
+ #include "nsNodeUtils.h"
+ #include "nsEventListenerManager.h"
+ #include "nsTextNode.h"
+ #include "mozAutoDocUpdate.h"
+ #include "nsMutationEvent.h"
+ #include "nsAsyncDOMEvent.h"
++#include "nsDOMAttributeMap.h"
+ #include "nsWrapperCacheInlines.h"
+ 
+ nsIAttribute::nsIAttribute(nsDOMAttributeMap* aAttrMap,
+                            already_AddRefed<nsINodeInfo> aNodeInfo,
+                            bool aNsAware)
+ : nsINode(aNodeInfo), mAttrMap(aAttrMap), mNsAware(aNsAware)
+ {
+ }
+diff --git a/content/base/src/Attr.h b/content/base/src/Attr.h
+--- a/content/base/src/Attr.h
++++ b/content/base/src/Attr.h
+@@ -5,18 +5,19 @@
+ 
+ /*
+  * Implementation of DOM Core's nsIDOMAttr node.
+  */
+ 
+ #ifndef mozilla_dom_Attr_h
+ #define mozilla_dom_Attr_h
+ 
++#include "nsIAttribute.h"
++
+ #include "mozilla/Attributes.h"
+-#include "nsIAttribute.h"
+ #include "nsIDOMAttr.h"
+ #include "nsIDOMText.h"
+ #include "nsIDOMNodeList.h"
+ #include "nsString.h"
+ #include "nsCOMPtr.h"
+ #include "nsINodeInfo.h"
+ #include "nsCycleCollectionParticipant.h"
+ #include "nsStubMutationObserver.h"
+diff --git a/content/base/src/nsDocument.cpp b/content/base/src/nsDocument.cpp
+--- a/content/base/src/nsDocument.cpp
++++ b/content/base/src/nsDocument.cpp
+@@ -207,16 +207,17 @@
+ #include "nsIDOMNSEditableElement.h"
+ #include "nsIEditor.h"
+ #include "nsIDOMCSSStyleRule.h"
+ #include "mozilla/css/Rule.h"
+ #include "nsIDOMLocation.h"
+ #include "nsIHttpChannelInternal.h"
+ #include "nsISecurityConsoleMessage.h"
+ #include "nsCharSeparatedTokenizer.h"
++#include "nsWindowMemoryReporter.h"
+ #include "mozilla/dom/XPathEvaluator.h"
+ 
+ using namespace mozilla;
+ using namespace mozilla::dom;
+ 
+ typedef nsTArray<Link*> LinkArray;
+ 
+ #ifdef PR_LOGGING
+diff --git a/content/canvas/src/WebGLMemoryMultiReporterWrapper.h b/content/canvas/src/WebGLMemoryMultiReporterWrapper.h
+--- a/content/canvas/src/WebGLMemoryMultiReporterWrapper.h
++++ b/content/canvas/src/WebGLMemoryMultiReporterWrapper.h
+@@ -10,16 +10,18 @@
+ #include "WebGLBuffer.h"
+ #include "WebGLVertexAttribData.h"
+ #include "WebGLShader.h"
+ #include "WebGLProgram.h"
+ #include "WebGLUniformLocation.h"
+ #include "WebGLTexture.h"
+ #include "WebGLRenderbuffer.h"
+ 
++class nsIMemoryMultiReporter;
++
+ namespace mozilla {
+ 
+ class WebGLMemoryMultiReporterWrapper
+ {
+     WebGLMemoryMultiReporterWrapper();
+     ~WebGLMemoryMultiReporterWrapper();
+     static WebGLMemoryMultiReporterWrapper* sUniqueInstance;
+ 
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -11,16 +11,17 @@
+ #include "mozilla/MemoryReporting.h"
+ #include "mozilla/Util.h"
+ 
+ // Local Includes
+ #include "Navigator.h"
+ #include "nsScreen.h"
+ #include "nsHistory.h"
+ #include "nsPerformance.h"
++#include "nsWindowMemoryReporter.h"
+ #include "nsDOMNavigationTiming.h"
+ #include "nsIDOMStorage.h"
+ #include "nsIDOMStorageManager.h"
+ #include "DOMStorage.h"
+ #include "nsDOMOfflineResourceList.h"
+ #include "nsError.h"
+ #include "nsIIdleService.h"
+ #include "nsIPowerManagerService.h"
+diff --git a/dom/base/nsWindowMemoryReporter.h b/dom/base/nsWindowMemoryReporter.h
+--- a/dom/base/nsWindowMemoryReporter.h
++++ b/dom/base/nsWindowMemoryReporter.h
+@@ -12,23 +12,16 @@
+ #include "nsDataHashtable.h"
+ #include "nsWeakReference.h"
+ #include "nsAutoPtr.h"
+ #include "mozilla/MemoryReporting.h"
+ #include "mozilla/TimeStamp.h"
+ #include "nsArenaMemoryStats.h"
+ #include "mozilla/Attributes.h"
+ 
+-// This should be used for any nsINode sub-class that has fields of its own
+-// that it needs to measure;  any sub-class that doesn't use it will inherit
+-// SizeOfExcludingThis from its super-class.  SizeOfIncludingThis() need not be
+-// defined, it is inherited from nsINode.
+-#define NS_DECL_SIZEOF_EXCLUDING_THIS \
+-  virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+-
+ class nsWindowSizes {
+ public:
+   nsWindowSizes(mozilla::MallocSizeOf aMallocSizeOf) {
+     memset(this, 0, sizeof(nsWindowSizes));
+     mMallocSizeOf = aMallocSizeOf;
+   }
+   mozilla::MallocSizeOf mMallocSizeOf;
+   nsArenaMemoryStats mArenaStats;
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -78,16 +78,17 @@
+ #include "mozilla/Alignment.h"
+ #include "mozilla/Assertions.h"
+ #include "mozilla/Attributes.h"
+ #include "mozilla/CycleCollectedJSRuntime.h"
+ #include "mozilla/GuardObjects.h"
+ #include "mozilla/MemoryReporting.h"
+ #include "mozilla/Mutex.h"
+ #include "mozilla/ReentrantMonitor.h"
++#include "mozilla/TimeStamp.h"
+ #include "mozilla/Util.h"
+ 
+ #include <math.h>
+ #include <stdarg.h>
+ #include <stdint.h>
+ #include <stdlib.h>
+ #include <string.h>
+ 
+diff --git a/layout/base/nsPresShell.cpp b/layout/base/nsPresShell.cpp
+--- a/layout/base/nsPresShell.cpp
++++ b/layout/base/nsPresShell.cpp
+@@ -141,16 +141,17 @@
+ 
+ #include "GeckoProfiler.h"
+ #include "gfxPlatform.h"
+ #include "Layers.h"
+ #include "LayerTreeInvalidation.h"
+ #include "mozilla/css/ImageLoader.h"
+ #include "mozilla/Preferences.h"
+ #include "mozilla/Telemetry.h"
++#include "nsArenaMemoryStats.h"
+ #include "nsCanvasFrame.h"
+ #include "nsIImageLoadingContent.h"
+ #include "nsIScreen.h"
+ #include "nsIScreenManager.h"
+ #include "nsPlaceholderFrame.h"
+ #include "nsTransitionManager.h"
+ #include "RestyleManager.h"
+ #include "nsIDOMHTMLElement.h"
+diff --git a/layout/style/nsCSSRuleProcessor.cpp b/layout/style/nsCSSRuleProcessor.cpp
+--- a/layout/style/nsCSSRuleProcessor.cpp
++++ b/layout/style/nsCSSRuleProcessor.cpp
+@@ -17,16 +17,17 @@
+ #include "plarena.h"
+ 
+ #include "nsCSSRuleProcessor.h"
+ #include "nsRuleProcessorData.h"
+ #include <algorithm>
+ #include "nsCRT.h"
+ #include "nsIAtom.h"
+ #include "pldhash.h"
++#include "nsDataHashtable.h"
+ #include "nsICSSPseudoComparator.h"
+ #include "mozilla/MemoryReporting.h"
+ #include "mozilla/css/StyleRule.h"
+ #include "mozilla/css/GroupRule.h"
+ #include "nsIDocument.h"
+ #include "nsPresContext.h"
+ #include "nsEventStateManager.h"
+ #include "nsGkAtoms.h"

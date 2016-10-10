@@ -1,0 +1,100 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/src/jsemit.cpp b/js/src/jsemit.cpp
+--- a/js/src/jsemit.cpp
++++ b/js/src/jsemit.cpp
+@@ -3362,44 +3362,41 @@ class TempPopScope {
+         cg->blockChainBox = savedBlockBox;
+         return js_Emit1(cx, cg, JSOP_NOP) >= 0 && EmitBlockChain(cx, cg);
+     }
+ };
+ 
+ static JSBool
+ EmitSwitch(JSContext *cx, JSCodeGenerator *cg, JSParseNode *pn)
+ {
+-    JSOp switchOp;
+-    JSBool ok, hasDefault, constPropagated;
+-    ptrdiff_t top, off, defaultOffset;
+-    JSParseNode *pn2, *pn3, *pn4;
+-    uint32 caseCount, tableLength;
+-    JSParseNode **table;
++    ptrdiff_t off;
++    JSParseNode *pn3, *pn4;
+     int32_t i, low, high;
+     intN noteIndex;
+     size_t switchSize, tableSize;
+     jsbytecode *pc, *savepc;
+ #if JS_HAS_BLOCK_SCOPE
+     JSObjectBox *box;
+ #endif
+     JSStmtInfo stmtInfo;
+ 
+     /* Try for most optimal, fall back if not dense ints, and per ECMAv2. */
+-    switchOp = JSOP_TABLESWITCH;
+-    ok = JS_TRUE;
+-    hasDefault = constPropagated = JS_FALSE;
+-    defaultOffset = -1;
++    JSOp switchOp = JSOP_TABLESWITCH;
++    JSBool ok = JS_TRUE;
++    JSBool hasDefault = JS_FALSE;
++    JSBool constPropagated = JS_FALSE;
++    ptrdiff_t defaultOffset = -1;
+ 
+     /*
+      * If the switch contains let variables scoped by its body, model the
+      * resulting block on the stack first, before emitting the discriminant's
+      * bytecode (in case the discriminant contains a stack-model dependency
+      * such as a let expression).
+      */
+-    pn2 = pn->pn_right;
++    JSParseNode *pn2 = pn->pn_right;
+ #if JS_HAS_BLOCK_SCOPE
+     TempPopScope tps;
+     if (pn2->isKind(TOK_LEXICALSCOPE)) {
+         /*
+          * Push the body's block scope before discriminant code-gen to reflect
+          * the order of slots on the stack. The block's locals must lie under
+          * the discriminant on the stack so that case-dispatch bytecodes can
+          * find the discriminant on top of stack.
+@@ -3429,17 +3426,17 @@ EmitSwitch(JSContext *cx, JSCodeGenerato
+     /*
+      * Emit code for the discriminant first (or nearly first, in the case of a
+      * switch whose body is a block scope).
+      */
+     if (!js_EmitTree(cx, cg, pn->pn_left))
+         return JS_FALSE;
+ 
+     /* Switch bytecodes run from here till end of final case. */
+-    top = CG_OFFSET(cg);
++    ptrdiff_t top = CG_OFFSET(cg);
+ #if !JS_HAS_BLOCK_SCOPE
+     js_PushStatement(cg, &stmtInfo, STMT_SWITCH, top);
+ #else
+     if (pn2->isKind(TOK_LC)) {
+         js_PushStatement(cg, &stmtInfo, STMT_SWITCH, top);
+     } else {
+         /* Re-push the switch's statement info record. */
+         if (!tps.repushBlock(cx, cg))
+@@ -3451,19 +3448,19 @@ EmitSwitch(JSContext *cx, JSCodeGenerato
+          */
+         stmtInfo.update = top = CG_OFFSET(cg);
+ 
+         /* Advance pn2 to refer to the switch case list. */
+         pn2 = pn2->expr();
+     }
+ #endif
+ 
+-    caseCount = pn2->pn_count;
+-    tableLength = 0;
+-    table = NULL;
++    uint32_t caseCount = pn2->pn_count;
++    uint32_t tableLength = 0;
++    JSParseNode **table = NULL;
+ 
+     if (caseCount == 0 ||
+         (caseCount == 1 &&
+          (hasDefault = (pn2->pn_head->isKind(TOK_DEFAULT))))) {
+         caseCount = 0;
+         low = 0;
+         high = -1;
+     } else {

@@ -1,0 +1,108 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCThreadContext.cpp b/js/xpconnect/src/XPCThreadContext.cpp
+--- a/js/xpconnect/src/XPCThreadContext.cpp
++++ b/js/xpconnect/src/XPCThreadContext.cpp
+@@ -37,16 +37,17 @@
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* Implement global service to track stack of JSContext per thread. */
+ 
+ #include "XPCJSContextStack.h"
++#include "nsXPCJSContextStackIterator.h"
+ 
+ #include "xpcprivate.h"
+ #include "XPCWrapper.h"
+ #include "mozilla/Mutex.h"
+ #include "nsDOMJSUtils.h"
+ #include "nsIScriptGlobalObject.h"
+ #include "nsNullPrincipal.h"
+ #include "PrincipalHolder.h"
+diff --git a/js/xpconnect/src/nsXPCJSContextStackIterator.h b/js/xpconnect/src/nsXPCJSContextStackIterator.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/nsXPCJSContextStackIterator.h
+@@ -0,0 +1,25 @@
++#ifndef nsXPCJSContextStackIterator_h
++#define nsXPCJSContextStackIterator_h
++
++#include "nsIJSContextStack.h"
++
++#include "XPCJSContextStack.h"
++
++#include "nsTArray.h"
++
++#define NS_XPC_JSCONTEXT_STACK_ITERATOR_CID                                   \
++{ 0x05bae29d, 0x8aef, 0x486d,                                                 \
++  { 0x84, 0xaa, 0x53, 0xf4, 0x8f, 0x14, 0x68, 0x11 } }
++
++class nsXPCJSContextStackIterator : public nsIJSContextStackIterator
++{
++public:
++    NS_DECL_ISUPPORTS
++    NS_DECL_NSIJSCONTEXTSTACKITERATOR
++
++private:
++    const nsTArray<XPCJSContextInfo> *mStack;
++    uint32_t mPosition;
++};
++
++#endif // nsXPCJSContextStackIterator_h
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -169,16 +169,17 @@
+ #include "XPCStringConvert.h"
+ #include "XPCThrower.h"
+ #include "XPCJSStack.h"
+ #include "nsXPCException.h"
+ #include "nsJSID.h"
+ #include "nsJSIID.h"
+ #include "nsJSCID.h"
+ #include "XPCJSContextStack.h"
++#include "nsXPCJSContextStackIterator.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -476,33 +477,16 @@ enum WrapperType {
+ ****************************************************************************
+ ***************************************************************************/
+ 
+ /***************************************************************************/
+ 
+ extern void xpc_InitJSxIDClassObjects();
+ extern void xpc_DestroyJSxIDClassObjects();
+ 
+-/***************************************************************************/
+-
+-#define NS_XPC_JSCONTEXT_STACK_ITERATOR_CID                                   \
+-{ 0x05bae29d, 0x8aef, 0x486d,                                                 \
+-  { 0x84, 0xaa, 0x53, 0xf4, 0x8f, 0x14, 0x68, 0x11 } }
+-
+-class nsXPCJSContextStackIterator : public nsIJSContextStackIterator
+-{
+-public:
+-    NS_DECL_ISUPPORTS
+-    NS_DECL_NSIJSCONTEXTSTACKITERATOR
+-
+-private:
+-    const nsTArray<XPCJSContextInfo> *mStack;
+-    uint32_t mPosition;
+-};
+-
+ /**************************************************************/
+ // All of our thread local storage.
+ 
+ #define BAD_TLS_INDEX ((uint32_t) -1)
+ 
+ class XPCPerThreadData
+ {
+     typedef mozilla::Mutex Mutex;

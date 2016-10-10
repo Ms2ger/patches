@@ -1,0 +1,190 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/document/src/nsHTMLDocument.cpp b/content/html/document/src/nsHTMLDocument.cpp
+--- a/content/html/document/src/nsHTMLDocument.cpp
++++ b/content/html/document/src/nsHTMLDocument.cpp
+@@ -606,24 +606,24 @@ nsHTMLDocument::StartDocumentLoad(eParse
+   }
+ 
+   nsCOMPtr<nsICachingChannel> cachingChan = do_QueryInterface(aChannel);
+ 
+   if (loadAsHtml5) {
+     mParser = nsHtml5Module::NewHtml5Parser();
+     if (plainText) {
+       if (viewSource) {
+-        mParser->MarkAsNotScriptCreated("view-source-plain");
++        mParser->MarkAsNotScriptCreated(eViewSourcePlain);
+       } else {
+-        mParser->MarkAsNotScriptCreated("plain-text");
++        mParser->MarkAsNotScriptCreated(ePlainText);
+       }
+     } else if (viewSource && !html) {
+-      mParser->MarkAsNotScriptCreated("view-source-xml");
++      mParser->MarkAsNotScriptCreated(eViewSourceXml);
+     } else {
+-      mParser->MarkAsNotScriptCreated(NULL);
++      mParser->MarkAsNotScriptCreated(aCommand);
+     }
+   } else {
+     mParser = do_CreateInstance(kCParserCID, &rv);
+     NS_ENSURE_SUCCESS(rv, rv);
+   }
+ 
+   int32_t textType = GET_BIDI_OPTION_TEXTTYPE(GetBidiOptions());
+ 
+diff --git a/parser/html/nsHtml5Parser.cpp b/parser/html/nsHtml5Parser.cpp
+--- a/parser/html/nsHtml5Parser.cpp
++++ b/parser/html/nsHtml5Parser.cpp
+@@ -596,35 +596,34 @@ nsHtml5Parser::BeginEvaluatingParserInse
+ 
+ void
+ nsHtml5Parser::EndEvaluatingParserInsertedScript()
+ {
+   --mParserInsertedScriptsBeingEvaluated;
+ }
+ 
+ void
+-nsHtml5Parser::MarkAsNotScriptCreated(const char* aCommand)
++nsHtml5Parser::MarkAsNotScriptCreated(eParserCommands aCommand)
+ {
+   NS_PRECONDITION(!mStreamParser, "Must not call this twice.");
+   eParserMode mode = NORMAL;
+-  if (!nsCRT::strcmp(aCommand, "view-source")) {
++  if (aCommand == eViewSource) {
+     mode = VIEW_SOURCE_HTML;
+-  } else if (!nsCRT::strcmp(aCommand, "view-source-xml")) {
++  } else if (aCommand == eViewSourceXml) {
+     mode = VIEW_SOURCE_XML;
+-  } else if (!nsCRT::strcmp(aCommand, "view-source-plain")) {
++  } else if (aCommand == eViewSourcePlain) {
+     mode = VIEW_SOURCE_PLAIN;
+-  } else if (!nsCRT::strcmp(aCommand, "plain-text")) {
++  } else if (aCommand == ePlainText) {
+     mode = PLAIN_TEXT;
+-  } else if (!nsCRT::strcmp(aCommand, kLoadAsData)) {
++  } else if (aCommand == eLoadAsData) {
+     mode = LOAD_AS_DATA;
+   }
+ #ifdef DEBUG
+   else {
+-    NS_ASSERTION(!nsCRT::strcmp(aCommand, "view") ||
+-                 !nsCRT::strcmp(aCommand, "external-resource"),
++    NS_ASSERTION(aCommand == eViewNormal || aCommand == eExternalResource,
+                  "Unsupported parser command!");
+   }
+ #endif
+   mStreamParser = new nsHtml5StreamParser(mExecutor, this, mode);
+ }
+ 
+ bool
+ nsHtml5Parser::IsScriptCreated()
+diff --git a/parser/html/nsHtml5Parser.h b/parser/html/nsHtml5Parser.h
+--- a/parser/html/nsHtml5Parser.h
++++ b/parser/html/nsHtml5Parser.h
+@@ -239,17 +239,17 @@ class nsHtml5Parser : public nsIParser,
+ 
+     /**
+      * Marks the HTML5 parser as not a script-created parser: Prepares the 
+      * parser to be able to read a stream.
+      *
+      * @param aCommand the parser command (Yeah, this is bad API design. Let's
+      * make this better when retiring nsIParser)
+      */
+-    virtual void MarkAsNotScriptCreated(const char* aCommand);
++    virtual void MarkAsNotScriptCreated(eParserCommands aCommand);
+ 
+     /**
+      * True if this is a script-created HTML5 parser.
+      */
+     virtual bool IsScriptCreated();
+ 
+     /* End nsIParser  */
+ 
+diff --git a/parser/htmlparser/public/nsIParser.h b/parser/htmlparser/public/nsIParser.h
+--- a/parser/htmlparser/public/nsIParser.h
++++ b/parser/htmlparser/public/nsIParser.h
+@@ -43,17 +43,20 @@ class nsIChannel;
+ class nsIContent;
+ 
+ enum eParserCommands {
+   eViewNormal,
+   eViewSource,
+   eViewFragment,
+   eExternalResource,
+   eLoadAsData,
+-  eLoadAsInteractiveData
++  eLoadAsInteractiveData,
++  eViewSourceXml,
++  eViewSourcePlain,
++  ePlainText
+ };
+ 
+ enum eParserDocType {
+   ePlainText = 0,
+   eXML,
+   eHTML_Quirks,
+   eHTML_Strict
+ };
+@@ -239,17 +242,17 @@ class nsIParser : public nsParserBase {
+     /**
+      * Call immediately after having evaluated a parser-inserted script.
+      */
+     virtual void EndEvaluatingParserInsertedScript() = 0;
+ 
+     /**
+      * Marks the HTML5 parser as not a script-created parser.
+      */
+-    virtual void MarkAsNotScriptCreated(const char* aCommand) = 0;
++    virtual void MarkAsNotScriptCreated(eParserCommands aCommand) = 0;
+ 
+     /**
+      * True if this is a script-created HTML5 parser.
+      */
+     virtual bool IsScriptCreated() = 0;
+ };
+ 
+ NS_DEFINE_STATIC_IID_ACCESSOR(nsIParser, NS_IPARSER_IID)
+diff --git a/parser/htmlparser/src/nsParser.cpp b/parser/htmlparser/src/nsParser.cpp
+--- a/parser/htmlparser/src/nsParser.cpp
++++ b/parser/htmlparser/src/nsParser.cpp
+@@ -1208,17 +1208,17 @@ nsParser::BeginEvaluatingParserInsertedS
+ }
+ 
+ void
+ nsParser::EndEvaluatingParserInsertedScript()
+ {
+ }
+ 
+ void
+-nsParser::MarkAsNotScriptCreated(const char* aCommand)
++nsParser::MarkAsNotScriptCreated(eParserCommands aCommand)
+ {
+ }
+ 
+ bool
+ nsParser::IsScriptCreated()
+ {
+   return false;
+ }
+diff --git a/parser/htmlparser/src/nsParser.h b/parser/htmlparser/src/nsParser.h
+--- a/parser/htmlparser/src/nsParser.h
++++ b/parser/htmlparser/src/nsParser.h
+@@ -277,17 +277,17 @@ class nsParser : public nsIParser,
+     /**
+      * No-op.
+      */
+     virtual void EndEvaluatingParserInsertedScript();
+ 
+     /**
+      * No-op.
+      */
+-    virtual void MarkAsNotScriptCreated(const char* aCommand);
++    virtual void MarkAsNotScriptCreated(eParserCommands aCommand);
+ 
+     /**
+      * Always false.
+      */
+     virtual bool IsScriptCreated();
+ 
+     /**  
+      *  Set to parser state to indicate whether parsing tokens can be interrupted

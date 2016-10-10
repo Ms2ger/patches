@@ -1,0 +1,112 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCComponents.cpp b/js/xpconnect/src/XPCComponents.cpp
+--- a/js/xpconnect/src/XPCComponents.cpp
++++ b/js/xpconnect/src/XPCComponents.cpp
+@@ -51,18 +51,18 @@
+ #include "XPCWrapper.h"
+ #include "jsproxy.h"
+ #include "WrapperFactory.h"
+ #include "XrayWrapper.h"
+ #include "nsNullPrincipal.h"
+ #include "nsJSUtils.h"
+ #include "mozJSComponentLoader.h"
+ #include "nsContentUtils.h"
+-#include "jsgc.h"
+-
++#include "jsgc.h"
++
+ using namespace js;
+ /***************************************************************************/
+ // stuff used by all
+ 
+ static nsresult ThrowAndFail(uintN errNum, JSContext* cx, bool* retval)
+ {
+     XPCThrower::Throw(errNum, cx);
+     *retval = false;
+@@ -3098,23 +3098,23 @@ xpc_CreateSandboxObject(JSContext * cx, 
+             return NS_ERROR_OUT_OF_MEMORY;
+     }
+ 
+     nsIPrincipal *principal = sop->GetPrincipal();
+ 
+     JSCompartment *compartment;
+     JSObject *sandbox;
+ 
+-    nsRefPtr<Identity> identity;
+-    if (!identityPtr) {
+-      identity = new Identity();
+-      identityPtr = identity;
+-    }
+-
+-    rv = xpc_CreateGlobalObject(cx, &SandboxClass, principal, identityPtr,
++    nsRefPtr<Identity> identity;
++    if (!identityPtr) {
++      identity = new Identity();
++      identityPtr = identity;
++    }
++
++    rv = xpc_CreateGlobalObject(cx, &SandboxClass, principal, identityPtr,
+                                 wantXrays, &sandbox, &compartment);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     js::AutoObjectRooter tvr(cx, sandbox);
+ 
+     {
+         JSAutoEnterCompartment ac;
+         if (!ac.enter(cx, sandbox))
+@@ -3320,35 +3320,35 @@ nsXPCComponents_utils_Sandbox::CallOrCon
+             char *tmp = JS_EncodeString(cx, JSVAL_TO_STRING(option));
+             if (!tmp) {
+                 return ThrowAndFail(NS_ERROR_INVALID_ARG, cx, _retval);
+             }
+ 
+             sandboxName.Adopt(tmp, strlen(tmp));
+         }
+ 
+-        // see Bug 677294:
+-        if (!JS_HasProperty(cx, optionsObject, "sameGroupAs", &found))
+-            return NS_ERROR_INVALID_ARG;
+-
+-        if (found) {
+-            if (!JS_GetProperty(cx, optionsObject, "sameGroupAs", &option) ||
+-                JSVAL_IS_PRIMITIVE(option)) {
+-                    return ThrowAndFail(NS_ERROR_INVALID_ARG, cx, _retval);
+-            }
+-
+-            void* privateValue =
+-                JS_GetCompartmentPrivate(cx,GetObjectCompartment(JSVAL_TO_OBJECT(option)));
+-            xpc::CompartmentPrivate *compartmentPrivate =
+-                static_cast<xpc::CompartmentPrivate*>(privateValue);
+-
+-            if (!compartmentPrivate || !compartmentPrivate->key)
+-                return ThrowAndFail(NS_ERROR_INVALID_ARG, cx, _retval);
+-
+-            identity = compartmentPrivate->key->GetPtr();
++        // see Bug 677294:
++        if (!JS_HasProperty(cx, optionsObject, "sameGroupAs", &found))
++            return NS_ERROR_INVALID_ARG;
++
++        if (found) {
++            if (!JS_GetProperty(cx, optionsObject, "sameGroupAs", &option) ||
++                JSVAL_IS_PRIMITIVE(option)) {
++                    return ThrowAndFail(NS_ERROR_INVALID_ARG, cx, _retval);
++            }
++
++            void* privateValue =
++                JS_GetCompartmentPrivate(cx,GetObjectCompartment(JSVAL_TO_OBJECT(option)));
++            xpc::CompartmentPrivate *compartmentPrivate =
++                static_cast<xpc::CompartmentPrivate*>(privateValue);
++
++            if (!compartmentPrivate || !compartmentPrivate->key)
++                return ThrowAndFail(NS_ERROR_INVALID_ARG, cx, _retval);
++
++            identity = compartmentPrivate->key->GetPtr();
+         }
+     }
+ 
+     rv = xpc_CreateSandboxObject(cx, vp, prinOrSop, proto, wantXrays, sandboxName, identity);
+ 
+     if (NS_FAILED(rv)) {
+         return ThrowAndFail(rv, cx, _retval);
+     }

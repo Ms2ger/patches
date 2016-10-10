@@ -1,0 +1,405 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsFrameLoader.cpp b/content/base/src/nsFrameLoader.cpp
+--- a/content/base/src/nsFrameLoader.cpp
++++ b/content/base/src/nsFrameLoader.cpp
+@@ -942,35 +942,34 @@ nsFrameLoader::ShowRemoteFrame(const Lay
+ 
+     nsRefPtr<layers::LayerManager> layerManager =
+       nsContentUtils::LayerManagerForDocument(mOwnerContent->GetCurrentDoc());
+     if (!layerManager) {
+       // This is just not going to work.
+       return false;
+     }
+ 
+-    mRemoteBrowser->Show(LayoutDeviceIntSize::ToUntyped(size));
++    mRemoteBrowser->Show(size);
+     mRemoteBrowserShown = true;
+ 
+     EnsureMessageManager();
+ 
+     nsCOMPtr<nsIObserverService> os = services::GetObserverService();
+     if (OwnerIsBrowserOrAppFrame() && os && !mRemoteBrowserInitialized) {
+       os->NotifyObservers(NS_ISUPPORTS_CAST(nsIFrameLoader*, this),
+                           "remote-browser-frame-shown", nullptr);
+       mRemoteBrowserInitialized = true;
+     }
+   } else {
+     nsRect dimensions;
+     NS_ENSURE_SUCCESS(GetWindowDimensions(dimensions), false);
+ 
+     // Don't show remote iframe if we are waiting for the completion of reflow.
+     if (!aFrame || !(aFrame->GetStateBits() & NS_FRAME_FIRST_REFLOW)) {
+-      mRemoteBrowser->UpdateDimensions(dimensions,
+-                                       LayoutDeviceIntSize::ToUntyped(size));
++      mRemoteBrowser->UpdateDimensions(dimensions, size);
+     }
+   }
+ 
+   return true;
+ }
+ 
+ void
+ nsFrameLoader::Hide()
+@@ -1839,18 +1838,17 @@ nsFrameLoader::GetWindowDimensions(nsRec
+ NS_IMETHODIMP
+ nsFrameLoader::UpdatePositionAndSize(nsSubDocumentFrame *aIFrame)
+ {
+   if (mRemoteFrame) {
+     if (mRemoteBrowser) {
+       LayoutDeviceIntSize size = aIFrame->GetSubdocumentSize();
+       nsRect dimensions;
+       NS_ENSURE_SUCCESS(GetWindowDimensions(dimensions), NS_ERROR_FAILURE);
+-      mRemoteBrowser->UpdateDimensions(dimensions,
+-        LayoutDeviceIntSize::ToUntyped(size));
++      mRemoteBrowser->UpdateDimensions(dimensions, size);
+     }
+     return NS_OK;
+   }
+   return UpdateBaseWindowPositionAndSize(aIFrame);
+ }
+ 
+ nsresult
+ nsFrameLoader::UpdateBaseWindowPositionAndSize(nsSubDocumentFrame *aIFrame)
+diff --git a/dom/ipc/PBrowser.ipdl b/dom/ipc/PBrowser.ipdl
+--- a/dom/ipc/PBrowser.ipdl
++++ b/dom/ipc/PBrowser.ipdl
+@@ -50,16 +50,18 @@ using nsRect;
+ using nsSelectionEvent;
+ using nsTextEvent;
+ using nsTouchEvent;
+ using RemoteDOMEvent;
+ using mozilla::dom::ScreenOrientation;
+ using mozilla::layers::TextureFactoryIdentifier;
+ using mozilla::CSSIntPoint;
+ using mozilla::CSSToScreenScale;
++using mozilla::LayoutDeviceIntSize;
++
+ namespace mozilla {
+ namespace dom {
+ 
+ rpc protocol PBrowser
+ {
+     manager PContent;
+ 
+     manages PContentDialog;
+@@ -304,23 +306,23 @@ child:
+      * Notify the remote browser that it has been Show()n on this
+      * side, with the given |visibleRect|.  This message is expected
+      * to trigger creation of the remote browser's "widget".
+      *
+      * |Show()| and |Move()| take IntSizes rather than Rects because
+      * content processes always render to a virtual <0, 0> top-left
+      * point.
+      */
+-    Show(nsIntSize size);
++    Show(LayoutDeviceIntSize size);
+ 
+     LoadURL(nsCString uri);
+ 
+     CacheFileDescriptor(nsString path, FileDescriptor fd);
+ 
+-    UpdateDimensions(nsRect rect, nsIntSize size, ScreenOrientation orientation) compress;
++    UpdateDimensions(nsRect rect, LayoutDeviceIntSize size, ScreenOrientation orientation) compress;
+ 
+     UpdateFrame(FrameMetrics frame) compress;
+ 
+     /**
+      * Requests handling of a double tap. |point| is in CSS pixels, relative to
+      * the scroll offset. This message is expected to round-trip back to
+      * ZoomToRect() with a rect indicating where we should zoom to.
+      */
+diff --git a/dom/ipc/TabChild.cpp b/dom/ipc/TabChild.cpp
+--- a/dom/ipc/TabChild.cpp
++++ b/dom/ipc/TabChild.cpp
+@@ -1440,24 +1440,23 @@ TabChild::CancelCachedFileDescriptorCall
+ 
+     // Set this flag so that we will close the file descriptor when it arrives.
+     info->mCanceled = true;
+ }
+ 
+ void
+ TabChild::DoFakeShow()
+ {
+-  RecvShow(nsIntSize(0, 0));
++  RecvShow(LayoutDeviceIntSize(0, 0));
+   mDidFakeShow = true;
+ }
+ 
+ bool
+-TabChild::RecvShow(const nsIntSize& size)
++TabChild::RecvShow(const LayoutDeviceIntSize& aSize)
+ {
+-
+     if (mDidFakeShow) {
+         return true;
+     }
+ 
+     nsCOMPtr<nsIBaseWindow> baseWindow = do_QueryInterface(mWebNav);
+     if (!baseWindow) {
+         NS_ERROR("mWebNav doesn't QI to nsIBaseWindow");
+         return false;
+@@ -1472,36 +1471,35 @@ TabChild::RecvShow(const nsIntSize& size
+     }
+ 
+     baseWindow->SetVisibility(true);
+ 
+     return InitTabChildGlobal();
+ }
+ 
+ bool
+-TabChild::RecvUpdateDimensions(const nsRect& rect, const nsIntSize& size, const ScreenOrientation& orientation)
++TabChild::RecvUpdateDimensions(const nsRect& aRect,
++                               const LayoutDeviceIntSize& aSize,
++                               const ScreenOrientation& aOrientation)
+ {
+     if (!mRemoteFrame) {
+         return true;
+     }
+ 
+-    mOuterRect.x = rect.x;
+-    mOuterRect.y = rect.y;
+-    mOuterRect.width = rect.width;
+-    mOuterRect.height = rect.height;
++    mOuterRect.x = aRect.x;
++    mOuterRect.y = aRect.y;
++    mOuterRect.width = aRect.width;
++    mOuterRect.height = aRect.height;
+ 
+-    mOrientation = orientation;
+-    mInnerSize = ScreenIntSize::FromUnknownSize(
+-      gfx::IntSize(size.width, size.height));
+-    mWidget->Resize(0, 0, size.width, size.height,
+-                    true);
++    mOrientation = aOrientation;
++    mInnerSize = ScreenIntSize::FromLayoutDevicePixels(aSize);
++    mWidget->Resize(0, 0, aSize.width, aSize.height, true);
+ 
+     nsCOMPtr<nsIBaseWindow> baseWin = do_QueryInterface(mWebNav);
+-    baseWin->SetPositionAndSize(0, 0, size.width, size.height,
+-                                true);
++    baseWin->SetPositionAndSize(0, 0, aSize.width, aSize.height, true);
+ 
+     HandlePossibleViewportChange();
+ 
+     return true;
+ }
+ 
+ void
+ TabChild::DispatchMessageManagerMessage(const nsAString& aMessageName,
+diff --git a/dom/ipc/TabChild.h b/dom/ipc/TabChild.h
+--- a/dom/ipc/TabChild.h
++++ b/dom/ipc/TabChild.h
+@@ -202,18 +202,20 @@ public:
+                                     const nsAString& aMessage,
+                                     const mozilla::dom::StructuredCloneData& aData,
+                                     JS::Handle<JSObject *> aCpows);
+ 
+     virtual bool RecvLoadURL(const nsCString& uri);
+     virtual bool RecvCacheFileDescriptor(const nsString& aPath,
+                                          const FileDescriptor& aFileDescriptor)
+                                          MOZ_OVERRIDE;
+-    virtual bool RecvShow(const nsIntSize& size);
+-    virtual bool RecvUpdateDimensions(const nsRect& rect, const nsIntSize& size, const ScreenOrientation& orientation);
++    virtual bool RecvShow(const LayoutDeviceIntSize& aSize);
++    virtual bool RecvUpdateDimensions(const nsRect& aRect,
++                                      const LayoutDeviceIntSize& aSize,
++                                      const ScreenOrientation& aOrientation);
+     virtual bool RecvUpdateFrame(const mozilla::layers::FrameMetrics& aFrameMetrics);
+     virtual bool RecvHandleDoubleTap(const CSSIntPoint& aPoint);
+     virtual bool RecvHandleSingleTap(const CSSIntPoint& aPoint);
+     virtual bool RecvHandleLongTap(const CSSIntPoint& aPoint);
+     virtual bool RecvActivate();
+     virtual bool RecvDeactivate();
+     virtual bool RecvMouseEvent(const nsString& aType,
+                                 const float&    aX,
+diff --git a/dom/ipc/TabParent.cpp b/dom/ipc/TabParent.cpp
+--- a/dom/ipc/TabParent.cpp
++++ b/dom/ipc/TabParent.cpp
+@@ -439,47 +439,48 @@ TabParent::LoadURL(nsIURI* aURI)
+                     new OpenFileAndSendFDRunnable(path, this);
+                 openFileRunnable->Dispatch();
+             }
+         }
+     }
+ }
+ 
+ void
+-TabParent::Show(const nsIntSize& size)
++TabParent::Show(const LayoutDeviceIntSize& aSize)
+ {
+     // sigh
+     mShown = true;
+-    mDimensions = size;
++    mDimensions = aSize;
+     if (!mIsDestroyed) {
+-      unused << SendShow(size);
++      unused << SendShow(aSize);
+     }
+ }
+ 
+ void
+-TabParent::UpdateDimensions(const nsRect& rect, const nsIntSize& size)
++TabParent::UpdateDimensions(const nsRect& aRect,
++                            const LayoutDeviceIntSize& aSize)
+ {
+   if (mIsDestroyed) {
+     return;
+   }
+   hal::ScreenConfiguration config;
+   hal::GetCurrentScreenConfiguration(&config);
+   ScreenOrientation orientation = config.orientation();
+ 
+   if (!mUpdatedDimensions || mOrientation != orientation ||
+-      mDimensions != size || !mRect.IsEqualEdges(rect)) {
++      mDimensions != aSize || !mRect.IsEqualEdges(aRect)) {
+     mUpdatedDimensions = true;
+-    mRect = rect;
+-    mDimensions = size;
++    mRect = aRect;
++    mDimensions = aSize;
+     mOrientation = orientation;
+ 
+     unused << SendUpdateDimensions(mRect, mDimensions, mOrientation);
+     if (RenderFrameParent* rfp = GetRenderFrame()) {
+-      rfp->NotifyDimensionsChanged(ScreenIntSize::FromUnknownSize(
+-        gfx::IntSize(mDimensions.width, mDimensions.height)));
++      rfp->NotifyDimensionsChanged(
++        ScreenIntSize::FromLayoutDevicePixels(mDimensions));
+     }
+   }
+ }
+ 
+ void
+ TabParent::UpdateFrame(const FrameMetrics& aFrameMetrics)
+ {
+   if (!mIsDestroyed) {
+@@ -1532,19 +1533,19 @@ TabParent::RecvBrowserFrameOpenWindow(PB
+ 
+ bool
+ TabParent::RecvPRenderFrameConstructor(PRenderFrameParent* actor,
+                                        ScrollingBehavior* scrolling,
+                                        TextureFactoryIdentifier* factoryIdentifier,
+                                        uint64_t* layersId)
+ {
+   RenderFrameParent* rfp = GetRenderFrame();
+-  if (mDimensions != nsIntSize() && rfp) {
+-    rfp->NotifyDimensionsChanged(ScreenIntSize::FromUnknownSize(
+-      gfx::IntSize(mDimensions.width, mDimensions.height)));
++  if (mDimensions != LayoutDeviceIntSize() && rfp) {
++    rfp->NotifyDimensionsChanged(
++      ScreenIntSize::FromLayoutDevicePixels(mDimensions));
+   }
+ 
+   return true;
+ }
+ 
+ bool
+ TabParent::RecvZoomToRect(const CSSRect& aRect)
+ {
+diff --git a/dom/ipc/TabParent.h b/dom/ipc/TabParent.h
+--- a/dom/ipc/TabParent.h
++++ b/dom/ipc/TabParent.h
+@@ -172,18 +172,19 @@ public:
+       return true;
+     }
+ 
+ 
+     void LoadURL(nsIURI* aURI);
+     // XXX/cjones: it's not clear what we gain by hiding these
+     // message-sending functions under a layer of indirection and
+     // eating the return values
+-    void Show(const nsIntSize& size);
+-    void UpdateDimensions(const nsRect& rect, const nsIntSize& size);
++    void Show(const LayoutDeviceIntSize& aSize);
++    void UpdateDimensions(const nsRect& aRect,
++                          const LayoutDeviceIntSize& aSize);
+     void UpdateFrame(const layers::FrameMetrics& aFrameMetrics);
+     void HandleDoubleTap(const CSSIntPoint& aPoint);
+     void HandleSingleTap(const CSSIntPoint& aPoint);
+     void HandleLongTap(const CSSIntPoint& aPoint);
+     void Activate();
+     void Deactivate();
+ 
+     bool MapEventCoordinatesForChildProcess(nsEvent* aEvent);
+@@ -298,17 +299,17 @@ protected:
+     nsAutoString mIMECompositionText;
+     uint32_t mIMECompositionStart;
+     uint32_t mIMESeqno;
+ 
+     // The number of event series we're currently capturing.
+     int32_t mEventCaptureDepth;
+ 
+     nsRect mRect;
+-    nsIntSize mDimensions;
++    LayoutDeviceIntSize mDimensions;
+     ScreenOrientation mOrientation;
+     float mDPI;
+     double mDefaultScale;
+     bool mShown;
+     bool mUpdatedDimensions;
+ 
+ private:
+     already_AddRefed<nsFrameLoader> GetFrameLoader() const;
+diff --git a/gfx/ipc/GfxMessageUtils.h b/gfx/ipc/GfxMessageUtils.h
+--- a/gfx/ipc/GfxMessageUtils.h
++++ b/gfx/ipc/GfxMessageUtils.h
+@@ -442,16 +442,34 @@ struct ParamTraits<mozilla::gfx::Size>
+   static bool Read(const Message* msg, void** iter, paramType* result)
+   {
+     return (ReadParam(msg, iter, &result->width) &&
+             ReadParam(msg, iter, &result->height));
+   }
+ };
+ 
+ template<class T>
++struct ParamTraits< mozilla::gfx::IntSizeTyped<T> >
++{
++  typedef mozilla::gfx::IntSizeTyped<T> paramType;
++
++  static void Write(Message* msg, const paramType& param)
++  {
++    WriteParam(msg, param.width);
++    WriteParam(msg, param.height);
++  }
++
++  static bool Read(const Message* msg, void** iter, paramType* result)
++  {
++    return (ReadParam(msg, iter, &result->width) &&
++            ReadParam(msg, iter, &result->height));
++  }
++};
++
++template<class T>
+ struct ParamTraits< mozilla::gfx::RectTyped<T> >
+ {
+   typedef mozilla::gfx::RectTyped<T> paramType;
+ 
+   static void Write(Message* msg, const paramType& param)
+   {
+     WriteParam(msg, param.x);
+     WriteParam(msg, param.y);
+diff --git a/layout/base/Units.h b/layout/base/Units.h
+--- a/layout/base/Units.h
++++ b/layout/base/Units.h
+@@ -196,16 +196,20 @@ struct LayerPixel {
+  * On non-OMTC platforms this should be equivalent to LayerPixel units.
+  * On OMTC platforms these may diverge from LayerPixel units temporarily,
+  * while an asynchronous zoom is happening, but should eventually converge
+  * back to LayerPixel units. Some variables (such as those representing
+  * chrome UI element sizes) that are not subject to content zoom should
+  * generally be represented in ScreenPixel units.
+  */
+ struct ScreenPixel {
++  static ScreenIntSize FromLayoutDevicePixels(const LayoutDeviceIntSize& aSize)
++  {
++    return ScreenIntSize(aSize.width, aSize.height);
++  }
+ };
+ 
+ // Operators to apply ScaleFactors directly to Points and Rects
+ 
+ template<class src, class dst>
+ gfx::PointTyped<dst> operator*(const gfx::PointTyped<src>& aPoint, const gfx::ScaleFactor<src, dst>& aScale) {
+   return gfx::PointTyped<dst>(aPoint.x * aScale.scale,
+                               aPoint.y * aScale.scale);

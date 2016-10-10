@@ -1,0 +1,171 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/html/nsHTMLEditRules.cpp b/editor/libeditor/html/nsHTMLEditRules.cpp
+--- a/editor/libeditor/html/nsHTMLEditRules.cpp
++++ b/editor/libeditor/html/nsHTMLEditRules.cpp
+@@ -3915,26 +3915,29 @@ nsHTMLEditRules::WillHTMLIndent(nsISelec
+   }
+   return res;
+ }
+ 
+ 
+ nsresult
+ nsHTMLEditRules::WillOutdent(nsISelection *aSelection, bool *aCancel, bool *aHandled)
+ {
+-  if (!aSelection || !aCancel || !aHandled) { return NS_ERROR_NULL_POINTER; }
++  MOZ_ASSERT(aSelection);
++  MOZ_ASSERT(aCancel);
++  MOZ_ASSERT(aHandled);
++
+   // initialize out param
+   *aCancel = false;
+   *aHandled = true;
+-  nsresult res = NS_OK;
+   nsCOMPtr<nsIDOMNode> rememberedLeftBQ, rememberedRightBQ;
+   bool useCSS = mHTMLEditor->IsCSSEnabled();
+ 
+-  res = NormalizeSelection(aSelection);
+-  NS_ENSURE_SUCCESS(res, res);
++  nsresult res = NormalizeSelection(aSelection);
++  NS_ENSURE_SUCCESS(res, res);
++
+   // some scoping for selection resetting - we may need to tweak it
+   {
+     nsAutoSelectionReset selectionResetter(aSelection, mHTMLEditor);
+     
+     // convert the selection ranges into "promoted" selection ranges:
+     // this basically just expands the range to include the immediate
+     // block parent, and then further expands to include any ancestors
+     // whose children are all in the range
+@@ -3944,63 +3947,62 @@ nsHTMLEditRules::WillOutdent(nsISelectio
+     NS_ENSURE_SUCCESS(res, res);
+ 
+     // Ok, now go through all the nodes and remove a level of blockquoting, 
+     // or whatever is appropriate.  Wohoo!
+ 
+     nsCOMPtr<nsIDOMNode> curBlockQuote, firstBQChild, lastBQChild;
+     bool curBlockQuoteIsIndentedWithCSS = false;
+     int32_t listCount = arrayOfNodes.Count();
+-    int32_t i;
+     nsCOMPtr<nsIDOMNode> curParent;
+-    for (i=0; i<listCount; i++)
+-    {
++    for (int32_t i = 0; i < listCount; ++i) {
+       // here's where we actually figure out what to do
+-      nsCOMPtr<nsIDOMNode> curNode = arrayOfNodes[i];
+-      int32_t offset;
+-      res = nsEditor::GetNodeLocation(curNode, address_of(curParent), &offset);
+-      NS_ENSURE_SUCCESS(res, res);
+-      
++      nsIDOMNode* curDOMNode = arrayOfNodes[i];
++      nsCOMPtr<nsIContent> curNode = do_QueryInterface(curDOMNode);
++      NS_ENSURE_STATE(curNode);
++
++      nsIContent* parent = curNode->GetParent();
++      int32_t offset = parent->IndexOf(curNode);
++
+       // is it a blockquote?
+-      if (nsHTMLEditUtils::IsBlockquote(curNode)) 
+-      {
++      if (curNode->IsHTML(nsGkAtoms::blockquote)) {
+         // if it is a blockquote, remove it.
+         // So we need to finish up dealng with any curBlockQuote first.
+         if (curBlockQuote)
+         {
+           res = OutdentPartOfBlock(curBlockQuote, firstBQChild, lastBQChild,
+                                    curBlockQuoteIsIndentedWithCSS,
+                                    address_of(rememberedLeftBQ),
+                                    address_of(rememberedRightBQ));
+           NS_ENSURE_SUCCESS(res, res);
+           curBlockQuote = 0;  firstBQChild = 0;  lastBQChild = 0;
+           curBlockQuoteIsIndentedWithCSS = false;
+         }
+-        res = mHTMLEditor->RemoveBlockContainer(curNode);
++        res = mHTMLEditor->RemoveBlockContainer(curDOMNode);
+         NS_ENSURE_SUCCESS(res, res);
+         continue;
+       }
+       // is it a block with a 'margin' property?
+-      if (useCSS && IsBlockNode(curNode))
+-      {
+-        nsIAtom* marginProperty = MarginPropertyAtomForIndent(mHTMLEditor->mHTMLCSSUtils, curNode);
++      if (useCSS && IsBlockNode(curNode)) {
++        nsIAtom* marginProperty = MarginPropertyAtomForIndent(mHTMLEditor->mHTMLCSSUtils, curDOMNode);
+         nsAutoString value;
+-        mHTMLEditor->mHTMLCSSUtils->GetSpecifiedProperty(curNode, marginProperty, value);
++        mHTMLEditor->mHTMLCSSUtils->GetSpecifiedProperty(curDOMNode, marginProperty, value);
+         float f;
+         nsCOMPtr<nsIAtom> unit;
+         mHTMLEditor->mHTMLCSSUtils->ParseLength(value, &f, getter_AddRefs(unit));
+         if (f > 0)
+         {
+           RelativeChangeIndentationOfElementNode(curNode, -1);
+           continue;
+         }
+       }
++
+       // is it a list item?
+-      if (nsHTMLEditUtils::IsListItem(curNode)) 
+-      {
++      if (curNode->IsElement() &&
++          nsHTMLEditUtils::IsListItem(curNode->AsElement())) {
+         // if it is a list item, that means we are not outdenting whole list.
+         // So we need to finish up dealing with any curBlockQuote, and then
+         // pop this list item.
+         if (curBlockQuote)
+         {
+           res = OutdentPartOfBlock(curBlockQuote, firstBQChild, lastBQChild,
+                                    curBlockQuoteIsIndentedWithCSS,
+                                    address_of(rememberedLeftBQ),
+@@ -4009,16 +4011,17 @@ nsHTMLEditRules::WillOutdent(nsISelectio
+           curBlockQuote = 0;  firstBQChild = 0;  lastBQChild = 0;
+           curBlockQuoteIsIndentedWithCSS = false;
+         }
+         bool bOutOfList;
+         res = PopListItem(curNode, &bOutOfList);
+         NS_ENSURE_SUCCESS(res, res);
+         continue;
+       }
++
+       // do we have a blockquote that we are already committed to removing?
+       if (curBlockQuote)
+       {
+         // if so, is this node a descendant?
+         if (nsEditorUtils::IsDescendantOf(curNode, curBlockQuote))
+         {
+           lastBQChild = curNode;
+           continue;  // then we don't need to do anything different for this node
+@@ -4035,29 +4038,28 @@ nsHTMLEditRules::WillOutdent(nsISelectio
+           NS_ENSURE_SUCCESS(res, res);
+           curBlockQuote = 0;  firstBQChild = 0;  lastBQChild = 0;
+           curBlockQuoteIsIndentedWithCSS = false;
+           // fall out and handle curNode
+         }
+       }
+       
+       // are we inside a blockquote?
+-      nsCOMPtr<nsIDOMNode> n = curNode;
+-      nsCOMPtr<nsIDOMNode> tmp;
++      nsCOMPtr<nsINode> n = curNode;
+       curBlockQuoteIsIndentedWithCSS = false;
+       // keep looking up the hierarchy as long as we don't hit the body or the
+       // active editing host or a table element (other than an entire table)
+       while (!nsTextEditUtils::IsBody(n) && mHTMLEditor->IsDescendantOfEditorRoot(n)
+           && (nsHTMLEditUtils::IsTable(n) || !nsHTMLEditUtils::IsTableElement(n)))
+       {
+-        n->GetParentNode(getter_AddRefs(tmp));
+-        if (!tmp) {
++        n = n->GetNodeParent();
++        if (!n) {
+           break;
+         }
+-        n = tmp;
++
+         if (nsHTMLEditUtils::IsBlockquote(n))
+         {
+           // if so, remember it, and remember first node we are taking out of it.
+           curBlockQuote = n;
+           firstBQChild  = curNode;
+           lastBQChild   = curNode;
+           break;
+         }

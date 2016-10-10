@@ -1,0 +1,859 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/Makefile.in b/dom/base/Makefile.in
+--- a/dom/base/Makefile.in
++++ b/dom/base/Makefile.in
+@@ -44,50 +44,50 @@ EXPORTS = \
+   nsDOMClassInfoClasses.h \
+   nsDOMClassInfoID.h \
+   nsDOMError.h \
+   nsDOMJSUtils.h \
+   nsDOMScriptObjectHolder.h \
+   nsDOMString.h \
+   nsIDOMClassInfo.h \
+   nsIDOMScriptObjectFactory.h \
++  nsIJSArgArray.h \
+   nsIJSEventListener.h \
+   nsIJSNativeInitializer.h \
+   nsIScriptContext.h	\
+   nsIScriptExternalNameSet.h \
+   nsIScriptGlobalObject.h \
+   nsIScriptGlobalObjectOwner.h \
+   nsIScriptNameSpaceManager.h \
+   nsIScriptObjectOwner.h \
+   nsIScriptObjectPrincipal.h \
+   nsIScriptRuntime.h \
+-  nsIScriptTimeoutHandler.h \
+   nsPIDOMWindow.h \
+   nsPIWindowRoot.h \
+   nsFocusManager.h \
+   nsWrapperCache.h \
+   nsContentPermissionHelper.h \
+   nsStructuredCloneContainer.h \
+   nsWindowMemoryReporter.h \
+   $(NULL)
+ 
+ EXPORTS_NAMESPACES = mozilla/dom
+ EXPORTS_mozilla/dom = \
+   DOMError.h \
+   DOMRequest.h \
++  ScreenOrientation.h \
++  ScriptTimeoutHandler.h \
+   StructuredCloneTags.h \
+-  ScreenOrientation.h \
+   $(NULL)
+ 
+ CPPSRCS =			\
+ 	nsBarProps.cpp          \
+ 	nsDOMException.cpp 	\
+ 	nsDOMWindowUtils.cpp 	\
+ 	nsJSEnvironment.cpp	\
+-	nsJSTimeoutHandler.cpp	\
+ 	nsFocusManager.cpp \
+ 	nsGlobalWindow.cpp      \
+ 	nsGlobalWindowCommands.cpp \
+ 	nsLocation.cpp		\
+ 	nsDOMWindowList.cpp	\
+ 	nsJSUtils.cpp		\
+ 	nsScreen.cpp		\
+ 	nsHistory.cpp		\
+@@ -101,16 +101,17 @@ CPPSRCS =			\
+ 	nsContentPermissionHelper.cpp \
+ 	nsStructuredCloneContainer.cpp \
+ 	nsDOMNavigationTiming.cpp \
+ 	nsPerformance.cpp	\
+ 	nsWindowMemoryReporter.cpp \
+ 	DOMError.cpp \
+ 	DOMRequest.cpp \
+ 	Navigator.cpp \
++	ScriptTimeoutHandler.cpp \
+ 	$(NULL)
+ 
+ include $(topsrcdir)/dom/dom-config.mk
+ 
+ ifdef MOZ_JSDEBUGGER
+ DEFINES += -DMOZ_JSDEBUGGER
+ endif
+ 
+diff --git a/dom/base/nsJSTimeoutHandler.cpp b/dom/base/ScriptTimeoutHandler.cpp
+rename from dom/base/nsJSTimeoutHandler.cpp
+rename to dom/base/ScriptTimeoutHandler.cpp
+--- a/dom/base/nsJSTimeoutHandler.cpp
++++ b/dom/base/ScriptTimeoutHandler.cpp
+@@ -1,89 +1,45 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* vim: set ts=2 sw=2 et tw=78: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
++#include "mozilla/dom/ScriptTimeoutHandler.h"
++
++#include "nsAlgorithm.h"
+ #include "nsCOMPtr.h"
++#include "nsContentUtils.h"
++#include "nsDOMError.h"
++#include "nsDOMJSUtils.h"
++#include "nsGlobalWindow.h"
++#include "nsIArray.h"
++#include "nsIContentSecurityPolicy.h"
++#include "nsIJSRuntimeService.h"
+ #include "nsIScriptContext.h"
+-#include "nsIArray.h"
+-#include "nsIScriptTimeoutHandler.h"
+ #include "nsIXPConnect.h"
+-#include "nsIJSRuntimeService.h"
++#include "nsJSEnvironment.h"
+ #include "nsJSUtils.h"
+-#include "nsDOMJSUtils.h"
+-#include "nsContentUtils.h"
+-#include "nsJSEnvironment.h"
+ #include "nsServiceManagerUtils.h"
+-#include "nsDOMError.h"
+-#include "nsGlobalWindow.h"
+-#include "nsIContentSecurityPolicy.h"
+-#include "nsAlgorithm.h"
+-#include "mozilla/Attributes.h"
++
++namespace mozilla {
++namespace dom {
+ 
+ static const char kSetIntervalStr[] = "setInterval";
+ static const char kSetTimeoutStr[] = "setTimeout";
+ 
+-// Our JS nsIScriptTimeoutHandler implementation.
+-class nsJSScriptTimeoutHandler MOZ_FINAL : public nsIScriptTimeoutHandler
+-{
+-public:
+-  // nsISupports
+-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsJSScriptTimeoutHandler)
+-
+-  nsJSScriptTimeoutHandler();
+-  ~nsJSScriptTimeoutHandler();
+-
+-  virtual const PRUnichar *GetHandlerText();
+-  virtual JSObject *GetScriptObject() {
+-    return mFunObj;
+-  }
+-  virtual void GetLocation(const char **aFileName, uint32_t *aLineNo) {
+-    *aFileName = mFileName.get();
+-    *aLineNo = mLineNo;
+-  }
+-
+-  virtual nsIArray *GetArgv() {
+-    return mArgv;
+-  }
+-
+-  nsresult Init(nsGlobalWindow *aWindow, bool *aIsInterval,
+-                int32_t *aInterval);
+-
+-  void ReleaseJSObjects();
+-
+-private:
+-
+-  nsCOMPtr<nsIScriptContext> mContext;
+-
+-  // filename, line number and JS language version string of the
+-  // caller of setTimeout()
+-  nsCString mFileName;
+-  uint32_t mLineNo;
+-  uint32_t mVersion;
+-  nsCOMPtr<nsIJSArgArray> mArgv;
+-
+-  // The JS expression to evaluate or function to call, if !mExpr
+-  JSFlatString *mExpr;
+-  JSObject *mFunObj;
+-};
+-
+-
+-// nsJSScriptTimeoutHandler
+-// QueryInterface implementation for nsJSScriptTimeoutHandler
+-NS_IMPL_CYCLE_COLLECTION_CLASS(nsJSScriptTimeoutHandler)
+-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsJSScriptTimeoutHandler)
++// QueryInterface implementation for ScriptTimeoutHandler
++NS_IMPL_CYCLE_COLLECTION_CLASS(ScriptTimeoutHandler)
++NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(ScriptTimeoutHandler)
+   tmp->ReleaseJSObjects();
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsJSScriptTimeoutHandler)
++NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(ScriptTimeoutHandler)
+   if (NS_UNLIKELY(cb.WantDebugInfo())) {
+-    nsCAutoString foo("nsJSScriptTimeoutHandler");
++    nsCAutoString foo("ScriptTimeoutHandler");
+     if (tmp->mExpr) {
+       foo.AppendLiteral(" [");
+       foo.Append(tmp->mFileName);
+       foo.AppendLiteral(":");
+       foo.AppendInt(tmp->mLineNo);
+       foo.AppendLiteral("]");
+     }
+     else if (tmp->mFunObj) {
+@@ -97,73 +53,72 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_
+           foo.AppendLiteral(" [");
+           foo.Append(name);
+           delete[] name;
+           foo.AppendLiteral("]");
+         }
+       }
+     }
+     cb.DescribeRefCountedNode(tmp->mRefCnt.get(),
+-                              sizeof(nsJSScriptTimeoutHandler), foo.get());
++                              sizeof(ScriptTimeoutHandler), foo.get());
+   }
+   else {
+-    NS_IMPL_CYCLE_COLLECTION_DESCRIBE(nsJSScriptTimeoutHandler,
++    NS_IMPL_CYCLE_COLLECTION_DESCRIBE(ScriptTimeoutHandler,
+                                       tmp->mRefCnt.get())
+   }
+ 
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mContext)
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mArgv)
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+ 
+-NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(nsJSScriptTimeoutHandler)
++NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(ScriptTimeoutHandler)
+   NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mExpr)
+   NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mFunObj)
+ NS_IMPL_CYCLE_COLLECTION_TRACE_END
+ 
+-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsJSScriptTimeoutHandler)
+-  NS_INTERFACE_MAP_ENTRY(nsIScriptTimeoutHandler)
++NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ScriptTimeoutHandler)
+   NS_INTERFACE_MAP_ENTRY(nsISupports)
+ NS_INTERFACE_MAP_END
+ 
+-NS_IMPL_CYCLE_COLLECTING_ADDREF(nsJSScriptTimeoutHandler)
+-NS_IMPL_CYCLE_COLLECTING_RELEASE(nsJSScriptTimeoutHandler)
++NS_IMPL_CYCLE_COLLECTING_ADDREF(ScriptTimeoutHandler)
++NS_IMPL_CYCLE_COLLECTING_RELEASE(ScriptTimeoutHandler)
+ 
+-nsJSScriptTimeoutHandler::nsJSScriptTimeoutHandler() :
++ScriptTimeoutHandler::ScriptTimeoutHandler() :
+   mLineNo(0),
+   mVersion(nsnull),
+   mExpr(nsnull),
+   mFunObj(nsnull)
+ {
+ }
+ 
+-nsJSScriptTimeoutHandler::~nsJSScriptTimeoutHandler()
++ScriptTimeoutHandler::~ScriptTimeoutHandler()
+ {
+   ReleaseJSObjects();
+ }
+ 
+ void
+-nsJSScriptTimeoutHandler::ReleaseJSObjects()
++ScriptTimeoutHandler::ReleaseJSObjects()
+ {
+   if (mExpr || mFunObj) {
+     if (mExpr) {
+-      NS_DROP_JS_OBJECTS(this, nsJSScriptTimeoutHandler);
++      NS_DROP_JS_OBJECTS(this, ScriptTimeoutHandler);
+       mExpr = nsnull;
+     } else if (mFunObj) {
+-      NS_DROP_JS_OBJECTS(this, nsJSScriptTimeoutHandler);
++      NS_DROP_JS_OBJECTS(this, ScriptTimeoutHandler);
+       mFunObj = nsnull;
+     } else {
+       NS_WARNING("No func and no expr - roots may not have been removed");
+     }
+   }
+ }
+ 
+ nsresult
+-nsJSScriptTimeoutHandler::Init(nsGlobalWindow *aWindow, bool *aIsInterval,
+-                               int32_t *aInterval)
++ScriptTimeoutHandler::Init(nsGlobalWindow* aWindow, bool* aIsInterval,
++                           int32_t* aInterval)
+ {
+   mContext = aWindow->GetContextInternal();
+   if (!mContext) {
+     // This window was already closed, or never properly initialized,
+     // don't let a timer be scheduled on such a window.
+ 
+     return NS_ERROR_NOT_INITIALIZED;
+   }
+@@ -188,58 +143,58 @@ nsJSScriptTimeoutHandler::Init(nsGlobalW
+   ncc->GetArgvPtr(&argv);
+ 
+   JSFlatString *expr = nsnull;
+   JSObject *funobj = nsnull;
+ 
+   JSAutoRequest ar(cx);
+ 
+   if (argc < 1) {
+-    ::JS_ReportError(cx, "Function %s requires at least 2 parameter",
+-                     *aIsInterval ? kSetIntervalStr : kSetTimeoutStr);
++    JS_ReportError(cx, "Function %s requires at least 2 parameter",
++                   *aIsInterval ? kSetIntervalStr : kSetTimeoutStr);
+     return NS_ERROR_DOM_TYPE_ERR;
+   }
+ 
+   int32_t interval = 0;
+-  if (argc > 1 && !::JS_ValueToECMAInt32(cx, argv[1], &interval)) {
+-    ::JS_ReportError(cx,
+-                     "Second argument to %s must be a millisecond interval",
+-                     aIsInterval ? kSetIntervalStr : kSetTimeoutStr);
++  if (argc > 1 && !JS_ValueToECMAInt32(cx, argv[1], &interval)) {
++    JS_ReportError(cx,
++                   "Second argument to %s must be a millisecond interval",
++                   *aIsInterval ? kSetIntervalStr : kSetTimeoutStr);
+     return NS_ERROR_DOM_TYPE_ERR;
+   }
+ 
+   if (argc == 1) {
+     // If no interval was specified, treat this like a timeout, to avoid
+     // setting an interval of 0 milliseconds.
+     *aIsInterval = false;
+   }
+ 
+-  switch (::JS_TypeOfValue(cx, argv[0])) {
++  switch (JS_TypeOfValue(cx, argv[0])) {
+   case JSTYPE_FUNCTION:
+     funobj = JSVAL_TO_OBJECT(argv[0]);
+     break;
+ 
+   case JSTYPE_STRING:
+   case JSTYPE_OBJECT:
+     {
+-      JSString *str = ::JS_ValueToString(cx, argv[0]);
++      JSString* str = JS_ValueToString(cx, argv[0]);
+       if (!str)
+         return NS_ERROR_OUT_OF_MEMORY;
+ 
+-      expr = ::JS_FlattenString(cx, str);
++      expr = JS_FlattenString(cx, str);
+       if (!expr)
+-          return NS_ERROR_OUT_OF_MEMORY;
++        return NS_ERROR_OUT_OF_MEMORY;
+ 
+       argv[0] = STRING_TO_JSVAL(str);
+     }
+     break;
+ 
+   default:
+-    ::JS_ReportError(cx, "useless %s call (missing quotes around argument?)",
+-                     *aIsInterval ? kSetIntervalStr : kSetTimeoutStr);
++    JS_ReportError(cx, "useless %s call (missing quotes around argument?)",
++                   *aIsInterval ? kSetIntervalStr : kSetTimeoutStr);
+ 
+     // Return an error that nsGlobalWindow can recognize and turn into NS_OK.
+     return NS_ERROR_DOM_TYPE_ERR;
+   }
+ 
+   if (expr) {
+     // if CSP is enabled, and setTimeout/setInterval was called with a string
+     // or object, disable the registration and log an error
+@@ -253,37 +208,37 @@ nsJSScriptTimeoutHandler::Init(nsGlobalW
+       if (csp) {
+         bool allowsEval;
+         // this call will send violation reports as warranted (and return true if
+         // reportOnly is set).
+         rv = csp->GetAllowsEval(&allowsEval);
+         NS_ENSURE_SUCCESS(rv, rv);
+ 
+         if (!allowsEval) {
+-          ::JS_ReportError(cx, "call to %s blocked by CSP",
+-                            *aIsInterval ? kSetIntervalStr : kSetTimeoutStr);
++          JS_ReportError(cx, "call to %s blocked by CSP",
++                         *aIsInterval ? kSetIntervalStr : kSetTimeoutStr);
+ 
+           // Note: Our only caller knows to turn NS_ERROR_DOM_TYPE_ERR into NS_OK.
+           return NS_ERROR_DOM_TYPE_ERR;
+         }
+       }
+     } // if there's no document, we don't have to do anything.
+ 
+-    rv = NS_HOLD_JS_OBJECTS(this, nsJSScriptTimeoutHandler);
++    rv = NS_HOLD_JS_OBJECTS(this, ScriptTimeoutHandler);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     mExpr = expr;
+ 
+     // Get the calling location.
+     const char *filename;
+     if (nsJSUtils::GetCallingLocation(cx, &filename, &mLineNo)) {
+       mFileName.Assign(filename);
+     }
+   } else if (funobj) {
+-    rv = NS_HOLD_JS_OBJECTS(this, nsJSScriptTimeoutHandler);
++    rv = NS_HOLD_JS_OBJECTS(this, ScriptTimeoutHandler);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     mFunObj = funobj;
+ 
+     // Create our arg array.  argc is the number of arguments passed
+     // to setTimeout or setInterval; the first two are our callback
+     // and the delay, so only arguments after that need to go in our
+     // array.
+@@ -311,34 +266,31 @@ nsJSScriptTimeoutHandler::Init(nsGlobalW
+   } else {
+     NS_WARNING("No func and no expr - why are we here?");
+   }
+   *aInterval = interval;
+   return NS_OK;
+ }
+ 
+ const PRUnichar *
+-nsJSScriptTimeoutHandler::GetHandlerText()
++ScriptTimeoutHandler::GetHandlerText()
+ {
+   NS_ASSERTION(mExpr, "No expression, so no handler text!");
+-  return ::JS_GetFlatStringChars(mExpr);
++  return JS_GetFlatStringChars(mExpr);
+ }
+ 
+-nsresult NS_CreateJSTimeoutHandler(nsGlobalWindow *aWindow,
+-                                   bool *aIsInterval,
+-                                   int32_t *aInterval,
+-                                   nsIScriptTimeoutHandler **aRet)
++// static
++nsresult
++ScriptTimeoutHandler::Create(nsGlobalWindow* aWindow, bool* aIsInterval,
++                             int32_t* aInterval, ScriptTimeoutHandler** aRet)
+ {
+   *aRet = nsnull;
+-  nsJSScriptTimeoutHandler *handler = new nsJSScriptTimeoutHandler();
+-  if (!handler)
+-    return NS_ERROR_OUT_OF_MEMORY;
++  nsRefPtr<ScriptTimeoutHandler> handler = new ScriptTimeoutHandler();
+ 
+   nsresult rv = handler->Init(aWindow, aIsInterval, aInterval);
+-  if (NS_FAILED(rv)) {
+-    delete handler;
+-    return rv;
+-  }
++  NS_ENSURE_SUCCESS(rv, rv);
+ 
+-  NS_ADDREF(*aRet = handler);
+-
++  handler.forget(aRet);
+   return NS_OK;
+ }
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/base/ScriptTimeoutHandler.h b/dom/base/ScriptTimeoutHandler.h
+new file mode 100644
+--- /dev/null
++++ b/dom/base/ScriptTimeoutHandler.h
+@@ -0,0 +1,72 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_ScriptTimeoutHandler_h
++#define mozilla_dom_ScriptTimeoutHandler_h
++
++#include "nsISupports.h"
++
++#include "mozilla/Attributes.h"
++#include "nsCOMPtr.h"
++#include "nsCycleCollectionParticipant.h"
++#include "nsIJSArgArray.h"
++#include "nsStringGlue.h"
++
++class JSFlatString;
++class nsGlobalWindow;
++class nsIScriptContext;
++
++struct JSObject;
++
++namespace mozilla {
++namespace dom {
++
++class ScriptTimeoutHandler MOZ_FINAL : public nsISupports
++{
++public:
++  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
++  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(ScriptTimeoutHandler)
++
++  static nsresult Create(nsGlobalWindow* aWindow, bool* aIsInterval,
++                         int32_t* aInterval, ScriptTimeoutHandler** aRet);
++
++  ~ScriptTimeoutHandler();
++
++  const PRUnichar* GetHandlerText();
++  JSObject* GetScriptObject() {
++    return mFunObj;
++  }
++  void GetLocation(const char** aFileName, uint32_t* aLineNo) {
++    *aFileName = mFileName.get();
++    *aLineNo = mLineNo;
++  }
++
++  nsIArray* GetArgv() {
++    return mArgv;
++  }
++
++  void ReleaseJSObjects();
++
++private:
++  ScriptTimeoutHandler();
++  nsresult Init(nsGlobalWindow* aWindow, bool* aIsInterval, int32_t* aInterval);
++
++  nsCOMPtr<nsIScriptContext> mContext;
++
++  // filename, line number and JS language version string of the
++  // caller of setTimeout()
++  nsCString mFileName;
++  uint32_t mLineNo;
++  uint32_t mVersion;
++  nsCOMPtr<nsIJSArgArray> mArgv;
++
++  // The JS expression to evaluate or function to call, if !mExpr
++  JSFlatString* mExpr;
++  JSObject* mFunObj;
++};
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_ScriptTimeoutHandler_h
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -8810,17 +8810,17 @@ nsGlobalWindow::CloseWindow(nsISupports 
+ 
+ //*****************************************************************************
+ // nsGlobalWindow: Timeout Functions
+ //*****************************************************************************
+ 
+ uint32_t sNestingLevel;
+ 
+ nsresult
+-nsGlobalWindow::SetTimeoutOrInterval(nsIScriptTimeoutHandler *aHandler,
++nsGlobalWindow::SetTimeoutOrInterval(ScriptTimeoutHandler *aHandler,
+                                      int32_t interval,
+                                      bool aIsInterval, int32_t *aReturn)
+ {
+   FORWARD_TO_INNER(SetTimeoutOrInterval, (aHandler, interval, aIsInterval, aReturn),
+                    NS_ERROR_NOT_INITIALIZED);
+ 
+   // If we don't have a document (we could have been unloaded since
+   // the call to setTimeout was made), do nothing.
+@@ -8981,21 +8981,19 @@ nsGlobalWindow::SetTimeoutOrInterval(boo
+     }
+ 
+     FORWARD_TO_INNER(SetTimeoutOrInterval, (aIsInterval, aReturn),
+                      NS_ERROR_NOT_INITIALIZED);
+   }
+ 
+   int32_t interval = 0;
+   bool isInterval = aIsInterval;
+-  nsCOMPtr<nsIScriptTimeoutHandler> handler;
+-  nsresult rv = NS_CreateJSTimeoutHandler(this,
+-                                          &isInterval,
+-                                          &interval,
+-                                          getter_AddRefs(handler));
++  nsRefPtr<ScriptTimeoutHandler> handler;
++  nsresult rv = ScriptTimeoutHandler::Create(this, &isInterval, &interval,
++                                             getter_AddRefs(handler));
+   if (NS_FAILED(rv))
+     return (rv == NS_ERROR_DOM_TYPE_ERR) ? NS_OK : rv;
+ 
+   return SetTimeoutOrInterval(handler, interval, isInterval, aReturn);
+ }
+ 
+ bool
+ nsGlobalWindow::RunTimeoutHandler(nsTimeout* aTimeout,
+@@ -9023,17 +9021,17 @@ nsGlobalWindow::RunTimeoutHandler(nsTime
+ 
+   bool trackNestingLevel = !timeout->mIsInterval;
+   uint32_t nestingLevel;
+   if (trackNestingLevel) {
+     nestingLevel = sNestingLevel;
+     sNestingLevel = timeout->mNestingLevel;
+   }
+ 
+-  nsCOMPtr<nsIScriptTimeoutHandler> handler(timeout->mScriptHandler);
++  nsRefPtr<ScriptTimeoutHandler> handler = timeout->mScriptHandler;
+   JSObject* scriptObject = handler->GetScriptObject();
+   if (!scriptObject) {
+     // Evaluate the timeout expression.
+     const PRUnichar* script = handler->GetHandlerText();
+     NS_ASSERTION(script, "timeout has no script nor handler text!");
+ 
+     const char* filename = nsnull;
+     uint32_t lineNo = 0;
+diff --git a/dom/base/nsGlobalWindow.h b/dom/base/nsGlobalWindow.h
+--- a/dom/base/nsGlobalWindow.h
++++ b/dom/base/nsGlobalWindow.h
+@@ -28,17 +28,17 @@
+ #include "nsIDOMEventTarget.h"
+ #include "nsIInterfaceRequestor.h"
+ #include "nsIInterfaceRequestorUtils.h"
+ #include "nsIDOMJSWindow.h"
+ #include "nsIDOMChromeWindow.h"
+ #include "nsIScriptGlobalObject.h"
+ #include "nsIScriptContext.h"
+ #include "nsIScriptObjectPrincipal.h"
+-#include "nsIScriptTimeoutHandler.h"
++#include "mozilla/dom/ScriptTimeoutHandler.h"
+ #include "nsITimer.h"
+ #include "nsIWebBrowserChrome.h"
+ #include "nsPIDOMWindow.h"
+ #include "nsIDOMModalContentWindow.h"
+ #include "nsIScriptSecurityManager.h"
+ #include "nsEventListenerManager.h"
+ #include "nsIDOMDocument.h"
+ #ifndef MOZ_DISABLE_DOMCRYPTO
+@@ -109,26 +109,19 @@ class nsIDOMCrypto;
+ class nsWindowSizes;
+ 
+ namespace mozilla {
+ namespace dom {
+ class Navigator;
+ } // namespace dom
+ } // namespace mozilla
+ 
+-extern nsresult
+-NS_CreateJSTimeoutHandler(nsGlobalWindow *aWindow,
+-                          bool *aIsInterval,
+-                          int32_t *aInterval,
+-                          nsIScriptTimeoutHandler **aRet);
+-
+ /*
+  * Timeout struct that holds information about each script
+- * timeout.  Holds a strong reference to an nsIScriptTimeoutHandler, which
+- * abstracts the language specific cruft.
++ * timeout.  Holds a strong reference to an ScriptTimeoutHandler.
+  */
+ struct nsTimeout : PRCList
+ {
+   nsTimeout();
+   ~nsTimeout();
+ 
+   NS_DECL_CYCLE_COLLECTION_NATIVE_CLASS(nsTimeout)
+ 
+@@ -183,17 +176,17 @@ struct nsTimeout : PRCList
+   // 
+   uint32_t mNestingLevel;
+ 
+   // The popup state at timeout creation time if not created from
+   // another timeout
+   PopupControlState mPopupState;
+ 
+   // The language-specific information about the callback.
+-  nsCOMPtr<nsIScriptTimeoutHandler> mScriptHandler;
++  nsRefPtr<mozilla::dom::ScriptTimeoutHandler> mScriptHandler;
+ 
+ private:
+   // reference count for shared usage
+   nsAutoRefCnt mRefCnt;
+ };
+ 
+ //*****************************************************************************
+ // nsGlobalWindow: Global Object for Scripting
+@@ -229,16 +222,17 @@ class nsGlobalWindow : public nsPIDOMWin
+                        public nsIInlineEventHandlers
+ {
+ public:
+   friend class nsDOMMozURLProperty;
+ 
+   typedef mozilla::TimeStamp TimeStamp;
+   typedef mozilla::TimeDuration TimeDuration;
+   typedef mozilla::dom::Navigator Navigator;
++  typedef mozilla::dom::ScriptTimeoutHandler ScriptTimeoutHandler;
+   typedef nsDataHashtable<nsUint64HashKey, nsGlobalWindow*> WindowByIdTable;
+ 
+   // public methods
+   nsPIDOMWindow* GetPrivateParent();
+   // callback for close event
+   void ReallyCloseWindow();
+ 
+   // nsISupports
+@@ -655,17 +649,17 @@ protected:
+                                     JSContext *aJSCallerContext,
+                                     nsIDOMWindow **aReturn);
+ 
+   static void CloseWindow(nsISupports* aWindow);
+ 
+   // Timeout Functions
+   // Language agnostic timeout function (all args passed).
+   // |interval| is in milliseconds.
+-  nsresult SetTimeoutOrInterval(nsIScriptTimeoutHandler *aHandler,
++  nsresult SetTimeoutOrInterval(ScriptTimeoutHandler *aHandler,
+                                 int32_t interval,
+                                 bool aIsInterval, int32_t *aReturn);
+   nsresult ClearTimeoutOrInterval(int32_t aTimerID);
+ 
+   // JS specific timeout functions (JS args grabbed from context).
+   nsresult SetTimeoutOrInterval(bool aIsInterval, int32_t* aReturn);
+   nsresult ResetTimersForNonBackgroundWindow();
+ 
+diff --git a/dom/base/nsIJSArgArray.h b/dom/base/nsIJSArgArray.h
+new file mode 100644
+--- /dev/null
++++ b/dom/base/nsIJSArgArray.h
+@@ -0,0 +1,30 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef nsIJSArgArray_h
++#define nsIJSArgArray_h
++
++#include "nsIArray.h"
++
++// An interface for fast and native conversion to/from nsIArray. If an object
++// supports this interface, JS can reach directly in for the argv, and avoid
++// nsISupports conversion. If this interface is not supported, the object will
++// be queried for nsIArray, and everything converted via xpcom objects.
++#define NS_IJSARGARRAY_IID \
++{ 0xb6acdac8, 0xf5c6, 0x432c, \
++  { 0xa8, 0x6e, 0x33, 0xee, 0xb1, 0xb0, 0xcd, 0xdc } }
++
++class nsIJSArgArray : public nsIArray
++{
++public:
++  NS_DECLARE_STATIC_IID_ACCESSOR(NS_IJSARGARRAY_IID)
++  // Bug 312003 describes why this must be "void **", but after calling argv
++  // may be cast to jsval* and the args found at:
++  //    ((jsval*)argv)[0], ..., ((jsval*)argv)[argc - 1]
++  virtual nsresult GetArgs(uint32_t* argc, void** argv) = 0;
++};
++
++NS_DEFINE_STATIC_IID_ACCESSOR(nsIJSArgArray, NS_IJSARGARRAY_IID)
++
++#endif // nsIJSArgArray_h
+diff --git a/dom/base/nsIScriptTimeoutHandler.h b/dom/base/nsIScriptTimeoutHandler.h
+deleted file mode 100644
+--- a/dom/base/nsIScriptTimeoutHandler.h
++++ /dev/null
+@@ -1,46 +0,0 @@
+-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+-/* vim: set ts=2 sw=2 et tw=80: */
+-/* This Source Code Form is subject to the terms of the Mozilla Public
+- * License, v. 2.0. If a copy of the MPL was not distributed with this
+- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+-#ifndef nsIScriptTimeoutHandler_h___
+-#define nsIScriptTimeoutHandler_h___
+-
+-class nsIArray;
+-
+-#define NS_ISCRIPTTIMEOUTHANDLER_IID \
+-{ 0xcaf520a5, 0x8078, 0x4cba, \
+-  { 0x8a, 0xb9, 0xb6, 0x8a, 0x12, 0x43, 0x4f, 0x05 } }
+-
+-/**
+- * Abstraction of the script objects etc required to do timeouts in a
+- * language agnostic way.
+- */
+-
+-class nsIScriptTimeoutHandler : public nsISupports
+-{
+-public:
+-  NS_DECLARE_STATIC_IID_ACCESSOR(NS_ISCRIPTTIMEOUTHANDLER_IID)
+-
+-  // Get a script object for the language suitable for passing back to
+-  // the language's context as an event handler.  If this returns nsnull,
+-  // GetHandlerText() will be called to get the string.
+-  virtual JSObject *GetScriptObject() = 0;
+-
+-  // Get the handler text of not a compiled object.
+-  virtual const PRUnichar *GetHandlerText() = 0;
+-
+-  // Get the location of the script.
+-  // Note: The memory pointed to by aFileName is owned by the
+-  // nsIScriptTimeoutHandler and should not be freed by the caller.
+-  virtual void GetLocation(const char **aFileName, uint32_t *aLineNo) = 0;
+-
+-  // If a script object, get the argv suitable for passing back to the
+-  // script context.
+-  virtual nsIArray *GetArgv() = 0;
+-};
+-
+-NS_DEFINE_STATIC_IID_ACCESSOR(nsIScriptTimeoutHandler,
+-                              NS_ISCRIPTTIMEOUTHANDLER_IID)
+-
+-#endif // nsIScriptTimeoutHandler_h___
+diff --git a/dom/base/nsJSEnvironment.h b/dom/base/nsJSEnvironment.h
+--- a/dom/base/nsJSEnvironment.h
++++ b/dom/base/nsJSEnvironment.h
+@@ -305,36 +305,16 @@ public:
+   static void Startup();
+   static void Shutdown();
+   // Setup all the statics etc - safe to call multiple times after Startup()
+   static nsresult Init();
+   // Get the NameSpaceManager, creating if necessary
+   static nsScriptNameSpaceManager* GetNameSpaceManager();
+ };
+ 
+-// An interface for fast and native conversion to/from nsIArray. If an object
+-// supports this interface, JS can reach directly in for the argv, and avoid
+-// nsISupports conversion. If this interface is not supported, the object will
+-// be queried for nsIArray, and everything converted via xpcom objects.
+-#define NS_IJSARGARRAY_IID \
+-{ 0xb6acdac8, 0xf5c6, 0x432c, \
+-  { 0xa8, 0x6e, 0x33, 0xee, 0xb1, 0xb0, 0xcd, 0xdc } }
+-
+-class nsIJSArgArray : public nsIArray
+-{
+-public:
+-  NS_DECLARE_STATIC_IID_ACCESSOR(NS_IJSARGARRAY_IID)
+-  // Bug 312003 describes why this must be "void **", but after calling argv
+-  // may be cast to jsval* and the args found at:
+-  //    ((jsval*)argv)[0], ..., ((jsval*)argv)[argc - 1]
+-  virtual nsresult GetArgs(uint32_t *argc, void **argv) = 0;
+-};
+-
+-NS_DEFINE_STATIC_IID_ACCESSOR(nsIJSArgArray, NS_IJSARGARRAY_IID)
+-
+ /* factory functions */
+ nsresult NS_CreateJSRuntime(nsIScriptRuntime **aRuntime);
+ 
+ /* prototypes */
+ void NS_ScriptErrorReporter(JSContext *cx, const char *message, JSErrorReport *report);
+ 
+ JSObject* NS_DOMReadStructuredClone(JSContext* cx,
+                                     JSStructuredCloneReader* reader, uint32_t tag,
+diff --git a/dom/base/nsPIDOMWindow.h b/dom/base/nsPIDOMWindow.h
+--- a/dom/base/nsPIDOMWindow.h
++++ b/dom/base/nsPIDOMWindow.h
+@@ -35,17 +35,16 @@ enum PopupControlState {
+   openControlled,   // it's a popup, but allow it
+   openAbused,       // it's a popup. disallow it, but allow domain override.
+   openOverridden    // disallow window open
+ };
+ 
+ class nsIDocShell;
+ class nsIContent;
+ class nsIDocument;
+-class nsIScriptTimeoutHandler;
+ struct nsTimeout;
+ template <class> class nsScriptObjectHolder;
+ class nsXBLPrototypeHandler;
+ class nsIArray;
+ class nsPIWindowRoot;
+ 
+ #define NS_PIDOMWINDOW_IID \
+ { 0x41dd6a62, 0xda59, 0x46e5, \
+@@ -294,24 +293,16 @@ public:
+   virtual uint32_t TimeoutSuspendCount() = 0;
+ 
+   // Fire any DOM notification events related to things that happened while
+   // the window was frozen.
+   virtual nsresult FireDelayedDOMEvents() = 0;
+ 
+   virtual bool IsFrozen() const = 0;
+ 
+-  // Add a timeout to this window.
+-  virtual nsresult SetTimeoutOrInterval(nsIScriptTimeoutHandler *aHandler,
+-                                        int32_t interval,
+-                                        bool aIsInterval, int32_t *aReturn) = 0;
+-
+-  // Clear a timeout from this window.
+-  virtual nsresult ClearTimeoutOrInterval(int32_t aTimerID) = 0;
+-
+   nsPIDOMWindow *GetOuterWindow()
+   {
+     return mIsInnerWindow ? mOuterWindow.get() : this;
+   }
+ 
+   nsPIDOMWindow *GetCurrentInnerWindow() const
+   {
+     return mInnerWindow;

@@ -1,0 +1,1542 @@
+From: Ms2ger <ms2ger@gmail.com>
+Move Maybe out of Util.h into Maybe.h.
+
+diff --git a/content/base/src/nsINode.cpp b/content/base/src/nsINode.cpp
+--- a/content/base/src/nsINode.cpp
++++ b/content/base/src/nsINode.cpp
+@@ -10,16 +10,17 @@
+ 
+ #include "nsINode.h"
+ 
+ #include "AccessCheck.h"
+ #include "jsapi.h"
+ #include "mozAutoDocUpdate.h"
+ #include "mozilla/CORSMode.h"
+ #include "mozilla/Likely.h"
++#include "mozilla/Maybe.h"
+ #include "mozilla/MemoryReporting.h"
+ #include "mozilla/Telemetry.h"
+ #include "mozilla/Util.h"
+ #include "nsAsyncDOMEvent.h"
+ #include "nsAttrValueOrString.h"
+ #include "nsBindingManager.h"
+ #include "nsCCUncollectableMarker.h"
+ #include "nsClientRect.h"
+diff --git a/content/events/src/nsEventListenerService.cpp b/content/events/src/nsEventListenerService.cpp
+--- a/content/events/src/nsEventListenerService.cpp
++++ b/content/events/src/nsEventListenerService.cpp
+@@ -1,13 +1,16 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
+ #include "nsEventListenerService.h"
++
++#include "mozilla/Maybe.h"
+ #include "nsCOMArray.h"
+ #include "nsEventListenerManager.h"
+ #include "nsIVariant.h"
+ #include "nsIServiceManager.h"
+ #include "nsMemory.h"
+ #include "nsCxPusher.h"
+ #include "nsIXPConnect.h"
+ #include "nsIDOMWindow.h"
+diff --git a/content/events/src/nsEventListenerService.h b/content/events/src/nsEventListenerService.h
+--- a/content/events/src/nsEventListenerService.h
++++ b/content/events/src/nsEventListenerService.h
+@@ -8,16 +8,19 @@
+ #include "nsIEventListenerService.h"
+ #include "nsAutoPtr.h"
+ #include "nsIDOMEventListener.h"
+ #include "nsString.h"
+ #include "nsCycleCollectionParticipant.h"
+ #include "jsapi.h"
+ #include "mozilla/Attributes.h"
+ 
++namespace mozilla {
++template<class> class Maybe;
++} // namespace mozilla
+ 
+ class nsEventListenerInfo : public nsIEventListenerInfo
+ {
+ public:
+   nsEventListenerInfo(const nsAString& aType,
+                       already_AddRefed<nsIDOMEventListener> aListener,
+                       bool aCapturing, bool aAllowsUntrusted,
+                       bool aInSystemEventGroup)
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -51,16 +51,17 @@
+ #include "nsIDOMEvent.h"
+ #include "nsIDOMEventListener.h"
+ #include "nsContentUtils.h"
+ #include "nsCxPusher.h"
+ #include "nsIDOMWindowUtils.h"
+ #include "nsIDOMGlobalPropertyInitializer.h"
+ #include "nsLocation.h"
+ #include "mozilla/Attributes.h"
++#include "mozilla/Maybe.h"
+ #include "mozilla/Telemetry.h"
+ 
+ // Window scriptable helper includes
+ #include "nsIDocShell.h"
+ #include "nsIScriptExternalNameSet.h"
+ #include "nsJSUtils.h"
+ #include "nsScriptNameSpaceManager.h"
+ #include "nsIJSNativeInitializer.h"
+diff --git a/dom/base/nsJSEnvironment.cpp b/dom/base/nsJSEnvironment.cpp
+--- a/dom/base/nsJSEnvironment.cpp
++++ b/dom/base/nsJSEnvironment.cpp
+@@ -70,21 +70,22 @@
+ #endif
+ #ifdef MOZ_LOGGING
+ // Force PR_LOGGING so we can get JS strict warnings even in release builds
+ #define FORCE_PR_LOG 1
+ #endif
+ #include "prlog.h"
+ #include "prthread.h"
+ 
++#include "mozilla/Attributes.h"
++#include "mozilla/dom/BindingUtils.h"
++#include "mozilla/dom/CanvasRenderingContext2DBinding.h"
++#include "mozilla/Maybe.h"
+ #include "mozilla/Preferences.h"
+ #include "mozilla/Telemetry.h"
+-#include "mozilla/dom/BindingUtils.h"
+-#include "mozilla/Attributes.h"
+-#include "mozilla/dom/CanvasRenderingContext2DBinding.h"
+ 
+ #include "GeckoProfiler.h"
+ 
+ using namespace mozilla;
+ using namespace mozilla::dom;
+ 
+ const size_t gStackSize = 8192;
+ 
+diff --git a/dom/bindings/BindingUtils.cpp b/dom/bindings/BindingUtils.cpp
+--- a/dom/bindings/BindingUtils.cpp
++++ b/dom/bindings/BindingUtils.cpp
+@@ -25,16 +25,17 @@
+ #include "XrayWrapper.h"
+ #include "nsPrintfCString.h"
+ 
+ #include "mozilla/dom/HTMLObjectElement.h"
+ #include "mozilla/dom/HTMLObjectElementBinding.h"
+ #include "mozilla/dom/HTMLSharedObjectElement.h"
+ #include "mozilla/dom/HTMLEmbedElementBinding.h"
+ #include "mozilla/dom/HTMLAppletElementBinding.h"
++#include "mozilla/Maybe.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ JSErrorFormatString ErrorFormatString[] = {
+ #define MSG_DEF(_name, _argc, _str) \
+   { _str, _argc, JSEXN_TYPEERR },
+ #include "mozilla/dom/Errors.msg"
+diff --git a/dom/bindings/BindingUtils.h b/dom/bindings/BindingUtils.h
+--- a/dom/bindings/BindingUtils.h
++++ b/dom/bindings/BindingUtils.h
+@@ -16,17 +16,17 @@
+ #include "mozilla/dom/CallbackObject.h"
+ #include "mozilla/dom/DOMJSClass.h"
+ #include "mozilla/dom/DOMJSProxyHandler.h"
+ #include "mozilla/dom/NonRefcountedDOMObject.h"
+ #include "mozilla/dom/Nullable.h"
+ #include "mozilla/dom/workers/Workers.h"
+ #include "mozilla/ErrorResult.h"
+ #include "mozilla/Likely.h"
+-#include "mozilla/Util.h"
++#include "mozilla/Maybe.h"
+ #include "nsCycleCollector.h"
+ #include "nsIXPConnect.h"
+ #include "nsTraceRefcnt.h"
+ #include "qsObjectHelper.h"
+ #include "xpcpublic.h"
+ 
+ #include "nsWrapperCacheInlines.h"
+ 
+diff --git a/dom/bindings/CallbackObject.h b/dom/bindings/CallbackObject.h
+--- a/dom/bindings/CallbackObject.h
++++ b/dom/bindings/CallbackObject.h
+@@ -19,17 +19,17 @@
+ 
+ #include "nsISupports.h"
+ #include "nsISupportsImpl.h"
+ #include "nsCycleCollectionParticipant.h"
+ #include "jsapi.h"
+ #include "jswrapper.h"
+ #include "mozilla/Assertions.h"
+ #include "mozilla/ErrorResult.h"
+-#include "mozilla/Util.h"
++#include "mozilla/Maybe.h"
+ #include "nsContentUtils.h"
+ #include "nsCxPusher.h"
+ #include "nsWrapperCache.h"
+ #include "nsJSEnvironment.h"
+ #include "xpcpublic.h"
+ #include "nsLayoutStatics.h"
+ #include "js/RootingAPI.h"
+ 
+diff --git a/dom/bindings/DOMString.h b/dom/bindings/DOMString.h
+--- a/dom/bindings/DOMString.h
++++ b/dom/bindings/DOMString.h
+@@ -7,17 +7,17 @@
+ /* A class for representing fast string return values. */
+ 
+ #ifndef mozilla_dom_DOMString_h
+ #define mozilla_dom_DOMString_h
+ 
+ #include <stdint.h>
+ 
+ #include "mozilla/Attributes.h"
+-#include "mozilla/Util.h"
++#include "mozilla/Maybe.h"
+ #include "nsDOMString.h"
+ #include "nsStringBuffer.h"
+ #include "nsStringGlue.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ /**
+diff --git a/dom/bindings/TypedArray.h b/dom/bindings/TypedArray.h
+--- a/dom/bindings/TypedArray.h
++++ b/dom/bindings/TypedArray.h
+@@ -6,16 +6,17 @@
+ 
+ #ifndef mozilla_dom_TypedArray_h
+ #define mozilla_dom_TypedArray_h
+ 
+ #include "jsfriendapi.h"
+ #include "js/RootingAPI.h"
+ #include "jsapi.h"
+ #include "mozilla/dom/BindingDeclarations.h"
++#include "mozilla/Maybe.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ /*
+  * Various typed array classes for argument conversion.  We have a base class
+  * that has a way of initializing a TypedArray from an existing typed array, and
+  * a subclass of the base class that supports creation of a relevant typed array
+diff --git a/dom/promise/Promise.cpp b/dom/promise/Promise.cpp
+--- a/dom/promise/Promise.cpp
++++ b/dom/promise/Promise.cpp
+@@ -1,17 +1,19 @@
+ /* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
+ /* vim: set ts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "mozilla/dom/Promise.h"
++
+ #include "mozilla/dom/PromiseBinding.h"
+ #include "mozilla/dom/PromiseResolver.h"
++#include "mozilla/Maybe.h"
+ #include "mozilla/Preferences.h"
+ #include "PromiseCallback.h"
+ #include "nsContentUtils.h"
+ #include "nsPIDOMWindow.h"
+ #include "WorkerPrivate.h"
+ #include "nsJSPrincipals.h"
+ 
+ namespace mozilla {
+diff --git a/dom/promise/PromiseCallback.cpp b/dom/promise/PromiseCallback.cpp
+--- a/dom/promise/PromiseCallback.cpp
++++ b/dom/promise/PromiseCallback.cpp
+@@ -1,17 +1,19 @@
+ /* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
+ /* vim: set ts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "PromiseCallback.h"
++
+ #include "mozilla/dom/Promise.h"
+ #include "mozilla/dom/PromiseResolver.h"
++#include "mozilla/Maybe.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ NS_IMPL_CYCLE_COLLECTING_ADDREF(PromiseCallback)
+ NS_IMPL_CYCLE_COLLECTING_RELEASE(PromiseCallback)
+ 
+ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(PromiseCallback)
+diff --git a/dom/src/json/nsJSON.cpp b/dom/src/json/nsJSON.cpp
+--- a/dom/src/json/nsJSON.cpp
++++ b/dom/src/json/nsJSON.cpp
+@@ -16,16 +16,17 @@
+ #include "nsICharsetConverterManager.h"
+ #include "nsXPCOMStrings.h"
+ #include "nsNetUtil.h"
+ #include "nsContentUtils.h"
+ #include "nsIScriptError.h"
+ #include "nsCRTGlue.h"
+ #include "nsAutoPtr.h"
+ #include "nsIScriptSecurityManager.h"
++#include "mozilla/Maybe.h"
+ #include <algorithm>
+ 
+ static const char kXPConnectServiceCID[] = "@mozilla.org/js/xpc/XPConnect;1";
+ 
+ #define JSON_STREAM_BUFSIZE 4096
+ 
+ NS_INTERFACE_MAP_BEGIN(nsJSON)
+   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIJSON)
+diff --git a/dom/workers/WorkerPrivate.cpp b/dom/workers/WorkerPrivate.cpp
+--- a/dom/workers/WorkerPrivate.cpp
++++ b/dom/workers/WorkerPrivate.cpp
+@@ -29,16 +29,17 @@
+ 
+ #include <algorithm>
+ #include "jsfriendapi.h"
+ #include "jsdbgapi.h"
+ #include "jsfriendapi.h"
+ #include "js/MemoryMetrics.h"
+ #include "mozilla/Attributes.h"
+ #include "mozilla/Likely.h"
++#include "mozilla/Maybe.h"
+ #include "mozilla/dom/BindingUtils.h"
+ #include "mozilla/dom/ImageData.h"
+ #include "mozilla/dom/ImageDataBinding.h"
+ #include "nsAlgorithm.h"
+ #include "nsContentUtils.h"
+ #include "nsCxPusher.h"
+ #include "nsError.h"
+ #include "nsDOMJSUtils.h"
+diff --git a/dom/workers/XMLHttpRequest.cpp b/dom/workers/XMLHttpRequest.cpp
+--- a/dom/workers/XMLHttpRequest.cpp
++++ b/dom/workers/XMLHttpRequest.cpp
+@@ -25,16 +25,17 @@
+ #include "Exceptions.h"
+ #include "File.h"
+ #include "RuntimeService.h"
+ #include "WorkerPrivate.h"
+ #include "XMLHttpRequestUpload.h"
+ 
+ #include "DOMBindingInlines.h"
+ #include "mozilla/Attributes.h"
++#include "mozilla/Maybe.h"
+ 
+ using namespace mozilla;
+ 
+ using namespace mozilla::dom;
+ USING_WORKERS_NAMESPACE
+ 
+ using mozilla::dom::workers::exceptions::ThrowDOMExceptionForNSResult;
+ 
+diff --git a/gfx/layers/basic/BasicLayersImpl.h b/gfx/layers/basic/BasicLayersImpl.h
+--- a/gfx/layers/basic/BasicLayersImpl.h
++++ b/gfx/layers/basic/BasicLayersImpl.h
+@@ -9,18 +9,18 @@
+ #include "BasicImplData.h"              // for BasicImplData
+ #include "BasicLayers.h"                // for BasicLayerManager
+ #include "ReadbackLayer.h"              // for ReadbackLayer
+ #include "gfxASurface.h"                // for gfxASurface
+ #include "gfxContext.h"                 // for gfxContext, etc
+ #include "gfxMatrix.h"                  // for gfxMatrix
+ #include "ipc/AutoOpenSurface.h"        // for AutoOpenSurface
+ #include "mozilla/Attributes.h"         // for MOZ_DELETE, MOZ_STACK_CLASS
+-#include "mozilla/Util.h"               // for Maybe
+ #include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor
++#include "mozilla/Maybe.h"              // for Maybe
+ #include "nsAutoPtr.h"                  // for nsRefPtr
+ #include "nsDebug.h"                    // for NS_ASSERTION
+ #include "nsISupportsImpl.h"            // for gfxContext::Release, etc
+ #include "nsRegion.h"                   // for nsIntRegion
+ #include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
+ 
+ namespace mozilla {
+ namespace layers {
+diff --git a/image/src/ClippedImage.cpp b/image/src/ClippedImage.cpp
+--- a/image/src/ClippedImage.cpp
++++ b/image/src/ClippedImage.cpp
+@@ -5,16 +5,18 @@
+ 
+ #include "gfxDrawable.h"
+ #include "gfxPlatform.h"
+ #include "gfxUtils.h"
+ #include "mozilla/dom/SVGSVGElement.h"
+ 
+ #include "ClippedImage.h"
+ 
++#include "mozilla/Maybe.h"
++
+ using mozilla::layers::LayerManager;
+ using mozilla::layers::ImageContainer;
+ 
+ namespace mozilla {
+ namespace image {
+ 
+ class ClippedImageCachedSurface
+ {
+diff --git a/image/src/ClippedImage.h b/image/src/ClippedImage.h
+--- a/image/src/ClippedImage.h
++++ b/image/src/ClippedImage.h
+@@ -2,17 +2,17 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef MOZILLA_IMAGELIB_CLIPPEDIMAGE_H_
+ #define MOZILLA_IMAGELIB_CLIPPEDIMAGE_H_
+ 
+ #include "ImageWrapper.h"
+-#include "mozilla/Util.h" // for Maybe
++#include "mozilla/Maybe.h"
+ 
+ namespace mozilla {
+ namespace image {
+ 
+ class ClippedImageCachedSurface;
+ class DrawSingleTileCallback;
+ 
+ /**
+diff --git a/image/src/ImageMetadata.h b/image/src/ImageMetadata.h
+--- a/image/src/ImageMetadata.h
++++ b/image/src/ImageMetadata.h
+@@ -1,16 +1,16 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+  *
+  * This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include <stdint.h>
+-#include "mozilla/Util.h"
++#include "mozilla/Maybe.h"
+ #include "nsSize.h"
+ 
+ namespace mozilla {
+ namespace image {
+ 
+ class RasterImage;
+ 
+ // The metadata about an image that decoders accumulate as they decode.
+diff --git a/js/jsd/jsd_xpc.cpp b/js/jsd/jsd_xpc.cpp
+--- a/js/jsd/jsd_xpc.cpp
++++ b/js/jsd/jsd_xpc.cpp
+@@ -21,16 +21,17 @@
+ #include "nsTArray.h"
+ #include "nsThreadUtils.h"
+ #include "nsMemory.h"
+ #include "jsdebug.h"
+ #include "nsReadableUtils.h"
+ #include "nsCRT.h"
+ #include "nsCycleCollectionParticipant.h"
+ #include "mozilla/Attributes.h"
++#include "mozilla/Maybe.h"
+ 
+ /* XXX DOM dependency */
+ #include "nsIScriptContext.h"
+ #include "SandboxPrivate.h"
+ #include "nsJSPrincipals.h"
+ #include "nsContentUtils.h"
+ #include "nsCxPusher.h"
+ 
+diff --git a/js/src/frontend/BytecodeCompiler.cpp b/js/src/frontend/BytecodeCompiler.cpp
+--- a/js/src/frontend/BytecodeCompiler.cpp
++++ b/js/src/frontend/BytecodeCompiler.cpp
+@@ -1,16 +1,18 @@
+ /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+  * vim: set ts=8 sts=4 et sw=4 tw=99:
+  * This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "frontend/BytecodeCompiler.h"
+ 
++#include "mozilla/Maybe.h"
++
+ #include "jscntxt.h"
+ #include "jsscript.h"
+ 
+ #include "frontend/BytecodeEmitter.h"
+ #include "frontend/FoldConstants.h"
+ #include "frontend/NameFunctions.h"
+ #include "frontend/Parser.h"
+ #include "jit/AsmJSLink.h"
+diff --git a/js/src/frontend/Parser.cpp b/js/src/frontend/Parser.cpp
+--- a/js/src/frontend/Parser.cpp
++++ b/js/src/frontend/Parser.cpp
+@@ -43,17 +43,16 @@
+ #include "jsscriptinlines.h"
+ 
+ #include "frontend/ParseMaps-inl.h"
+ #include "frontend/ParseNode-inl.h"
+ #include "vm/ScopeObject-inl.h"
+ 
+ using namespace js;
+ using namespace js::gc;
+-using mozilla::Maybe;
+ 
+ namespace js {
+ namespace frontend {
+ 
+ typedef Rooted<StaticBlockObject*> RootedStaticBlockObject;
+ typedef Handle<StaticBlockObject*> HandleStaticBlockObject;
+ 
+ 
+diff --git a/js/src/gc/Zone.h b/js/src/gc/Zone.h
+--- a/js/src/gc/Zone.h
++++ b/js/src/gc/Zone.h
+@@ -2,18 +2,18 @@
+  * vim: set ts=8 sts=4 et sw=4 tw=99:
+  * This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef gc_Zone_h
+ #define gc_Zone_h
+ 
++#include "mozilla/Maybe.h"
+ #include "mozilla/MemoryReporting.h"
+-#include "mozilla/Util.h"
+ 
+ #include "jscntxt.h"
+ #include "jsgc.h"
+ #include "jsinfer.h"
+ 
+ #include "gc/FindSCCs.h"
+ 
+ namespace js {
+diff --git a/js/src/jit/AsmJS.cpp b/js/src/jit/AsmJS.cpp
+--- a/js/src/jit/AsmJS.cpp
++++ b/js/src/jit/AsmJS.cpp
+@@ -1,16 +1,17 @@
+ /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+  * vim: set ts=8 sts=4 et sw=4 tw=99:
+  * This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "jit/AsmJS.h"
+ 
++#include "mozilla/Maybe.h"
+ #include "mozilla/Move.h"
+ 
+ #ifdef MOZ_VTUNE
+ # include "vtune/VTuneWrapper.h"
+ #endif
+ 
+ #include "jsmath.h"
+ #include "jsprf.h"
+diff --git a/js/src/jit/CodeGenerator.cpp b/js/src/jit/CodeGenerator.cpp
+--- a/js/src/jit/CodeGenerator.cpp
++++ b/js/src/jit/CodeGenerator.cpp
+@@ -4,17 +4,17 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "jit/CodeGenerator.h"
+ 
+ #include "mozilla/Assertions.h"
+ #include "mozilla/Attributes.h"
+ #include "mozilla/DebugOnly.h"
+-#include "mozilla/Util.h"
++#include "mozilla/Maybe.h"
+ 
+ #include "jslibmath.h"
+ #include "jsmath.h"
+ #include "jsnum.h"
+ 
+ #include "builtin/Eval.h"
+ #include "gc/Nursery.h"
+ #include "jit/ExecutionModeInlines.h"
+@@ -2658,17 +2658,17 @@ CodeGenerator::generateBody()
+         LInstructionIterator iter = current->begin();
+ 
+         // Separately visit the label at the start of every block, so that
+         // count instrumentation is inserted after the block label is bound.
+         if (!iter->accept(this))
+             return false;
+         iter++;
+ 
+-        mozilla::Maybe<ScriptCountBlockState> blockCounts;
++        Maybe<ScriptCountBlockState> blockCounts;
+         if (counts) {
+             blockCounts.construct(&counts->block(i), &masm);
+             if (!blockCounts.ref().init())
+                 return false;
+         }
+ 
+ #if defined(JS_ION_PERF)
+         perfSpewer->startBasicBlock(current->mir(), masm);
+diff --git a/js/src/jit/IonMacroAssembler.h b/js/src/jit/IonMacroAssembler.h
+--- a/js/src/jit/IonMacroAssembler.h
++++ b/js/src/jit/IonMacroAssembler.h
+@@ -4,16 +4,18 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef jit_IonMacroAssembler_h
+ #define jit_IonMacroAssembler_h
+ 
+ #ifdef JS_ION
+ 
++#include "mozilla/Maybe.h"
++
+ #include "jscompartment.h"
+ 
+ #if defined(JS_CPU_X86)
+ # include "jit/x86/MacroAssembler-x86.h"
+ #elif defined(JS_CPU_X64)
+ # include "jit/x64/MacroAssembler-x64.h"
+ #elif defined(JS_CPU_ARM)
+ # include "jit/arm/MacroAssembler-arm.h"
+diff --git a/js/src/jit/shared/CodeGenerator-shared.h b/js/src/jit/shared/CodeGenerator-shared.h
+--- a/js/src/jit/shared/CodeGenerator-shared.h
++++ b/js/src/jit/shared/CodeGenerator-shared.h
+@@ -3,17 +3,17 @@
+  * This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef jit_shared_CodeGenerator_shared_h
+ #define jit_shared_CodeGenerator_shared_h
+ 
+ #include "mozilla/Alignment.h"
+-#include "mozilla/Util.h"
++#include "mozilla/Maybe.h"
+ 
+ #include "jit/IonCaches.h"
+ #include "jit/IonFrames.h"
+ #include "jit/IonMacroAssembler.h"
+ #include "jit/LIR.h"
+ #include "jit/MIR.h"
+ #include "jit/MIRGraph.h"
+ #include "jit/Safepoints.h"
+diff --git a/js/src/jsapi.cpp b/js/src/jsapi.cpp
+--- a/js/src/jsapi.cpp
++++ b/js/src/jsapi.cpp
+@@ -89,19 +89,17 @@
+ #include "vm/RegExpStatics-inl.h"
+ #include "vm/Shape-inl.h"
+ #include "vm/String-inl.h"
+ 
+ using namespace js;
+ using namespace js::gc;
+ using namespace js::types;
+ 
+-using mozilla::Maybe;
+ using mozilla::PodCopy;
+-using mozilla::PodZero;
+ 
+ using js::frontend::Parser;
+ 
+ bool
+ JS::detail::CallMethodIfWrapped(JSContext *cx, IsAcceptableThis test, NativeImpl impl,
+                                CallArgs args)
+ {
+     HandleValue thisv = args.thisv();
+diff --git a/js/src/jscompartment.h b/js/src/jscompartment.h
+--- a/js/src/jscompartment.h
++++ b/js/src/jscompartment.h
+@@ -2,16 +2,17 @@
+  * vim: set ts=8 sts=4 et sw=4 tw=99:
+  * This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef jscompartment_h
+ #define jscompartment_h
+ 
++#include "mozilla/Maybe.h"
+ #include "mozilla/MemoryReporting.h"
+ 
+ #include "gc/Zone.h"
+ #include "vm/GlobalObject.h"
+ 
+ namespace js {
+ 
+ namespace ion {
+diff --git a/js/src/jsgc.cpp b/js/src/jsgc.cpp
+--- a/js/src/jsgc.cpp
++++ b/js/src/jsgc.cpp
+@@ -31,19 +31,19 @@
+  * barriers. However, they must be marked in the first slice. Roots are things
+  * like the C stack and the VM stack, since it would be too expensive to put
+  * barriers on them.
+  */
+ 
+ #include "jsgcinlines.h"
+ 
+ #include "mozilla/DebugOnly.h"
++#include "mozilla/Maybe.h"
+ #include "mozilla/MemoryReporting.h"
+ #include "mozilla/Move.h"
+-#include "mozilla/Util.h"
+ 
+ #include <string.h>     /* for memset used when DEBUG */
+ #ifndef XP_WIN
+ # include <unistd.h>
+ #endif
+ 
+ #include "jsapi.h"
+ #include "jsatom.h"
+diff --git a/js/src/json.cpp b/js/src/json.cpp
+--- a/js/src/json.cpp
++++ b/js/src/json.cpp
+@@ -2,16 +2,17 @@
+  * vim: set ts=8 sts=4 et sw=4 tw=99:
+  * This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "json.h"
+ 
+ #include "mozilla/FloatingPoint.h"
++#include "mozilla/Maybe.h"
+ 
+ #include "jsapi.h"
+ #include "jsarray.h"
+ #include "jsatom.h"
+ #include "jscntxt.h"
+ #include "jsnum.h"
+ #include "jsobj.h"
+ #include "jsonparser.h"
+diff --git a/js/src/jsproxy.h b/js/src/jsproxy.h
+--- a/js/src/jsproxy.h
++++ b/js/src/jsproxy.h
+@@ -2,16 +2,18 @@
+  * vim: set ts=8 sts=4 et sw=4 tw=99:
+  * This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef jsproxy_h
+ #define jsproxy_h
+ 
++#include "mozilla/Maybe.h"
++
+ #include "jsapi.h"
+ #include "jsfriendapi.h"
+ 
+ namespace js {
+ 
+ class RegExpGuard;
+ class JS_FRIEND_API(Wrapper);
+ 
+diff --git a/js/src/jsworkers.h b/js/src/jsworkers.h
+--- a/js/src/jsworkers.h
++++ b/js/src/jsworkers.h
+@@ -9,16 +9,17 @@
+  * worklist. Worklist items are engine internal, and are distinct from e.g.
+  * web workers.
+  */
+ 
+ #ifndef jsworkers_h
+ #define jsworkers_h
+ 
+ #include "mozilla/GuardObjects.h"
++#include "mozilla/Maybe.h"
+ #include "mozilla/PodOperations.h"
+ 
+ #include "jscntxt.h"
+ #include "jslock.h"
+ 
+ #include "jit/Ion.h"
+ 
+ namespace js {
+diff --git a/js/src/shell/js.cpp b/js/src/shell/js.cpp
+--- a/js/src/shell/js.cpp
++++ b/js/src/shell/js.cpp
+@@ -2,16 +2,17 @@
+  * This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ /* JS shell. */
+ 
+ #include "mozilla/DebugOnly.h"
+ #include "mozilla/GuardObjects.h"
++#include "mozilla/Maybe.h"
+ #include "mozilla/Util.h"
+ 
+ #ifdef XP_WIN
+ # include <direct.h>
+ #endif
+ #include <errno.h>
+ #if defined(XP_OS2) || defined(XP_WIN)
+ # include <io.h>     /* for isatty() */
+diff --git a/js/src/vm/Debugger.cpp b/js/src/vm/Debugger.cpp
+--- a/js/src/vm/Debugger.cpp
++++ b/js/src/vm/Debugger.cpp
+@@ -1,16 +1,18 @@
+ /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+  * vim: set ts=8 sts=4 et sw=4 tw=99:
+  * This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "vm/Debugger-inl.h"
+ 
++#include "mozilla/Maybe.h"
++
+ #include "jsapi.h"
+ #include "jscntxt.h"
+ #include "jscompartment.h"
+ #include "jsnum.h"
+ #include "jsobj.h"
+ #include "jswrapper.h"
+ 
+ #include "frontend/BytecodeCompiler.h"
+diff --git a/js/src/vm/Debugger.h b/js/src/vm/Debugger.h
+--- a/js/src/vm/Debugger.h
++++ b/js/src/vm/Debugger.h
+@@ -3,16 +3,17 @@
+  * This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef vm_Debugger_h
+ #define vm_Debugger_h
+ 
+ #include "mozilla/LinkedList.h"
++#include "mozilla/Maybe.h"
+ 
+ #include "jsapi.h"
+ #include "jsclist.h"
+ #include "jscntxt.h"
+ #include "jscompartment.h"
+ #include "jsweakmap.h"
+ 
+ #include "gc/Barrier.h"
+diff --git a/js/src/vm/Interpreter-inl.h b/js/src/vm/Interpreter-inl.h
+--- a/js/src/vm/Interpreter-inl.h
++++ b/js/src/vm/Interpreter-inl.h
+@@ -4,16 +4,18 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef vm_Interpreter_inl_h
+ #define vm_Interpreter_inl_h
+ 
+ #include "vm/Interpreter.h"
+ 
++#include "mozilla/Maybe.h"
++
+ #include "jsapi.h"
+ #include "jscompartment.h"
+ #include "jsinfer.h"
+ #include "jsnum.h"
+ #include "jsstr.h"
+ 
+ #include "jit/Ion.h"
+ #include "jit/IonCompartment.h"
+diff --git a/js/src/vm/Shape.h b/js/src/vm/Shape.h
+--- a/js/src/vm/Shape.h
++++ b/js/src/vm/Shape.h
+@@ -4,16 +4,17 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef vm_Shape_h
+ #define vm_Shape_h
+ 
+ #include "mozilla/Attributes.h"
+ #include "mozilla/GuardObjects.h"
++#include "mozilla/Maybe.h"
+ #include "mozilla/MemoryReporting.h"
+ #include "mozilla/TemplateLib.h"
+ 
+ #include "jspropertytree.h"
+ #include "jstypes.h"
+ 
+ #include "gc/Heap.h"
+ #include "js/HashTable.h"
+diff --git a/js/xpconnect/loader/mozJSComponentLoader.cpp b/js/xpconnect/loader/mozJSComponentLoader.cpp
+--- a/js/xpconnect/loader/mozJSComponentLoader.cpp
++++ b/js/xpconnect/loader/mozJSComponentLoader.cpp
+@@ -56,20 +56,21 @@
+ #endif
+ #include "xpcprivate.h"
+ #include "xpcpublic.h"
+ #include "nsIResProtocolHandler.h"
+ #include "nsContentUtils.h"
+ #include "nsCxPusher.h"
+ #include "WrapperFactory.h"
+ 
++#include "mozilla/Maybe.h"
++#include "mozilla/Omnijar.h"
++#include "mozilla/Preferences.h"
+ #include "mozilla/scache/StartupCache.h"
+ #include "mozilla/scache/StartupCacheUtils.h"
+-#include "mozilla/Omnijar.h"
+-#include "mozilla/Preferences.h"
+ 
+ #include "jsdbgapi.h"
+ 
+ 
+ using namespace mozilla;
+ using namespace mozilla::scache;
+ using namespace xpc;
+ using namespace JS;
+diff --git a/js/xpconnect/src/XPCComponents.cpp b/js/xpconnect/src/XPCComponents.cpp
+--- a/js/xpconnect/src/XPCComponents.cpp
++++ b/js/xpconnect/src/XPCComponents.cpp
+@@ -26,16 +26,17 @@
+ #include "nsContentUtils.h"
+ #include "nsCxPusher.h"
+ #include "jsfriendapi.h"
+ #include "AccessCheck.h"
+ #include "mozilla/dom/BindingUtils.h"
+ #include "mozilla/Preferences.h"
+ #include "nsPrincipal.h"
+ #include "mozilla/Attributes.h"
++#include "mozilla/Maybe.h"
+ #include "nsIScriptContext.h"
+ #include "nsJSEnvironment.h"
+ #include "nsXMLHttpRequest.h"
+ #include "mozilla/Telemetry.h"
+ #include "mozilla/XPTInterfaceInfoManager.h"
+ #include "nsDOMClassInfoID.h"
+ #include "nsGlobalWindow.h"
+ 
+diff --git a/js/xpconnect/src/XPCJSRuntime.cpp b/js/xpconnect/src/XPCJSRuntime.cpp
+--- a/js/xpconnect/src/XPCJSRuntime.cpp
++++ b/js/xpconnect/src/XPCJSRuntime.cpp
+@@ -1,18 +1,18 @@
+ /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+ /* vim: set ts=8 sts=4 et sw=4 tw=99: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ /* Per JSRuntime object */
+ 
++#include "mozilla/Maybe.h"
+ #include "mozilla/MemoryReporting.h"
+-#include "mozilla/Util.h"
+ 
+ #include "xpcprivate.h"
+ #include "xpcpublic.h"
+ #include "XPCJSMemoryReporter.h"
+ #include "WrapperFactory.h"
+ #include "dom_quickstubs.h"
+ 
+ #include "nsIMemoryReporter.h"
+diff --git a/js/xpconnect/src/XPCWrappedNative.cpp b/js/xpconnect/src/XPCWrappedNative.cpp
+--- a/js/xpconnect/src/XPCWrappedNative.cpp
++++ b/js/xpconnect/src/XPCWrappedNative.cpp
+@@ -2,35 +2,37 @@
+  * vim: set ts=8 sw=4 et tw=78:
+  *
+  * This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ /* Wrapper object for reflecting native xpcom objects into JavaScript. */
+ 
++#include <algorithm>
++#include <stdint.h>
++
+ #include "xpcprivate.h"
+ #include "nsCRT.h"
+ #include "XPCWrapper.h"
+ #include "nsWrapperCacheInlines.h"
+ #include "XPCLog.h"
+ #include "nsINode.h"
+ #include "XPCQuickStubs.h"
+ #include "jsproxy.h"
+ #include "AccessCheck.h"
+ #include "WrapperFactory.h"
+ #include "XrayWrapper.h"
+ 
+ #include "nsContentUtils.h"
+ #include "nsCxPusher.h"
+ 
+-#include <stdint.h>
+ #include "mozilla/Util.h"
+ #include "mozilla/Likely.h"
+-#include <algorithm>
++#include "mozilla/Maybe.h"
+ 
+ using namespace xpc;
+ using namespace mozilla;
+ using namespace mozilla::dom;
+ using namespace JS;
+ 
+ bool
+ xpc_OkToHandOutWrapper(nsWrapperCache *cache)
+diff --git a/js/xpconnect/src/nsCxPusher.h b/js/xpconnect/src/nsCxPusher.h
+--- a/js/xpconnect/src/nsCxPusher.h
++++ b/js/xpconnect/src/nsCxPusher.h
+@@ -1,16 +1,16 @@
+ /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ 
+ #ifndef nsCxPusher_h
+ #define nsCxPusher_h
+ 
+ #include "jsapi.h"
+-#include "mozilla/Util.h"
++#include "mozilla/Maybe.h"
+ #include "nsCOMPtr.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ class EventTarget;
+ }
+ }
+ 
+@@ -27,18 +27,18 @@ class MOZ_STACK_CLASS AutoCxPusher
+ public:
+   AutoCxPusher(JSContext *aCx, bool aAllowNull = false);
+   // XPCShell uses an nsCxPusher, which contains an AutoCxPusher.
+   NS_EXPORT ~AutoCxPusher();
+ 
+   nsIScriptContext* GetScriptContext() { return mScx; }
+ 
+ private:
+-  mozilla::Maybe<JSAutoRequest> mAutoRequest;
+-  mozilla::Maybe<JSAutoCompartment> mAutoCompartment;
++  Maybe<JSAutoRequest> mAutoRequest;
++  Maybe<JSAutoCompartment> mAutoCompartment;
+   nsCOMPtr<nsIScriptContext> mScx;
+ #ifdef DEBUG
+   JSContext* mPushedContext;
+   unsigned mCompartmentDepthOnEntry;
+ #endif
+ };
+ 
+ } /* namespace mozilla */
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -75,21 +75,21 @@
+ #ifndef xpcprivate_h___
+ #define xpcprivate_h___
+ 
+ #include "mozilla/Alignment.h"
+ #include "mozilla/Assertions.h"
+ #include "mozilla/Attributes.h"
+ #include "mozilla/CycleCollectedJSRuntime.h"
+ #include "mozilla/GuardObjects.h"
++#include "mozilla/Maybe.h"
+ #include "mozilla/MemoryReporting.h"
+ #include "mozilla/Mutex.h"
+ #include "mozilla/ReentrantMonitor.h"
+ #include "mozilla/TimeStamp.h"
+-#include "mozilla/Util.h"
+ 
+ #include <math.h>
+ #include <stdarg.h>
+ #include <stdint.h>
+ #include <stdlib.h>
+ #include <string.h>
+ 
+ #include "xpcpublic.h"
+diff --git a/layout/base/nsRefreshDriver.h b/layout/base/nsRefreshDriver.h
+--- a/layout/base/nsRefreshDriver.h
++++ b/layout/base/nsRefreshDriver.h
+@@ -15,17 +15,17 @@
+ #include "mozilla/TimeStamp.h"
+ #include "mozFlushType.h"
+ #include "nsTObserverArray.h"
+ #include "nsTArray.h"
+ #include "nsTHashtable.h"
+ #include "nsClassHashtable.h"
+ #include "nsHashKeys.h"
+ #include "mozilla/Attributes.h"
+-#include "mozilla/Util.h"
++#include "mozilla/Maybe.h"
+ 
+ class nsPresContext;
+ class nsIPresShell;
+ class nsIDocument;
+ class imgIRequest;
+ 
+ /**
+  * An abstract base class to be implemented by callers wanting to be
+diff --git a/layout/generic/nsBlockFrame.cpp b/layout/generic/nsBlockFrame.cpp
+--- a/layout/generic/nsBlockFrame.cpp
++++ b/layout/generic/nsBlockFrame.cpp
+@@ -4,22 +4,23 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ /*
+  * rendering object for CSS display:block, inline-block, and list-item
+  * boxes, also used for various anonymous boxes
+  */
+ 
++#include "nsBlockFrame.h"
++
+ #include "mozilla/DebugOnly.h"
+ #include "mozilla/Likely.h"
+-#include "mozilla/Util.h"
++#include "mozilla/Maybe.h"
+ 
+ #include "nsCOMPtr.h"
+-#include "nsBlockFrame.h"
+ #include "nsAbsoluteContainingBlock.h"
+ #include "nsBlockReflowContext.h"
+ #include "nsBlockReflowState.h"
+ #include "nsBulletFrame.h"
+ #include "nsLineBox.h"
+ #include "nsInlineFrame.h"
+ #include "nsLineLayout.h"
+ #include "nsPlaceholderFrame.h"
+diff --git a/layout/generic/nsLineLayout.cpp b/layout/generic/nsLineLayout.cpp
+--- a/layout/generic/nsLineLayout.cpp
++++ b/layout/generic/nsLineLayout.cpp
+@@ -3,17 +3,16 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ /* state and methods used while laying out a single line of a block frame */
+ 
+ #define PL_ARENA_CONST_ALIGN_MASK (sizeof(void*)-1)
+ #include "plarena.h"
+ 
+-#include "mozilla/Util.h"
+ #include "nsCOMPtr.h"
+ #include "nsLineLayout.h"
+ #include "nsBlockFrame.h"
+ #include "nsInlineFrame.h"
+ #include "nsStyleConsts.h"
+ #include "nsContainerFrame.h"
+ #include "nsFloatManager.h"
+ #include "nsStyleContext.h"
+@@ -22,16 +21,17 @@
+ #include "nsGkAtoms.h"
+ #include "nsPlaceholderFrame.h"
+ #include "nsIContent.h"
+ #include "nsTextFragment.h"
+ #include "nsBidiUtils.h"
+ #include "nsLayoutUtils.h"
+ #include "nsTextFrame.h"
+ #include "nsCSSRendering.h"
++#include "mozilla/Maybe.h"
+ #include <algorithm>
+ 
+ #ifdef DEBUG
+ #undef  NOISY_HORIZONTAL_ALIGN
+ #undef  NOISY_VERTICAL_ALIGN
+ #undef  REALLY_NOISY_VERTICAL_ALIGN
+ #undef  NOISY_REFLOW
+ #undef  REALLY_NOISY_REFLOW
+diff --git a/layout/style/nsRuleNode.cpp b/layout/style/nsRuleNode.cpp
+--- a/layout/style/nsRuleNode.cpp
++++ b/layout/style/nsRuleNode.cpp
+@@ -37,16 +37,17 @@
+ #include "nsCSSProps.h"
+ #include "nsTArray.h"
+ #include "nsContentUtils.h"
+ #include "CSSCalc.h"
+ #include "nsPrintfCString.h"
+ #include "nsRenderingContext.h"
+ #include "nsStyleUtil.h"
+ #include "prtime.h"
++#include "mozilla/Maybe.h"
+ 
+ #if defined(_MSC_VER) || defined(__MINGW32__)
+ #include <malloc.h>
+ #ifdef _MSC_VER
+ #define alloca _alloca
+ #endif
+ #endif
+ #ifdef SOLARIS
+diff --git a/mfbt/Maybe.h b/mfbt/Maybe.h
+new file mode 100644
+--- /dev/null
++++ b/mfbt/Maybe.h
+@@ -0,0 +1,161 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++/* Utility for lazily constructing objects without using dynamic storage. */
++
++#ifndef mozilla_Maybe_h
++#define mozilla_Maybe_h
++
++#include "mozilla/Alignment.h"
++#include "mozilla/Assertions.h"
++#include "mozilla/Attributes.h"
++
++namespace mozilla {
++
++/*
++ * Small utility for lazily constructing objects without using dynamic storage.
++ * When a Maybe<T> is constructed, it is |empty()|, i.e., no value of T has
++ * been constructed and no T destructor will be called when the Maybe<T> is
++ * destroyed. Upon calling |construct|, a T object will be constructed with the
++ * given arguments and that object will be destroyed when the owning Maybe<T>
++ * is destroyed.
++ *
++ * N.B. GCC seems to miss some optimizations with Maybe and may generate extra
++ * branches/loads/stores. Use with caution on hot paths.
++ */
++template<class T>
++class Maybe
++{
++    AlignedStorage2<T> storage;
++    bool constructed;
++
++    T& asT() { return *storage.addr(); }
++
++  public:
++    Maybe() { constructed = false; }
++    ~Maybe() { if (constructed) asT().~T(); }
++
++    bool empty() const { return !constructed; }
++
++    void construct() {
++      MOZ_ASSERT(!constructed);
++      ::new (storage.addr()) T();
++      constructed = true;
++    }
++
++    template<class T1>
++    void construct(const T1& t1) {
++      MOZ_ASSERT(!constructed);
++      ::new (storage.addr()) T(t1);
++      constructed = true;
++    }
++
++    template<class T1, class T2>
++    void construct(const T1& t1, const T2& t2) {
++      MOZ_ASSERT(!constructed);
++      ::new (storage.addr()) T(t1, t2);
++      constructed = true;
++    }
++
++    template<class T1, class T2, class T3>
++    void construct(const T1& t1, const T2& t2, const T3& t3) {
++      MOZ_ASSERT(!constructed);
++      ::new (storage.addr()) T(t1, t2, t3);
++      constructed = true;
++    }
++
++    template<class T1, class T2, class T3, class T4>
++    void construct(const T1& t1, const T2& t2, const T3& t3, const T4& t4) {
++      MOZ_ASSERT(!constructed);
++      ::new (storage.addr()) T(t1, t2, t3, t4);
++      constructed = true;
++    }
++
++    template<class T1, class T2, class T3, class T4, class T5>
++    void construct(const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5) {
++      MOZ_ASSERT(!constructed);
++      ::new (storage.addr()) T(t1, t2, t3, t4, t5);
++      constructed = true;
++    }
++
++    template<class T1, class T2, class T3, class T4, class T5,
++             class T6>
++    void construct(const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5,
++                   const T6& t6) {
++      MOZ_ASSERT(!constructed);
++      ::new (storage.addr()) T(t1, t2, t3, t4, t5, t6);
++      constructed = true;
++    }
++
++    template<class T1, class T2, class T3, class T4, class T5,
++             class T6, class T7>
++    void construct(const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5,
++                   const T6& t6, const T7& t7) {
++      MOZ_ASSERT(!constructed);
++      ::new (storage.addr()) T(t1, t2, t3, t4, t5, t6, t7);
++      constructed = true;
++    }
++
++    template<class T1, class T2, class T3, class T4, class T5,
++             class T6, class T7, class T8>
++    void construct(const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5,
++                   const T6& t6, const T7& t7, const T8& t8) {
++      MOZ_ASSERT(!constructed);
++      ::new (storage.addr()) T(t1, t2, t3, t4, t5, t6, t7, t8);
++      constructed = true;
++    }
++
++    template<class T1, class T2, class T3, class T4, class T5,
++             class T6, class T7, class T8, class T9>
++    void construct(const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5,
++                   const T6& t6, const T7& t7, const T8& t8, const T9& t9) {
++      MOZ_ASSERT(!constructed);
++      ::new (storage.addr()) T(t1, t2, t3, t4, t5, t6, t7, t8, t9);
++      constructed = true;
++    }
++
++    template<class T1, class T2, class T3, class T4, class T5,
++             class T6, class T7, class T8, class T9, class T10>
++    void construct(const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5,
++                   const T6& t6, const T7& t7, const T8& t8, const T9& t9, const T10& t10) {
++      MOZ_ASSERT(!constructed);
++      ::new (storage.addr()) T(t1, t2, t3, t4, t5, t6, t7, t8, t9, t10);
++      constructed = true;
++    }
++
++    T* addr() {
++      MOZ_ASSERT(constructed);
++      return &asT();
++    }
++
++    T& ref() {
++      MOZ_ASSERT(constructed);
++      return asT();
++    }
++
++    const T& ref() const {
++      MOZ_ASSERT(constructed);
++      return const_cast<Maybe*>(this)->asT();
++    }
++
++    void destroy() {
++      ref().~T();
++      constructed = false;
++    }
++
++    void destroyIfConstructed() {
++      if (!empty())
++        destroy();
++    }
++
++  private:
++    Maybe(const Maybe& other) MOZ_DELETE;
++    const Maybe& operator=(const Maybe& other) MOZ_DELETE;
++};
++
++} /* namespace mozilla */
++
++#endif /* mozilla_Maybe_h */
+diff --git a/mfbt/Util.h b/mfbt/Util.h
+--- a/mfbt/Util.h
++++ b/mfbt/Util.h
+@@ -13,162 +13,19 @@
+ #define mozilla_Util_h
+ 
+ #include "mozilla/Assertions.h"
+ #include "mozilla/Attributes.h"
+ #include "mozilla/Types.h"
+ 
+ #ifdef __cplusplus
+ 
+-#include "mozilla/Alignment.h"
+-
+ namespace mozilla {
+ 
+ /*
+- * Small utility for lazily constructing objects without using dynamic storage.
+- * When a Maybe<T> is constructed, it is |empty()|, i.e., no value of T has
+- * been constructed and no T destructor will be called when the Maybe<T> is
+- * destroyed. Upon calling |construct|, a T object will be constructed with the
+- * given arguments and that object will be destroyed when the owning Maybe<T>
+- * is destroyed.
+- *
+- * N.B. GCC seems to miss some optimizations with Maybe and may generate extra
+- * branches/loads/stores. Use with caution on hot paths.
+- */
+-template<class T>
+-class Maybe
+-{
+-    AlignedStorage2<T> storage;
+-    bool constructed;
+-
+-    T& asT() { return *storage.addr(); }
+-
+-  public:
+-    Maybe() { constructed = false; }
+-    ~Maybe() { if (constructed) asT().~T(); }
+-
+-    bool empty() const { return !constructed; }
+-
+-    void construct() {
+-      MOZ_ASSERT(!constructed);
+-      ::new (storage.addr()) T();
+-      constructed = true;
+-    }
+-
+-    template<class T1>
+-    void construct(const T1& t1) {
+-      MOZ_ASSERT(!constructed);
+-      ::new (storage.addr()) T(t1);
+-      constructed = true;
+-    }
+-
+-    template<class T1, class T2>
+-    void construct(const T1& t1, const T2& t2) {
+-      MOZ_ASSERT(!constructed);
+-      ::new (storage.addr()) T(t1, t2);
+-      constructed = true;
+-    }
+-
+-    template<class T1, class T2, class T3>
+-    void construct(const T1& t1, const T2& t2, const T3& t3) {
+-      MOZ_ASSERT(!constructed);
+-      ::new (storage.addr()) T(t1, t2, t3);
+-      constructed = true;
+-    }
+-
+-    template<class T1, class T2, class T3, class T4>
+-    void construct(const T1& t1, const T2& t2, const T3& t3, const T4& t4) {
+-      MOZ_ASSERT(!constructed);
+-      ::new (storage.addr()) T(t1, t2, t3, t4);
+-      constructed = true;
+-    }
+-
+-    template<class T1, class T2, class T3, class T4, class T5>
+-    void construct(const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5) {
+-      MOZ_ASSERT(!constructed);
+-      ::new (storage.addr()) T(t1, t2, t3, t4, t5);
+-      constructed = true;
+-    }
+-
+-    template<class T1, class T2, class T3, class T4, class T5,
+-             class T6>
+-    void construct(const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5,
+-                   const T6& t6) {
+-      MOZ_ASSERT(!constructed);
+-      ::new (storage.addr()) T(t1, t2, t3, t4, t5, t6);
+-      constructed = true;
+-    }
+-
+-    template<class T1, class T2, class T3, class T4, class T5,
+-             class T6, class T7>
+-    void construct(const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5,
+-                   const T6& t6, const T7& t7) {
+-      MOZ_ASSERT(!constructed);
+-      ::new (storage.addr()) T(t1, t2, t3, t4, t5, t6, t7);
+-      constructed = true;
+-    }
+-
+-    template<class T1, class T2, class T3, class T4, class T5,
+-             class T6, class T7, class T8>
+-    void construct(const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5,
+-                   const T6& t6, const T7& t7, const T8& t8) {
+-      MOZ_ASSERT(!constructed);
+-      ::new (storage.addr()) T(t1, t2, t3, t4, t5, t6, t7, t8);
+-      constructed = true;
+-    }
+-
+-    template<class T1, class T2, class T3, class T4, class T5,
+-             class T6, class T7, class T8, class T9>
+-    void construct(const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5,
+-                   const T6& t6, const T7& t7, const T8& t8, const T9& t9) {
+-      MOZ_ASSERT(!constructed);
+-      ::new (storage.addr()) T(t1, t2, t3, t4, t5, t6, t7, t8, t9);
+-      constructed = true;
+-    }
+-
+-    template<class T1, class T2, class T3, class T4, class T5,
+-             class T6, class T7, class T8, class T9, class T10>
+-    void construct(const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5,
+-                   const T6& t6, const T7& t7, const T8& t8, const T9& t9, const T10& t10) {
+-      MOZ_ASSERT(!constructed);
+-      ::new (storage.addr()) T(t1, t2, t3, t4, t5, t6, t7, t8, t9, t10);
+-      constructed = true;
+-    }
+-
+-    T* addr() {
+-      MOZ_ASSERT(constructed);
+-      return &asT();
+-    }
+-
+-    T& ref() {
+-      MOZ_ASSERT(constructed);
+-      return asT();
+-    }
+-
+-    const T& ref() const {
+-      MOZ_ASSERT(constructed);
+-      return const_cast<Maybe*>(this)->asT();
+-    }
+-
+-    void destroy() {
+-      ref().~T();
+-      constructed = false;
+-    }
+-
+-    void destroyIfConstructed() {
+-      if (!empty())
+-        destroy();
+-    }
+-
+-  private:
+-    Maybe(const Maybe& other) MOZ_DELETE;
+-    const Maybe& operator=(const Maybe& other) MOZ_DELETE;
+-};
+-
+-/*
+  * Safely subtract two pointers when it is known that end >= begin.  This avoids
+  * the common compiler bug that if (size_t(end) - size_t(begin)) has the MSB
+  * set, the unsigned subtraction followed by right shift will produce -1, or
+  * size_t(-1), instead of the real difference.
+  */
+ template<class T>
+ MOZ_ALWAYS_INLINE size_t
+ PointerRangeSize(T* begin, T* end)
+diff --git a/mfbt/exported_headers.mk b/mfbt/exported_headers.mk
+--- a/mfbt/exported_headers.mk
++++ b/mfbt/exported_headers.mk
+@@ -26,16 +26,17 @@ EXPORTS_mozilla += \
+   Endian.h \
+   EnumSet.h \
+   FloatingPoint.h \
+   GuardObjects.h \
+   HashFunctions.h \
+   Likely.h \
+   LinkedList.h \
+   MathAlgorithms.h \
++  Maybe.h \
+   MemoryChecking.h \
+   MemoryReporting.h \
+   Move.h \
+   NullPtr.h \
+   PodOperations.h \
+   Poison.h \
+   Range.h \
+   RangedPtr.h \
+diff --git a/netwerk/base/src/nsMediaFragmentURIParser.h b/netwerk/base/src/nsMediaFragmentURIParser.h
+--- a/netwerk/base/src/nsMediaFragmentURIParser.h
++++ b/netwerk/base/src/nsMediaFragmentURIParser.h
+@@ -1,17 +1,17 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* vim:set ts=2 sw=2 sts=2 et cindent: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ #if !defined(nsMediaFragmentURIParser_h__)
+ #define nsMediaFragmentURIParser_h__
+ 
+-#include "mozilla/Util.h" // Maybe
++#include "mozilla/Maybe.h"
+ #include "nsIURI.h"
+ #include "nsString.h"
+ #include "nsRect.h"
+ 
+ // Class to handle parsing of a W3C media fragment URI as per
+ // spec at: http://www.w3.org/TR/media-frags/
+ // Only the temporaral URI portion of the spec is implemented.
+ // To use:
+diff --git a/startupcache/test/TestStartupCache.cpp b/startupcache/test/TestStartupCache.cpp
+--- a/startupcache/test/TestStartupCache.cpp
++++ b/startupcache/test/TestStartupCache.cpp
+@@ -1,15 +1,16 @@
+ /* -*-  Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2; -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "TestHarness.h"
+ 
++#include "mozilla/Maybe.h"
+ #include "nsThreadUtils.h"
+ #include "nsIClassInfo.h"
+ #include "nsIOutputStream.h"
+ #include "nsIObserver.h"
+ #include "nsISerializable.h"
+ #include "nsISupports.h"
+ #include "nsIStartupCache.h"
+ #include "nsIStringStream.h"

@@ -1,0 +1,61 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/html/nsHTMLDataTransfer.cpp b/editor/libeditor/html/nsHTMLDataTransfer.cpp
+--- a/editor/libeditor/html/nsHTMLDataTransfer.cpp
++++ b/editor/libeditor/html/nsHTMLDataTransfer.cpp
+@@ -2247,17 +2247,17 @@ nsresult nsHTMLEditor::CreateDOMFragment
+   nsCOMPtr<nsIDOMNode> contextAsNode, tmp;  
+   nsresult res = NS_OK;
+ 
+   nsCOMPtr<nsIDocument> doc = GetDocument();
+   NS_ENSURE_TRUE(doc, NS_ERROR_FAILURE);
+   
+   // if we have context info, create a fragment for that
+   nsCOMPtr<nsIDOMDocumentFragment> contextfrag;
+-  nsCOMPtr<nsIDOMNode> contextLeaf, junk;
++  nsCOMPtr<nsIDOMNode> contextLeaf;
+   if (!aContextStr.IsEmpty())
+   {
+     res = ParseFragment(aContextStr, nsnull, doc, address_of(contextAsNode),
+                         aTrustedInput);
+     NS_ENSURE_SUCCESS(res, res);
+     NS_ENSURE_TRUE(contextAsNode, NS_ERROR_FAILURE);
+ 
+     res = StripFormattingNodes(contextAsNode);
+@@ -2291,16 +2291,17 @@ nsresult nsHTMLEditor::CreateDOMFragment
+   NS_ENSURE_SUCCESS(res, res);
+   NS_ENSURE_TRUE(*outFragNode, NS_ERROR_FAILURE);
+ 
+   RemoveBodyAndHead(*outFragNode);
+ 
+   if (contextAsNode)
+   {
+     // unite the two trees
++    nsCOMPtr<nsIDOMNode> junk;
+     contextLeaf->AppendChild(*outFragNode, getter_AddRefs(junk));
+     *outFragNode = contextAsNode;
+   }
+ 
+   res = StripFormattingNodes(*outFragNode, true);
+   NS_ENSURE_SUCCESS(res, res);
+ 
+   // If there was no context, then treat all of the data we did get as the
+@@ -2361,17 +2362,17 @@ nsresult nsHTMLEditor::ParseFragment(con
+                                            aContextLocalName : nsGkAtoms::body,
+                                         kNameSpaceID_XHTML,
+                                         false,
+                                         true);
+   if (!aTrustedInput) {
+     nsTreeSanitizer sanitizer(!!aContextLocalName, !aContextLocalName);
+     sanitizer.Sanitize(fragment);
+   }
+-  *outNode = do_QueryInterface(frag);
++  *outNode = frag;
+   return rv;
+ }
+ 
+ nsresult nsHTMLEditor::CreateListOfNodesToPaste(nsIDOMNode  *aFragmentAsNode,
+                                                 nsCOMArray<nsIDOMNode>& outNodeList,
+                                                 nsIDOMNode *aStartNode,
+                                                 int32_t aStartOffset,
+                                                 nsIDOMNode *aEndNode,

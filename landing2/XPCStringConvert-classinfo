@@ -1,0 +1,60 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -8435,22 +8435,18 @@ nsDOMStringMapSH::GetProperty(nsIXPConne
+   nsresult rv = dataset->GetDataAttr(propName, propVal);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   if (propVal.IsVoid()) {
+     *vp = JSVAL_VOID;
+     return NS_SUCCESS_I_DID_SOMETHING;
+   }
+ 
+-  nsStringBuffer* valBuf;
+-  *vp = XPCStringConvert::ReadableToJSVal(cx, propVal, &valBuf);
+-  if (valBuf) {
+-    propVal.ForgetSharedBuffer();
+-  }
+-
++  NS_ENSURE_TRUE(xpc::NonVoidStringToJsval(cx, propVal, vp),
++                 NS_ERROR_OUT_OF_MEMORY);
+   return NS_SUCCESS_I_DID_SOMETHING;
+ }
+ 
+ NS_IMETHODIMP
+ nsDOMStringMapSH::SetProperty(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
+                               JSObject *obj, jsid id, jsval *vp,
+                               bool *_retval)
+ {
+@@ -9954,24 +9950,21 @@ nsStringArraySH::GetProperty(nsIXPConnec
+ 
+   nsresult rv = GetStringAt(GetNative(wrapper, obj), n, val);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   JSAutoRequest ar(cx);
+ 
+   if (DOMStringIsNull(val)) {
+     *vp = JSVAL_VOID;
+-  } else {
+-    nsStringBuffer* sharedBuffer = nsnull;
+-    *vp = XPCStringConvert::ReadableToJSVal(cx, val, &sharedBuffer);
+-    if (sharedBuffer) {
+-      val.ForgetSharedBuffer();
+-    }
+-  }
+-
++    return NS_SUCCESS_I_DID_SOMETHING;
++  }
++
++  NS_ENSURE_TRUE(xpc::NonVoidStringToJsval(cx, val, vp),
++                 NS_ERROR_OUT_OF_MEMORY);
+   return NS_SUCCESS_I_DID_SOMETHING;
+ }
+ 
+ 
+ // History helper
+ 
+ NS_IMETHODIMP
+ nsHistorySH::PreCreate(nsISupports *nativeObj, JSContext *cx,

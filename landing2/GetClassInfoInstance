@@ -1,0 +1,109 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsDOMScriptObjectFactory.cpp b/dom/base/nsDOMScriptObjectFactory.cpp
+--- a/dom/base/nsDOMScriptObjectFactory.cpp
++++ b/dom/base/nsDOMScriptObjectFactory.cpp
+@@ -72,22 +72,16 @@ NS_INTERFACE_MAP_BEGIN(nsDOMScriptObject
+   NS_INTERFACE_MAP_ENTRY(nsIObserver)
+   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMScriptObjectFactory)
+ NS_INTERFACE_MAP_END
+ 
+ 
+ NS_IMPL_ADDREF(nsDOMScriptObjectFactory)
+ NS_IMPL_RELEASE(nsDOMScriptObjectFactory)
+ 
+-NS_IMETHODIMP_(nsISupports *)
+-nsDOMScriptObjectFactory::GetClassInfoInstance(nsDOMClassInfoID aID)
+-{
+-  return NS_GetDOMClassInfoInstance(aID);
+-}
+-
+ NS_IMETHODIMP
+ nsDOMScriptObjectFactory::Observe(nsISupports *aSubject,
+                                   const char *aTopic,
+                                   const PRUnichar *someData)
+ {
+   if (!nsCRT::strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID)) {
+ #ifdef MOZ_XUL
+     // Flush the XUL cache since it holds JS roots, and we're about to
+diff --git a/dom/base/nsDOMScriptObjectFactory.h b/dom/base/nsDOMScriptObjectFactory.h
+--- a/dom/base/nsDOMScriptObjectFactory.h
++++ b/dom/base/nsDOMScriptObjectFactory.h
+@@ -30,19 +30,16 @@ class nsDOMScriptObjectFactory MOZ_FINAL
+ {
+ public:
+   nsDOMScriptObjectFactory();
+ 
+   NS_DECL_ISUPPORTS
+ 
+   // nsIObserver
+   NS_DECL_NSIOBSERVER
+-
+-  // nsIDOMScriptObjectFactory
+-  NS_IMETHOD_(nsISupports *) GetClassInfoInstance(nsDOMClassInfoID aID);
+ };
+ 
+ class nsDOMExceptionProvider MOZ_FINAL : public nsIExceptionProvider
+ {
+ public:
+   NS_DECL_ISUPPORTS
+   NS_DECL_NSIEXCEPTIONPROVIDER
+ };
+diff --git a/dom/base/nsIDOMClassInfo.h b/dom/base/nsIDOMClassInfo.h
+--- a/dom/base/nsIDOMClassInfo.h
++++ b/dom/base/nsIDOMClassInfo.h
+@@ -35,28 +35,21 @@
+ 
+ 
+ #ifdef _IMPL_NS_LAYOUT
+ 
+ // See nsDOMClassInfoID.h
+ 
+ #else
+ 
++extern nsIClassInfo*
++NS_GetDOMClassInfoInstance(nsDOMClassInfoID aID);
++
+ #define NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(_class)                       \
+   if (aIID.Equals(NS_GET_IID(nsIClassInfo)) ||                             \
+       aIID.Equals(NS_GET_IID(nsXPCClassInfo))) {                           \
+-    static NS_DEFINE_CID(kDOMSOF_CID, NS_DOM_SCRIPT_OBJECT_FACTORY_CID);   \
+-                                                                           \
+-    nsresult rv;                                                           \
+-    nsCOMPtr<nsIDOMScriptObjectFactory> sof(do_GetService(kDOMSOF_CID,     \
+-                                                          &rv));           \
+-    if (NS_FAILED(rv)) {                                                   \
+-      *aInstancePtr = nsnull;                                              \
+-      return rv;                                                           \
+-    }                                                                      \
+-                                                                           \
+     foundInterface =                                                       \
+-      sof->GetClassInfoInstance(eDOMClassInfo_##_class##_id);              \
++      NS_GetDOMClassInfoInstance(eDOMClassInfo_##_class##_id);             \
+   } else
+ 
+ #endif /* _IMPL_NS_LAYOUT */
+ 
+ #endif /* nsIDOMClassInfo_h___ */
+diff --git a/dom/base/nsIDOMScriptObjectFactory.h b/dom/base/nsIDOMScriptObjectFactory.h
+--- a/dom/base/nsIDOMScriptObjectFactory.h
++++ b/dom/base/nsIDOMScriptObjectFactory.h
+@@ -21,18 +21,16 @@ class nsIDOMEventListener;
+ 
+ typedef nsXPCClassInfo* (*nsDOMClassInfoExternalConstructorFnc)
+   (const char* aName);
+ 
+ class nsIDOMScriptObjectFactory : public nsISupports {
+ public:  
+   NS_DECLARE_STATIC_IID_ACCESSOR(NS_IDOM_SCRIPT_OBJECT_FACTORY_IID)
+ 
+-  NS_IMETHOD_(nsISupports *) GetClassInfoInstance(nsDOMClassInfoID aID) = 0;
+-
+   nsIScriptRuntime* GetJSRuntime()
+   {
+     return mJSRuntime;
+   }
+ 
+ protected:
+   nsCOMPtr<nsIScriptRuntime> mJSRuntime;
+ };

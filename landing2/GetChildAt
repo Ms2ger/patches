@@ -1,0 +1,545 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/accessible/src/html/nsHTMLTableAccessible.cpp b/accessible/src/html/nsHTMLTableAccessible.cpp
+--- a/accessible/src/html/nsHTMLTableAccessible.cpp
++++ b/accessible/src/html/nsHTMLTableAccessible.cpp
+@@ -1340,17 +1340,17 @@ nsHTMLTableAccessible::HasDescendant(con
+     return true;
+ 
+   // Make sure that the item we found has contents and either has multiple
+   // children or the found item is not a whitespace-only text node.
+   nsCOMPtr<nsIContent> foundItemContent = do_QueryInterface(foundItem);
+   if (foundItemContent->GetChildCount() > 1)
+     return true; // Treat multiple child nodes as non-empty
+ 
+-  nsIContent *innerItemContent = foundItemContent->GetChildAt(0);
++  nsIContent *innerItemContent = foundItemContent->GetFirstChild();
+   if (innerItemContent && !innerItemContent->TextIsOnlyWhitespace())
+     return true;
+ 
+   // If we found more than one node then return true not depending on
+   // aAllowEmpty flag.
+   // XXX it might be dummy but bug 501375 where we changed this addresses
+   // performance problems only. Note, currently 'aAllowEmpty' flag is used for
+   // caption element only. On another hand we create accessible object for
+diff --git a/content/base/public/nsINode.h b/content/base/public/nsINode.h
+--- a/content/base/public/nsINode.h
++++ b/content/base/public/nsINode.h
+@@ -374,16 +374,21 @@ public:
+ 
+   /**
+    * Return this node as an Element.  Should only be used for nodes
+    * for which IsElement() is true.
+    */
+   mozilla::dom::Element* AsElement();
+ 
+   /**
++   * Return if this node has any children.
++   */
++  bool HasChildren() const { return !!mFirstChild; }
++
++  /**
+    * Get the number of children
+    * @return the number of children
+    */
+   virtual uint32_t GetChildCount() const = 0;
+ 
+   /**
+    * Get a child by index
+    * @param aIndex the index of the child to get
+diff --git a/dom/base/nsFocusManager.cpp b/dom/base/nsFocusManager.cpp
+--- a/dom/base/nsFocusManager.cpp
++++ b/dom/base/nsFocusManager.cpp
+@@ -2911,41 +2911,40 @@ nsFocusManager::GetNextTabbableMapArea(b
+ }
+ 
+ int32_t
+ nsFocusManager::GetNextTabIndex(nsIContent* aParent,
+                                 int32_t aCurrentTabIndex,
+                                 bool aForward)
+ {
+   int32_t tabIndex, childTabIndex;
+-  nsIContent *child;
+-
+-  uint32_t count = aParent->GetChildCount();
+ 
+   if (aForward) {
+     tabIndex = 0;
+-    for (uint32_t index = 0; index < count; index++) {
+-      child = aParent->GetChildAt(index);
++    for (nsIContent* child = aParent->GetFirstChild();
++         child;
++         child = child->GetNextSibling()) {
+       childTabIndex = GetNextTabIndex(child, aCurrentTabIndex, aForward);
+       if (childTabIndex > aCurrentTabIndex && childTabIndex != tabIndex) {
+         tabIndex = (tabIndex == 0 || childTabIndex < tabIndex) ? childTabIndex : tabIndex;
+       }
+ 
+       nsAutoString tabIndexStr;
+       child->GetAttr(kNameSpaceID_None, nsGkAtoms::tabindex, tabIndexStr);
+       int32_t ec, val = tabIndexStr.ToInteger(&ec);
+       if (NS_SUCCEEDED (ec) && val > aCurrentTabIndex && val != tabIndex) {
+         tabIndex = (tabIndex == 0 || val < tabIndex) ? val : tabIndex;
+       }
+     }
+   }
+   else { /* !aForward */
+     tabIndex = 1;
+-    for (uint32_t index = 0; index < count; index++) {
+-      child = aParent->GetChildAt(index);
++    for (nsIContent* child = aParent->GetFirstChild();
++         child;
++         child = child->GetNextSibling()) {
+       childTabIndex = GetNextTabIndex(child, aCurrentTabIndex, aForward);
+       if ((aCurrentTabIndex == 0 && childTabIndex > tabIndex) ||
+           (childTabIndex < aCurrentTabIndex && childTabIndex > tabIndex)) {
+         tabIndex = childTabIndex;
+       }
+ 
+       nsAutoString tabIndexStr;
+       child->GetAttr(kNameSpaceID_None, nsGkAtoms::tabindex, tabIndexStr);
+@@ -2991,33 +2990,28 @@ nsFocusManager::GetRootForFocus(nsPIDOMW
+     if (itemType == nsIDocShellTreeItem::typeChrome)
+       return nsnull;
+   }
+ 
+   if (aCheckVisibility && !IsWindowVisible(aWindow))
+     return nsnull;
+ 
+   Element *rootElement = aDocument->GetRootElement();
+-  if (rootElement) {
+-    if (aCheckVisibility && !rootElement->GetPrimaryFrame()) {
+-      return nsnull;
+-    }
+-
+-    // Finally, check if this is a frameset
+-    nsCOMPtr<nsIHTMLDocument> htmlDoc = do_QueryInterface(aDocument);
+-    if (htmlDoc) {
+-      uint32_t childCount = rootElement->GetChildCount();
+-      for (uint32_t i = 0; i < childCount; ++i) {
+-        nsIContent *childContent = rootElement->GetChildAt(i);
+-        nsINodeInfo *ni = childContent->NodeInfo();
+-        if (childContent->IsHTML() &&
+-            ni->Equals(nsGkAtoms::frameset))
+-          return nsnull;
+-      }
+-    }
++  if (!rootElement) {
++    return nsnull;
++  }
++
++  if (aCheckVisibility && !rootElement->GetPrimaryFrame()) {
++    return nsnull;
++  }
++
++  // Finally, check if this is a frameset
++  nsCOMPtr<nsIHTMLDocument> htmlDoc = do_QueryInterface(aDocument);
++  if (htmlDoc && aDocument->GetHtmlChildElement(nsGkAtoms::frameset)) {
++    return nsnull;
+   }
+ 
+   return rootElement;
+ }
+ 
+ TabParent*
+ nsFocusManager::GetRemoteForContent(nsIContent* aContent) {
+   if (!aContent ||
+diff --git a/layout/printing/nsPrintEngine.cpp b/layout/printing/nsPrintEngine.cpp
+--- a/layout/printing/nsPrintEngine.cpp
++++ b/layout/printing/nsPrintEngine.cpp
+@@ -1350,19 +1350,19 @@ nsPrintEngine::MapContentForPO(nsPrintOb
+           NS_ASSERTION(po->mParent, "The root must be a parent");
+           po->mParent->mPrintAsIs = true;
+         }
+       }
+     }
+   }
+ 
+   // walk children content
+-  uint32_t count = aContent->GetChildCount();
+-  for (uint32_t i = 0; i < count; ++i) {
+-    nsIContent *child = aContent->GetChildAt(i);
++  for (nsIContent* child = aContent->GetFirstChild();
++       child;
++       child = child->GetNextSibling()) {
+     MapContentForPO(aPO, child);
+   }
+ }
+ 
+ //---------------------------------------------------------------------
+ bool
+ nsPrintEngine::IsThereAnIFrameSelected(nsIDocShell* aDocShell,
+                                        nsIDOMWindow* aDOMWin,
+@@ -2758,23 +2758,21 @@ nsPrintEngine::CleanupDocTitleArray(PRUn
+ //---------------------------------------------------------------------
+ // static
+ bool nsPrintEngine::HasFramesetChild(nsIContent* aContent)
+ {
+   if (!aContent) {
+     return false;
+   }
+ 
+-  uint32_t numChildren = aContent->GetChildCount();
+-
+   // do a breadth search across all siblings
+-  for (uint32_t i = 0; i < numChildren; ++i) {
+-    nsIContent *child = aContent->GetChildAt(i);
+-    if (child->Tag() == nsGkAtoms::frameset &&
+-        child->IsHTML()) {
++  for (nsIContent* child = aContent->GetFirstChild();
++       child;
++       child = child->GetNextSibling()) {
++    if (child->IsHTML(nsGkAtoms::frameset)) {
+       return true;
+     }
+   }
+ 
+   return false;
+ }
+  
+ 
+diff --git a/layout/style/nsCSSRuleProcessor.cpp b/layout/style/nsCSSRuleProcessor.cpp
+--- a/layout/style/nsCSSRuleProcessor.cpp
++++ b/layout/style/nsCSSRuleProcessor.cpp
+@@ -1539,28 +1539,26 @@ edgeOfTypeMatches(Element* aElement, Tre
+             GetNthIndex(aElement, true, true, true) == 1);
+ }
+ 
+ static inline bool
+ checkGenericEmptyMatches(Element* aElement,
+                          TreeMatchContext& aTreeMatchContext,
+                          bool isWhitespaceSignificant)
+ {
+-  nsIContent *child = nsnull;
+-  int32_t index = -1;
+-
+   if (aTreeMatchContext.mForStyling)
+     aElement->SetFlags(NODE_HAS_EMPTY_SELECTOR);
+ 
+-  do {
+-    child = aElement->GetChildAt(++index);
+-    // stop at first non-comment (and non-whitespace for
+-    // :-moz-only-whitespace) node        
+-  } while (child && !IsSignificantChild(child, true, isWhitespaceSignificant));
+-  return (child == nsnull);
++  nsIContent* child = aElement->GetFirstChild();
++  // stop at first non-comment (and non-whitespace for
++  // :-moz-only-whitespace) node        
++  while (child && !IsSignificantChild(child, true, isWhitespaceSignificant)) {
++    child = child->GetNextSibling();
++  }
++  return !child;
+ }
+ 
+ // An array of the states that are relevant for various pseudoclasses.
+ static const nsEventStates sPseudoClassStates[] = {
+ #define CSS_PSEUDO_CLASS(_name, _value)         \
+   nsEventStates(),
+ #define CSS_STATE_PSEUDO_CLASS(_name, _value, _states) \
+   _states,
+@@ -1696,33 +1694,34 @@ static bool SelectorMatches(Element* aEl
+         if (!checkGenericEmptyMatches(aElement, aTreeMatchContext, false)) {
+           return false;
+         }
+         break;
+ 
+       case nsCSSPseudoClasses::ePseudoClass_mozEmptyExceptChildrenWithLocalname:
+         {
+           NS_ASSERTION(pseudoClass->u.mString, "Must have string!");
+-          nsIContent *child = nsnull;
+-          int32_t index = -1;
+ 
+           if (aTreeMatchContext.mForStyling)
+             // FIXME:  This isn't sufficient to handle:
+             //   :-moz-empty-except-children-with-localname() + E
+             //   :-moz-empty-except-children-with-localname() ~ E
+             // because we don't know to restyle the grandparent of the
+             // inserted/removed element (as in bug 534804 for :empty).
+             aElement->SetFlags(NODE_HAS_SLOW_SELECTOR);
+-          do {
+-            child = aElement->GetChildAt(++index);
+-          } while (child &&
+-                   (!IsSignificantChild(child, true, false) ||
+-                    (child->GetNameSpaceID() == aElement->GetNameSpaceID() &&
+-                     child->Tag()->Equals(nsDependentString(pseudoClass->u.mString)))));
+-          if (child != nsnull) {
++
++          nsIContent* child = aElement->GetFirstChild();
++          while (child &&
++                 (!IsSignificantChild(child, true, false) ||
++                  (child->GetNameSpaceID() == aElement->GetNameSpaceID() &&
++                   child->Tag()->Equals(nsDependentString(pseudoClass->u.mString))))) {
++            child = child->GetNextSibling();
++          }
++
++          if (child) {
+             return false;
+           }
+         }
+         break;
+ 
+       case nsCSSPseudoClasses::ePseudoClass_lang:
+         {
+           NS_ASSERTION(nsnull != pseudoClass->u.mString, "null lang parameter");
+@@ -1815,55 +1814,59 @@ static bool SelectorMatches(Element* aEl
+       case nsCSSPseudoClasses::ePseudoClass_firstChild:
+         if (!edgeChildMatches(aElement, aTreeMatchContext, true, false)) {
+           return false;
+         }
+         break;
+ 
+       case nsCSSPseudoClasses::ePseudoClass_firstNode:
+         {
+-          nsIContent *firstNode = nsnull;
+           nsIContent *parent = aElement->GetParent();
+-          if (parent) {
+-            if (aTreeMatchContext.mForStyling)
+-              parent->SetFlags(NODE_HAS_EDGE_CHILD_SELECTOR);
+-
+-            int32_t index = -1;
+-            do {
+-              firstNode = parent->GetChildAt(++index);
+-              // stop at first non-comment and non-whitespace node
+-            } while (firstNode &&
+-                     !IsSignificantChild(firstNode, true, false));
++          if (!parent) {
++            return false;
++          }
++
++          if (aTreeMatchContext.mForStyling) {
++            parent->SetFlags(NODE_HAS_EDGE_CHILD_SELECTOR);
++          }
++
++          nsIContent* firstNode = aElement->GetFirstChild();
++          // stop at first non-comment and non-whitespace node
++          while (firstNode &&
++                 !IsSignificantChild(firstNode, true, false)) {
++            firstNode = firstNode->GetNextSibling();
+           }
+           if (aElement != firstNode) {
+             return false;
+           }
+         }
+         break;
+ 
+       case nsCSSPseudoClasses::ePseudoClass_lastChild:
+         if (!edgeChildMatches(aElement, aTreeMatchContext, false, true)) {
+           return false;
+         }
+         break;
+ 
+       case nsCSSPseudoClasses::ePseudoClass_lastNode:
+         {
+-          nsIContent *lastNode = nsnull;
+           nsIContent *parent = aElement->GetParent();
+-          if (parent) {
+-            if (aTreeMatchContext.mForStyling)
+-              parent->SetFlags(NODE_HAS_EDGE_CHILD_SELECTOR);
+-            
+-            uint32_t index = parent->GetChildCount();
+-            do {
+-              lastNode = parent->GetChildAt(--index);
+-              // stop at first non-comment and non-whitespace node
+-            } while (lastNode &&
+-                     !IsSignificantChild(lastNode, true, false));
++          if (!parent) {
++            return false;
++          }
++
++          if (aTreeMatchContext.mForStyling) {
++            parent->SetFlags(NODE_HAS_EDGE_CHILD_SELECTOR);
++          }
++          
++          nsIContent* lastNode = parent->GetLastChild();
++          // stop at first non-comment and non-whitespace node
++          while (lastNode &&
++                 !IsSignificantChild(lastNode, true, false)) {
++            lastNode = lastNode->GetPreviousSibling();
+           }
+           if (aElement != lastNode) {
+             return false;
+           }
+         }
+         break;
+ 
+       case nsCSSPseudoClasses::ePseudoClass_onlyChild:
+@@ -1915,29 +1918,27 @@ static bool SelectorMatches(Element* aEl
+         if (!nthChildGenericMatches(aElement, aTreeMatchContext, pseudoClass,
+                                     true, true)) {
+           return false;
+         }
+         break;
+ 
+       case nsCSSPseudoClasses::ePseudoClass_mozHasHandlerRef:
+         {
+-          nsIContent *child = nsnull;
+-          int32_t index = -1;
+-
+-          do {
+-            child = aElement->GetChildAt(++index);
+-            if (child && child->IsHTML() &&
+-                child->Tag() == nsGkAtoms::param &&
++          nsIContent* child = aElement->GetFirstChild();
++
++          while (child) {
++            if (child->IsHTML(nsGkAtoms::param) &&
+                 child->AttrValueIs(kNameSpaceID_None, nsGkAtoms::name,
+                                    NS_LITERAL_STRING("pluginurl"),
+                                    eIgnoreCase)) {
+               break;
+             }
+-          } while (child);
++            child = child->GetNextSibling();
++          }
+           if (!child) {
+             return false;
+           }
+         }
+         break;
+ 
+       case nsCSSPseudoClasses::ePseudoClass_mozIsHTML:
+         if (!aTreeMatchContext.mIsHTMLDocument || !aElement->IsHTML()) {
+@@ -2183,19 +2184,19 @@ static bool SelectorMatchesTree(Element*
+         PRUnichar('~') == selector->mOperator) {
+       // The relevant link must be an ancestor of the node being matched.
+       aLookForRelevantLink = false;
+       nsIContent* parent = prevElement->GetParent();
+       if (parent) {
+         if (aTreeMatchContext.mForStyling)
+           parent->SetFlags(NODE_HAS_SLOW_SELECTOR_LATER_SIBLINGS);
+ 
+-        int32_t index = parent->IndexOf(prevElement);
+-        while (0 <= --index) {
+-          nsIContent* content = parent->GetChildAt(index);
++        for (nsIContent* content = prevElement->GetPreviousSibling();
++             content;
++             content = content->GetPreviousSibling()) {
+           if (content->IsElement()) {
+             element = content->AsElement();
+             break;
+           }
+         }
+       }
+     }
+     // for descendant combinators and child combinators, the element
+diff --git a/layout/xul/base/src/nsXULPopupManager.cpp b/layout/xul/base/src/nsXULPopupManager.cpp
+--- a/layout/xul/base/src/nsXULPopupManager.cpp
++++ b/layout/xul/base/src/nsXULPopupManager.cpp
+@@ -1666,20 +1666,19 @@ nsXULPopupManager::UpdateKeyboardListene
+ 
+ void
+ nsXULPopupManager::UpdateMenuItems(nsIContent* aPopup)
+ {
+   // Walk all of the menu's children, checking to see if any of them has a
+   // command attribute. If so, then several attributes must potentially be updated.
+  
+   nsCOMPtr<nsIDOMDocument> domDoc(do_QueryInterface(aPopup->GetDocument()));
+-  uint32_t count = aPopup->GetChildCount();
+-  for (uint32_t i = 0; i < count; i++) {
+-    nsCOMPtr<nsIContent> grandChild = aPopup->GetChildAt(i);
+-
++  for (nsCOMPtr<nsIContent> grandChild = aPopup->GetFirstChild();
++       grandChild;
++       grandChild = grandChild->GetNextSibling()) {
+     if (grandChild->NodeInfo()->Equals(nsGkAtoms::menuitem, kNameSpaceID_XUL)) {
+       // See if we have a command attribute.
+       nsAutoString command;
+       grandChild->GetAttr(kNameSpaceID_None, nsGkAtoms::command, command);
+       if (!command.IsEmpty()) {
+         // We do! Look it up in our document
+         nsCOMPtr<nsIDOMElement> commandElt;
+         domDoc->GetElementById(command, getter_AddRefs(commandElt));
+diff --git a/parser/html/nsHtml5TreeOperation.cpp b/parser/html/nsHtml5TreeOperation.cpp
+--- a/parser/html/nsHtml5TreeOperation.cpp
++++ b/parser/html/nsHtml5TreeOperation.cpp
+@@ -284,18 +284,18 @@ nsHtml5TreeOperation::Perform(nsHtml5Tre
+       nsIContent* parent = *(mTwo.node);
+       aBuilder->FlushPendingAppendNotifications();
+ 
+       nsHtml5OtherDocUpdate update(parent->OwnerDoc(),
+                                    aBuilder->GetDocument());
+ 
+       uint32_t childCount = parent->GetChildCount();
+       bool didAppend = false;
+-      while (node->GetChildCount()) {
+-        nsCOMPtr<nsIContent> child = node->GetChildAt(0);
++      while (node->HasChildren()) {
++        nsCOMPtr<nsIContent> child = node->GetFirstChild();
+         rv = node->RemoveChildAt(0, true);
+         NS_ENSURE_SUCCESS(rv, rv);
+         rv = parent->AppendChildTo(child, false);
+         NS_ENSURE_SUCCESS(rv, rv);
+         didAppend = true;
+       }
+       if (didAppend) {
+         nsNodeUtils::ContentAppended(parent, parent->GetChildAt(childCount),
+@@ -512,18 +512,18 @@ nsHtml5TreeOperation::Perform(nsHtml5Tre
+ 
+       if (foster && foster->IsElement()) {
+         aBuilder->FlushPendingAppendNotifications();
+ 
+         nsHtml5OtherDocUpdate update(foster->OwnerDoc(),
+                                      aBuilder->GetDocument());
+ 
+         uint32_t pos = foster->IndexOf(table);
+-        
+-        nsIContent* previousSibling = foster->GetChildAt(pos - 1);
++
++        nsIContent* previousSibling = table->GetPreviousSibling();
+         if (previousSibling && previousSibling->IsNodeOfType(nsINode::eTEXT)) {
+           return AppendTextToTextNode(buffer, 
+                                       length, 
+                                       previousSibling, 
+                                       aBuilder);
+         }
+         
+         nsCOMPtr<nsIContent> text;
+diff --git a/toolkit/components/typeaheadfind/nsTypeAheadFind.cpp b/toolkit/components/typeaheadfind/nsTypeAheadFind.cpp
+--- a/toolkit/components/typeaheadfind/nsTypeAheadFind.cpp
++++ b/toolkit/components/typeaheadfind/nsTypeAheadFind.cpp
+@@ -850,21 +850,21 @@ nsTypeAheadFind::RangeStartsInsideLink(n
+       }
+     }
+ 
+     // Get the parent
+     nsCOMPtr<nsIContent> parent = startContent->GetParent();
+     if (!parent)
+       break;
+ 
+-    nsIContent *parentsFirstChild = parent->GetChildAt(0);
++    nsIContent* parentsFirstChild = parent->GetFirstChild();
+ 
+     // We don't want to look at a whitespace-only first child
+     if (parentsFirstChild && parentsFirstChild->TextIsOnlyWhitespace()) {
+-      parentsFirstChild = parent->GetChildAt(1);
++      parentsFirstChild = parentsFirstChild->GetNextSibling();
+     }
+ 
+     if (parentsFirstChild != startContent) {
+       // startContent wasn't a first child, so we conclude that
+       // if this is inside a link, it's not at the beginning of it
+       *aIsStartingLink = false;
+     }
+ 
+diff --git a/widget/windows/nsNativeThemeWin.cpp b/widget/windows/nsNativeThemeWin.cpp
+--- a/widget/windows/nsNativeThemeWin.cpp
++++ b/widget/windows/nsNativeThemeWin.cpp
+@@ -879,17 +879,17 @@ nsNativeThemeWin::GetThemePartAndState(n
+       // for this item. We will pass any nessessary information via aState,
+       // and will render the item using separate code.
+       aPart = -1;
+       aState = 0;
+       if (aFrame) {
+         nsIContent* content = aFrame->GetContent();
+         nsIContent* parent = content->GetParent();
+         // XXXzeniko hiding the first toolbar will result in an unwanted margin
+-        if (parent && parent->GetChildAt(0) == content) {
++        if (parent && parent->GetFirstChild() == content) {
+           aState = 1;
+         }
+       }
+       return NS_OK;
+     }
+     case NS_THEME_STATUSBAR_PANEL:
+     case NS_THEME_STATUSBAR_RESIZER_PANEL:
+     case NS_THEME_RESIZER: {

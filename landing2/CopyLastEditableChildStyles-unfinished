@@ -1,0 +1,87 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -5139,30 +5139,29 @@ nsHTMLEditor::AreNodesSameType(nsIConten
+     return true;
+   }
+ 
+   // If CSS is enabled, we are stricter about span nodes.
+   return mHTMLCSSUtils->ElementsSameStyle(aNode1->AsDOMNode(),
+                                           aNode2->AsDOMNode());
+ }
+ 
+-NS_IMETHODIMP
++nsresult
+ nsHTMLEditor::CopyLastEditableChildStyles(nsIDOMNode * aPreviousBlock, nsIDOMNode * aNewBlock,
+                                           nsIDOMNode **aOutBrNode)
+ {
+   *aOutBrNode = nsnull;
+   nsCOMPtr<nsIDOMNode> child, tmp;
+   nsresult res;
+   // first, clear out aNewBlock.  Contract is that we want only the styles from previousBlock.
+-  res = aNewBlock->GetFirstChild(getter_AddRefs(child));
+-  while (NS_SUCCEEDED(res) && child)
+-  {
++  child = aNewBlock->GetFirstChild();
++  while (child) {
+     res = DeleteNode(child);
+     NS_ENSURE_SUCCESS(res, res);
+-    res = aNewBlock->GetFirstChild(getter_AddRefs(child));
++    child = aNewBlock->GetFirstChild();
+   }
+   // now find and clone the styles
+   child = aPreviousBlock;
+   tmp = aPreviousBlock;
+   while (tmp) {
+     child = tmp;
+     res = GetLastEditableChild(child, address_of(tmp));
+     NS_ENSURE_SUCCESS(res, res);
+@@ -5189,21 +5188,19 @@ nsHTMLEditor::CopyLastEditableChildStyle
+       else {
+         res = CreateNode(domTagName, aNewBlock, 0, getter_AddRefs(newStyles));
+         NS_ENSURE_SUCCESS(res, res);
+         deepestStyle = newStyles;
+       }
+       res = CloneAttributes(newStyles, child);
+       NS_ENSURE_SUCCESS(res, res);
+     }
+-    nsCOMPtr<nsIDOMNode> tmp;
+-    res = child->GetParentNode(getter_AddRefs(tmp));
+-    NS_ENSURE_SUCCESS(res, res);
+-    child = tmp;
++    child = child->GetNodeParentNode();
+   }
++
+   if (deepestStyle) {
+     nsCOMPtr<nsIDOMNode> outBRNode;
+     res = CreateBR(deepestStyle, 0, address_of(outBRNode));
+     NS_ENSURE_SUCCESS(res, res);
+     // Getters must addref
+     outBRNode.forget(aOutBrNode);
+   }
+   return NS_OK;
+diff --git a/editor/libeditor/html/nsHTMLEditor.h b/editor/libeditor/html/nsHTMLEditor.h
+--- a/editor/libeditor/html/nsHTMLEditor.h
++++ b/editor/libeditor/html/nsHTMLEditor.h
+@@ -129,18 +129,17 @@ public:
+   /* ------------ nsIHTMLAbsPosEditor methods -------------- */
+   /* -------- Implemented in nsHTMLAbsPosition.cpp --------- */
+   NS_DECL_NSIHTMLABSPOSEDITOR
+ 
+   /* ------------ nsIHTMLInlineTableEditor methods -------------- */
+   /* ------- Implemented in nsHTMLInlineTableEditor.cpp --------- */
+   NS_DECL_NSIHTMLINLINETABLEEDITOR
+ 
+-  /* ------------ nsIHTMLEditor methods -------------- */
+-  NS_IMETHOD CopyLastEditableChildStyles(nsIDOMNode *aPreviousBlock, nsIDOMNode *aNewBlock,
++  nsresult CopyLastEditableChildStyles(nsIDOMNode *aPreviousBlock, nsIDOMNode *aNewBlock,
+                                          nsIDOMNode **aOutBrNode);
+ 
+   NS_IMETHOD LoadHTML(const nsAString &aInputString);
+ 
+   nsresult GetCSSBackgroundColorState(bool *aMixed, nsAString &aOutColor,
+                                       bool aBlockLevel);
+   NS_IMETHOD GetHTMLBackgroundColorState(bool *aMixed, nsAString &outColor);
+ 

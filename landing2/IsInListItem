@@ -1,0 +1,85 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 724260 - Add nsHTMLEditRules::IsInListItem(nsINode* aNode); r=ehsan
+
+diff --git a/editor/libeditor/html/nsHTMLEditRules.cpp b/editor/libeditor/html/nsHTMLEditRules.cpp
+--- a/editor/libeditor/html/nsHTMLEditRules.cpp
++++ b/editor/libeditor/html/nsHTMLEditRules.cpp
+@@ -6484,31 +6484,40 @@ nsHTMLEditRules::MakeTransitionList(nsCO
+  ********************************************************/
+  
+ ///////////////////////////////////////////////////////////////////////////
+ // IsInListItem: if aNode is the descendant of a listitem, return that li.
+ //               But table element boundaries are stoppers on the search.
+ //               Also stops on the active editor host (contenteditable).
+ //               Also test if aNode is an li itself.
+ //                       
+-nsCOMPtr<nsIDOMNode> 
+-nsHTMLEditRules::IsInListItem(nsIDOMNode *aNode)
+-{
+-  NS_ENSURE_TRUE(aNode, nsnull);  
+-  if (nsHTMLEditUtils::IsListItem(aNode)) return aNode;
+-  
+-  nsCOMPtr<nsIDOMNode> parent, tmp;
+-  aNode->GetParentNode(getter_AddRefs(parent));
+-  
+-  while (parent)
+-  {
+-    if (!mHTMLEditor->IsNodeInActiveEditor(parent)) return nsnull;
+-    if (nsHTMLEditUtils::IsTableElement(parent)) return nsnull;
+-    if (nsHTMLEditUtils::IsListItem(parent)) return parent;
+-    tmp=parent; tmp->GetParentNode(getter_AddRefs(parent));
++already_AddRefed<nsIDOMNode>
++nsHTMLEditRules::IsInListItem(nsIDOMNode* aNode)
++{
++  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
++  nsCOMPtr<nsIDOMNode> retval = do_QueryInterface(IsInListItem(node));
++  return retval.forget();
++}
++
++nsINode*
++nsHTMLEditRules::IsInListItem(nsINode* aNode)
++{
++  NS_ENSURE_TRUE(aNode, nsnull);
++  if (aNode->IsElement() && nsHTMLEditUtils::IsListItem(aNode->AsElement())) {
++    return aNode;
++  }
++
++  nsINode* parent = aNode->GetNodeParent();
++  while (parent && mHTMLEditor->IsNodeInActiveEditor(parent) &&
++         !(parent->IsElement() &&
++           nsHTMLEditUtils::IsTableElement(parent->AsElement()))) {
++    if (nsHTMLEditUtils::IsListItem(parent->AsElement())) {
++      return parent;
++    }
++    parent = parent->GetNodeParent();
+   }
+   return nsnull;
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // ReturnInHeader: do the right thing for returns pressed in headers
+ //                       
+diff --git a/editor/libeditor/html/nsHTMLEditRules.h b/editor/libeditor/html/nsHTMLEditRules.h
+--- a/editor/libeditor/html/nsHTMLEditRules.h
++++ b/editor/libeditor/html/nsHTMLEditRules.h
+@@ -181,17 +181,18 @@ protected:
+   nsresult DidMakeBasicBlock(nsISelection *aSelection, nsRulesInfo *aInfo, nsresult aResult);
+   nsresult DidAbsolutePosition();
+   nsresult AlignInnerBlocks(nsIDOMNode *aNode, const nsAString *alignType);
+   nsresult AlignBlockContents(nsIDOMNode *aNode, const nsAString *alignType);
+   nsresult AppendInnerFormatNodes(nsCOMArray<nsIDOMNode>& aArray,
+                                   nsIDOMNode *aNode);
+   nsresult GetFormatString(nsIDOMNode *aNode, nsAString &outFormat);
+   nsresult GetInnerContent(nsIDOMNode *aNode, nsCOMArray<nsIDOMNode>& outArrayOfNodes, int32_t *aIndex, bool aList = true, bool aTble = true);
+-  nsCOMPtr<nsIDOMNode> IsInListItem(nsIDOMNode *aNode);
++  already_AddRefed<nsIDOMNode> IsInListItem(nsIDOMNode* aNode);
++  nsINode* IsInListItem(nsINode* aNode);
+   nsresult ReturnInHeader(nsISelection *aSelection, nsIDOMNode *aHeader, nsIDOMNode *aTextNode, int32_t aOffset);
+   nsresult ReturnInParagraph(nsISelection *aSelection, nsIDOMNode *aHeader, nsIDOMNode *aTextNode, int32_t aOffset, bool *aCancel, bool *aHandled);
+   nsresult SplitParagraph(nsIDOMNode *aPara,
+                           nsIDOMNode *aBRNode, 
+                           nsISelection *aSelection,
+                           nsCOMPtr<nsIDOMNode> *aSelNode, 
+                           int32_t *aOffset);
+   nsresult ReturnInListItem(nsISelection *aSelection, nsIDOMNode *aHeader, nsIDOMNode *aTextNode, int32_t aOffset);

@@ -1,0 +1,55 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -4361,29 +4361,40 @@ nsHTMLEditor::GetPriorHTMLNode(nsIDOMNod
+                "GetPriorNode screwed up");
+   return res;
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // GetNextHTMLNode: returns the next editable leaf node, if there is
+ //                   one within the <body>
+-//                       
++//
++nsIContent*
++nsHTMLEditor::GetNextHTMLNode(nsINode* aNode, bool aNoBlockCrossing)
++{
++  MOZ_ASSERT(aNode);
++
++  nsIContent* result = GetNextNode(currentNode, true, aNoBlockCrossing, NULL);
++  // if it's not in the body, then zero it out
++  if (result && !IsNodeInActiveEditor(result)) {
++    return NULL;
++  }
++  return result;
++}
++
+ nsresult
+ nsHTMLEditor::GetNextHTMLNode(nsIDOMNode *inNode, nsCOMPtr<nsIDOMNode> *outNode, bool bNoBlockCrossing)
+ {
+   NS_ENSURE_TRUE(outNode, NS_ERROR_NULL_POINTER);
+-  nsresult res = GetNextNode(inNode, true, address_of(*outNode), bNoBlockCrossing);
+-  NS_ENSURE_SUCCESS(res, res);
+-  
+-  // if it's not in the body, then zero it out
+-  if (*outNode && !IsNodeInActiveEditor(*outNode)) {
+-    *outNode = nsnull;
+-  }
+-  return res;
++
++  nsCOMPtr<nsINode> currentNode = do_QueryInterface(inNode);
++  NS_ENSURE_TRUE(currentNode, NS_ERROR_NULL_POINTER);
++
++  *outNode = do_QueryInterface(GetNextHTMLNode(currentNode, bNoBlockCrossing));
++  return NS_OK;
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // GetNHTMLextNode: same as above but takes {parent,offset} instead of node
+ //                       
+ nsresult
+ nsHTMLEditor::GetNextHTMLNode(nsIDOMNode *inParent, int32_t inOffset, nsCOMPtr<nsIDOMNode> *outNode, bool bNoBlockCrossing)

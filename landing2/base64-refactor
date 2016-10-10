@@ -1,0 +1,68 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/xpcom/io/Base64.cpp b/xpcom/io/Base64.cpp
+--- a/xpcom/io/Base64.cpp
++++ b/xpcom/io/Base64.cpp
+@@ -314,40 +314,43 @@ Base64Decode(const nsACString &aString, 
+ {
+   // Check for overflow.
+   if (aString.Length() > PR_UINT32_MAX / 3) {
+     return NS_ERROR_FAILURE;
+   }
+ 
+   uint32_t binaryDataLen = ((aString.Length() * 3) / 4);
+ 
+-  char *buffer;
++  aBinaryData.Truncate();
+ 
+   // Add one byte for null termination.
+-  if (aBinaryData.SetCapacity(binaryDataLen + 1) &&
+-    (buffer = aBinaryData.BeginWriting()) &&
+-    PL_Base64Decode(aString.BeginReading(), aString.Length(), buffer)) {
+-    // PL_Base64Decode doesn't null terminate the buffer for us when we pass
+-    // the buffer in. Do that manually, taking into account the number of '='
+-    // characters we were passed.
+-    if (!aString.IsEmpty() && aString[aString.Length() - 1] == '=') {
+-      if (aString.Length() > 1 && aString[aString.Length() - 2] == '=') {
+-        binaryDataLen -= 2;
+-      } else {
+-        binaryDataLen -= 1;
+-      }
+-    }
+-    buffer[binaryDataLen] = '\0';
++  NS_ENSURE_TRUE(aBinaryData.SetCapacity(binaryDataLen + 1, fallible_t()),
++                 NS_ERROR_OUT_OF_MEMORY);
+ 
+-    aBinaryData.SetLength(binaryDataLen);
+-    return NS_OK;
++  char* buffer = aBinaryData.BeginWriting();
++  NS_ENSURE_TRUE(buffer, NS_ERROR_OUT_OF_MEMORY); // XXX Can this happen?
++
++  if (!PL_Base64Decode(aString.BeginReading(), aString.Length(), buffer)) {
++    return NS_ERROR_INVALID_ARG;
+   }
+ 
+-  aBinaryData.Truncate();
+-  return NS_ERROR_INVALID_ARG;
++  // PL_Base64Decode doesn't null terminate the buffer for us when we pass
++  // the buffer in. Do that manually, taking into account the number of '='
++  // characters we were passed.
++  if (!aString.IsEmpty() && aString[aString.Length() - 1] == '=') {
++    if (aString.Length() > 1 && aString[aString.Length() - 2] == '=') {
++      binaryDataLen -= 2;
++    } else {
++      binaryDataLen -= 1;
++    }
++  }
++  buffer[binaryDataLen] = '\0';
++
++  aBinaryData.SetLength(binaryDataLen);
++  return NS_OK;
+ }
+ 
+ nsresult
+ Base64Decode(const nsAString &aBinaryData, nsAString &aString)
+ {
+   NS_LossyConvertUTF16toASCII binaryData(aBinaryData);
+   nsCAutoString string;
+ 

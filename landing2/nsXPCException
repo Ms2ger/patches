@@ -1,0 +1,176 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCException.cpp b/js/xpconnect/src/XPCException.cpp
+--- a/js/xpconnect/src/XPCException.cpp
++++ b/js/xpconnect/src/XPCException.cpp
+@@ -34,17 +34,19 @@
+  * use your version of this file under the terms of the MPL, indicate your
+  * decision by deleting the provisions above and replace them with the notice
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+-/* An implementaion of nsIException. */
++/* An implementation of nsIException. */
++
++#include "nsXPCException.h"
+ 
+ #include "xpcprivate.h"
+ #include "nsNetError.h"
+ #include "mozStorage.h"
+ #include "nsPluginError.h"
+ 
+ /***************************************************************************/
+ /* Quick and dirty mapping of well known result codes to strings. We only
+diff --git a/js/xpconnect/src/nsXPCException.h b/js/xpconnect/src/nsXPCException.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/nsXPCException.h
+@@ -0,0 +1,57 @@
++#ifndef nsXPCException_h
++#define nsXPCException_h
++
++#include "xpcexception.h"
++
++#include "nsAutoJSValHolder.h"
++
++class nsXPCException : public nsIXPCException
++{
++public:
++    NS_DEFINE_STATIC_CID_ACCESSOR(NS_XPCEXCEPTION_CID)
++
++    NS_DECL_ISUPPORTS
++    NS_DECL_NSIEXCEPTION
++    NS_DECL_NSIXPCEXCEPTION
++
++    static nsresult NewException(const char *aMessage,
++                                 nsresult aResult,
++                                 nsIStackFrame *aLocation,
++                                 nsISupports *aData,
++                                 nsIException** exception);
++
++    static JSBool NameAndFormatForNSResult(nsresult rv,
++                                           const char** name,
++                                           const char** format);
++
++    static void* IterateNSResults(nsresult* rv,
++                                  const char** name,
++                                  const char** format,
++                                  void** iterp);
++
++    static uint32_t GetNSResultCount();
++
++    nsXPCException();
++    virtual ~nsXPCException();
++
++    static void InitStatics() { sEverMadeOneFromFactory = false; }
++
++protected:
++    void Reset();
++private:
++    char*           mMessage;
++    nsresult        mResult;
++    char*           mName;
++    nsIStackFrame*  mLocation;
++    nsISupports*    mData;
++    char*           mFilename;
++    int             mLineNumber;
++    nsIException*   mInner;
++    bool            mInitialized;
++
++    nsAutoJSValHolder mThrownJSVal;
++
++    static JSBool sEverMadeOneFromFactory;
++};
++
++#endif // nsXPCException_h
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -164,16 +164,17 @@
+ #include "XPCWrappedNativeProto.h"
+ #include "XPCWrappedNative.h"
+ #include "nsXPCWrappedJSClass.h"
+ #include "xpcObjectHelper.h"
+ #include "XPCConvert.h"
+ #include "XPCStringConvert.h"
+ #include "XPCThrower.h"
+ #include "XPCJSStack.h"
++#include "nsXPCException.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -466,66 +467,16 @@ enum WrapperType {
+ /***************************************************************************
+ ****************************************************************************
+ *
+ * All manner of utility classes follow...
+ *
+ ****************************************************************************
+ ***************************************************************************/
+ 
+-class nsXPCException :
+-            public nsIXPCException
+-{
+-public:
+-    NS_DEFINE_STATIC_CID_ACCESSOR(NS_XPCEXCEPTION_CID)
+-
+-    NS_DECL_ISUPPORTS
+-    NS_DECL_NSIEXCEPTION
+-    NS_DECL_NSIXPCEXCEPTION
+-
+-    static nsresult NewException(const char *aMessage,
+-                                 nsresult aResult,
+-                                 nsIStackFrame *aLocation,
+-                                 nsISupports *aData,
+-                                 nsIException** exception);
+-
+-    static JSBool NameAndFormatForNSResult(nsresult rv,
+-                                           const char** name,
+-                                           const char** format);
+-
+-    static void* IterateNSResults(nsresult* rv,
+-                                  const char** name,
+-                                  const char** format,
+-                                  void** iterp);
+-
+-    static uint32_t GetNSResultCount();
+-
+-    nsXPCException();
+-    virtual ~nsXPCException();
+-
+-    static void InitStatics() { sEverMadeOneFromFactory = false; }
+-
+-protected:
+-    void Reset();
+-private:
+-    char*           mMessage;
+-    nsresult        mResult;
+-    char*           mName;
+-    nsIStackFrame*  mLocation;
+-    nsISupports*    mData;
+-    char*           mFilename;
+-    int             mLineNumber;
+-    nsIException*   mInner;
+-    bool            mInitialized;
+-
+-    nsAutoJSValHolder mThrownJSVal;
+-
+-    static JSBool sEverMadeOneFromFactory;
+-};
+-
+ /***************************************************************************/
+ /*
+ * nsJSID implements nsIJSID. It is also used by nsJSIID and nsJSCID as a
+ * member (as a hidden implementaion detail) to which they delegate many calls.
+ */
+ 
+ extern void xpc_InitJSxIDClassObjects();
+ extern void xpc_DestroyJSxIDClassObjects();

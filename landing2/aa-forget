@@ -1,0 +1,127 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/xpcom/components/nsComponentManager.cpp b/xpcom/components/nsComponentManager.cpp
+--- a/xpcom/components/nsComponentManager.cpp
++++ b/xpcom/components/nsComponentManager.cpp
+@@ -48,23 +48,16 @@
+  */
+ 
+ #include <stdlib.h>
+ #include "nscore.h"
+ #include "nsISupports.h"
+ #include "nspr.h"
+ #include "nsCRT.h" // for atoll
+ 
+-// Arena used by component manager for storing contractid string, dll
+-// location strings and small objects
+-// CAUTION: Arena align mask needs to be defined before including plarena.h
+-//          currently from nsComponentManager.h
+-#define PL_ARENA_CONST_ALIGN_MASK 7
+-#define NS_CM_BLOCK_SIZE (1024 * 8)
+-
+ #include "nsCategoryManager.h"
+ #include "nsCOMPtr.h"
+ #include "nsComponentManager.h"
+ #include "nsDirectoryService.h"
+ #include "nsDirectoryServiceDefs.h"
+ #include "nsCategoryManager.h"
+ #include "nsCategoryManagerUtils.h"
+ #include "nsIEnumerator.h"
+@@ -98,20 +91,28 @@
+ #include "nsSupportsPrimitives.h"
+ #include "nsArrayEnumerator.h"
+ #include "nsStringEnumerator.h"
+ 
+ #include NEW_H     // for placement new
+ 
+ #include "mozilla/Omnijar.h"
+ #include "nsJAR.h"
+-static NS_DEFINE_CID(kZipReaderCID, NS_ZIPREADER_CID);
+ 
+ #include "prlog.h"
+ 
++// Arena used by component manager for storing contractid string, dll
++// location strings and small objects
++// CAUTION: Arena align mask needs to be defined before including plarena.h
++//          currently from nsComponentManager.h
++#define PL_ARENA_CONST_ALIGN_MASK 7
++#define NS_CM_BLOCK_SIZE (1024 * 8)
++
++static NS_DEFINE_CID(kZipReaderCID, NS_ZIPREADER_CID);
++
+ using namespace mozilla;
+ 
+ PRLogModuleInfo* nsComponentManagerLog = nsnull;
+ 
+ #if 0 || defined (DEBUG_timeless)
+  #define SHOW_DENIED_ON_SHUTDOWN
+  #define SHOW_CI_ON_EXISTING_SERVICE
+ #endif
+@@ -1982,19 +1983,18 @@ nsFactoryEntry::GetFactory()
+         }
+         else {
+             NS_ASSERTION(mCIDEntry->constructorProc, "no getfactory or constructor");
+             mFactory = new mozilla::GenericFactory(mCIDEntry->constructorProc);
+         }
+         if (!mFactory)
+             return NULL;
+     }
+-    nsIFactory* factory = mFactory.get();
+-    NS_ADDREF(factory);
+-    return factory;
++    nsCOMPtr<nsIFactory> factory = mFactory;
++    return factory.forget();
+ }
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ // Static Access Functions
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+ nsresult
+ NS_GetComponentManager(nsIComponentManager* *result)
+@@ -2059,41 +2059,41 @@ nsComponentManagerImpl::AddBootstrappedM
+ 
+ NS_IMETHODIMP
+ nsComponentManagerImpl::RemoveBootstrappedManifestLocation(nsILocalFile* aLocation)
+ {
+   nsCOMPtr<nsIChromeRegistry> cr = mozilla::services::GetChromeRegistryService();
+   if (!cr)
+     return NS_ERROR_FAILURE;
+ 
+-  bool isJar = false;
+-  nsCOMPtr<nsILocalFile> manifest;
+   nsString path;
+   nsresult rv = aLocation->GetPath(path);
+   if (NS_FAILED(rv))
+     return rv;
+ 
++  bool isJar;
++  nsCOMPtr<nsILocalFile> manifest;
+   if (Substring(path, path.Length() - 4).Equals(NS_LITERAL_STRING(".xpi"))) {
+     isJar = true;
+     manifest = aLocation;
+   } else {
++    isJar = false
+     manifest = CloneAndAppend(aLocation, NS_LITERAL_CSTRING("chrome.manifest"));
+   }
+ 
+   nsComponentManagerImpl::ComponentLocation elem = {
+     NS_BOOTSTRAPPED_LOCATION,
+     manifest,
+     isJar
+   };
+ 
+   // Remove reference.
+   nsComponentManagerImpl::sModuleLocations->RemoveElement(elem, ComponentLocationComparator());
+ 
+-  rv = cr->CheckForNewChrome();
+-  return rv;
++  return cr->CheckForNewChrome();
+ }
+ 
+ EXPORT_XPCOM_API(nsresult)
+ XRE_AddManifestLocation(NSLocationType aType, nsILocalFile* aLocation)
+ {
+     nsComponentManagerImpl::InitializeModuleLocations();
+     nsComponentManagerImpl::ComponentLocation* c = 
+         nsComponentManagerImpl::sModuleLocations->AppendElement();

@@ -1,0 +1,187 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCNativeScriptableInfo.h b/js/xpconnect/src/XPCNativeScriptableInfo.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCNativeScriptableInfo.h
+@@ -0,0 +1,65 @@
++#ifndef XPCNativeScriptableInfo_h
++#define XPCNativeScriptableInfo_h
++
++#include "XPCNativeScriptableShared.h"
++
++class XPCCallContext;
++class XPCNativeScriptableCreateInfo;
++
++// XPCNativeScriptableInfo is used to hold the nsIXPCScriptable state for a
++// given class or instance.
++
++class XPCNativeScriptableInfo
++{
++public:
++    static XPCNativeScriptableInfo*
++    Construct(XPCCallContext& ccx, JSBool isGlobal,
++              const XPCNativeScriptableCreateInfo* sci);
++
++    nsIXPCScriptable*
++    GetCallback() const {return mCallback;}
++
++    const XPCNativeScriptableFlags&
++    GetFlags() const      {return mShared->GetFlags();}
++
++    uint32_t
++    GetInterfacesBitmap() const {return mShared->GetInterfacesBitmap();}
++
++    JSClass*
++    GetJSClass()          {return mShared->GetJSClass();}
++
++    JSClass*
++    GetSlimJSClass()      {return mShared->GetSlimJSClass();}
++
++    XPCNativeScriptableShared*
++    GetScriptableShared() {return mShared;}
++
++    void
++    SetCallback(nsIXPCScriptable* s) {mCallback = s;}
++    void
++    SetCallback(already_AddRefed<nsIXPCScriptable> s) {mCallback = s;}
++
++    void
++    SetScriptableShared(XPCNativeScriptableShared* shared) {mShared = shared;}
++
++    void Mark() {if (mShared) mShared->Mark();}
++
++protected:
++    XPCNativeScriptableInfo(nsIXPCScriptable* scriptable = nsnull,
++                            XPCNativeScriptableShared* shared = nsnull)
++        : mCallback(scriptable), mShared(shared)
++                               {MOZ_COUNT_CTOR(XPCNativeScriptableInfo);}
++public:
++    ~XPCNativeScriptableInfo() {MOZ_COUNT_DTOR(XPCNativeScriptableInfo);}
++private:
++
++    // disable copy ctor and assignment
++    XPCNativeScriptableInfo(const XPCNativeScriptableInfo& r); // not implemented
++    XPCNativeScriptableInfo& operator= (const XPCNativeScriptableInfo& r); // not implemented
++
++private:
++    nsCOMPtr<nsIXPCScriptable>  mCallback;
++    XPCNativeScriptableShared*  mShared;
++};
++
++#endif // XPCNativeScriptableInfo_h
+diff --git a/js/xpconnect/src/XPCWrappedNativeJSOps.cpp b/js/xpconnect/src/XPCWrappedNativeJSOps.cpp
+--- a/js/xpconnect/src/XPCWrappedNativeJSOps.cpp
++++ b/js/xpconnect/src/XPCWrappedNativeJSOps.cpp
+@@ -40,16 +40,17 @@
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* JavaScript JSClasses and JSOps for our Wrapped Native JS Objects. */
+ 
+ #include "xpcprivate.h"
+ #include "XPCWrapper.h"
+ #include "nsWrapperCacheInlines.h"
+ #include "XPCNativeScriptableShared.h"
++#include "XPCNativeScriptableInfo.h"
+ 
+ /***************************************************************************/
+ 
+ class NS_STACK_CLASS AutoResolveName
+ {
+ public:
+     AutoResolveName(XPCCallContext& ccx, jsid name
+                     MOZILLA_GUARD_OBJECT_NOTIFIER_PARAM)
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -154,16 +154,17 @@
+ #include "XPCCallContext.h"
+ #include "XPCLazyCallContext.h"
+ #include "XPCWrappedNativeScope.h"
+ #include "XPCNativeMember.h"
+ #include "XPCNativeInterface.h"
+ #include "XPCNativeSetKey.h"
+ #include "XPCNativeScriptableFlags.h"
+ #include "XPCNativeScriptableShared.h"
++#include "XPCNativeScriptableInfo.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -453,72 +454,16 @@ enum WrapperType {
+     SOW             = 1 << 5
+ };
+ 
+ }
+ 
+ /***************************************************************************/
+ 
+ /***************************************************************************/
+-// XPCNativeScriptableInfo is used to hold the nsIXPCScriptable state for a
+-// given class or instance.
+-
+-class XPCNativeScriptableInfo
+-{
+-public:
+-    static XPCNativeScriptableInfo*
+-    Construct(XPCCallContext& ccx, JSBool isGlobal,
+-              const XPCNativeScriptableCreateInfo* sci);
+-
+-    nsIXPCScriptable*
+-    GetCallback() const {return mCallback;}
+-
+-    const XPCNativeScriptableFlags&
+-    GetFlags() const      {return mShared->GetFlags();}
+-
+-    uint32_t
+-    GetInterfacesBitmap() const {return mShared->GetInterfacesBitmap();}
+-
+-    JSClass*
+-    GetJSClass()          {return mShared->GetJSClass();}
+-
+-    JSClass*
+-    GetSlimJSClass()      {return mShared->GetSlimJSClass();}
+-
+-    XPCNativeScriptableShared*
+-    GetScriptableShared() {return mShared;}
+-
+-    void
+-    SetCallback(nsIXPCScriptable* s) {mCallback = s;}
+-    void
+-    SetCallback(already_AddRefed<nsIXPCScriptable> s) {mCallback = s;}
+-
+-    void
+-    SetScriptableShared(XPCNativeScriptableShared* shared) {mShared = shared;}
+-
+-    void Mark() {if (mShared) mShared->Mark();}
+-
+-protected:
+-    XPCNativeScriptableInfo(nsIXPCScriptable* scriptable = nsnull,
+-                            XPCNativeScriptableShared* shared = nsnull)
+-        : mCallback(scriptable), mShared(shared)
+-                               {MOZ_COUNT_CTOR(XPCNativeScriptableInfo);}
+-public:
+-    ~XPCNativeScriptableInfo() {MOZ_COUNT_DTOR(XPCNativeScriptableInfo);}
+-private:
+-
+-    // disable copy ctor and assignment
+-    XPCNativeScriptableInfo(const XPCNativeScriptableInfo& r); // not implemented
+-    XPCNativeScriptableInfo& operator= (const XPCNativeScriptableInfo& r); // not implemented
+-
+-private:
+-    nsCOMPtr<nsIXPCScriptable>  mCallback;
+-    XPCNativeScriptableShared*  mShared;
+-};
+-
+ /***************************************************************************/
+ // XPCNativeScriptableCreateInfo is used in creating new wrapper and protos.
+ // it abstracts out the scriptable interface pointer and the flags. After
+ // creation these are factored differently using XPCNativeScriptableInfo.
+ 
+ class NS_STACK_CLASS XPCNativeScriptableCreateInfo
+ {
+ public:

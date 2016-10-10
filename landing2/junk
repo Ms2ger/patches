@@ -1,0 +1,4910 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/accessible/src/jsat/Utils.jsm b/accessible/src/jsat/Utils.jsm
+--- a/accessible/src/jsat/Utils.jsm
++++ b/accessible/src/jsat/Utils.jsm
+@@ -7,27 +7,33 @@
+ const Cu = Components.utils;
+ const Cc = Components.classes;
+ const Ci = Components.interfaces;
+ 
+ Cu.import('resource://gre/modules/Services.jsm');
+ 
+ var EXPORTED_SYMBOLS = ['Utils', 'Logger'];
+ 
+-var gAccRetrieval = Cc['@mozilla.org/accessibleRetrieval;1'].
+-  getService(Ci.nsIAccessibleRetrieval);
+-
+ var Utils = {
+   _buildAppMap: {
+     '{3c2e2abc-06d4-11e1-ac3b-374f68613e61}': 'b2g',
+     '{ec8030f7-c20a-464f-9b0e-13a3a9e97384}': 'browser',
+     '{aa3c5121-dab2-40e2-81ca-7ea25febc110}': 'mobile/android',
+     '{a23983c0-fd0e-11dc-95ff-0800200c9a66}': 'mobile/xul'
+   },
+ 
++  get AccRetrieval() {
++    if (!this._AccRetrieval) {
++      this._AccRetrieval = Cc['@mozilla.org/accessibleRetrieval;1'].
++        getService(Ci.nsIAccessibleRetrieval);
++    }
++
++    return this._AccRetrieval;
++  },
++
+   get MozBuildApp() {
+     if (!this._buildApp)
+       this._buildApp = this._buildAppMap[Services.appinfo.ID];
+     return this._buildApp;
+   },
+ 
+   get OS() {
+     if (!this._OS)
+@@ -67,17 +73,17 @@ var Utils = {
+ 
+   getCurrentContentDoc: function getCurrentContentDoc(aWindow) {
+     if (this.MozBuildApp == "b2g")
+       return this.getBrowserApp(aWindow).contentBrowser.contentDocument;
+     return this.getBrowserApp(aWindow).selectedBrowser.contentDocument;
+   },
+ 
+   getAllDocuments: function getAllDocuments(aWindow) {
+-    let doc = gAccRetrieval.
++    let doc = this.AccRetrieval.
+       getAccessibleFor(this.getCurrentContentDoc(aWindow)).
+       QueryInterface(Ci.nsIAccessibleDocument);
+     let docs = [];
+     function getAllDocuments(aDocument) {
+       docs.push(aDocument.DOMDocument);
+       for (let i = 0; i < aDocument.childDocumentCount; i++)
+         getAllDocuments(aDocument.getChildDocumentAt(i));
+     }
+@@ -101,17 +107,17 @@ var Utils = {
+     let state = {};
+     let extState = {};
+     aAccessible.getState(state, extState);
+     return [state.value, extState.value];
+   },
+ 
+   getVirtualCursor: function getVirtualCursor(aDocument) {
+     let doc = (aDocument instanceof Ci.nsIAccessible) ? aDocument :
+-      gAccRetrieval.getAccessibleFor(aDocument);
++      this.AccRetrieval.getAccessibleFor(aDocument);
+ 
+     while (doc) {
+       try {
+         return doc.QueryInterface(Ci.nsIAccessibleCursorable).virtualCursor;
+       } catch (x) {
+         doc = doc.parentDocument;
+       }
+     }
+@@ -165,17 +171,17 @@ var Utils = {
+   changePage: function changePage(aWindow, aPage) {
+     for each (let doc in this.getAllDocuments(aWindow)) {
+       // Get current main section or active target.
+       let main = doc.querySelector('[role=main]') ||
+         doc.querySelector(':target');
+       if (!main)
+         continue;
+ 
+-      let mainAcc = gAccRetrieval.getAccessibleFor(main);
++      let mainAcc = this.AccRetrieval.getAccessibleFor(main);
+       if (!mainAcc)
+         continue;
+ 
+       let controllers = mainAcc.
+         getRelationByType(Ci.nsIAccessibleRelation.RELATION_CONTROLLED_BY);
+ 
+       for (var i=0; controllers.targetsCount > i; i++) {
+         let controller = controllers.getTarget(i);
+@@ -232,41 +238,41 @@ var Logger = {
+   error: function error() {
+     this.log.apply(
+       this, [this.ERROR].concat(Array.prototype.slice.call(arguments)));
+   },
+ 
+   accessibleToString: function accessibleToString(aAccessible) {
+     let str = '[ defunct ]';
+     try {
+-      str = '[ ' + gAccRetrieval.getStringRole(aAccessible.role) +
++      str = '[ ' + Utils.AccRetrieval.getStringRole(aAccessible.role) +
+         ' | ' + aAccessible.name + ' ]';
+     } catch (x) {
+     }
+ 
+     return str;
+   },
+ 
+   eventToString: function eventToString(aEvent) {
+-    let str = gAccRetrieval.getStringEventType(aEvent.eventType);
++    let str = Utils.AccRetrieval.getStringEventType(aEvent.eventType);
+     if (aEvent.eventType == Ci.nsIAccessibleEvent.EVENT_STATE_CHANGE) {
+       let event = aEvent.QueryInterface(Ci.nsIAccessibleStateChangeEvent);
+       let stateStrings = (event.isExtraState()) ?
+-        gAccRetrieval.getStringStates(0, event.state) :
+-        gAccRetrieval.getStringStates(event.state, 0);
++        Utils.AccRetrieval.getStringStates(0, event.state) :
++        Utils.AccRetrieval.getStringStates(event.state, 0);
+       str += ' (' + stateStrings.item(0) + ')';
+     }
+ 
+     return str;
+   },
+ 
+   statesToString: function statesToString(aAccessible) {
+     let [state, extState] = Utils.getStates(aAccessible);
+     let stringArray = [];
+-    let stateStrings = gAccRetrieval.getStringStates(state, extState);
++    let stateStrings = Utils.AccRetrieval.getStringStates(state, extState);
+     for (var i=0; i < stateStrings.length; i++)
+       stringArray.push(stateStrings.item(i));
+     return stringArray.join(' ');
+   },
+ 
+   dumpTree: function dumpTree(aLogLevel, aRootAccessible) {
+     if (aLogLevel < this.logLevel)
+       return;
+diff --git a/accessible/src/jsat/UtteranceGenerator.jsm b/accessible/src/jsat/UtteranceGenerator.jsm
+--- a/accessible/src/jsat/UtteranceGenerator.jsm
++++ b/accessible/src/jsat/UtteranceGenerator.jsm
+@@ -12,21 +12,21 @@ const Cr = Components.results;
+ const INCLUDE_DESC = 0x01;
+ const INCLUDE_NAME = 0x02;
+ const INCLUDE_CUSTOM = 0x04;
+ 
+ var gStringBundle = Cc['@mozilla.org/intl/stringbundle;1'].
+   getService(Ci.nsIStringBundleService).
+   createBundle('chrome://global/locale/AccessFu.properties');
+ 
+-var gAccRetrieval = Cc['@mozilla.org/accessibleRetrieval;1'].
+-  getService(Ci.nsIAccessibleRetrieval);
+ 
+ var EXPORTED_SYMBOLS = ['UtteranceGenerator'];
+ 
++Cu.import('resource://gre/modules/accessibility/Utils.jsm');
++
+ /**
+  * Generates speech utterances from objects, actions and state changes.
+  * An utterance is an array of strings.
+  *
+  * It should not be assumed that flattening an utterance array would create a
+  * gramatically correct sentence. For example, {@link genForObject} might
+  * return: ['graphic', 'Welcome to my home page'].
+  * Each string element in an utterance should be gramatically correct in itself.
+@@ -61,17 +61,17 @@ var UtteranceGenerator = {
+    * @param {nsIAccessible} aAccessible accessible object to generate utterance
+    *    for.
+    * @return {Array} Two string array. The first string describes the object
+    *    and its states. The second string is the object's name. Whether the
+    *    object's description or it's role is included is determined by
+    *    {@link verbosityRoleMap}.
+    */
+   genForObject: function genForObject(aAccessible) {
+-    let roleString = gAccRetrieval.getStringRole(aAccessible.role);
++    let roleString = Utils.AccRetrieval.getStringRole(aAccessible.role);
+ 
+     let func = this.objectUtteranceFunctions[roleString] ||
+       this.objectUtteranceFunctions.defaultFunc;
+ 
+     let flags = this.verbosityRoleMap[roleString] || 0;
+ 
+     if (aAccessible.childCount == 0)
+       flags |= INCLUDE_NAME;
+diff --git a/accessible/src/jsat/VirtualCursorController.jsm b/accessible/src/jsat/VirtualCursorController.jsm
+--- a/accessible/src/jsat/VirtualCursorController.jsm
++++ b/accessible/src/jsat/VirtualCursorController.jsm
+@@ -9,19 +9,16 @@ const Ci = Components.interfaces;
+ const Cu = Components.utils;
+ const Cr = Components.results;
+ 
+ var EXPORTED_SYMBOLS = ['VirtualCursorController'];
+ 
+ Cu.import('resource://gre/modules/accessibility/Utils.jsm');
+ Cu.import('resource://gre/modules/XPCOMUtils.jsm');
+ 
+-var gAccRetrieval = Cc['@mozilla.org/accessibleRetrieval;1'].
+-  getService(Ci.nsIAccessibleRetrieval);
+-
+ function BaseTraversalRule(aRoles, aMatchFunc) {
+   this._matchRoles = aRoles;
+   this._matchFunc = aMatchFunc;
+ }
+ 
+ BaseTraversalRule.prototype = {
+     getMatchRoles: function BaseTraversalRule_getmatchRoles(aRules) {
+       aRules.value = this._matchRoles;
+@@ -344,48 +341,48 @@ var VirtualCursorController = {
+     if (aLast) {
+       virtualCursor.moveLast(TraversalRules.Simple);
+     } else {
+       try {
+         virtualCursor.moveNext(aRule || TraversalRules.Simple);
+       } catch (x) {
+         this.moveCursorToObject(
+           virtualCursor,
+-          gAccRetrieval.getAccessibleFor(aDocument.activeElement), aRule);
++          Utils.AccRetrieval.getAccessibleFor(aDocument.activeElement), aRule);
+       }
+     }
+   },
+ 
+   moveBackward: function moveBackward(aDocument, aFirst, aRule) {
+     let virtualCursor = Utils.getVirtualCursor(aDocument);
+     if (aFirst) {
+       virtualCursor.moveFirst(TraversalRules.Simple);
+     } else {
+       try {
+         virtualCursor.movePrevious(aRule || TraversalRules.Simple);
+       } catch (x) {
+         this.moveCursorToObject(
+           virtualCursor,
+-          gAccRetrieval.getAccessibleFor(aDocument.activeElement), aRule);
++          Utils.AccRetrieval.getAccessibleFor(aDocument.activeElement), aRule);
+       }
+     }
+   },
+ 
+   activateCurrent: function activateCurrent(document) {
+     let virtualCursor = Utils.getVirtualCursor(document);
+     let acc = virtualCursor.position;
+ 
+     if (acc.actionCount > 0) {
+       acc.doAction(0);
+     } else {
+       // XXX Some mobile widget sets do not expose actions properly
+       // (via ARIA roles, etc.), so we need to generate a click.
+       // Could possibly be made simpler in the future. Maybe core
+       // engine could expose nsCoreUtiles::DispatchMouseEvent()?
+-      let docAcc = gAccRetrieval.getAccessibleFor(this.chromeWin.document);
++      let docAcc = Utils.AccRetrieval.getAccessibleFor(this.chromeWin.document);
+       let docX = {}, docY = {}, docW = {}, docH = {};
+       docAcc.getBounds(docX, docY, docW, docH);
+ 
+       let objX = {}, objY = {}, objW = {}, objH = {};
+       acc.getBounds(objX, objY, objW, objH);
+ 
+       let x = Math.round((objX.value - docX.value) + objW.value / 2);
+       let y = Math.round((objY.value - docY.value) + objH.value / 2);
+diff --git a/b2g/app/b2g.js b/b2g/app/b2g.js
+--- a/b2g/app/b2g.js
++++ b/b2g/app/b2g.js
+@@ -520,8 +520,11 @@ pref("hal.processPriorityManager.gonk.ba
+ // (hiding latency).
+ pref("dom.ipc.processPrelauch.enabled", true);
+ // Wait this long before pre-launching a new subprocess.
+ pref("dom.ipc.processPrelauch.delayMs", 1000);
+ #endif
+ 
+ // Ignore the "dialog=1" feature in window.open.
+ pref("dom.disable_window_open_dialog_feature", true);
++
++// Screen reader support
++pref("accessibility.accessfu.activate", 2);
+diff --git a/b2g/chrome/content/shell.js b/b2g/chrome/content/shell.js
+--- a/b2g/chrome/content/shell.js
++++ b/b2g/chrome/content/shell.js
+@@ -13,16 +13,17 @@ Cu.import('resource://gre/modules/XPCOMU
+ Cu.import('resource://gre/modules/Services.jsm');
+ Cu.import('resource://gre/modules/ContactService.jsm');
+ Cu.import('resource://gre/modules/SettingsChangeNotifier.jsm');
+ Cu.import('resource://gre/modules/Webapps.jsm');
+ Cu.import('resource://gre/modules/AlarmService.jsm');
+ Cu.import('resource://gre/modules/ActivitiesService.jsm');
+ Cu.import('resource://gre/modules/PermissionPromptHelper.jsm');
+ Cu.import('resource://gre/modules/ObjectWrapper.jsm');
++Cu.import("resource://gre/modules/accessibility/AccessFu.jsm");
+ 
+ XPCOMUtils.defineLazyServiceGetter(Services, 'env',
+                                    '@mozilla.org/process/environment;1',
+                                    'nsIEnvironment');
+ 
+ XPCOMUtils.defineLazyServiceGetter(Services, 'ss',
+                                    '@mozilla.org/content/style-sheet-service;1',
+                                    'nsIStyleSheetService');
+@@ -144,16 +145,17 @@ var shell = {
+     try {
+       Services.audioManager.masterVolume = 0.5;
+     } catch(e) {
+       dump('Error setting master volume: ' + e + '\n');
+     }
+ 
+     CustomEventManager.init();
+     WebappsHelper.init();
++    AccessFu.attach(window);
+ 
+     // XXX could factor out into a settings->pref map.  Not worth it yet.
+     SettingsListener.observe("debug.fps.enabled", false, function(value) {
+       Services.prefs.setBoolPref("layers.acceleration.draw-fps", value);
+     });
+     SettingsListener.observe("debug.paint-flashing.enabled", false, function(value) {
+       Services.prefs.setBoolPref("nglayout.debug.paint_flashing", value);
+     });
+diff --git a/browser/base/content/browser-social.js b/browser/base/content/browser-social.js
+--- a/browser/base/content/browser-social.js
++++ b/browser/base/content/browser-social.js
+@@ -167,19 +167,19 @@ let SocialChatBar = {
+   },
+   // Whether the chats can be shown for this window.
+   get canShow() {
+     let docElem = document.documentElement;
+     let chromeless = docElem.getAttribute("disablechrome") ||
+                      docElem.getAttribute("chromehidden").indexOf("extrachrome") >= 0;
+     return Social.uiVisible && !chromeless;
+   },
+-  newChat: function(aProvider, aURL, aCallback) {
++  openChat: function(aProvider, aURL, aCallback, aMode) {
+     if (this.canShow)
+-      this.chatbar.newChat(aProvider, aURL, aCallback);
++      this.chatbar.openChat(aProvider, aURL, aCallback, aMode);
+   },
+   update: function() {
+     if (!this.canShow)
+       this.chatbar.removeAll();
+   }
+ }
+ 
+ function sizeSocialPanelToContent(iframe) {
+diff --git a/browser/base/content/socialchat.xml b/browser/base/content/socialchat.xml
+--- a/browser/base/content/socialchat.xml
++++ b/browser/base/content/socialchat.xml
+@@ -130,16 +130,17 @@
+         <getter>
+           return document.getAnonymousElementByAttribute(this, "anonid", "spacer").boxObject.width;
+         </getter>
+       </property>
+ 
+       <field name="selectedChat"/>
+ 
+       <field name="menuitemMap">new WeakMap()</field>
++      <field name="chatboxForURL">new Map();</field>
+ 
+       <property name="firstCollapsedChild">
+         <getter><![CDATA[
+           let child = this.lastChild;
+           while (child && !child.collapsed) {
+             child = child.previousSibling;
+           }
+           return child;
+@@ -235,36 +236,55 @@
+       <method name="remove">
+         <parameter name="aChatbox"/>
+         <body><![CDATA[
+           if (this.selectedChat == aChatbox) {
+             this.selectedChat = aChatbox.previousSibling ? aChatbox.previousSibling : aChatbox.nextSibling
+           }
+           this.removeChild(aChatbox);
+           this.resize();
++          this.chatboxForURL.delete(aChatbox.getAttribute('src'));
+         ]]></body>
+       </method>
+ 
+       <method name="removeAll">
+         <body><![CDATA[
+           while (this.firstChild) {
+             this.removeChild(this.firstChild);
+           }
++          this.chatboxForURL = new Map();
+         ]]></body>
+       </method>
+ 
+-      <method name="newChat">
++      <method name="openChat">
+         <parameter name="aProvider"/>
+         <parameter name="aURL"/>
+         <parameter name="aCallback"/>
++        <parameter name="aMode"/>
+         <body><![CDATA[
+-          let cb = document.createElementNS("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul", "chatbox");
++          let cb = this.chatboxForURL.get(aURL);
++          if (cb) {
++            cb = cb.get();
++            if (cb.parentNode) {
++              // ensure this chatbox is visible
++              if (this.selectedChat != cb)
++                this.selectedChat = cb;
++              if (cb.collapsed)
++                this.showChat(cb);
++              return;
++            }
++            this.chatboxForURL.delete(aURL);
++          }
++          cb = document.createElementNS("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul", "chatbox");
++          if (aMode == "minimized")
++            cb.minimized = true;
+           this.selectedChat = cb;
+-          this.appendChild(cb);
++          this.insertBefore(cb, this.firstChild);
+           cb.init(aProvider, aURL, aCallback);
++          this.chatboxForURL.set(aURL, Cu.getWeakReference(cb));
+         ]]></body>
+       </method>
+ 
+     </implementation>
+     <handlers>
+       <handler event="overflow"><![CDATA[
+         // make sure we're not getting an overflow from content
+         if (event.originalTarget != this.innerbox)
+diff --git a/browser/base/content/test/browser_social_chatwindow.js b/browser/base/content/test/browser_social_chatwindow.js
+--- a/browser/base/content/test/browser_social_chatwindow.js
++++ b/browser/base/content/test/browser_social_chatwindow.js
+@@ -50,17 +50,17 @@ var tests = {
+           break;
+         case "got-chatbox-message":
+           ok(true, "got chatbox message");
+           ok(e.data.result == "ok", "got chatbox windowRef result: "+e.data.result);
+           chats.selectedChat.toggle();
+           break;
+       }
+     }
+-    port.postMessage({topic: "test-init"});
++    port.postMessage({topic: "test-init", data: { id: 1 }});
+   },
+   testManyChats: function(next) {
+     // open enough chats to overflow the window, then check
+     // if the menupopup is visible
+     let port = Social.provider.port;
+     ok(port, "provider has a port");
+     let width = document.documentElement.boxObject.width;
+     let numToOpen = (width / 200) + 1;
+@@ -82,13 +82,31 @@ var tests = {
+           }
+           ok(!chats.selectedChat, "chats are all closed");
+           next();
+           break;
+       }
+     }
+     let num = numToOpen;
+     while (num-- > 0) {
+-      port.postMessage({topic: "test-chatbox-open"});
++      port.postMessage({topic: "test-chatbox-open", data: { id: num }});
+     }
++  },
++  testWorkerChatWindow: function(next) {
++    let port = Social.provider.port;
++    ok(port, "provider has a port");
++    port.onmessage = function (e) {
++      let topic = e.data.topic;
++      switch (topic) {
++        case "got-chatbox-message":
++          ok(true, "got a chat window opened");
++          let chats = document.getElementById("pinnedchats");
++          while (chats.selectedChat) {
++            chats.selectedChat.close();
++          }
++          ok(!chats.selectedChat, "chats are all closed");
++          next();
++          break;
++      }
++    }
++    port.postMessage({topic: "test-worker-chat" });
+   }
+ }
+-
+diff --git a/browser/base/content/test/browser_social_mozSocial_API.js b/browser/base/content/test/browser_social_mozSocial_API.js
+--- a/browser/base/content/test/browser_social_mozSocial_API.js
++++ b/browser/base/content/test/browser_social_mozSocial_API.js
+@@ -49,16 +49,17 @@ var tests = {
+           if (e.data.result == "shown") {
+             ok(true, "panel shown");
+             let panel = document.getElementById("social-notification-panel");
+             panel.hidePopup();
+           } else if (e.data.result == "hidden") {
+             ok(true, "panel hidden");
+             next();
+           }
++          break;
+         case "got-sidebar-message":
+           // The sidebar message will always come first, since it loads by default
+           ok(true, "got sidebar message");
+           gotSidebarMessage = true;
+           checkNext();
+           break;
+       }
+     }
+@@ -77,55 +78,10 @@ var tests = {
+         // Let the other observers (like the one that updates the UI) run before
+         // checking the icons.
+         executeSoon(function () {
+           iconsReady = true;
+           checkNext();
+         });
+       }, "social:ambient-notification-changed", false);
+     }
+-  },
+-
+-  testServiceWindow: function(next) {
+-    // our test provider was initialized in the test above, we just
+-    // initiate our specific test now.
+-    let port = Social.provider.port;
+-    ok(port, "provider has a port");
+-    port.postMessage({topic: "test-service-window"});
+-    port.onmessage = function (e) {
+-      let topic = e.data.topic;
+-      switch (topic) {
+-        case "got-service-window-message":
+-          // The sidebar message will always come first, since it loads by default
+-          ok(true, "got service window message");
+-          // the service window URL should not be stored in history.
+-          ensureSocialUrlNotRemembered(e.data.location);
+-          port.postMessage({topic: "test-close-service-window"});
+-          break;
+-        case "got-service-window-closed-message":
+-          ok(true, "got service window closed message");
+-          next();
+-          break;
+-      }
+-    }
+-  },
+-
+-  testServiceWindowTwice: function(next) {
+-    let port = Social.provider.port;
+-    port.postMessage({topic: "test-service-window-twice"});
+-    Social.provider.port.onmessage = function (e) {
+-      let topic = e.data.topic;
+-      switch (topic) {
+-        case "test-service-window-twice-result":
+-          is(e.data.result, "ok", "only one window should open when name is reused");
+-          break;
+-        case "got-service-window-message":
+-          ok(true, "got service window message");
+-          port.postMessage({topic: "test-close-service-window"});
+-          break;
+-        case "got-service-window-closed-message":
+-          ok(true, "got service window closed message");
+-          next();
+-          break;
+-      }
+-    }
+   }
+ }
+diff --git a/browser/base/content/test/social_sidebar.html b/browser/base/content/test/social_sidebar.html
+--- a/browser/base/content/test/social_sidebar.html
++++ b/browser/base/content/test/social_sidebar.html
+@@ -1,48 +1,35 @@
+ <html>
+   <head>
+     <meta charset="utf-8">
+     <script>
+-      var win;
++      var testwindow;
+       function pingWorker() {
+         var port = navigator.mozSocial.getWorker().port;
+         port.onmessage = function(e) {
+           var topic = e.data.topic;
+           switch (topic) {
+             case "test-flyout-open":
+               navigator.mozSocial.openPanel("social_flyout.html");
+               break;
+             case "test-chatbox-open":
+-              navigator.mozSocial.openChatWindow("social_chat.html", function(chatwin) {
+-                port.postMessage({topic: "chatbox-opened", result: chatwin ? "ok" : "failed"});
++              var url = "social_chat.html";
++              var data = e.data.data;
++              if (data && data.id) {
++                url = url + "?id="+data.id;
++              }
++              navigator.mozSocial.openChatWindow(url, function(chatwin) {
++                port.postMessage({topic: "chatbox-opened",
++                                  result: chatwin ? "ok" : "failed"});
+               });
+               break;
+-            case "test-service-window":
+-              win = navigator.mozSocial.openServiceWindow("social_window.html", "test-service-window", "width=300,height=300");
+-              break;
+-            case "test-service-window-twice":
+-              win = navigator.mozSocial.openServiceWindow("social_window.html", "test-service-window", "width=300,height=300");
+-              var win2 = navigator.mozSocial.openServiceWindow("social_window.html", "test-service-window", "");
+-              var result;
+-              if (win == win2)
+-                result = "ok";
+-              else
+-                result = "not ok: " + win2 + " != " + win;
+-              port.postMessage({topic: "test-service-window-twice-result", result: result});
+-              break;
+-            case "test-close-service-window":
+-              win.addEventListener("unload", function watchClose() {
+-                win.removeEventListener("unload", watchClose);
+-                port.postMessage({topic: "service-window-closed-message", result: "ok"});
+-              }, false)
+-              win.close();
+-              break;
+             case "test-isVisible":
+-              port.postMessage({topic: "test-isVisible-response", result: navigator.mozSocial.isVisible});
++              port.postMessage({topic: "test-isVisible-response",
++                                result: navigator.mozSocial.isVisible});
+               break;
+           }
+         }
+         port.postMessage({topic: "sidebar-message", result: "ok"});
+       }
+     </script>
+   </head>
+   <body onload="pingWorker();">
+diff --git a/browser/base/content/test/social_worker.js b/browser/base/content/test/social_worker.js
+--- a/browser/base/content/test/social_worker.js
++++ b/browser/base/content/test/social_worker.js
+@@ -1,13 +1,13 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+-let testPort, sidebarPort;
++let testPort, sidebarPort, apiPort;
+ 
+ onconnect = function(e) {
+   let port = e.ports[0];
+   port.onmessage = function onMessage(event) {
+     let topic = event.data.topic;
+     switch (topic) {
+       case "test-init":
+         testPort = port;
+@@ -41,35 +41,39 @@ onconnect = function(e) {
+           testPort.postMessage({topic:"got-panel-message",
+                                 location: event.data.location
+                                });
+         break;
+       case "status-panel-visibility":
+         testPort.postMessage({topic:"got-social-panel-visibility", result: event.data.result });
+         break;
+       case "test-chatbox-open":
+-        sidebarPort.postMessage({topic:"test-chatbox-open"});
++        sidebarPort.postMessage( event.data );
+         break;
+       case "chatbox-message":
+         testPort.postMessage({topic:"got-chatbox-message", result: event.data.result});
+         break;
+       case "chatbox-visibility":
+         testPort.postMessage({topic:"got-chatbox-visibility", result: event.data.result});
+         break;
+       case "test-flyout-open":
+         sidebarPort.postMessage({topic:"test-flyout-open"});
+         break;
+       case "flyout-message":
+         testPort.postMessage({topic:"got-flyout-message", result: event.data.result});
+         break;
+       case "flyout-visibility":
+         testPort.postMessage({topic:"got-flyout-visibility", result: event.data.result});
+         break;
++      case "test-worker-chat":
++        apiPort.postMessage({topic: "social.request-chat", data: "https://example.com/browser/browser/base/content/test/social_chat.html" });
++        break;
+       case "social.initialize":
+         // This is the workerAPI port, respond and set up a notification icon.
++        apiPort = port;
+         port.postMessage({topic: "social.initialize-response"});
+         let profile = {
+           portrait: "https://example.com/portrait.jpg",
+           userName: "trickster",
+           displayName: "Kuma Lisa",
+           profileURL: "http://en.wikipedia.org/wiki/Kuma_Lisa"
+         };
+         port.postMessage({topic: "social.user-profile", data: profile});
+diff --git a/browser/devtools/commandline/test/browser_cmd_pref.js b/browser/devtools/commandline/test/browser_cmd_pref.js
+old mode 100755
+new mode 100644
+diff --git a/browser/devtools/commandline/test/browser_cmd_settings.js b/browser/devtools/commandline/test/browser_cmd_settings.js
+old mode 100755
+new mode 100644
+diff --git a/browser/themes/gnomestripe/browser.css b/browser/themes/gnomestripe/browser.css
+--- a/browser/themes/gnomestripe/browser.css
++++ b/browser/themes/gnomestripe/browser.css
+@@ -2808,37 +2808,36 @@ stack[anonid=browserStack][responsivemod
+   -moz-border-end: 1px solid gray;
+ }
+ 
+ .chatbar-button[open="true"],
+ .chatbar-button:active:hover {
+   box-shadow: inset 0 2px 5px rgba(0,0,0,0.6), 0 1px rgba(255,255,255,0.2);
+ }
+ 
+-/* toolbarbutton-icon */
+ .chatbar-button > .toolbarbutton-text,
+ .chatbar-button > .toolbarbutton-menu-dropmarker {
+   display: none;
+ }
+ 
+ .chatbar-innerbox {
+   background: transparent;
+-  margin: -200px -1px 0 -1px;
++  margin: -285px -1px 0 -1px;
+   overflow: hidden;
+ }
+ 
+-chatbar > chatbox {
+-  height: 200px;
+-  width: 200px;
++chatbar {
++  -moz-margin-end: 20px;
++}
++
++chatbox {
++  height: 285px;
++  width: 260px;
++  -moz-margin-start: 4px;
+   background-color: white;
+   border: 1px solid gray;
+   border-bottom: none;
+ }
+ 
+-chatbar > chatbox[minimized="true"] {
+-  width: 100px;
++chatbox[minimized="true"] {
++  width: 160px;
+   height: 20px;
+-  border-bottom: none;
+-}
+-
+-chatbar > chatbox + chatbox {
+-  -moz-margin-start: -1px;
+-}
++}
+diff --git a/browser/themes/gnomestripe/downloads/buttons.png b/browser/themes/gnomestripe/downloads/buttons.png
+old mode 100644
+new mode 100755
+diff --git a/browser/themes/pinstripe/browser.css b/browser/themes/pinstripe/browser.css
+--- a/browser/themes/pinstripe/browser.css
++++ b/browser/themes/pinstripe/browser.css
+@@ -3497,38 +3497,36 @@ stack[anonid=browserStack][responsivemod
+   -moz-border-end: 1px solid #404040;
+ }
+ 
+ .chatbar-button[open="true"],
+ .chatbar-button:active:hover {
+   box-shadow: inset 0 2px 5px rgba(0,0,0,0.6), 0 1px rgba(255,255,255,0.2);
+ }
+ 
+-/* toolbarbutton-icon */
+ .chatbar-button > .toolbarbutton-text,
+ .chatbar-button > .toolbarbutton-menu-dropmarker {
+   display: none;
+ }
+ 
+ .chatbar-innerbox {
+   background: transparent;
+-  margin: -200px -1px 0 -1px;
++  margin: -285px -1px 0 -1px;
+   overflow: hidden;
+ }
+ 
+-chatbar > chatbox {
+-  height: 200px;
+-  width: 200px;
++chatbar {
++  -moz-margin-end: 20px;
++}
++
++chatbox {
++  height: 285px;
++  width: 260px;
++  -moz-margin-start: 4px;
+   background-color: white;
+   border: 1px solid #404040;
+   border-bottom: none;
+ }
+ 
+-chatbar > chatbox[minimized="true"] {
+-  width: 100px;
++chatbox[minimized="true"] {
++  width: 160px;
+   height: 20px;
+-  border-bottom: none;
+-}
+-
+-chatbar > chatbox + chatbox {
+-  -moz-margin-start: -1px;
+-}
+-
++}
+diff --git a/browser/themes/pinstripe/downloads/buttons.png b/browser/themes/pinstripe/downloads/buttons.png
+old mode 100644
+new mode 100755
+diff --git a/browser/themes/winstripe/browser.css b/browser/themes/winstripe/browser.css
+--- a/browser/themes/winstripe/browser.css
++++ b/browser/themes/winstripe/browser.css
+@@ -3520,38 +3520,36 @@ stack[anonid=browserStack][responsivemod
+ }
+ 
+ .chatbar-button[open="true"],
+ .chatbar-button:hover,
+ .chatbar-button:active:hover {
+   box-shadow: inset 0 2px 5px rgba(0,0,0,0.6), 0 1px rgba(255,255,255,0.2);
+ }
+ 
+-/* toolbarbutton-icon */
+ .chatbar-button > .toolbarbutton-text,
+ .chatbar-button > .toolbarbutton-menu-dropmarker {
+   display: none;
+ }
+ 
+ .chatbar-innerbox {
+   background: transparent;
+-  margin: -200px -1px 0 -1px;
++  margin: -285px -1px 0 -1px;
+   overflow: hidden;
+ }
+ 
+-chatbar > chatbox {
+-  height: 200px;
+-  width: 200px;
++chatbar {
++  -moz-margin-end: 20px;
++}
++
++chatbox {
++  height: 285px;
++  width: 260px;
++  -moz-margin-start: 4px;
+   background-color: white;
+   border: 1px solid gray;
+   border-bottom: none;
+ }
+ 
+-chatbar > chatbox[minimized="true"] {
+-  width: 100px;
++chatbox[minimized="true"] {
++  width: 160px;
+   height: 20px;
+-  border-bottom: none;
+-}
+-
+-chatbar > chatbox + chatbox {
+-  -moz-margin-start: -1px;
+-}
+-
++}
+diff --git a/browser/themes/winstripe/downloads/buttons-aero.png b/browser/themes/winstripe/downloads/buttons-aero.png
+old mode 100644
+new mode 100755
+diff --git a/browser/themes/winstripe/downloads/buttons.png b/browser/themes/winstripe/downloads/buttons.png
+old mode 100644
+new mode 100755
+diff --git a/content/base/src/nsGkAtomList.h b/content/base/src/nsGkAtomList.h
+--- a/content/base/src/nsGkAtomList.h
++++ b/content/base/src/nsGkAtomList.h
+@@ -440,16 +440,17 @@ GK_ATOM(indeterminate, "indeterminate")
+ GK_ATOM(index, "index")
+ GK_ATOM(infer, "infer")
+ GK_ATOM(infinity, "infinity")
+ GK_ATOM(inherit, "inherit")
+ GK_ATOM(inherits, "inherits")
+ GK_ATOM(inheritstyle, "inheritstyle")
+ GK_ATOM(initial_scale, "initial-scale")
+ GK_ATOM(input, "input")
++GK_ATOM(inputmode, "inputmode")
+ GK_ATOM(ins, "ins")
+ GK_ATOM(insertafter, "insertafter")
+ GK_ATOM(insertbefore, "insertbefore")
+ GK_ATOM(instanceOf, "instanceOf")
+ GK_ATOM(int32, "int32")
+ GK_ATOM(int64, "int64")
+ GK_ATOM(integer, "integer")
+ GK_ATOM(intersection, "intersection")
+diff --git a/content/events/src/nsIMEStateManager.cpp b/content/events/src/nsIMEStateManager.cpp
+--- a/content/events/src/nsIMEStateManager.cpp
++++ b/content/events/src/nsIMEStateManager.cpp
+@@ -317,16 +317,18 @@ nsIMEStateManager::SetIMEState(const IME
+   InputContext context;
+   context.mIMEState = aState;
+ 
+   if (aContent && aContent->GetNameSpaceID() == kNameSpaceID_XHTML &&
+       (aContent->Tag() == nsGkAtoms::input ||
+        aContent->Tag() == nsGkAtoms::textarea)) {
+     aContent->GetAttr(kNameSpaceID_None, nsGkAtoms::type,
+                       context.mHTMLInputType);
++    aContent->GetAttr(kNameSpaceID_None, nsGkAtoms::inputmode,
++                      context.mHTMLInputInputmode);
+     aContent->GetAttr(kNameSpaceID_None, nsGkAtoms::moz_action_hint,
+                       context.mActionHint);
+ 
+     // if we don't have an action hint and  return won't submit the form use "next"
+     if (context.mActionHint.IsEmpty() && aContent->Tag() == nsGkAtoms::input) {
+       bool willSubmit = false;
+       nsCOMPtr<nsIFormControl> control(do_QueryInterface(aContent));
+       mozilla::dom::Element* formElement = control->GetFormElement();
+diff --git a/content/html/content/public/nsHTMLMediaElement.h b/content/html/content/public/nsHTMLMediaElement.h
+--- a/content/html/content/public/nsHTMLMediaElement.h
++++ b/content/html/content/public/nsHTMLMediaElement.h
+@@ -642,18 +642,18 @@ protected:
+   // Holds references to the DOM wrappers for the MediaStreams that we're
+   // writing to.
+   struct OutputMediaStream {
+     nsRefPtr<nsDOMMediaStream> mStream;
+     bool mFinishWhenEnded;
+   };
+   nsTArray<OutputMediaStream> mOutputStreams;
+ 
+-  // Holds a reference to the MediaStreamListener attached to mSrcStream. STRONG!
+-  StreamListener* mSrcStreamListener;
++  // Holds a reference to the MediaStreamListener attached to mSrcStream.
++  nsRefPtr<StreamListener> mSrcStreamListener;
+ 
+   // Holds a reference to the first channel we open to the media resource.
+   // Once the decoder is created, control over the channel passes to the
+   // decoder, and we null out this reference. We must store this in case
+   // we need to cancel the channel before control of it passes to the decoder.
+   nsCOMPtr<nsIChannel> mChannel;
+ 
+   // Error attribute
+diff --git a/content/html/content/src/nsHTMLInputElement.cpp b/content/html/content/src/nsHTMLInputElement.cpp
+--- a/content/html/content/src/nsHTMLInputElement.cpp
++++ b/content/html/content/src/nsHTMLInputElement.cpp
+@@ -142,16 +142,38 @@ static const nsAttrValue::EnumTable kInp
+   { "on", NS_INPUT_AUTOCOMPLETE_ON },
+   { "off", NS_INPUT_AUTOCOMPLETE_OFF },
+   { 0 }
+ };
+ 
+ // Default autocomplete value is "".
+ static const nsAttrValue::EnumTable* kInputDefaultAutocomplete = &kInputAutocompleteTable[0];
+ 
++static const uint8_t NS_INPUT_INPUTMODE_AUTO              = 0;
++static const uint8_t NS_INPUT_INPUTMODE_NUMERIC           = 1;
++static const uint8_t NS_INPUT_INPUTMODE_DIGIT             = 2;
++static const uint8_t NS_INPUT_INPUTMODE_UPPERCASE         = 3;
++static const uint8_t NS_INPUT_INPUTMODE_LOWERCASE         = 4;
++static const uint8_t NS_INPUT_INPUTMODE_TITLECASE         = 5;
++static const uint8_t NS_INPUT_INPUTMODE_AUTOCAPITALIZED   = 6;
++
++static const nsAttrValue::EnumTable kInputInputmodeTable[] = {
++  { "auto", NS_INPUT_INPUTMODE_AUTO },
++  { "numeric", NS_INPUT_INPUTMODE_NUMERIC },
++  { "digit", NS_INPUT_INPUTMODE_DIGIT },
++  { "uppercase", NS_INPUT_INPUTMODE_UPPERCASE },
++  { "lowercase", NS_INPUT_INPUTMODE_LOWERCASE },
++  { "titlecase", NS_INPUT_INPUTMODE_TITLECASE },
++  { "autocapitalized", NS_INPUT_INPUTMODE_AUTOCAPITALIZED },
++  { 0 }
++};
++
++// Default inputmode value is "auto".
++static const nsAttrValue::EnumTable* kInputDefaultInputmode = &kInputInputmodeTable[0];
++
+ const double nsHTMLInputElement::kDefaultStepBase = 0;
+ const double nsHTMLInputElement::kStepAny = 0;
+ 
+ #define NS_INPUT_ELEMENT_STATE_IID                 \
+ { /* dc3b3d14-23e2-4479-b513-7b369343e3a0 */       \
+   0xdc3b3d14,                                      \
+   0x23e2,                                          \
+   0x4479,                                          \
+@@ -861,16 +883,18 @@ NS_IMPL_STRING_ATTR(nsHTMLInputElement, 
+ NS_IMPL_STRING_ATTR(nsHTMLInputElement, Min, min)
+ NS_IMPL_ACTION_ATTR(nsHTMLInputElement, FormAction, formaction)
+ NS_IMPL_ENUM_ATTR_DEFAULT_VALUE(nsHTMLInputElement, FormEnctype, formenctype,
+                                 kFormDefaultEnctype->tag)
+ NS_IMPL_ENUM_ATTR_DEFAULT_VALUE(nsHTMLInputElement, FormMethod, formmethod,
+                                 kFormDefaultMethod->tag)
+ NS_IMPL_BOOL_ATTR(nsHTMLInputElement, FormNoValidate, formnovalidate)
+ NS_IMPL_STRING_ATTR(nsHTMLInputElement, FormTarget, formtarget)
++NS_IMPL_ENUM_ATTR_DEFAULT_VALUE(nsHTMLInputElement, Inputmode, inputmode,
++                                kInputDefaultInputmode->tag)
+ NS_IMPL_BOOL_ATTR(nsHTMLInputElement, Multiple, multiple)
+ NS_IMPL_NON_NEGATIVE_INT_ATTR(nsHTMLInputElement, MaxLength, maxlength)
+ NS_IMPL_STRING_ATTR(nsHTMLInputElement, Name, name)
+ NS_IMPL_BOOL_ATTR(nsHTMLInputElement, ReadOnly, readonly)
+ NS_IMPL_BOOL_ATTR(nsHTMLInputElement, Required, required)
+ NS_IMPL_URI_ATTR(nsHTMLInputElement, Src, src)
+ NS_IMPL_STRING_ATTR(nsHTMLInputElement, Step, step)
+ NS_IMPL_INT_ATTR(nsHTMLInputElement, TabIndex, tabindex)
+@@ -2736,16 +2760,19 @@ nsHTMLInputElement::ParseAttribute(int32
+       return aResult.ParseEnumValue(aValue, kFormMethodTable, false);
+     }
+     if (aAttribute == nsGkAtoms::formenctype) {
+       return aResult.ParseEnumValue(aValue, kFormEnctypeTable, false);
+     }
+     if (aAttribute == nsGkAtoms::autocomplete) {
+       return aResult.ParseEnumValue(aValue, kInputAutocompleteTable, false);
+     }
++    if (aAttribute == nsGkAtoms::inputmode) {
++      return aResult.ParseEnumValue(aValue, kInputInputmodeTable, false);
++    }
+     if (ParseImageAttribute(aAttribute, aValue, aResult)) {
+       // We have to call |ParseImageAttribute| unconditionally since we
+       // don't know if we're going to have a type="image" attribute yet,
+       // (or could have it set dynamically in the future).  See bug
+       // 214077.
+       return true;
+     }
+   }
+diff --git a/content/html/content/src/nsHTMLMediaElement.cpp b/content/html/content/src/nsHTMLMediaElement.cpp
+--- a/content/html/content/src/nsHTMLMediaElement.cpp
++++ b/content/html/content/src/nsHTMLMediaElement.cpp
+@@ -2596,17 +2596,16 @@ private:
+ void nsHTMLMediaElement::SetupSrcMediaStreamPlayback()
+ {
+   NS_ASSERTION(!mSrcStream && !mSrcStreamListener, "Should have been ended already");
+ 
+   mSrcStream = mSrcAttrStream;
+   // XXX if we ever support capturing the output of a media element which is
+   // playing a stream, we'll need to add a CombineWithPrincipal call here.
+   mSrcStreamListener = new StreamListener(this);
+-  NS_ADDREF(mSrcStreamListener);
+   GetSrcMediaStream()->AddListener(mSrcStreamListener);
+   if (mPaused) {
+     GetSrcMediaStream()->ChangeExplicitBlockerCount(1);
+   }
+   if (mPausedForInactiveDocument) {
+     GetSrcMediaStream()->ChangeExplicitBlockerCount(1);
+   }
+   ChangeDelayLoadStatus(false);
+@@ -2622,17 +2621,17 @@ void nsHTMLMediaElement::SetupSrcMediaSt
+   ResourceLoaded();
+ }
+ 
+ void nsHTMLMediaElement::EndSrcMediaStreamPlayback()
+ {
+   GetSrcMediaStream()->RemoveListener(mSrcStreamListener);
+   // Kill its reference to this element
+   mSrcStreamListener->Forget();
+-  NS_RELEASE(mSrcStreamListener); // sets to null
++  mSrcStreamListener = nullptr;
+   GetSrcMediaStream()->RemoveAudioOutput(this);
+   VideoFrameContainer* container = GetVideoFrameContainer();
+   if (container) {
+     GetSrcMediaStream()->RemoveVideoOutput(container);
+     container->GetImageContainer()->SetCurrentImage(nullptr);
+   }
+   if (mPaused) {
+     GetSrcMediaStream()->ChangeExplicitBlockerCount(-1);
+@@ -3425,17 +3424,17 @@ nsHTMLMediaElement::CopyInnerTo(nsGeneri
+     }
+   }
+   return rv;
+ }
+ 
+ nsresult nsHTMLMediaElement::GetBuffered(nsIDOMTimeRanges** aBuffered)
+ {
+   nsRefPtr<nsTimeRanges> ranges = new nsTimeRanges();
+-  if (mReadyState >= nsIDOMHTMLMediaElement::HAVE_CURRENT_DATA && mDecoder) {
++  if (mReadyState > nsIDOMHTMLMediaElement::HAVE_NOTHING && mDecoder) {
+     // If GetBuffered fails we ignore the error result and just return the
+     // time ranges we found up till the error.
+     mDecoder->GetBuffered(ranges);
+   }
+   ranges.forget(aBuffered);
+   return NS_OK;
+ }
+ 
+diff --git a/content/html/content/test/forms/test_input_attributes_reflection.html b/content/html/content/test/forms/test_input_attributes_reflection.html
+--- a/content/html/content/test/forms/test_input_attributes_reflection.html
++++ b/content/html/content/test/forms/test_input_attributes_reflection.html
+@@ -105,16 +105,25 @@ reflectString({
+ reflectUnsignedInt({
+   element: document.createElement("input"),
+   attribute: "height",
+   nonZero: false
+ });
+ 
+ // .indeterminate doesn't reflect a content attribute.
+ 
++// .inputmode
++reflectLimitedEnumerated({
++  element: document.createElement("input"),
++  attribute: "inputmode",
++  validValues: [ "numeric", "digit", "uppercase", "lowercase", "titlecase", "autocapitalized", "auto" ],
++  invalidValues: [ "", "foo", "tulip" ],
++  defaultValue: "auto"
++});
++
+ // TODO: list (HTMLElement)
+ 
+ // .max
+ reflectString({
+   element: document.createElement('input'),
+   attribute: 'max',
+ });
+ 
+diff --git a/dom/browser-element/BrowserElementScrolling.js b/dom/browser-element/BrowserElementScrolling.js
+--- a/dom/browser-element/BrowserElementScrolling.js
++++ b/dom/browser-element/BrowserElementScrolling.js
+@@ -25,17 +25,17 @@ const ContentPanning = {
+         break;
+       case 'click':
+         evt.stopPropagation();
+         evt.preventDefault();
+         
+         let target = evt.target;
+         let view = target.ownerDocument ? target.ownerDocument.defaultView
+                                         : target;
+-        view.removeEventListener('click', this, false, true);
++        view.removeEventListener('click', this, true, true);
+         break;
+     }
+   },
+ 
+   position: new Point(0 , 0),
+ 
+   onTouchStart: function cp_onTouchStart(evt) {
+     this.dragging = true;
+@@ -78,17 +78,17 @@ const ContentPanning = {
+ 
+     this.onTouchMove(evt);
+ 
+     let click = evt.detail;
+     if (this.target && click && (this.panning || this.preventNextClick)) {
+       let target = this.target;
+       let view = target.ownerDocument ? target.ownerDocument.defaultView
+                                       : target;
+-      view.addEventListener('click', this, false, true);
++      view.addEventListener('click', this, true, true);
+     }
+ 
+     if (this.panning)
+       KineticPanning.start(this);
+   },
+ 
+   onTouchMove: function cp_onTouchMove(evt) {
+     if (!this.dragging || !this.scrollCallback)
+diff --git a/dom/devicestorage/DeviceStorageRequestParent.cpp b/dom/devicestorage/DeviceStorageRequestParent.cpp
+--- a/dom/devicestorage/DeviceStorageRequestParent.cpp
++++ b/dom/devicestorage/DeviceStorageRequestParent.cpp
+@@ -304,22 +304,20 @@ DeviceStorageRequestParent::StatFileEven
+ 
+ nsresult
+ DeviceStorageRequestParent::StatFileEvent::CancelableRun()
+ {
+   NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
+ 
+   nsCOMPtr<nsIRunnable> r;
+   uint64_t diskUsage = DeviceStorageFile::DirectoryDiskUsage(mFile->mFile);
+-  int64_t freeSpace = 0;
++  int64_t freeSpace;
+   nsresult rv = mFile->mFile->GetDiskSpaceAvailable(&freeSpace);
+   if (NS_FAILED(rv)) {
+-    r = new PostErrorEvent(mParent, POST_ERROR_EVENT_UNKNOWN);
+-    NS_DispatchToMainThread(r);
+-    return NS_OK;
++    freeSpace = 0;
+   }
+   
+   r = new PostStatResultEvent(mParent, diskUsage, freeSpace);
+   NS_DispatchToMainThread(r);
+   return NS_OK;
+ }
+ 
+ DeviceStorageRequestParent::ReadFileEvent::ReadFileEvent(DeviceStorageRequestParent* aParent,
+diff --git a/dom/devicestorage/nsDeviceStorage.cpp b/dom/devicestorage/nsDeviceStorage.cpp
+--- a/dom/devicestorage/nsDeviceStorage.cpp
++++ b/dom/devicestorage/nsDeviceStorage.cpp
+@@ -486,16 +486,25 @@ nsDOMDeviceStorage::SetRootFileForType(c
+     if (aType.Equals(NS_LITERAL_STRING("testing"))) {
+       dirService->Get(NS_OS_TEMP_DIR, NS_GET_IID(nsIFile), getter_AddRefs(f));
+       if (f) {
+         f->AppendRelativeNativePath(NS_LITERAL_CSTRING("device-storage-testing"));
+         f->Create(nsIFile::DIRECTORY_TYPE, 0777);
+         f->Normalize();
+       }
+     }
++
++    if (aType.Equals(NS_LITERAL_STRING("testing-other"))) {
++      dirService->Get(NS_OS_TEMP_DIR, NS_GET_IID(nsIFile), getter_AddRefs(f));
++      if (f) {
++        f->AppendRelativeNativePath(NS_LITERAL_CSTRING("device-storage-testing-other"));
++        f->Create(nsIFile::DIRECTORY_TYPE, 0777);
++        f->Normalize();
++      }
++    }
+   } 
+ 
+ #ifdef MOZ_WIDGET_GONK
+   RegisterForSDCardChanges(this);
+ #endif
+ 
+   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+   obs->AddObserver(this, "file-watcher-update", false);
+diff --git a/dom/devicestorage/test/Makefile.in b/dom/devicestorage/test/Makefile.in
+--- a/dom/devicestorage/test/Makefile.in
++++ b/dom/devicestorage/test/Makefile.in
+@@ -16,12 +16,13 @@ MOCHITEST_FILES	= \
+ 		test_enumerate.html \
+ 		test_enumerateMultipleContinue.html \
+ 		test_overwrite.html \
+ 		test_dotdot.html \
+ 		test_enumerateOptions.html \
+ 		test_lastModificationFilter.html \
+ 		test_stat.html \
+ 		test_watch.html \
++		test_watchOther.html \
+ 		devicestorage_common.js \
+ 		$(NULL)
+ 
+ include $(topsrcdir)/config/rules.mk
+diff --git a/dom/devicestorage/test/test_watch.html b/dom/devicestorage/test/test_watch.html
+--- a/dom/devicestorage/test/test_watch.html
++++ b/dom/devicestorage/test/test_watch.html
+@@ -12,17 +12,17 @@ https://bugzilla.mozilla.org/show_bug.cg
+   <script type="text/javascript" src="devicestorage_common.js"></script>
+ 
+ <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
+ </head>
+ <body>
+ <a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=717103">Mozilla Bug 717103</a>
+ <p id="display"></p>
+ <div id="content" style="display: none">
+-  
++
+ </div>
+ <pre id="test">
+ <script class="testbody" type="text/javascript">
+ 
+ devicestorage_setup();
+ 
+ var gFileName = randomFilename(20);
+ 
+@@ -44,29 +44,22 @@ function onChange(e) {
+     devicestorage_cleanup();
+   }
+   else {
+     // we may see other file changes during the test, and
+     // that is completely ok
+   }
+ }
+ 
+-function makeFile() {
+-  request = storage.addNamed(createRandomBlob(), gFileName);
+-  ok(request, "Should have a non-null request");
+-
+-  request.onsuccess = addSuccess;
+-  request.onerror = addError;
+-}
+-
+ var storage = navigator.getDeviceStorage("testing");
+-ok(navigator.getDeviceStorage, "Should have getDeviceStorage");
++ok(storage, "Should have storage");
+ storage.addEventListener("change", onChange);
+ 
+-// since addEventListener is async, we have to wait until
+-// it's definitely done before we make the file.
+-setTimeout(makeFile,100);
++request = storage.addNamed(createRandomBlob(), gFileName);
++ok(request, "Should have a non-null request");
++
++request.onsuccess = addSuccess;
++request.onerror = addError;
+ 
+ </script>
+ </pre>
+ </body>
+ </html>
+-
+diff --git a/dom/devicestorage/test/test_watchOther.html b/dom/devicestorage/test/test_watchOther.html
+new file mode 100644
+--- /dev/null
++++ b/dom/devicestorage/test/test_watchOther.html
+@@ -0,0 +1,74 @@
++<!--
++  Any copyright is dedicated to the Public Domain.
++  http://creativecommons.org/publicdomain/zero/1.0/
++-->
++<!DOCTYPE HTML>
++<html> <!--
++https://bugzilla.mozilla.org/show_bug.cgi?id=717103
++-->
++<head>
++  <title>Test for the device storage API </title>
++  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
++  <script type="text/javascript" src="devicestorage_common.js"></script>
++
++<link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
++</head>
++<body>
++<a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=717103">Mozilla Bug 717103</a>
++<p id="display"></p>
++<div id="content" style="display: none">
++
++</div>
++<pre id="test">
++<script class="testbody" type="text/javascript">
++
++devicestorage_setup();
++
++var gFileName = randomFilename(20);
++
++function addSuccess(e) {
++}
++
++function addError(e) {
++  ok(false, "addError was called : " + e.target.error.name);
++  devicestorage_cleanup();
++}
++
++function onChange(e) {
++
++  dump("we saw: " + e.path + " " + e.reason + "\n");
++
++  if (e.path == gFileName) {
++    ok(true, "we saw the file get created");
++    storage.removeEventListener("change", onChange);
++    devicestorage_cleanup();
++  }
++  else {
++    // we may see other file changes during the test, and
++    // that is completely ok
++  }
++}
++
++function onChangeFail(e) {
++  dump("onChangeFail: " + e.path + " " + e.reason + "\n");
++  ok(false, "We should never see any changes");
++}
++
++var storage = navigator.getDeviceStorage("testing");
++ok(storage, "Should have storage");
++storage.addEventListener("change", onChange);
++
++var storageOther = navigator.getDeviceStorage("testing-other");
++ok(storageOther, "Should have storage");
++storageOther.addEventListener("change", onChangeFail);
++
++request = storage.addNamed(createRandomBlob(), gFileName);
++ok(request, "Should have a non-null request");
++
++request.onsuccess = addSuccess;
++request.onerror = addError;
++
++</script>
++</pre>
++</body>
++</html>
+diff --git a/dom/interfaces/html/nsIDOMHTMLInputElement.idl b/dom/interfaces/html/nsIDOMHTMLInputElement.idl
+--- a/dom/interfaces/html/nsIDOMHTMLInputElement.idl
++++ b/dom/interfaces/html/nsIDOMHTMLInputElement.idl
+@@ -15,17 +15,17 @@ interface nsIDOMValidityState;
+   *
+   * This interface is trying to follow the DOM Level 2 HTML specification:
+   * http://www.w3.org/TR/DOM-Level-2-HTML/
+   *
+   * with changes from the work-in-progress WHATWG HTML specification:
+   * http://www.whatwg.org/specs/web-apps/current-work/
+   */
+ 
+-[scriptable, uuid(c12471c8-155f-4368-9e8b-13a231e85f3b)]
++[scriptable, uuid(83984fd0-b0b2-11e1-afa6-0800200c9a66)]
+ interface nsIDOMHTMLInputElement : nsIDOMHTMLElement
+ {
+            attribute DOMString             accept;
+            attribute DOMString             alt;
+ 
+            attribute DOMString             autocomplete;
+            attribute boolean               autofocus;
+            attribute boolean               defaultChecked;
+@@ -38,16 +38,18 @@ interface nsIDOMHTMLInputElement : nsIDO
+            attribute boolean               formNoValidate;
+            attribute DOMString             formTarget;
+ 
+   readonly attribute nsIDOMFileList        files;
+ 
+            attribute unsigned long height;
+            attribute boolean               indeterminate;
+ 
++           attribute DOMString             inputmode;
++
+   readonly attribute nsIDOMHTMLElement     list;
+            attribute DOMString             max;
+            attribute long                  maxLength;
+            attribute DOMString             min;
+ 
+            attribute boolean               multiple;
+            attribute DOMString             name;
+ 
+diff --git a/dom/ipc/PBrowser.ipdl b/dom/ipc/PBrowser.ipdl
+--- a/dom/ipc/PBrowser.ipdl
++++ b/dom/ipc/PBrowser.ipdl
+@@ -156,16 +156,17 @@ parent:
+      */
+     sync EndIMEComposition(bool cancel) returns (nsString composition);
+ 
+     sync GetInputContext() returns (int32_t IMEEnabled, int32_t IMEOpen);
+ 
+     SetInputContext(int32_t IMEEnabled,
+                     int32_t IMEOpen,
+                     nsString type,
++                    nsString inputmode,
+                     nsString actionHint,
+                     int32_t cause,
+                     int32_t focusChange);
+ 
+     /**
+      * Gets the DPI of the screen corresponding to this browser.
+      */
+     sync GetDPI() returns (float value);
+diff --git a/dom/ipc/TabParent.cpp b/dom/ipc/TabParent.cpp
+--- a/dom/ipc/TabParent.cpp
++++ b/dom/ipc/TabParent.cpp
+@@ -679,16 +679,17 @@ TabParent::RecvGetInputContext(int32_t* 
+   *aIMEOpen = static_cast<int32_t>(context.mIMEState.mOpen);
+   return true;
+ }
+ 
+ bool
+ TabParent::RecvSetInputContext(const int32_t& aIMEEnabled,
+                                const int32_t& aIMEOpen,
+                                const nsString& aType,
++                               const nsString& aInputmode,
+                                const nsString& aActionHint,
+                                const int32_t& aCause,
+                                const int32_t& aFocusChange)
+ {
+   // mIMETabParent (which is actually static) tracks which if any TabParent has IMEFocus
+   // When the input mode is set to anything but IMEState::DISABLED,
+   // mIMETabParent should be set to this
+   mIMETabParent =
+@@ -696,16 +697,17 @@ TabParent::RecvSetInputContext(const int
+   nsCOMPtr<nsIWidget> widget = GetWidget();
+   if (!widget || !AllowContentIME())
+     return true;
+ 
+   InputContext context;
+   context.mIMEState.mEnabled = static_cast<IMEState::Enabled>(aIMEEnabled);
+   context.mIMEState.mOpen = static_cast<IMEState::Open>(aIMEOpen);
+   context.mHTMLInputType.Assign(aType);
++  context.mHTMLInputInputmode.Assign(aInputmode);
+   context.mActionHint.Assign(aActionHint);
+   InputContextAction action(
+     static_cast<InputContextAction::Cause>(aCause),
+     static_cast<InputContextAction::FocusChange>(aFocusChange));
+   widget->SetInputContext(context, action);
+ 
+   nsCOMPtr<nsIObserverService> observerService = mozilla::services::GetObserverService();
+   if (!observerService)
+diff --git a/dom/ipc/TabParent.h b/dom/ipc/TabParent.h
+--- a/dom/ipc/TabParent.h
++++ b/dom/ipc/TabParent.h
+@@ -93,16 +93,17 @@ public:
+     virtual bool RecvNotifyIMETextHint(const nsString& aText);
+     virtual bool RecvEndIMEComposition(const bool& aCancel,
+                                        nsString* aComposition);
+     virtual bool RecvGetInputContext(int32_t* aIMEEnabled,
+                                      int32_t* aIMEOpen);
+     virtual bool RecvSetInputContext(const int32_t& aIMEEnabled,
+                                      const int32_t& aIMEOpen,
+                                      const nsString& aType,
++                                     const nsString& aInputmode,
+                                      const nsString& aActionHint,
+                                      const int32_t& aCause,
+                                      const int32_t& aFocusChange);
+     virtual bool RecvSetCursor(const uint32_t& aValue);
+     virtual bool RecvSetBackgroundColor(const nscolor& aValue);
+     virtual bool RecvGetDPI(float* aValue);
+     virtual bool RecvGetWidgetNativeData(WindowsHandle* aValue);
+     virtual bool RecvZoomToRect(const gfxRect& aRect);
+diff --git a/dom/plugins/ipc/PluginModuleParent.cpp b/dom/plugins/ipc/PluginModuleParent.cpp
+old mode 100644
+new mode 100755
+diff --git a/dom/wifi/WifiWorker.js b/dom/wifi/WifiWorker.js
+--- a/dom/wifi/WifiWorker.js
++++ b/dom/wifi/WifiWorker.js
+@@ -891,21 +891,21 @@ var WifiManager = (function() {
+       });
+     }
+ 
+     setProperty("ctl.stop", "wpa_supplicant", tick);
+   }
+ 
+   function didConnectSupplicant(reconnected, callback) {
+     waitForEvent();
+-    notify("supplicantconnection");
+ 
+     // Load up the supplicant state.
+     statusCommand(function(status) {
+       parseStatus(status, reconnected);
++      notify("supplicantconnection");
+       callback();
+     });
+   }
+ 
+   function prepareForStartup(callback) {
+     // First, check to see if there's a wpa_supplicant running that we can
+     // connect to.
+     getProperty(SUPP_PROP, "stopped", function (value) {
+@@ -1940,17 +1940,17 @@ WifiWorker.prototype = {
+ 
+         break;
+       }
+     }
+   },
+ 
+   getNetworks: function(msg) {
+     const message = "WifiManager:getNetworks:Return";
+-    if (WifiManager.state === "UNINITIALIZED") {
++    if (!WifiManager.enabled) {
+       this._sendMessage(message, false, "Wifi is disabled", msg);
+       return;
+     }
+ 
+     this.waitForScan((function (networks) {
+       this._sendMessage(message, networks !== null, networks, msg);
+     }).bind(this));
+     WifiManager.scan(true, function() {});
+@@ -2018,17 +2018,17 @@ WifiWorker.prototype = {
+     if (this._stateRequests.length === 1)
+       WifiManager.setWifiEnabled(msg.enabled, this._setWifiEnabledCallback.bind(this));
+   },
+ 
+   associate: function(msg) {
+     const MAX_PRIORITY = 9999;
+     const message = "WifiManager:associate:Return";
+     let network = msg.data;
+-    if (WifiManager.state === "UNINITIALIZED") {
++    if (!WifiManager.enabled) {
+       this._sendMessage(message, false, "Wifi is disabled", msg);
+       return;
+     }
+ 
+     let privnet = network;
+     let self = this;
+     function networkReady() {
+       // saveConfig now before we disable most of the other networks.
+@@ -2088,17 +2088,17 @@ WifiWorker.prototype = {
+         networkReady();
+       }).bind(this));
+     }
+   },
+ 
+   forget: function(msg) {
+     const message = "WifiManager:forget:Return";
+     let network = msg.data;
+-    if (WifiManager.state === "UNINITIALIZED") {
++    if (!WifiManager.enabled) {
+       this._sendMessage(message, false, "Wifi is disabled", msg);
+       return;
+     }
+ 
+     let ssid = network.ssid;
+     if (!(ssid in this.configuredNetworks)) {
+       this._sendMessage(message, false, "Trying to forget an unknown network", msg);
+       return;
+diff --git a/embedding/android/GeckoAppShell.java b/embedding/android/GeckoAppShell.java
+--- a/embedding/android/GeckoAppShell.java
++++ b/embedding/android/GeckoAppShell.java
+@@ -534,26 +534,27 @@ public class GeckoAppShell
+             break;
+ 
+         case NOTIFY_IME_FOCUSCHANGE:
+             IMEStateUpdater.resetIME();
+             break;
+         }
+     }
+ 
+-    public static void notifyIMEEnabled(int state, String typeHint,
++    public static void notifyIMEEnabled(int state, String typeHint, String modeHint,
+                                         String actionHint, boolean landscapeFS)
+     {
+         if (GeckoApp.surfaceView == null)
+             return;
+ 
+         /* When IME is 'disabled', IME processing is disabled.
+            In addition, the IME UI is hidden */
+         GeckoApp.surfaceView.mIMEState = state;
+         GeckoApp.surfaceView.mIMETypeHint = typeHint;
++        GeckoApp.surfaceView.mIMEModeHint = modeHint;
+         GeckoApp.surfaceView.mIMEActionHint = actionHint;
+         GeckoApp.surfaceView.mIMELandscapeFS = landscapeFS;
+         IMEStateUpdater.enableIME();
+     }
+ 
+     public static void notifyIMEChange(String text, int start, int end, int newEnd) {
+         if (GeckoApp.surfaceView == null ||
+             GeckoApp.surfaceView.inputConnection == null)
+diff --git a/embedding/android/GeckoSurfaceView.java b/embedding/android/GeckoSurfaceView.java
+--- a/embedding/android/GeckoSurfaceView.java
++++ b/embedding/android/GeckoSurfaceView.java
+@@ -58,16 +58,17 @@ class GeckoSurfaceView
+         mBufferHeight = 0;
+ 
+         mSurfaceLock = new ReentrantLock();
+ 
+         mEditableFactory = Editable.Factory.getInstance();
+         initEditable("");
+         mIMEState = IME_STATE_DISABLED;
+         mIMETypeHint = "";
++        mIMEModeHint = "";
+         mIMEActionHint = "";
+     }
+ 
+     protected void finalize() throws Throwable {
+         super.finalize();
+     }
+ 
+     void drawSplashScreen() {
+@@ -497,16 +498,30 @@ class GeckoSurfaceView
+             outAttrs.inputType = InputType.TYPE_CLASS_DATETIME |
+                                  InputType.TYPE_DATETIME_VARIATION_NORMAL;
+         else if (mIMETypeHint.equalsIgnoreCase("date"))
+             outAttrs.inputType = InputType.TYPE_CLASS_DATETIME |
+                                  InputType.TYPE_DATETIME_VARIATION_DATE;
+         else if (mIMETypeHint.equalsIgnoreCase("time"))
+             outAttrs.inputType = InputType.TYPE_CLASS_DATETIME |
+                                  InputType.TYPE_DATETIME_VARIATION_TIME;
++        else if (mIMEModeHint.equalsIgnoreCase("numeric"))
++            outAttrs.inputType = InputType.TYPE_CLASS_NUMBER |
++                                 InputType.TYPE_NUMBER_FLAG_SIGNED |
++                                 InputType.TYPE_NUMBER_FLAG_DECIMAL;
++        else if (mIMEModeHint.equalsIgnoreCase("digit"))
++            outAttrs.inputType = InputType.TYPE_CLASS_NUMBER;
++        else if (mIMEModeHint.equalsIgnoreCase("uppercase"))
++            outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS;
++        else if (mIMEModeHint.equalsIgnoreCase("lowercase"))
++            outAttrs.inputType = InputType.TYPE_CLASS_TEXT; 
++        else if (mIMEModeHint.equalsIgnoreCase("titlecase"))
++            outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_CAP_WORDS;
++        else if (mIMEModeHint.equalsIgnoreCase("autocapitalized"))
++            outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_CAP_SENTENCES;
+ 
+         if (mIMEActionHint.equalsIgnoreCase("go"))
+             outAttrs.imeOptions = EditorInfo.IME_ACTION_GO;
+         else if (mIMEActionHint.equalsIgnoreCase("done"))
+             outAttrs.imeOptions = EditorInfo.IME_ACTION_DONE;
+         else if (mIMEActionHint.equalsIgnoreCase("next"))
+             outAttrs.imeOptions = EditorInfo.IME_ACTION_NEXT;
+         else if (mIMEActionHint.equalsIgnoreCase("search"))
+@@ -743,16 +758,17 @@ class GeckoSurfaceView
+     public static final int IME_STATE_PLUGIN = 3;
+ 
+     GeckoInputConnection inputConnection;
+     KeyListener mKeyListener;
+     Editable mEditable;
+     Editable.Factory mEditableFactory;
+     int mIMEState;
+     String mIMETypeHint;
++    String mIMEModeHint;
+     String mIMEActionHint;
+     boolean mIMELandscapeFS;
+ 
+     // Software rendering
+     Bitmap mSoftwareBitmap;
+     ByteBuffer mSoftwareBuffer;
+     Bitmap mSoftwareBufferCopy;
+ 
+diff --git a/gfx/layers/ImageContainer.h b/gfx/layers/ImageContainer.h
+--- a/gfx/layers/ImageContainer.h
++++ b/gfx/layers/ImageContainer.h
+@@ -647,16 +647,23 @@ public:
+     gfxIntSize mPicSize;
+     StereoMode mStereoMode;
+ 
+     nsIntRect GetPictureRect() const {
+       return nsIntRect(mPicX, mPicY,
+                        mPicSize.width,
+                        mPicSize.height);
+     }
++
++    Data()
++      : mYChannel(nullptr), mYStride(0), mYSize(0, 0), mYSkip(0)
++      , mCbChannel(nullptr), mCrChannel(nullptr)
++      , mCbCrStride(0), mCbCrSize(0, 0) , mCbSkip(0), mCrSkip(0)
++      , mPicX(0), mPicY(0), mPicSize(0, 0), mStereoMode(STEREO_MODE_MONO)
++    {}
+   };
+ 
+   enum {
+     MAX_DIMENSION = 16384
+   };
+ 
+   virtual ~PlanarYCbCrImage();
+ 
+diff --git a/js/src/frontend/BytecodeEmitter.cpp b/js/src/frontend/BytecodeEmitter.cpp
+--- a/js/src/frontend/BytecodeEmitter.cpp
++++ b/js/src/frontend/BytecodeEmitter.cpp
+@@ -116,17 +116,17 @@ BytecodeEmitter::BytecodeEmitter(Bytecod
+     stackDepth(0), maxStackDepth(0),
+     ntrynotes(0), lastTryNode(NULL),
+     arrayCompDepth(0),
+     emitLevel(0),
+     constMap(sc->context),
+     constList(sc->context),
+     typesetCount(0),
+     hasSingletons(false),
+-    inForInit(false),
++    emittingForInit(false),
+     hasGlobalScope(hasGlobalScope),
+     selfHostingMode(selfHostingMode)
+ {
+     memset(&prolog, 0, sizeof prolog);
+     memset(&main, 0, sizeof main);
+     current = &main;
+     firstLine = prolog.currentLine = main.currentLine = lineno;
+ }
+@@ -1297,17 +1297,17 @@ BindNameToSlot(JSContext *cx, BytecodeEm
+         StackFrame *caller = bce->callerFrame;
+         if (caller) {
+             JS_ASSERT(bce->script->compileAndGo);
+ 
+             /*
+              * Don't generate upvars on the left side of a for loop. See
+              * bug 470758.
+              */
+-            if (bce->inForInit)
++            if (bce->emittingForInit)
+                 return true;
+ 
+             /*
+              * If this is an eval in the global scope, then unbound variables
+              * must be globals, so try to use GNAME ops.
+              */
+             if (caller->isGlobalFrame() && TryConvertToGname(bce, pn, &op)) {
+                 pn->setOp(op);
+@@ -1681,20 +1681,18 @@ BytecodeEmitter::checkSingletonContext()
+ 
+ bool
+ BytecodeEmitter::needsImplicitThis()
+ {
+     if (!script->compileAndGo)
+         return true;
+ 
+     if (sc->inFunction()) {
+-        for (const FunctionBox *funbox = this->sc->funbox(); funbox; funbox = funbox->parent) {
+-            if (funbox->inWith)
+-                return true;
+-        }
++        if (sc->funbox()->inWith)
++            return true;
+     } else {
+         JSObject *scope = sc->scopeChain();
+         while (scope) {
+             if (scope->isWith())
+                 return true;
+             scope = scope->enclosingScope();
+         }
+     }
+@@ -1814,21 +1812,21 @@ static bool
+ EmitXMLName(JSContext *cx, ParseNode *pn, JSOp op, BytecodeEmitter *bce)
+ {
+     JS_ASSERT(!bce->sc->inStrictMode());
+     JS_ASSERT(pn->isKind(PNK_XMLUNARY));
+     JS_ASSERT(pn->isOp(JSOP_XMLNAME));
+     JS_ASSERT(op == JSOP_XMLNAME || op == JSOP_CALLXMLNAME);
+ 
+     ParseNode *pn2 = pn->pn_kid;
+-    bool oldInForInit = bce->inForInit;
+-    bce->inForInit = false;
++    bool oldEmittingForInit = bce->emittingForInit;
++    bce->emittingForInit = false;
+     if (!EmitTree(cx, bce, pn2))
+         return false;
+-    bce->inForInit = oldInForInit;
++    bce->emittingForInit = oldEmittingForInit;
+     if (NewSrcNote2(cx, bce, SRC_PCBASE, bce->offset() - pn2->pn_offset) < 0)
+         return false;
+ 
+     if (Emit1(cx, bce, op) < 0)
+         return false;
+ 
+     return true;
+ }
+@@ -3404,21 +3402,21 @@ EmitVariables(JSContext *cx, BytecodeEmi
+                     return false;
+             }
+             if (pn->isOp(JSOP_DEFCONST) &&
+                 !DefineCompileTimeConstant(cx, bce, pn2->pn_atom, pn3))
+             {
+                 return false;
+             }
+ 
+-            bool oldInForInit = bce->inForInit;
+-            bce->inForInit = false;
++            bool oldEmittingForInit = bce->emittingForInit;
++            bce->emittingForInit = false;
+             if (!EmitTree(cx, bce, pn3))
+                 return false;
+-            bce->inForInit = oldInForInit;
++            bce->emittingForInit = oldEmittingForInit;
+         } else if (letNotes) {
+             /* JSOP_ENTERLETx expects at least 1 slot to have been pushed. */
+             if (Emit1(cx, bce, JSOP_UNDEFINED) < 0)
+                 return false;
+         }
+ 
+         /* If we are not initializing, nothing to pop. */
+         if (emitOption != InitializeVars) {
+@@ -4558,20 +4556,20 @@ EmitForIn(JSContext *cx, BytecodeEmitter
+      * If the left part is 'var x', emit code to define x if necessary
+      * using a prolog opcode, but do not emit a pop. If the left part was
+      * originally 'var x = i', the parser will have rewritten it; see
+      * Parser::forStatement. 'for (let x = i in o)' is mercifully banned.
+      */
+     if (pn1) {
+         ParseNode *decl = letDecl ? pn1->pn_expr : pn1;
+         JS_ASSERT(decl->isKind(PNK_VAR) || decl->isKind(PNK_LET));
+-        bce->inForInit = true;
++        bce->emittingForInit = true;
+         if (!EmitVariables(cx, bce, decl, DefineVars))
+             return false;
+-        bce->inForInit = false;
++        bce->emittingForInit = false;
+     }
+ 
+     /* Compile the object expression to the right of 'in'. */
+     if (!EmitTree(cx, bce, forHead->pn_kid3))
+         return false;
+ 
+     /*
+      * Emit a bytecode to convert top of stack value to the iterator
+@@ -4703,17 +4701,17 @@ EmitNormalFor(JSContext *cx, BytecodeEmi
+ 
+     /* C-style for (init; cond; update) ... loop. */
+     JSOp op = JSOP_POP;
+     ParseNode *pn3 = forHead->pn_kid1;
+     if (!pn3) {
+         /* No initializer: emit an annotated nop for the decompiler. */
+         op = JSOP_NOP;
+     } else {
+-        bce->inForInit = true;
++        bce->emittingForInit = true;
+ #if JS_HAS_DESTRUCTURING
+         if (pn3->isKind(PNK_ASSIGN)) {
+             JS_ASSERT(pn3->isOp(JSOP_NOP));
+             if (!MaybeEmitGroupAssignment(cx, bce, op, pn3, GroupIsNotDecl, &op))
+                 return false;
+         }
+ #endif
+         if (op == JSOP_POP) {
+@@ -4728,17 +4726,17 @@ EmitNormalFor(JSContext *cx, BytecodeEmi
+                  * not need to emit a pop below, so switch to a nop,
+                  * just for the decompiler.
+                  */
+                 JS_ASSERT(pn3->isArity(PN_LIST) || pn3->isArity(PN_BINARY));
+                 if (pn3->pn_xflags & PNX_GROUPINIT)
+                     op = JSOP_NOP;
+             }
+         }
+-        bce->inForInit = false;
++        bce->emittingForInit = false;
+     }
+ 
+     /*
+      * NB: the SRC_FOR note has offsetBias 1 (JSOP_{NOP,POP}_LENGTH).
+      * Use tmp to hold the biased srcnote "top" offset, which differs
+      * from the top local variable by the length of the JSOP_GOTO
+      * emitted in between tmp and top if this loop has a condition.
+      */
+@@ -5395,23 +5393,23 @@ EmitCallOrNew(JSContext *cx, BytecodeEmi
+             ParseNode *funNode = pn2->pn_next;
+             while (funNode->pn_next)
+                 funNode = funNode->pn_next;
+             if (!EmitTree(cx, bce, funNode))
+                 return false;
+             ParseNode *receiver = pn2->pn_next;
+             if (!EmitTree(cx, bce, receiver))
+                 return false;
+-            bool oldInForInit = bce->inForInit;
+-            bce->inForInit = false;
++            bool oldEmittingForInit = bce->emittingForInit;
++            bce->emittingForInit = false;
+             for (ParseNode *argpn = receiver->pn_next; argpn != funNode; argpn = argpn->pn_next) {
+                 if (!EmitTree(cx, bce, argpn))
+                     return false;
+             }
+-            bce->inForInit = oldInForInit;
++            bce->emittingForInit = oldEmittingForInit;
+             argc -= 2;
+             emitArgs = false;
+             break;
+         }
+         if (!EmitNameOp(cx, bce, pn2, callop))
+             return false;
+         break;
+       case PNK_DOT:
+@@ -5441,23 +5439,23 @@ EmitCallOrNew(JSContext *cx, BytecodeEmi
+         return false;
+ 
+     if (emitArgs) {
+         /*
+          * Emit code for each argument in order, then emit the JSOP_*CALL or
+          * JSOP_NEW bytecode with a two-byte immediate telling how many args
+          * were pushed on the operand stack.
+          */
+-        bool oldInForInit = bce->inForInit;
+-        bce->inForInit = false;
++        bool oldEmittingForInit = bce->emittingForInit;
++        bce->emittingForInit = false;
+         for (ParseNode *pn3 = pn2->pn_next; pn3; pn3 = pn3->pn_next) {
+             if (!EmitTree(cx, bce, pn3))
+                 return false;
+         }
+-        bce->inForInit = oldInForInit;
++        bce->emittingForInit = oldEmittingForInit;
+     }
+     if (NewSrcNote2(cx, bce, SRC_PCBASE, bce->offset() - top) < 0)
+         return false;
+ 
+     if (Emit3(cx, bce, pn->getOp(), ARGC_HI(argc), ARGC_LO(argc)) < 0)
+         return false;
+     CheckTypeSet(cx, bce, pn->getOp());
+     if (pn->isOp(JSOP_EVAL))
+@@ -5962,22 +5960,22 @@ EmitUnary(JSContext *cx, BytecodeEmitter
+     /* Unary op, including unary +/-. */
+     JSOp op = pn->getOp();
+     ParseNode *pn2 = pn->pn_kid;
+ 
+     JS_ASSERT(op != JSOP_XMLNAME);
+     if (op == JSOP_TYPEOF && !pn2->isKind(PNK_NAME))
+         op = JSOP_TYPEOFEXPR;
+ 
+-    bool oldInForInit = bce->inForInit;
+-    bce->inForInit = false;
++    bool oldEmittingForInit = bce->emittingForInit;
++    bce->emittingForInit = false;
+     if (!EmitTree(cx, bce, pn2))
+         return false;
+ 
+-    bce->inForInit = oldInForInit;
++    bce->emittingForInit = oldEmittingForInit;
+     return Emit1(cx, bce, op) >= 0;
+ }
+ 
+ static bool
+ EmitDefaults(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
+ {
+     JS_ASSERT(pn->isKind(PNK_ARGSBODY));
+     uint16_t ndefaults = bce->sc->funbox()->ndefaults;
+@@ -6361,48 +6359,48 @@ frontend::EmitTree(JSContext *cx, Byteco
+                 if (!EmitAtomOp(cx, pn, pn->getOp(), bce))
+                     return false;
+                 break;
+             }
+ 
+             /*
+              * Binary :: has a right operand that brackets arbitrary code,
+              * possibly including a let (a = b) ... expression.  We must clear
+-             * inForInit to avoid mis-compiling such beasts.
++             * emittingForInit to avoid mis-compiling such beasts.
+              */
+-            bool oldInForInit = bce->inForInit;
+-            bce->inForInit = false;
++            bool oldEmittingForInit = bce->emittingForInit;
++            bce->emittingForInit = false;
+ #endif
+ 
+             /* Binary operators that evaluate both operands unconditionally. */
+             if (!EmitTree(cx, bce, pn->pn_left))
+                 return false;
+             if (!EmitTree(cx, bce, pn->pn_right))
+                 return false;
+ #if JS_HAS_XML_SUPPORT
+-            bce->inForInit = oldInForInit;
++            bce->emittingForInit = oldEmittingForInit;
+ #endif
+             if (Emit1(cx, bce, pn->getOp()) < 0)
+                 return false;
+         }
+         break;
+ 
+ #if JS_HAS_XML_SUPPORT
+       case PNK_XMLUNARY:
+         if (pn->getOp() == JSOP_XMLNAME) {
+             if (!EmitXMLName(cx, pn, JSOP_XMLNAME, bce))
+                 return false;
+         } else {
+             JSOp op = pn->getOp();
+             JS_ASSERT(op == JSOP_BINDXMLNAME || op == JSOP_SETXMLNAME);
+-            bool oldInForInit = bce->inForInit;
+-            bce->inForInit = false;
++            bool oldEmittingForInit = bce->emittingForInit;
++            bce->emittingForInit = false;
+             if (!EmitTree(cx, bce, pn->pn_kid))
+                 return false;
+-            bce->inForInit = oldInForInit;
++            bce->emittingForInit = oldEmittingForInit;
+             if (Emit1(cx, bce, op) < 0)
+                 return false;
+         }
+         break;
+ #endif
+ 
+       case PNK_THROW:
+ #if JS_HAS_XML_SUPPORT
+diff --git a/js/src/frontend/BytecodeEmitter.h b/js/src/frontend/BytecodeEmitter.h
+--- a/js/src/frontend/BytecodeEmitter.h
++++ b/js/src/frontend/BytecodeEmitter.h
+@@ -107,17 +107,17 @@ struct BytecodeEmitter
+     CGObjectList    objectList;     /* list of emitted objects */
+     CGObjectList    regexpList;     /* list of emitted regexp that will be
+                                        cloned during execution */
+ 
+     uint16_t        typesetCount;   /* Number of JOF_TYPESET opcodes generated */
+ 
+     bool            hasSingletons:1;    /* script contains singleton initializer JSOP_OBJECT */
+ 
+-    bool            inForInit:1;        /* emitting init expr of for; exclude 'in' */
++    bool            emittingForInit:1;  /* true while emitting init expr of for; exclude 'in' */
+ 
+     const bool      hasGlobalScope:1;   /* frontend::CompileScript's scope chain is the
+                                            global object */
+ 
+     const bool      selfHostingMode:1;  /* Emit JSOP_CALLINTRINSIC instead of JSOP_NAME
+                                            and assert that JSOP_NAME and JSOP_*GNAME
+                                            don't ever get emitted. See the comment for
+                                            the field |selfHostingMode| in Parser.h for details. */
+diff --git a/js/src/frontend/ParseNode.cpp b/js/src/frontend/ParseNode.cpp
+--- a/js/src/frontend/ParseNode.cpp
++++ b/js/src/frontend/ParseNode.cpp
+@@ -49,21 +49,17 @@ ParseNode::become(ParseNode *pn2)
+     pn_arity = pn2->pn_arity;
+     pn_parens = pn2->pn_parens;
+     pn_u = pn2->pn_u;
+ 
+     /*
+      * If any pointers are pointing to pn2, change them to point to this
+      * instead, since pn2 will be cleared and probably recycled.
+      */
+-    if (this->isKind(PNK_FUNCTION) && isArity(PN_FUNC)) {
+-        /* Function node: fix up the pn_funbox->node back-pointer. */
+-        JS_ASSERT(pn_funbox->node == pn2);
+-        pn_funbox->node = this;
+-    } else if (pn_arity == PN_LIST && !pn_head) {
++    if (pn_arity == PN_LIST && !pn_head) {
+         /* Empty list: fix up the pn_tail pointer. */
+         JS_ASSERT(pn_count == 0);
+         JS_ASSERT(pn_tail == &pn2->pn_head);
+         pn_tail = &pn_head;
+     }
+ 
+     pn2->clear();
+ }
+@@ -93,26 +89,16 @@ ParseNode::checkListConsistency()
+     } else {
+         tail = &pn_head;
+     }
+     JS_ASSERT(pn_tail == tail);
+     JS_ASSERT(pn_count == count);
+ }
+ #endif
+ 
+-bool
+-FunctionBox::inAnyDynamicScope() const
+-{
+-    for (const FunctionBox *funbox = this; funbox; funbox = funbox->parent) {
+-        if (funbox->inWith || funbox->funHasExtensibleScope())
+-            return true;
+-    }
+-    return false;
+-}
+-
+ /* Add |node| to |parser|'s free node list. */
+ void
+ ParseNodeAllocator::freeNode(ParseNode *pn)
+ {
+     /* Catch back-to-back dup recycles. */
+     JS_ASSERT(pn != freelist);
+ 
+     /*
+@@ -254,34 +240,16 @@ PushNodeChildren(ParseNode *pn, NodeStac
+  * Prepare |pn| to be mutated in place into a new kind of node. Recycle all
+  * |pn|'s recyclable children (but not |pn| itself!), and disconnect it from
+  * metadata structures (the function box tree).
+  */
+ void
+ ParseNodeAllocator::prepareNodeForMutation(ParseNode *pn)
+ {
+     if (!pn->isArity(PN_NULLARY)) {
+-        if (pn->isArity(PN_FUNC)) {
+-            /*
+-             * Since this node could be turned into anything, we can't
+-             * ensure it won't be subsequently recycled, so we must
+-             * disconnect it from the funbox tree entirely.
+-             *
+-             * Note that pn_funbox may legitimately be NULL. functionDef
+-             * applies MakeDefIntoUse to definition nodes, which can come
+-             * from prior iterations of the big loop in compileScript. In
+-             * such cases, the defn nodes have been visited by the recycler
+-             * (but not actually recycled!), and their funbox pointers
+-             * cleared. But it's fine to mutate them into uses of some new
+-             * definition.
+-             */
+-            if (pn->pn_funbox)
+-                pn->pn_funbox->node = NULL;
+-        }
+-
+         /* Put |pn|'s children (but not |pn| itself) on a work stack. */
+         NodeStack stack;
+         PushNodeChildren(pn, &stack);
+         /*
+          * For each node on the work stack, push its children on the work stack,
+          * and free the node if we can.
+          */
+         while (!stack.empty()) {
+@@ -472,17 +440,17 @@ CloneParseTree(ParseNode *opn, Parser *p
+     pn->setDefn(opn->isDefn());
+     pn->setUsed(opn->isUsed());
+ 
+     switch (pn->getArity()) {
+ #define NULLCHECK(e)    JS_BEGIN_MACRO if (!(e)) return NULL; JS_END_MACRO
+ 
+       case PN_FUNC:
+         NULLCHECK(pn->pn_funbox =
+-                  parser->newFunctionBox(opn->pn_funbox->object, pn, pc, opn->pn_funbox->strictModeState));
++                  parser->newFunctionBox(opn->pn_funbox->object, pc, opn->pn_funbox->strictModeState));
+         NULLCHECK(pn->pn_body = CloneParseTree(opn->pn_body, parser));
+         pn->pn_cookie = opn->pn_cookie;
+         pn->pn_dflags = opn->pn_dflags;
+         pn->pn_blockid = opn->pn_blockid;
+         break;
+ 
+       case PN_LIST:
+         pn->makeEmpty();
+diff --git a/js/src/frontend/Parser-inl.h b/js/src/frontend/Parser-inl.h
+--- a/js/src/frontend/Parser-inl.h
++++ b/js/src/frontend/Parser-inl.h
+@@ -41,21 +41,21 @@ ParseContext::ParseContext(Parser *prs, 
+     args_(prs->context),
+     vars_(prs->context),
+     yieldNode(NULL),
+     functionList(NULL),
+     queuedStrictModeError(NULL),
+     parserPC(&prs->pc),
+     lexdeps(prs->context),
+     parent(prs->pc),
+-    innermostWith(NULL),
+     funcStmts(NULL),
+-    hasReturnExpr(false),
+-    hasReturnVoid(false),
+-    inForInit(false),
++    funHasReturnExpr(false),
++    funHasReturnVoid(false),
++    parsingForInit(false),
++    parsingWith(prs->pc ? prs->pc->parsingWith : false), // inherit from parent context
+     inDeclDestructuring(false)
+ {
+     prs->pc = this;
+ }
+ 
+ inline bool
+ ParseContext::init()
+ {
+diff --git a/js/src/frontend/Parser.cpp b/js/src/frontend/Parser.cpp
+--- a/js/src/frontend/Parser.cpp
++++ b/js/src/frontend/Parser.cpp
+@@ -382,73 +382,62 @@ Parser::newObjectBox(JSObject *obj)
+         return NULL;
+     }
+ 
+     traceListHead = objbox;
+ 
+     return objbox;
+ }
+ 
+-FunctionBox::FunctionBox(ObjectBox* traceListHead, JSObject *obj, ParseNode *fn, ParseContext *pc,
++FunctionBox::FunctionBox(ObjectBox* traceListHead, JSObject *obj, ParseContext *outerpc,
+                          StrictMode::StrictModeState sms)
+   : ObjectBox(traceListHead, obj),
+-    node(fn),
+-    siblings(pc->functionList),
++    siblings(outerpc->functionList),
+     kids(NULL),
+-    parent(pc->sc->inFunction() ? pc->sc->funbox() : NULL),
+     bindings(),
+     bufStart(0),
+     bufEnd(0),
+-    level(pc->staticLevel),
+     ndefaults(0),
+     strictModeState(sms),
+-    inLoop(false),
+-    inWith(!!pc->innermostWith),
++    inWith(outerpc->parsingWith),
+     inGenexpLambda(false),
+-    cxFlags(pc->sc->context)     // the cxFlags are set in LeaveFunction
++    cxFlags(outerpc->sc->context)     // the cxFlags are set in LeaveFunction
+ {
+     isFunctionBox = true;
+-    for (StmtInfoPC *stmt = pc->topStmt; stmt; stmt = stmt->down) {
+-        if (stmt->isLoop()) {
+-            inLoop = true;
+-            break;
+-        }
+-    }
+-    if (!pc->sc->inFunction()) {
+-        JSObject *scope = pc->sc->scopeChain();
++    if (!outerpc->sc->inFunction()) {
++        JSObject *scope = outerpc->sc->scopeChain();
+         while (scope) {
+             if (scope->isWith())
+                 inWith = true;
+             scope = scope->enclosingScope();
+         }
+     }
+ }
+ 
+ FunctionBox *
+-Parser::newFunctionBox(JSObject *obj, ParseNode *fn, ParseContext *pc,
+-                       StrictMode::StrictModeState sms)
++Parser::newFunctionBox(JSObject *obj, ParseContext *outerpc, StrictMode::StrictModeState sms)
+ {
+     JS_ASSERT(obj && !IsPoisonedPtr(obj));
+     JS_ASSERT(obj->isFunction());
+ 
+     /*
+      * We use JSContext.tempLifoAlloc to allocate parsed objects and place them
+      * on a list in this Parser to ensure GC safety. Thus the tempLifoAlloc
+      * arenas containing the entries must be alive until we are done with
+      * scanning, parsing and code generation for the whole script or top-level
+      * function.
+      */
+     FunctionBox *funbox =
+-        context->tempLifoAlloc().new_<FunctionBox>(traceListHead, obj, fn, pc, sms);
++        context->tempLifoAlloc().new_<FunctionBox>(traceListHead, obj, outerpc, sms);
+     if (!funbox) {
+         js_ReportOutOfMemory(context);
+         return NULL;
+     }
+ 
+-    traceListHead = pc->functionList = funbox;
++    traceListHead = outerpc->functionList = funbox;
+ 
+     return funbox;
+ }
+ 
+ void
+ Parser::trace(JSTracer *trc)
+ {
+     ObjectBox *objbox = traceListHead;
+@@ -705,17 +694,17 @@ ParseNode *
+ Parser::functionBody(FunctionBodyType type)
+ {
+     JS_ASSERT(pc->sc->inFunction());
+ 
+     StmtInfoPC stmtInfo(context);
+     PushStatementPC(pc, &stmtInfo, STMT_BLOCK);
+     stmtInfo.isFunctionBodyBlock = true;
+ 
+-    JS_ASSERT(!pc->hasReturnExpr && !pc->hasReturnVoid);
++    JS_ASSERT(!pc->funHasReturnExpr && !pc->funHasReturnVoid);
+ 
+     ParseNode *pn;
+     if (type == StatementListBody) {
+         pn = statements();
+     } else {
+         JS_ASSERT(type == ExpressionBody);
+         JS_ASSERT(JS_HAS_EXPR_CLOSURES);
+ 
+@@ -744,17 +733,17 @@ Parser::functionBody(FunctionBodyType ty
+ 
+     if (!pn)
+         return NULL;
+ 
+     JS_ASSERT(!pc->topStmt->isBlockScope);
+     FinishPopStatement(pc);
+ 
+     /* Check for falling off the end of a function that returns a value. */
+-    if (context->hasStrictOption() && pc->hasReturnExpr &&
++    if (context->hasStrictOption() && pc->funHasReturnExpr &&
+         !CheckFinalReturn(context, this, pn))
+     {
+         pn = NULL;
+     }
+ 
+     /* Time to implement the odd semantics of 'arguments'. */
+     Rooted<PropertyName*> arguments(context, context->runtime->atomState.argumentsAtom);
+ 
+@@ -1156,17 +1145,17 @@ LeaveFunction(ParseNode *fn, Parser *par
+ 
+             Definition *outer_dn = pc->decls().lookupFirst(atom);
+ 
+             /*
+              * Make sure to deoptimize lexical dependencies that are polluted
+              * by eval and function statements (which both flag the function as
+              * having an extensible scope) or any enclosing 'with'.
+              */
+-            if (funpc->sc->funHasExtensibleScope() || pc->innermostWith)
++            if (funpc->sc->funHasExtensibleScope() || pc->parsingWith)
+                 DeoptimizeUsesWithin(dn, fn->pn_pos);
+ 
+             if (!outer_dn) {
+                 AtomDefnAddPtr p = pc->lexdeps->lookupForAdd(atom);
+                 if (p) {
+                     outer_dn = p.value();
+                 } else {
+                     /*
+@@ -1313,17 +1302,17 @@ BindDestructuringArg(JSContext *cx, Bind
+     if (!CheckStrictBinding(cx, parser, name, data->pn))
+         return false;
+ 
+     return pc->define(cx, name, data->pn, Definition::VAR);
+ }
+ #endif /* JS_HAS_DESTRUCTURING */
+ 
+ bool
+-Parser::functionArguments(ParseNode **listp, bool &hasRest)
++Parser::functionArguments(ParseNode **listp, ParseNode* funcpn, bool &hasRest)
+ {
+     if (tokenStream.getToken() != TOK_LP) {
+         reportError(NULL, JSMSG_PAREN_BEFORE_FORMAL);
+         return false;
+     }
+ 
+     FunctionBox *funbox = pc->sc->funbox();
+     funbox->bufStart = tokenStream.offsetOfToken(tokenStream.currentToken());
+@@ -1331,17 +1320,16 @@ Parser::functionArguments(ParseNode **li
+     hasRest = false;
+ 
+     ParseNode *argsbody = ListNode::create(PNK_ARGSBODY, this);
+     if (!argsbody)
+         return false;
+     argsbody->setOp(JSOP_NOP);
+     argsbody->makeEmpty();
+ 
+-    ParseNode *funcpn = funbox->node;
+     funcpn->pn_body = argsbody;
+ 
+     if (!tokenStream.matchToken(TOK_RP)) {
+         bool hasDefaults = false;
+         Definition *duplicatedArg = NULL;
+         bool destructuringArg = false;
+ #if JS_HAS_DESTRUCTURING
+         ParseNode *list = NULL;
+@@ -1592,30 +1580,30 @@ Parser::functionDef(HandlePropertyName f
+     if (!fun)
+         return NULL;
+ 
+     // Inherit strictness if neeeded.
+     StrictMode::StrictModeState sms = (outerpc->sc->strictModeState == StrictMode::STRICT) ?
+         StrictMode::STRICT : StrictMode::UNKNOWN;
+ 
+     // Create box for fun->object early to protect against last-ditch GC.
+-    FunctionBox *funbox = newFunctionBox(fun, pn, outerpc, sms);
++    FunctionBox *funbox = newFunctionBox(fun, outerpc, sms);
+     if (!funbox)
+         return NULL;
+ 
+     /* Initialize early for possible flags mutation via destructuringExpr. */
+     SharedContext funsc(context, /* scopeChain = */ NULL, fun, funbox, sms);
+     ParseContext funpc(this, &funsc, outerpc->staticLevel + 1, outerpc->blockidGen);
+     if (!funpc.init())
+         return NULL;
+ 
+     /* Now parse formal argument list and compute fun->nargs. */
+     ParseNode *prelude = NULL;
+     bool hasRest;
+-    if (!functionArguments(&prelude, hasRest))
++    if (!functionArguments(&prelude, pn, hasRest))
+         return NULL;
+ 
+     fun->setArgCount(funpc.numArgs());
+     if (funbox->ndefaults)
+         fun->setHasDefaults();
+     if (hasRest)
+         fun->setHasRest();
+ 
+@@ -2565,34 +2553,34 @@ Parser::returnOrYield(bool useAssignExpr
+         )
+     {
+         ParseNode *pn2 = useAssignExpr ? assignExpr() : expr();
+         if (!pn2)
+             return NULL;
+ #if JS_HAS_GENERATORS
+         if (tt == TOK_RETURN)
+ #endif
+-            pc->hasReturnExpr = true;
++            pc->funHasReturnExpr = true;
+         pn->pn_pos.end = pn2->pn_pos.end;
+         pn->pn_kid = pn2;
+     } else {
+ #if JS_HAS_GENERATORS
+         if (tt == TOK_RETURN)
+ #endif
+-            pc->hasReturnVoid = true;
++            pc->funHasReturnVoid = true;
+     }
+ 
+-    if (pc->hasReturnExpr && pc->sc->funIsGenerator()) {
++    if (pc->funHasReturnExpr && pc->sc->funIsGenerator()) {
+         /* As in Python (see PEP-255), disallow return v; in generators. */
+         ReportBadReturn(context, this, pn, &Parser::reportError, JSMSG_BAD_GENERATOR_RETURN,
+                         JSMSG_BAD_ANON_GENERATOR_RETURN);
+         return NULL;
+     }
+ 
+-    if (context->hasStrictOption() && pc->hasReturnExpr && pc->hasReturnVoid &&
++    if (context->hasStrictOption() && pc->funHasReturnExpr && pc->funHasReturnVoid &&
+         !ReportBadReturn(context, this, pn, &Parser::reportStrictWarning,
+                          JSMSG_NO_RETURN_VALUE, JSMSG_ANON_NO_RETURN_VALUE))
+     {
+         return NULL;
+     }
+ 
+     return pn;
+ }
+@@ -2970,27 +2958,27 @@ Parser::forStatement()
+                 return NULL;
+             }
+ 
+             pn1 = NULL;
+         } else {
+             /*
+              * Set pn1 to a var list or an initializing expression.
+              *
+-             * Set the inForInit flag during parsing of the first clause
++             * Set the parsingForInit flag during parsing of the first clause
+              * of the for statement.  This flag will be used by the RelExpr
+              * production; if it is set, then the 'in' keyword will not be
+              * recognized as an operator, leaving it available to be parsed as
+              * part of a for/in loop.
+              *
+              * A side effect of this restriction is that (unparenthesized)
+              * expressions involving an 'in' operator are illegal in the init
+              * clause of an ordinary for loop.
+              */
+-            pc->inForInit = true;
++            pc->parsingForInit = true;
+             if (tt == TOK_VAR || tt == TOK_CONST) {
+                 forDecl = true;
+                 tokenStream.consumeKnownToken(tt);
+                 pn1 = variables(tt == TOK_VAR ? PNK_VAR : PNK_CONST);
+             }
+ #if JS_HAS_BLOCK_SCOPE
+             else if (tt == TOK_LET) {
+                 (void) tokenStream.getToken();
+@@ -3003,17 +2991,17 @@ Parser::forStatement()
+                         return NULL;
+                     pn1 = variables(PNK_LET, blockObj, DontHoistVars);
+                 }
+             }
+ #endif
+             else {
+                 pn1 = expr();
+             }
+-            pc->inForInit = false;
++            pc->parsingForInit = false;
+             if (!pn1)
+                 return NULL;
+         }
+     }
+ 
+     JS_ASSERT_IF(forDecl, pn1->isArity(PN_LIST));
+     JS_ASSERT(!!blockObj == (forDecl && pn1->isOp(JSOP_NOP)));
+ 
+@@ -3021,17 +3009,17 @@ Parser::forStatement()
+ 
+     /* If non-null, the parent that should be returned instead of forHead. */
+     ParseNode *forParent = NULL;
+ 
+     /*
+      * We can be sure that it's a for/in loop if there's still an 'in'
+      * keyword here, even if JavaScript recognizes 'in' as an operator,
+      * as we've excluded 'in' from being parsed in RelExpr by setting
+-     * pc->inForInit.
++     * pc->parsingForInit.
+      */
+     ParseNode *forHead;        /* initialized by both branches. */
+     StmtInfoPC letStmt(context); /* used if blockObj != NULL. */
+     ParseNode *pn2, *pn3;      /* forHead->pn_kid1 and pn_kid2. */
+     bool forOf;
+     if (pn1 && matchInOrOf(&forOf)) {
+         /*
+          * Parse the rest of the for/in or for/of head.
+@@ -3488,31 +3476,31 @@ Parser::withStatement()
+         return NULL;
+     MUST_MATCH_TOKEN(TOK_LP, JSMSG_PAREN_BEFORE_WITH);
+     ParseNode *pn2 = parenExpr();
+     if (!pn2)
+         return NULL;
+     MUST_MATCH_TOKEN(TOK_RP, JSMSG_PAREN_AFTER_WITH);
+     pn->pn_left = pn2;
+ 
+-    ParseNode *oldWith = pc->innermostWith;
+-    pc->innermostWith = pn;
++    bool oldParsingWith = pc->parsingWith;
++    pc->parsingWith = true;
+ 
+     StmtInfoPC stmtInfo(context);
+     PushStatementPC(pc, &stmtInfo, STMT_WITH);
+     pn2 = statement();
+     if (!pn2)
+         return NULL;
+     PopStatementPC(context, pc);
+ 
+     pn->pn_pos.end = pn2->pn_pos.end;
+     pn->pn_right = pn2;
+ 
+     pc->sc->setBindingsAccessedDynamically();
+-    pc->innermostWith = oldWith;
++    pc->parsingWith = oldParsingWith;
+ 
+     /*
+      * Make sure to deoptimize lexical dependencies inside the |with|
+      * to safely optimize binding globals (see bug 561923).
+      */
+     for (AtomDefnRange r = pc->lexdeps->all(); !r.empty(); r.popFront()) {
+         Definition *defn = r.front().value();
+         Definition *lexdep = defn->resolve();
+@@ -4081,17 +4069,17 @@ Parser::variables(ParseNodeKind kind, St
+             pn2 = primaryExpr(tt, false);
+             pc->inDeclDestructuring = false;
+             if (!pn2)
+                 return NULL;
+ 
+             if (!CheckDestructuring(context, &data, pn2, this))
+                 return NULL;
+             bool ignored;
+-            if (pc->inForInit && matchInOrOf(&ignored)) {
++            if (pc->parsingForInit && matchInOrOf(&ignored)) {
+                 tokenStream.ungetToken();
+                 pn->append(pn2);
+                 continue;
+             }
+ 
+             MUST_MATCH_TOKEN(TOK_ASSIGN, JSMSG_BAD_DESTRUCT_DECL);
+             JS_ASSERT(tokenStream.currentToken().t_op == JSOP_NOP);
+ 
+@@ -4287,34 +4275,34 @@ RelationalTokenToParseNodeKind(const Tok
+ }
+ 
+ BEGIN_EXPR_PARSER(relExpr1)
+ {
+     /*
+      * Uses of the in operator in shiftExprs are always unambiguous,
+      * so unset the flag that prohibits recognizing it.
+      */
+-    bool oldInForInit = pc->inForInit;
+-    pc->inForInit = false;
++    bool oldParsingForInit = pc->parsingForInit;
++    pc->parsingForInit = false;
+ 
+     ParseNode *pn = shiftExpr1i();
+     while (pn &&
+            (tokenStream.isCurrentTokenRelational() ||
+             /*
+              * Recognize the 'in' token as an operator only if we're not
+              * currently in the init expr of a for loop.
+              */
+-            (oldInForInit == 0 && tokenStream.isCurrentTokenType(TOK_IN)) ||
++            (oldParsingForInit == 0 && tokenStream.isCurrentTokenType(TOK_IN)) ||
+             tokenStream.isCurrentTokenType(TOK_INSTANCEOF))) {
+         ParseNodeKind kind = RelationalTokenToParseNodeKind(tokenStream.currentToken());
+         JSOp op = tokenStream.currentToken().t_op;
+         pn = ParseNode::newBinaryOrAppend(kind, op, pn, shiftExpr1n(), this);
+     }
+-    /* Restore previous state of inForInit flag. */
+-    pc->inForInit |= oldInForInit;
++    /* Restore previous state of parsingForInit flag. */
++    pc->parsingForInit |= oldParsingForInit;
+ 
+     return pn;
+ }
+ END_EXPR_PARSER(relExpr1)
+ 
+ inline ParseNodeKind
+ EqualityTokenToParseNodeKind(const Token &token)
+ {
+@@ -4398,20 +4386,20 @@ Parser::condExpr1()
+     if (!condition || !tokenStream.isCurrentTokenType(TOK_HOOK))
+         return condition;
+ 
+     /*
+      * Always accept the 'in' operator in the middle clause of a ternary,
+      * where it's unambiguous, even if we might be parsing the init of a
+      * for statement.
+      */
+-    bool oldInForInit = pc->inForInit;
+-    pc->inForInit = false;
++    bool oldParsingForInit = pc->parsingForInit;
++    pc->parsingForInit = false;
+     ParseNode *thenExpr = assignExpr();
+-    pc->inForInit = oldInForInit;
++    pc->parsingForInit = oldParsingForInit;
+     if (!thenExpr)
+         return NULL;
+ 
+     MUST_MATCH_TOKEN(TOK_COLON, JSMSG_COLON_IN_COND);
+ 
+     ParseNode *elseExpr = assignExpr();
+     if (!elseExpr)
+         return NULL;
+@@ -4816,17 +4804,17 @@ GenexpGuard::maybeNoteGenerator(ParseNod
+ {
+     ParseContext *pc = parser->pc;
+     if (pc->yieldCount > 0) {
+         pc->sc->setFunIsGenerator();
+         if (!pc->sc->inFunction()) {
+             parser->reportError(NULL, JSMSG_BAD_RETURN_OR_YIELD, js_yield_str);
+             return false;
+         }
+-        if (pc->hasReturnExpr) {
++        if (pc->funHasReturnExpr) {
+             /* At the time we saw the yield, we might not have set funIsGenerator yet. */
+             ReportBadReturn(pc->sc->context, parser, pn, &Parser::reportError,
+                             JSMSG_BAD_GENERATOR_RETURN, JSMSG_BAD_ANON_GENERATOR_RETURN);
+             return false;
+         }
+     }
+     return true;
+ }
+@@ -4904,38 +4892,30 @@ CompExprTransplanter::transplant(ParseNo
+             return false;
+         break;
+ 
+       case PN_FUNC:
+       {
+         /*
+          * Only the first level of transplant recursion through functions needs
+          * to reparent the funbox, since all descendant functions are correctly
+-         * linked under the top-most funbox. But every visit to this case needs
+-         * to update funbox->level.
+-         *
+-         * Recall that funbox->level is the static level of the code containing
+-         * the definition or expression of the function and not the static level
+-         * of the function's body.
++         * linked under the top-most funbox.
+          */
+         FunctionBox *funbox = pn->pn_funbox;
+ 
+-        funbox->level = pc->staticLevel + funcLevel;
+         if (++funcLevel == 1 && genexp) {
+             FunctionBox *parent = pc->sc->funbox();
+ 
+             FunctionBox **funboxp = &pc->parent->functionList;
+             while (*funboxp != funbox)
+                 funboxp = &(*funboxp)->siblings;
+             *funboxp = funbox->siblings;
+ 
+-            funbox->parent = parent;
+             funbox->siblings = parent->kids;
+             parent->kids = funbox;
+-            funbox->level = pc->staticLevel;
+         }
+         /* FALL THROUGH */
+       }
+ 
+       case PN_NAME:
+         if (!transplant(pn->maybeExpr()))
+             return false;
+         if (pn->isArity(PN_FUNC))
+@@ -5327,17 +5307,17 @@ Parser::generatorExpr(ParseNode *kid)
+     {
+         ParseContext *outerpc = pc;
+ 
+         RootedFunction fun(context, newFunction(outerpc, /* atom = */ NULL, Expression));
+         if (!fun)
+             return NULL;
+ 
+         /* Create box for fun->object early to protect against last-ditch GC. */
+-        FunctionBox *funbox = newFunctionBox(fun, genfn, outerpc, outerpc->sc->strictModeState);
++        FunctionBox *funbox = newFunctionBox(fun, outerpc, outerpc->sc->strictModeState);
+         if (!funbox)
+             return NULL;
+ 
+         SharedContext gensc(context, /* scopeChain = */ NULL, fun, funbox, outerpc->sc->strictModeState);
+         ParseContext genpc(this, &gensc, outerpc->staticLevel + 1, outerpc->blockidGen);
+         if (!genpc.init())
+             return NULL;
+ 
+@@ -5536,27 +5516,27 @@ Parser::memberExpr(bool allowCallSyntax)
+ #if JS_HAS_XML_SUPPORT
+             else if (allowsXML()) {
+                 TokenPtr begin = lhs->pn_pos.begin;
+                 if (tt == TOK_LP) {
+                     /* Filters are effectively 'with', so deoptimize names. */
+                     pc->sc->setBindingsAccessedDynamically();
+ 
+                     StmtInfoPC stmtInfo(context);
+-                    ParseNode *oldWith = pc->innermostWith;
+-                    pc->innermostWith = lhs;
++                    bool oldParsingWith = pc->parsingWith;
++                    pc->parsingWith = true;
+                     PushStatementPC(pc, &stmtInfo, STMT_WITH);
+ 
+                     ParseNode *filter = bracketedExpr();
+                     if (!filter)
+                         return NULL;
+                     filter->setInParens(true);
+                     MUST_MATCH_TOKEN(TOK_RP, JSMSG_PAREN_IN_PAREN);
+ 
+-                    pc->innermostWith = oldWith;
++                    pc->parsingWith = oldParsingWith;
+                     PopStatementPC(context, pc);
+ 
+                     nextMember =
+                         new_<XMLFilterExpression>(lhs, filter,
+                                                   begin, tokenStream.currentToken().pos.end);
+                     if (!nextMember)
+                         return NULL;
+                 } else if (tt == TOK_AT || tt == TOK_STAR) {
+@@ -5709,20 +5689,20 @@ Parser::memberExpr(bool allowCallSyntax)
+ ParseNode *
+ Parser::bracketedExpr()
+ {
+     /*
+      * Always accept the 'in' operator in a parenthesized expression,
+      * where it's unambiguous, even if we might be parsing the init of a
+      * for statement.
+      */
+-    bool oldInForInit = pc->inForInit;
+-    pc->inForInit = false;
++    bool oldParsingForInit = pc->parsingForInit;
++    pc->parsingForInit = false;
+     ParseNode *pn = expr();
+-    pc->inForInit = oldInForInit;
++    pc->parsingForInit = oldParsingForInit;
+     return pn;
+ }
+ 
+ #if JS_HAS_XML_SUPPORT
+ 
+ ParseNode *
+ Parser::endBracketedExpr()
+ {
+diff --git a/js/src/frontend/Parser.h b/js/src/frontend/Parser.h
+--- a/js/src/frontend/Parser.h
++++ b/js/src/frontend/Parser.h
+@@ -169,30 +169,32 @@ struct ParseContext                 /* t
+                                        and holds either |this| or one of
+                                        |this|'s descendents */
+ 
+   public:
+     OwnedAtomDefnMapPtr lexdeps;    /* unresolved lexical name dependencies */
+ 
+     ParseContext     *parent;       /* Enclosing function or global context.  */
+ 
+-    ParseNode       *innermostWith; /* innermost WITH parse node */
+-
+     FuncStmtSet     *funcStmts;     /* Set of (non-top-level) function statements
+                                        that will alias any top-level bindings with
+                                        the same name. */
+ 
+-    /*
+-     * Flags that are set for a short time during parsing to indicate context
+-     * or the presence of a code feature.
+-     */
+-    bool            hasReturnExpr:1; /* function has 'return <expr>;' */
+-    bool            hasReturnVoid:1; /* function has 'return;' */
++    // The following flags are set when a particular code feature is detected
++    // in a function.
++    bool            funHasReturnExpr:1; /* function has 'return <expr>;' */
++    bool            funHasReturnVoid:1; /* function has 'return;' */
+ 
+-    bool            inForInit:1;    /* parsing init expr of for; exclude 'in' */
++    // The following flags are set when parsing enters a particular region of
++    // source code, and cleared when that region is exited.
++    bool            parsingForInit:1;   /* true while parsing init expr of for;
++                                           exclude 'in' */
++    bool            parsingWith:1;  /* true while we are within a
++                                       with-statement or E4X filter-expression
++                                       in the current ParseContext chain */
+ 
+     // Set when parsing a declaration-like destructuring pattern.  This flag
+     // causes PrimaryExpr to create PN_NAME parse nodes for variable references
+     // which are not hooked into any definition's use chain, added to any tree
+     // context's AtomList, etc. etc.  CheckDestructuring will do that work
+     // later.
+     //
+     // The comments atop CheckDestructuring explain the distinction between
+@@ -295,18 +297,17 @@ struct Parser : private AutoGCRooter
+ #endif
+ 
+     /*
+      * Allocate a new parsed object or function container from
+      * cx->tempLifoAlloc.
+      */
+     ObjectBox *newObjectBox(JSObject *obj);
+ 
+-    FunctionBox *newFunctionBox(JSObject *obj, ParseNode *fn, ParseContext *pc,
+-                                StrictMode::StrictModeState sms);
++    FunctionBox *newFunctionBox(JSObject *obj, ParseContext *pc, StrictMode::StrictModeState sms);
+ 
+     /*
+      * Create a new function object given parse context (pc) and a name (which
+      * is optional if this is a function expression).
+      */
+     JSFunction *newFunction(ParseContext *pc, JSAtom *atom, FunctionSyntaxKind kind);
+ 
+     void trace(JSTracer *trc);
+@@ -419,17 +420,17 @@ struct Parser : private AutoGCRooter
+     ParseNode *memberExpr(bool allowCallSyntax);
+     ParseNode *primaryExpr(TokenKind tt, bool afterDoubleDot);
+     ParseNode *parenExpr(bool *genexp = NULL);
+ 
+     /*
+      * Additional JS parsers.
+      */
+     enum FunctionType { Getter, Setter, Normal };
+-    bool functionArguments(ParseNode **list, bool &hasRest);
++    bool functionArguments(ParseNode **list, ParseNode *funcpn, bool &hasRest);
+ 
+     ParseNode *functionDef(HandlePropertyName name, FunctionType type, FunctionSyntaxKind kind);
+ 
+     ParseNode *unaryOpExpr(ParseNodeKind kind, JSOp op);
+ 
+     ParseNode *condition();
+     ParseNode *comprehensionTail(ParseNode *kid, unsigned blockid, bool isGenexp,
+                                  ParseNodeKind kind = PNK_SEMI, JSOp op = JSOP_NOP);
+diff --git a/js/src/frontend/SharedContext.h b/js/src/frontend/SharedContext.h
+--- a/js/src/frontend/SharedContext.h
++++ b/js/src/frontend/SharedContext.h
+@@ -286,47 +286,36 @@ struct StmtInfoBase {
+ 
+     bool isTrying() const {
+         return STMT_TRY <= type && type <= STMT_SUBROUTINE;
+     }
+ };
+ 
+ struct FunctionBox : public ObjectBox
+ {
+-    ParseNode       *node;
+     FunctionBox     *siblings;
+     FunctionBox     *kids;
+-    FunctionBox     *parent;
+     Bindings        bindings;               /* bindings for this function */
+     size_t          bufStart;
+     size_t          bufEnd;
+-    uint16_t        level;
+     uint16_t        ndefaults;
+     StrictMode::StrictModeState strictModeState;
+-    bool            inLoop:1;               /* in a loop in parent function */
+     bool            inWith:1;               /* some enclosing scope is a with-statement
+                                                or E4X filter-expression */
+     bool            inGenexpLambda:1;       /* lambda from generator expression */
+ 
+     ContextFlags    cxFlags;
+ 
+-    FunctionBox(ObjectBox* traceListHead, JSObject *obj, ParseNode *fn, ParseContext *pc,
++    FunctionBox(ObjectBox* traceListHead, JSObject *obj, ParseContext *pc,
+                 StrictMode::StrictModeState sms);
+ 
+     bool funIsGenerator()        const { return cxFlags.funIsGenerator; }
+-    bool funHasExtensibleScope() const { return cxFlags.funHasExtensibleScope; }
+ 
+     JSFunction *function() const { return (JSFunction *) object; }
+ 
+-    /*
+-     * True if this function is inside the scope of a with-statement, an E4X
+-     * filter-expression, or a function that uses direct eval.
+-     */
+-    bool inAnyDynamicScope() const;
+-
+     void recursivelySetStrictMode(StrictMode::StrictModeState strictness);
+ };
+ 
+ // Push the C-stack-allocated struct at stmt onto the StmtInfoPC stack.
+ template <class ContextT>
+ void
+ PushStatement(ContextT *ct, typename ContextT::StmtInfo *stmt, StmtType type);
+ 
+diff --git a/js/src/tests/js1_5/extensions/toLocaleFormat-02.js b/js/src/tests/js1_5/extensions/toLocaleFormat-02.js
+--- a/js/src/tests/js1_5/extensions/toLocaleFormat-02.js
++++ b/js/src/tests/js1_5/extensions/toLocaleFormat-02.js
+@@ -1,9 +1,9 @@
+-// |reftest| fails-if(xulRuntime.OS=="WINNT")
++// |reftest| fails-if(xulRuntime.OS=="WINNT") skip-if(xulRuntime.OS=="WINNT"&&isDebugBuild)
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ //-----------------------------------------------------------------------------
+ var BUGNUMBER = 291494;
+ var summary = 'Date.prototype.toLocaleFormat extension';
+diff --git a/layout/style/nsStyleAnimation.cpp b/layout/style/nsStyleAnimation.cpp
+--- a/layout/style/nsStyleAnimation.cpp
++++ b/layout/style/nsStyleAnimation.cpp
+@@ -1,16 +1,17 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ /* Utilities for animation of computed style values */
+ 
+ #include "mozilla/Util.h"
++#include "mozilla/MathAlgorithms.h"
+ 
+ #include "nsStyleAnimation.h"
+ #include "nsCOMArray.h"
+ #include "nsIStyleRule.h"
+ #include "mozilla/css/StyleRule.h"
+ #include "nsString.h"
+ #include "nsStyleContext.h"
+ #include "nsStyleSet.h"
+@@ -237,43 +238,16 @@ ToPrimitive(nsCSSValue::Array* aArray)
+       break;
+     }
+     default:
+       arr = aArray;
+   }
+   return arr.forget();
+ }
+ 
+-// Greatest Common Divisor
+-static uint32_t
+-gcd(uint32_t a, uint32_t b)
+-{
+-  // Euclid's algorithm; O(N) in the worst case.  (There are better
+-  // ways, but we don't need them for stroke-dasharray animation.)
+-  NS_ABORT_IF_FALSE(a > 0 && b > 0, "positive numbers expected");
+-
+-  while (a != b) {
+-    if (a > b) {
+-      a = a - b;
+-    } else {
+-      b = b - a;
+-    }
+-  }
+-
+-  return a;
+-}
+-
+-// Least Common Multiple
+-static uint32_t
+-lcm(uint32_t a, uint32_t b)
+-{
+-  // Divide first to reduce overflow risk.
+-  return (a / gcd(a, b)) * b;
+-}
+-
+ inline void
+ nscoordToCSSValue(nscoord aCoord, nsCSSValue& aCSSValue)
+ {
+   aCSSValue.SetFloatValue(nsPresContext::AppUnitsToFloatCSSPixels(aCoord),
+                           eCSSUnit_Pixel);
+ }
+ 
+ // Like nsStyleCoord::Calc, but with length in float pixels instead of nscoord.
+@@ -1948,17 +1922,17 @@ nsStyleAnimation::AddWeighted(nsCSSPrope
+           (list1->mValue.GetUnit() != eCSSUnit_None || len1 == 1) &&
+           (list2->mValue.GetUnit() != eCSSUnit_None || len2 == 1),
+           "multi-value valuelist with 'none' as first element");
+         return false;
+       }
+ 
+       nsAutoPtr<nsCSSValueList> result;
+       nsCSSValueList **resultTail = getter_Transfers(result);
+-      for (uint32_t i = 0, i_end = lcm(len1, len2); i != i_end; ++i) {
++      for (uint32_t i = 0, i_end = EuclidLCM<uint32_t>(len1, len2); i != i_end; ++i) {
+         const nsCSSValue &v1 = list1->mValue;
+         const nsCSSValue &v2 = list2->mValue;
+         NS_ABORT_IF_FALSE(v1.GetUnit() == eCSSUnit_Number ||
+                           v1.GetUnit() == eCSSUnit_Percent, "unexpected");
+         NS_ABORT_IF_FALSE(v2.GetUnit() == eCSSUnit_Number ||
+                           v2.GetUnit() == eCSSUnit_Percent, "unexpected");
+         if (v1.GetUnit() != v2.GetUnit()) {
+           // Can't animate between lengths and percentages (until calc()).
+diff --git a/layout/svg/base/src/nsSVGUtils.cpp b/layout/svg/base/src/nsSVGUtils.cpp
+--- a/layout/svg/base/src/nsSVGUtils.cpp
++++ b/layout/svg/base/src/nsSVGUtils.cpp
+@@ -728,17 +728,17 @@ nsSVGUtils::ScheduleReflowSVG(nsIFrame *
+ 
+   // If this is triggered, the callers should be fixed to call us before
+   // ReflowSVG is called. If we try to mark dirty bits on frames while we're
+   // in the process of removing them, things will get messed up.
+   NS_ASSERTION(!OuterSVGIsCallingReflowSVG(aFrame),
+                "Do not call under nsISVGChildFrame::ReflowSVG!");
+ 
+   // We don't call nsSVGEffects::InvalidateRenderingObservers here because
+-  // we should only be called under InvalidateAndScheduleBoundsUpdate (which
++  // we should only be called under InvalidateAndScheduleReflowSVG (which
+   // calls InvalidateBounds) or nsSVGDisplayContainerFrame::InsertFrames
+   // (at which point the frame has no observers).
+ 
+   if (aFrame->GetStateBits() & NS_STATE_SVG_NONDISPLAY_CHILD) {
+     return;
+   }
+ 
+   if (aFrame->GetStateBits() &
+diff --git a/mfbt/MathAlgorithms.h b/mfbt/MathAlgorithms.h
+new file mode 100644
+--- /dev/null
++++ b/mfbt/MathAlgorithms.h
+@@ -0,0 +1,47 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++/* mfbt maths algorithms. */
++
++#ifndef mozilla_MathAlgorithms_h_
++#define mozilla_MathAlgorithms_h_
++
++#include "mozilla/Assertions.h"
++
++namespace mozilla {
++
++// Greatest Common Divisor
++template<typename IntegerType>
++MOZ_ALWAYS_INLINE IntegerType
++EuclidGCD(IntegerType a, IntegerType b)
++{
++  // Euclid's algorithm; O(N) in the worst case.  (There are better
++  // ways, but we don't need them for the current use of this algo.)
++  MOZ_ASSERT(a > 0);
++  MOZ_ASSERT(b > 0);
++
++  while (a != b) {
++    if (a > b) {
++      a = a - b;
++    } else {
++      b = b - a;
++    }
++  }
++
++  return a;
++}
++
++// Least Common Multiple
++template<typename IntegerType>
++MOZ_ALWAYS_INLINE IntegerType
++EuclidLCM(IntegerType a, IntegerType b)
++{
++  // Divide first to reduce overflow risk.
++  return (a / EuclidGCD(a, b)) * b;
++}
++
++} /* namespace mozilla */
++
++#endif  /* mozilla_MathAlgorithms_h_ */
+diff --git a/mfbt/exported_headers.mk b/mfbt/exported_headers.mk
+--- a/mfbt/exported_headers.mk
++++ b/mfbt/exported_headers.mk
+@@ -14,16 +14,17 @@ EXPORTS_mozilla += \
+   BloomFilter.h \
+   CheckedInt.h \
+   Constants.h \
+   FloatingPoint.h \
+   GuardObjects.h \
+   HashFunctions.h \
+   Likely.h \
+   LinkedList.h \
++  MathAlgorithms.h \
+   MSStdInt.h \
+   RangedPtr.h \
+   RefPtr.h \
+   Scoped.h \
+   StandardInteger.h \
+   SHA1.h \
+   ThreadLocal.h \
+   TypeTraits.h \
+diff --git a/mobile/android/app/mobile.js b/mobile/android/app/mobile.js
+--- a/mobile/android/app/mobile.js
++++ b/mobile/android/app/mobile.js
+@@ -421,17 +421,18 @@ pref("plugins.click_to_play", true);
+ // in getting the bits from the surface.
+ // Bug 756253
+ pref("plugins.use_placeholder", 0);
+ 
+ // product URLs
+ // The breakpad report server to link to in about:crashes
+ pref("breakpad.reportURL", "http://crash-stats.mozilla.com/report/index/");
+ pref("app.support.baseURL", "http://support.mozilla.org/1/mobile/%VERSION%/%OS%/%LOCALE%/");
+-pref("app.feedbackURL", "http://input.mozilla.com/feedback/");
++// Used to submit data to input from about:feedback
++pref("app.feedback.postURL", "http://m.input.mozilla.org/%LOCALE%/feedback");
+ pref("app.privacyURL", "http://www.mozilla.com/%LOCALE%/m/privacy.html");
+ pref("app.creditsURL", "http://www.mozilla.org/credits/");
+ pref("app.channelURL", "http://www.mozilla.org/%LOCALE%/firefox/channel/");
+ #if MOZ_UPDATE_CHANNEL == aurora
+ pref("app.releaseNotesURL", "http://www.mozilla.com/%LOCALE%/mobile/%VERSION%/auroranotes/");
+ #else
+ pref("app.releaseNotesURL", "http://www.mozilla.com/%LOCALE%/mobile/%VERSION%/releasenotes/");
+ #endif
+diff --git a/mobile/android/base/BrowserApp.java b/mobile/android/base/BrowserApp.java
+--- a/mobile/android/base/BrowserApp.java
++++ b/mobile/android/base/BrowserApp.java
+@@ -1,21 +1,28 @@
+ /* -*- Mode: Java; c-basic-offset: 4; tab-width: 4; indent-tabs-mode: nil; -*-
+  * This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ package org.mozilla.gecko;
+ 
++import org.mozilla.gecko.db.BrowserContract.Combined;
++import org.mozilla.gecko.db.BrowserDB;
++import org.mozilla.gecko.util.GeckoAsyncTask;
++import org.mozilla.gecko.util.GeckoBackgroundThread;
++
+ import org.json.JSONArray;
+ import org.json.JSONException;
+ import org.json.JSONObject;
+ 
+ import android.app.Activity;
++import android.content.SharedPreferences;
+ import android.content.Intent;
++import android.database.Cursor;
+ import android.graphics.Bitmap;
+ import android.graphics.BitmapFactory;
+ import android.graphics.drawable.BitmapDrawable;
+ import android.graphics.drawable.Drawable;
+ import android.net.Uri;
+ import android.os.Build;
+ import android.os.Bundle;
+ import android.util.Log;
+@@ -44,16 +51,19 @@ abstract public class BrowserApp extends
+     private AboutHomeContent mAboutHomeContent;
+ 
+     static Vector<MenuItem> sAddonMenuItems = new Vector<MenuItem>();
+ 
+     private PropertyAnimator mMainLayoutAnimator;
+ 
+     private FindInPageBar mFindInPageBar;
+ 
++    // We'll ask for feedback after the user launches the app this many times.
++    private static final int FEEDBACK_LAUNCH_COUNT = 10;
++
+     @Override
+     public void onTabChanged(Tab tab, Tabs.TabEvents msg, Object data) {
+         switch(msg) {
+             case LOCATION_CHANGE:
+                 if (Tabs.getInstance().isSelectedTab(tab)) {
+                     String url = tab.getURL();
+                     if (url.equals("about:home"))
+                         showAboutHome();
+@@ -183,23 +193,31 @@ abstract public class BrowserApp extends
+         if (mTabsPanel != null)
+             mTabsPanel.setTabsLayoutChangeListener(this);
+ 
+         mFindInPageBar = (FindInPageBar) findViewById(R.id.find_in_page);
+ 
+         if (savedInstanceState != null) {
+             mBrowserToolbar.setTitle(savedInstanceState.getString(SAVED_STATE_TITLE));
+         }
++
++        registerEventListener("Feedback:LastUrl");
++        registerEventListener("Feedback:OpenPlayStore");
++        registerEventListener("Feedback:MaybeLater");
+     }
+ 
+     @Override
+     public void onDestroy() {
+         super.onDestroy();
+         if (mAboutHomeContent != null)
+             mAboutHomeContent.onDestroy();
++
++        unregisterEventListener("Feedback:LastUrl");
++        unregisterEventListener("Feedback:OpenPlayStore");
++        unregisterEventListener("Feedback:MaybeLater");
+     }
+ 
+     @Override
+     public void onContentChanged() {
+         super.onContentChanged();
+         if (mAboutHomeContent != null)
+             mAboutHomeContent.onActivityContentChanged();
+     }
+@@ -333,16 +351,24 @@ abstract public class BrowserApp extends
+                 });
+             } else if (event.equals("Menu:Remove")) {
+                 final int id = message.getInt("id");
+                 mMainHandler.post(new Runnable() {
+                     public void run() {
+                         removeAddonMenuItem(id);
+                     }
+                 });
++            } else if (event.equals("Feedback:OpenPlayStore")) {
++                Intent intent = new Intent(Intent.ACTION_VIEW);
++                intent.setData(Uri.parse("market://details?id=" + getPackageName()));
++                startActivity(intent);
++            } else if (event.equals("Feedback:MaybeLater")) {
++                resetFeedbackLaunchCount();
++            } else if (event.equals("Feedback:LastUrl")) {
++                getLastUrl();
+             } else {
+                 super.handleMessage(event, message);
+             }
+         } catch (Exception e) {
+             Log.e(LOGTAG, "Exception handling message \"" + event + "\":", e);
+         }
+     }
+ 
+@@ -796,9 +822,79 @@ abstract public class BrowserApp extends
+                     Log.e(LOGTAG, "error building json arguments");
+                 }
+                 GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("DesktopMode:Change", args.toString()));
+                 return true;
+             default:
+                 return super.onOptionsItemSelected(item);
+         }
+     }
++
++    /*
++     * If the app has been launched a certain number of times, and we haven't asked for feedback before,
++     * open a new tab with about:feedback when launching the app from the icon shortcut.
++     */ 
++    @Override
++    protected void onNewIntent(Intent intent) {
++        super.onNewIntent(intent);
++
++        if (!Intent.ACTION_MAIN.equals(intent.getAction()))
++            return;
++
++        (new GeckoAsyncTask<Void, Void, Boolean>(mAppContext, GeckoAppShell.getHandler()) {
++            @Override
++            public synchronized Boolean doInBackground(Void... params) {
++                // Check to see how many times the app has been launched.
++                SharedPreferences settings = getPreferences(Activity.MODE_PRIVATE);
++                String keyName = getPackageName() + ".feedback_launch_count";
++                int launchCount = settings.getInt(keyName, 0);
++                if (launchCount >= FEEDBACK_LAUNCH_COUNT)
++                    return false;
++
++                // Increment the launch count and store the new value.
++                launchCount++;
++                settings.edit().putInt(keyName, launchCount).commit();
++
++                // If we've reached our magic number, show the feedback page.
++                return launchCount == FEEDBACK_LAUNCH_COUNT;
++            }
++
++            @Override
++            public void onPostExecute(Boolean shouldShowFeedbackPage) {
++                if (shouldShowFeedbackPage)
++                    loadUrlInTab("about:feedback");
++            }
++        }).execute();
++    }
++
++    private void resetFeedbackLaunchCount() {
++        GeckoBackgroundThread.post(new Runnable() {
++            @Override
++            public synchronized void run() {
++                SharedPreferences settings = getPreferences(Activity.MODE_PRIVATE);
++                settings.edit().putInt(getPackageName() + ".feedback_launch_count", 0).commit();
++            }
++        });
++    }
++
++    private void getLastUrl() {
++        (new GeckoAsyncTask<Void, Void, String>(mAppContext, GeckoAppShell.getHandler()) {
++            @Override
++            public synchronized String doInBackground(Void... params) {
++                // Get the most recent URL stored in browser history.
++                String url = "";
++                Cursor c = BrowserDB.getRecentHistory(getContentResolver(), 1);
++                if (c.moveToFirst()) {
++                    url = c.getString(c.getColumnIndexOrThrow(Combined.URL));
++                }
++                c.close();
++                return url;
++            }
++
++            @Override
++            public void onPostExecute(String url) {
++                // Don't bother sending a message if there is no URL.
++                if (url.length() > 0)
++                    GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Feedback:LastUrl", url));
++            }
++        }).execute();
++    }
+ }
+diff --git a/mobile/android/base/BrowserToolbar.java b/mobile/android/base/BrowserToolbar.java
+--- a/mobile/android/base/BrowserToolbar.java
++++ b/mobile/android/base/BrowserToolbar.java
+@@ -321,23 +321,23 @@ public class BrowserToolbar implements V
+         switch(msg) {
+             case TITLE:
+                 if (Tabs.getInstance().isSelectedTab(tab)) {
+                     setTitle(tab.getDisplayTitle());
+                 }
+                 break;
+             case START:
+                 if (Tabs.getInstance().isSelectedTab(tab)) {
+-                    setSecurityMode(tab.getSecurityMode());
+-                    setReaderMode(tab.getReaderEnabled());
+                     updateBackButton(tab.canDoBack());
+                     updateForwardButton(tab.canDoForward());
+                     Boolean showProgress = (Boolean)data;
+                     if (showProgress && tab.getState() == Tab.STATE_LOADING)
+                         setProgressVisibility(true);
++                    setSecurityMode(tab.getSecurityMode());
++                    setReaderMode(tab.getReaderEnabled());
+                 }
+                 break;
+             case STOP:
+                 if (Tabs.getInstance().isSelectedTab(tab)) {
+                     updateBackButton(tab.canDoBack());
+                     updateForwardButton(tab.canDoForward());
+                     setProgressVisibility(false);
+                 }
+@@ -637,19 +637,19 @@ public class BrowserToolbar implements V
+     }
+ 
+     public void refresh() {
+         Tab tab = Tabs.getInstance().getSelectedTab();
+         if (tab != null) {
+             String url = tab.getURL();
+             setTitle(tab.getDisplayTitle());
+             setFavicon(tab.getFavicon());
++            setProgressVisibility(tab.getState() == Tab.STATE_LOADING);
+             setSecurityMode(tab.getSecurityMode());
+             setReaderMode(tab.getReaderEnabled());
+-            setProgressVisibility(tab.getState() == Tab.STATE_LOADING);
+             setShadowVisibility((url == null) || !url.startsWith("about:"));
+             updateTabCount(Tabs.getInstance().getCount());
+             updateBackButton(tab.canDoBack());
+             updateForwardButton(tab.canDoForward());
+         }
+     }
+ 
+     public void destroy() {
+diff --git a/mobile/android/base/GeckoApp.java b/mobile/android/base/GeckoApp.java
+--- a/mobile/android/base/GeckoApp.java
++++ b/mobile/android/base/GeckoApp.java
+@@ -2140,21 +2140,21 @@ abstract public class GeckoApp
+         super.onDestroy();
+ 
+         if (mBatteryReceiver != null)
+             mBatteryReceiver.unregisterFor(mAppContext);
+ 
+         ((GeckoApplication) getApplication()).removeApplicationLifecycleCallbacks(this);
+     }
+ 
+-    private void registerEventListener(String event) {
++    protected void registerEventListener(String event) {
+         GeckoAppShell.getEventDispatcher().registerEventListener(event, this);
+     }
+ 
+-    private void unregisterEventListener(String event) {
++    protected void unregisterEventListener(String event) {
+         GeckoAppShell.getEventDispatcher().unregisterEventListener(event, this);
+     }
+ 
+     // Get a temporary directory, may return null
+     public static File getTempDirectory() {
+         File dir = mAppContext.getExternalFilesDir("temp");
+         return dir;
+     }
+diff --git a/mobile/android/base/GeckoAppShell.java b/mobile/android/base/GeckoAppShell.java
+--- a/mobile/android/base/GeckoAppShell.java
++++ b/mobile/android/base/GeckoAppShell.java
+@@ -580,22 +580,22 @@ public class GeckoAppShell
+     /*
+      *  The Gecko-side API: API methods that Gecko calls
+      */
+     public static void notifyIME(int type, int state) {
+         if (mInputConnection != null)
+             mInputConnection.notifyIME(type, state);
+     }
+ 
+-    public static void notifyIMEEnabled(int state, String typeHint,
++    public static void notifyIMEEnabled(int state, String typeHint, String modeHint,
+                                         String actionHint, boolean landscapeFS) {
+         // notifyIMEEnabled() still needs the landscapeFS parameter because it is called from JNI
+         // code that assumes it has the same signature as XUL Fennec's (which does use landscapeFS).
+         if (mInputConnection != null)
+-            mInputConnection.notifyIMEEnabled(state, typeHint, actionHint);
++            mInputConnection.notifyIMEEnabled(state, typeHint, modeHint, actionHint);
+     }
+ 
+     public static void notifyIMEChange(String text, int start, int end, int newEnd) {
+         if (mInputConnection != null)
+             mInputConnection.notifyIMEChange(text, start, end, newEnd);
+     }
+ 
+     // Called by AndroidBridge using JNI
+diff --git a/mobile/android/base/GeckoInputConnection.java b/mobile/android/base/GeckoInputConnection.java
+--- a/mobile/android/base/GeckoInputConnection.java
++++ b/mobile/android/base/GeckoInputConnection.java
+@@ -81,16 +81,17 @@ class GeckoInputConnection
+     private static final char UNICODE_SQUARE_ROOT               = '\u221a';
+     private static final char UNICODE_TRADEMARK_SIGN            = '\u2122';
+     private static final char UNICODE_WHITE_BULLET              = '\u25e6';
+     private static final char UNICODE_YEN_SIGN                  = '\u00a5';
+ 
+     private static final Timer mIMETimer = new Timer("GeckoInputConnection Timer");
+     private static int mIMEState;
+     private static String mIMETypeHint = "";
++    private static String mIMEModeHint = "";
+     private static String mIMEActionHint = "";
+ 
+     private String mCurrentInputMethod;
+ 
+     // Is a composition active?
+     private int mCompositionStart = NO_COMPOSITION_STRING;
+     private boolean mCommittingText;
+     private KeyCharacterMap mKeyCharacterMap;
+@@ -799,16 +800,30 @@ class GeckoInputConnection
+             outAttrs.inputType = InputType.TYPE_CLASS_DATETIME
+                                  | InputType.TYPE_DATETIME_VARIATION_NORMAL;
+         else if (mIMETypeHint.equalsIgnoreCase("date"))
+             outAttrs.inputType = InputType.TYPE_CLASS_DATETIME
+                                  | InputType.TYPE_DATETIME_VARIATION_DATE;
+         else if (mIMETypeHint.equalsIgnoreCase("time"))
+             outAttrs.inputType = InputType.TYPE_CLASS_DATETIME
+                                  | InputType.TYPE_DATETIME_VARIATION_TIME;
++        else if (mIMEModeHint.equalsIgnoreCase("numeric"))
++            outAttrs.inputType = InputType.TYPE_CLASS_NUMBER |
++                                 InputType.TYPE_NUMBER_FLAG_SIGNED |
++                                 InputType.TYPE_NUMBER_FLAG_DECIMAL;
++        else if (mIMEModeHint.equalsIgnoreCase("digit"))
++            outAttrs.inputType = InputType.TYPE_CLASS_NUMBER;
++        else if (mIMEModeHint.equalsIgnoreCase("uppercase"))
++            outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS;
++        else if (mIMEModeHint.equalsIgnoreCase("lowercase"))
++            outAttrs.inputType = InputType.TYPE_CLASS_TEXT; 
++        else if (mIMEModeHint.equalsIgnoreCase("titlecase"))
++            outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_CAP_WORDS;
++        else if (mIMEModeHint.equalsIgnoreCase("autocapitalized"))
++            outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_CAP_SENTENCES;
+ 
+         if (mIMEActionHint.equalsIgnoreCase("go"))
+             outAttrs.imeOptions = EditorInfo.IME_ACTION_GO;
+         else if (mIMEActionHint.equalsIgnoreCase("done"))
+             outAttrs.imeOptions = EditorInfo.IME_ACTION_DONE;
+         else if (mIMEActionHint.equalsIgnoreCase("next"))
+             outAttrs.imeOptions = EditorInfo.IME_ACTION_NEXT;
+         else if (mIMEActionHint.equalsIgnoreCase("search"))
+@@ -1025,27 +1040,28 @@ class GeckoInputConnection
+                         if (DEBUG)
+                             throw new IllegalArgumentException("Unexpected NOTIFY_IME=" + type);
+                         break;
+                 }
+             }
+         });
+     }
+ 
+-    public void notifyIMEEnabled(final int state, final String typeHint, final String actionHint) {
++    public void notifyIMEEnabled(final int state, final String typeHint, final String modeHint, final String actionHint) {
+         postToUiThread(new Runnable() {
+             public void run() {
+                 View v = getView();
+                 if (v == null)
+                     return;
+ 
+                 /* When IME is 'disabled', IME processing is disabled.
+                    In addition, the IME UI is hidden */
+                 mIMEState = state;
+                 mIMETypeHint = (typeHint == null) ? "" : typeHint;
++                mIMEModeHint = (modeHint == null) ? "" : modeHint;
+                 mIMEActionHint = (actionHint == null) ? "" : actionHint;
+                 IMEStateUpdater.enableIME();
+             }
+         });
+     }
+ 
+     public final void notifyIMEChange(final String text, final int start, final int end,
+                                       final int newEnd) {
+@@ -1436,19 +1452,20 @@ private static final class DebugGeckoInp
+     @Override
+     public void notifyIME(int type, int state) {
+         Log.d(LOGTAG, "IME: >notifyIME(type=" + type + ", state=" + state + ")");
+         GeckoApp.assertOnGeckoThread();
+         super.notifyIME(type, state);
+     }
+ 
+     @Override
+-    public void notifyIMEEnabled(int state, String typeHint, String actionHint) {
++    public void notifyIMEEnabled(int state, String typeHint, String modeHint, String actionHint) {
+         Log.d(LOGTAG, "IME: >notifyIMEEnabled(state=" + state + ", typeHint=\"" + typeHint
+-                      + "\", actionHint=\"" + actionHint + "\"");
++                      + "\", modeHint=\"" + modeHint + "\", actionHint=\""
++                      + actionHint + "\"");
+         GeckoApp.assertOnGeckoThread();
+         if (state < IME_STATE_DISABLED || state > IME_STATE_PLUGIN)
+             throw new IllegalArgumentException("Unexpected IMEState=" + state);
+-        super.notifyIMEEnabled(state, typeHint, actionHint);
++        super.notifyIMEEnabled(state, typeHint, modeHint, actionHint);
+     }
+ }
+ 
+ }
+diff --git a/mobile/android/base/SiteIdentityPopup.java b/mobile/android/base/SiteIdentityPopup.java
+--- a/mobile/android/base/SiteIdentityPopup.java
++++ b/mobile/android/base/SiteIdentityPopup.java
+@@ -149,17 +149,17 @@ public class SiteIdentityPopup extends P
+         int[] anchorLocation = new int[2];
+         v.getLocationOnScreen(anchorLocation);
+ 
+         int arrowWidth = mResources.getDimensionPixelSize(R.dimen.doorhanger_arrow_width);
+         int leftMargin = anchorLocation[0] + (v.getWidth() - arrowWidth) / 2;
+ 
+         int offset = 0;
+         if (GeckoApp.mAppContext.isTablet()) {
+-            int popupWidth = mResources.getDimensionPixelSize(R.dimen.site_identity_popup_width);
++            int popupWidth = mResources.getDimensionPixelSize(R.dimen.popup_width);
+             offset = 0 - popupWidth + arrowWidth*3/2 + v.getWidth()/2;
+         }
+ 
+         LayoutParams layoutParams = (LayoutParams) mArrow.getLayoutParams();
+         LayoutParams newLayoutParams = new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
+         newLayoutParams.setMargins(leftMargin, layoutParams.topMargin, 0, 0);
+         mArrow.setLayoutParams(newLayoutParams);
+ 
+diff --git a/mobile/android/base/resources/layout-large-v11/doorhangerpopup.xml b/mobile/android/base/resources/layout-large-v11/doorhangerpopup.xml
+--- a/mobile/android/base/resources/layout-large-v11/doorhangerpopup.xml
++++ b/mobile/android/base/resources/layout-large-v11/doorhangerpopup.xml
+@@ -1,23 +1,21 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <!-- This Source Code Form is subject to the terms of the Mozilla Public
+    - License, v. 2.0. If a copy of the MPL was not distributed with this
+    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
+ 
+ <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+-                android:layout_width="wrap_content"
++                android:layout_width="fill_parent"
+                 android:layout_height="wrap_content">
+ 
+-    <ScrollView android:layout_width="wrap_content"
++    <ScrollView android:layout_width="@dimen/popup_width"
+                 android:layout_height="wrap_content"
+                 android:layout_marginTop="24dip"
+                 android:layout_alignParentTop="true"
+-                android:minWidth="200dip"
+-                android:maxWidth="600dip"
+                 android:background="@drawable/doorhanger_popup_bg">
+ 
+         <LinearLayout android:id="@+id/doorhanger_container"
+                       android:layout_width="fill_parent"
+                       android:layout_height="wrap_content"
+                       android:orientation="vertical"/>
+ 
+     </ScrollView>
+diff --git a/mobile/android/base/resources/layout-large-v11/site_identity_popup.xml b/mobile/android/base/resources/layout-large-v11/site_identity_popup.xml
+--- a/mobile/android/base/resources/layout-large-v11/site_identity_popup.xml
++++ b/mobile/android/base/resources/layout-large-v11/site_identity_popup.xml
+@@ -2,17 +2,17 @@
+ <!-- This Source Code Form is subject to the terms of the Mozilla Public
+    - License, v. 2.0. If a copy of the MPL was not distributed with this
+    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
+ 
+ <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+                 android:layout_width="fill_parent"
+                 android:layout_height="wrap_content">
+ 
+-    <RelativeLayout android:layout_width="@dimen/site_identity_popup_width"
++    <RelativeLayout android:layout_width="@dimen/popup_width"
+                     android:layout_height="wrap_content"
+                     android:layout_marginTop="15dip"
+                     android:layout_alignParentTop="true"
+                     android:background="@drawable/doorhanger_popup_bg">
+ 
+       <LinearLayout android:id="@+id/identity_info"
+                     android:layout_width="fill_parent"
+                     android:layout_height="wrap_content"
+diff --git a/mobile/android/base/resources/values/dimens.xml b/mobile/android/base/resources/values/dimens.xml
+--- a/mobile/android/base/resources/values/dimens.xml
++++ b/mobile/android/base/resources/values/dimens.xml
+@@ -24,17 +24,17 @@
+     <dimen name="menu_item_row_width">240dp</dimen>
+     <dimen name="prompt_service_group_padding_size">32dp</dimen>
+     <dimen name="prompt_service_icon_size">72dp</dimen>
+     <dimen name="prompt_service_icon_text_padding">10dp</dimen>
+     <dimen name="prompt_service_left_right_text_with_icon_padding">10dp</dimen>
+     <dimen name="prompt_service_top_bottom_text_with_icon_padding">8dp</dimen>
+     <dimen name="remote_tab_child_row_height">54dp</dimen>
+     <dimen name="remote_tab_group_row_height">26dp</dimen>
+-    <dimen name="site_identity_popup_width">400dp</dimen>
++    <dimen name="popup_width">400dp</dimen>
+     <dimen name="tab_thumbnail_height">78dp</dimen>
+     <dimen name="tab_thumbnail_width">136dp</dimen>
+     <dimen name="tabs_list_divider_height">2dp</dimen>
+     <dimen name="tabs_counter_size">22sp</dimen>
+     <dimen name="text_selection_handle_width">30dp</dimen>
+     <dimen name="text_selection_handle_height">44dp</dimen>
+     <dimen name="text_selection_handle_shadow">2dp</dimen>
+     <dimen name="validation_message_height">50dp</dimen>
+diff --git a/mobile/android/chrome/content/aboutFeedback.xhtml b/mobile/android/chrome/content/aboutFeedback.xhtml
+new file mode 100644
+--- /dev/null
++++ b/mobile/android/chrome/content/aboutFeedback.xhtml
+@@ -0,0 +1,227 @@
++<?xml version="1.0" encoding="UTF-8"?>
++
++<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
++  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd" [
++<!ENTITY % brandDTD SYSTEM "chrome://branding/locale/brand.dtd" >
++%brandDTD;
++<!ENTITY % globalDTD SYSTEM "chrome://global/locale/global.dtd">
++%globalDTD;
++<!ENTITY % aboutFeedbackDTD SYSTEM "chrome://browser/locale/aboutFeedback.dtd" >
++%aboutFeedbackDTD;
++]>
++
++<!-- This Source Code Form is subject to the terms of the Mozilla Public
++   - License, v. 2.0. If a copy of the MPL was not distributed with this
++   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
++
++<html xmlns="http://www.w3.org/1999/xhtml">
++<head>
++  <title>&pageTitle;</title>
++  <meta name="viewport" content="width=device-width; user-scalable=0" />
++  <link rel="stylesheet" href="chrome://browser/skin/aboutFeedback.css" type="text/css"/>
++  <link rel="icon" type="image/png" href="chrome://branding/content/favicon32.png" />
++</head>
++
++<body dir="&locale.dir;" onload="init();" onunload="uninit();">
++
++  <section id="intro" active="true">
++    <h1 class="header">&intro.header;</h1>
++    <div class="message">&intro.message;</div>
++    <div class="link-box" onclick="switchSection('happy');">
++      <a>&intro.happyLink;</a>
++    </div>
++    <div class="link-box" onclick="switchSection('sad');">
++      <a>&intro.sadLink;</a>
++    </div>
++    <div class="link-box-bottom" onclick="switchSection('idea');">
++      <a>&intro.ideaLink;</a>
++    </div>
++    <div id="sumo-message" class="fine-print">&support.pre;<a id="sumo-link">&support.link;</a>&support.post;</div>
++  </section>
++
++  <section id="happy">
++    <h1 class="header">&happy.header;</h1>
++    <div class="message-box">
++      <div class="message">&happy.message;</div>
++      <div class="fine-print">&happy.finePrint;</div>
++    </div>
++    <div class="link-box-bottom" onclick="openPlayStore();">
++      <div class="stars"/>
++      <a>&happy.ratingLink;</a>
++    </div>
++    <div class="bottom-links">
++      <a onclick="maybeLater();">&happy.maybeLater;</a>
++      <a onclick="window.close();">&happy.noThanks;</a>
++    </div>
++  </section>
++
++  <section id="sad">
++    <form onsubmit="sendFeedback(event);">
++      <div class="message">&sad.message;</div>
++      <textarea class="description" placeholder="&sad.placeholder;" rows="8" required="true"/>
++      <div class="message">&sad.lastSite;</div>
++      <input id="last-url" type="url" placeholder="&sad.urlPlaceholder;"/>
++      <div class="fine-print">&feedback.privacy;</div>
++      <input class="send-feedback" type="submit" value="&feedback.send;"/>
++    </form>
++  </section>
++
++  <section id="idea">
++    <form onsubmit="sendFeedback(event);">
++      <div class="message">&idea.message;</div>
++      <textarea class="description" placeholder="&idea.placeholder;" rows="8" required="true"/>
++      <div class="fine-print">&feedback.privacy;</div>
++      <input class="send-feedback" type="submit" value="&feedback.send;"/>
++    </form>
++  </section>
++
++  <section id="thanks-sad">
++    <h1 class="header">&sad.thanksHeader;</h1>
++    <div class="message-box-bottom">
++      <div class="message">&sad.thanksMessageTop;</div>
++      <div class="message">&sad.thanksMessageBottom;</div>
++    </div>
++  </section>
++
++  <section id="thanks-idea">
++    <h1 class="header">&idea.thanksHeader;</h1>
++    <div class="message-box-bottom">
++      <div class="message">&idea.thanksMessageTop;</div>
++      <div class="message">&idea.thanksMessageBottom;</div>
++    </div>
++  </section>
++
++  <script type="application/javascript;version=1.8"><![CDATA[
++    let Cc = Components.classes;
++    let Ci = Components.interfaces;
++    let Cu = Components.utils;
++
++    Cu.import("resource://gre/modules/Services.jsm");
++
++    function dump(a) {
++      Services.console.logStringMessage(a);
++    }
++
++    function sendMessageToJava(aMessage) {
++      Cc["@mozilla.org/android/bridge;1"].getService(Ci.nsIAndroidBridge).
++                                          handleGeckoMessage(JSON.stringify(aMessage));
++    }
++
++    function init() {
++      let sumoLink = Services.urlFormatter.formatURLPref("app.support.baseURL");
++      document.getElementById("sumo-link").href = sumoLink;
++
++      window.addEventListener("popstate", function (aEvent) {
++        updateActiveSection(aEvent.state ? aEvent.state.section : "intro")
++      }, false);
++
++      // Fill "Last visited site" input with most recent history entry URL.
++      Services.obs.addObserver(function observer(aSubject, aTopic, aData) {
++        document.getElementById("last-url").value = aData;
++      }, "Feedback:LastUrl", false);
++
++      sendMessageToJava({
++        gecko: {
++          type: "Feedback:LastUrl"
++        }
++      });
++    }
++
++    function uninit() {
++      Services.obs.removeObserver(this, "Feedback:LastUrl");
++    }
++
++    function switchSection(aSection) {
++      history.pushState({ section: aSection }, aSection);
++      updateActiveSection(aSection);
++    }
++
++    function updateActiveSection(aSection) {
++      document.querySelector("section[active]").removeAttribute("active");
++      document.getElementById(aSection).setAttribute("active", true);
++    }
++
++    function openPlayStore() {
++      sendMessageToJava({
++        gecko: {
++          type: "Feedback:OpenPlayStore"
++        }
++      });
++
++      window.close();
++    }
++
++    function maybeLater() {
++      window.close();
++
++      sendMessageToJava({
++        gecko: {
++          type: "Feedback:MaybeLater"
++        }
++      });
++    }
++
++    function sendFeedback(aEvent) {
++      // Prevent the page from reloading.
++      aEvent.preventDefault();
++
++      let section = history.state.section;
++
++      // Sanity check.
++      if (section != "sad" && section != "idea") {
++        Cu.reportError("Trying to send feedback from an invalid section: " + section);
++        return;
++      }
++
++      let sectionElement = document.getElementById(section);
++      let descriptionElement = sectionElement.querySelector(".description");
++
++      // Bail if the description value isn't valid. HTML5 form validation will take care
++      // of showing an error message for us.
++      if (!descriptionElement.validity.valid)
++        return;
++
++      let data = new FormData();
++      data.append("description", descriptionElement.value);
++
++      if (section == "sad") {
++        data.append("_type", 2);
++
++        let urlElement = document.getElementById("last-url");
++        // Bail if the URL value isn't valid. HTML5 form validation will take care
++        // of showing an error message for us.
++        if (!urlElement.validity.valid)
++          return;
++
++        // Only send a URL string if the user provided one.
++        if (urlElement.value) {
++          data.append("add_url", true);
++          data.append("url", urlElement.value);
++        }
++      } else {
++        // Otherwise we're in the "idea" section.
++        data.append("_type", 3);        
++      }
++
++      let sysInfo = Cc["@mozilla.org/system-info;1"].getService(Ci.nsIPropertyBag2);
++      data.append("device", sysInfo.get("device"));
++      data.append("manufacturer", sysInfo.get("manufacturer"));
++
++      let req = new XMLHttpRequest();
++      req.addEventListener("error", function() {
++        Cu.reportError("Error sending feedback to input.mozilla.org: " + req.statusText);
++      }, false);
++      req.addEventListener("abort", function() {
++        Cu.reportError("Aborted sending feedback to input.mozilla.org: " + req.statusText);
++      }, false);
++
++      let postURL = Services.urlFormatter.formatURLPref("app.feedback.postURL");
++      req.open("POST", postURL, true);
++      req.send(data);
++
++      switchSection("thanks-" + section);
++    }
++  ]]></script>
++
++</body>
++</html>
+diff --git a/mobile/android/chrome/jar.mn b/mobile/android/chrome/jar.mn
+--- a/mobile/android/chrome/jar.mn
++++ b/mobile/android/chrome/jar.mn
+@@ -9,16 +9,17 @@ chrome.jar:
+ 
+ * content/about.xhtml                  (content/about.xhtml)
+   content/config.xhtml                 (content/config.xhtml)
+   content/aboutAddons.xhtml            (content/aboutAddons.xhtml)
+   content/aboutAddons.js               (content/aboutAddons.js)
+   content/aboutCertError.xhtml         (content/aboutCertError.xhtml)
+   content/aboutDownloads.xhtml         (content/aboutDownloads.xhtml)
+   content/aboutDownloads.js            (content/aboutDownloads.js)
++  content/aboutFeedback.xhtml          (content/aboutFeedback.xhtml)
+   content/aboutReader.html             (content/aboutReader.html)
+   content/aboutReaderContent.html      (content/aboutReaderContent.html)
+   content/aboutReader.js               (content/aboutReader.js)
+   content/Readability.js               (content/Readability.js)
+   content/JSDOMParser.js               (content/JSDOMParser.js)
+   content/readerWorker.js              (content/readerWorker.js)
+   content/aboutHome.xhtml              (content/aboutHome.xhtml)
+ * content/aboutRights.xhtml            (content/aboutRights.xhtml)
+diff --git a/mobile/android/components/AboutRedirector.js b/mobile/android/components/AboutRedirector.js
+--- a/mobile/android/components/AboutRedirector.js
++++ b/mobile/android/components/AboutRedirector.js
+@@ -63,16 +63,20 @@ let modules = {
+     uri: "chrome://browser/content/aboutReader.html",
+     privileged: true,
+     hide: true
+   },
+   readercontent: {
+     uri: "chrome://browser/content/aboutReaderContent.html",
+     privileged: false,
+     hide: true
++  },
++  feedback: {
++    uri: "chrome://browser/content/aboutFeedback.xhtml",
++    privileged: true
+   }
+ }
+ 
+ function AboutRedirector() {}
+ AboutRedirector.prototype = {
+   QueryInterface: XPCOMUtils.generateQI([Ci.nsIAboutModule]),
+   classID: Components.ID("{322ba47e-7047-4f71-aebf-cb7d69325cd9}"),
+ 
+diff --git a/mobile/android/components/MobileComponents.manifest b/mobile/android/components/MobileComponents.manifest
+--- a/mobile/android/components/MobileComponents.manifest
++++ b/mobile/android/components/MobileComponents.manifest
+@@ -6,16 +6,17 @@ contract @mozilla.org/network/protocol/a
+ contract @mozilla.org/network/protocol/about;1?what=empty {322ba47e-7047-4f71-aebf-cb7d69325cd9}
+ contract @mozilla.org/network/protocol/about;1?what=rights {322ba47e-7047-4f71-aebf-cb7d69325cd9}
+ contract @mozilla.org/network/protocol/about;1?what=certerror {322ba47e-7047-4f71-aebf-cb7d69325cd9}
+ contract @mozilla.org/network/protocol/about;1?what=home {322ba47e-7047-4f71-aebf-cb7d69325cd9}
+ contract @mozilla.org/network/protocol/about;1?what=apps {322ba47e-7047-4f71-aebf-cb7d69325cd9}
+ contract @mozilla.org/network/protocol/about;1?what=downloads {322ba47e-7047-4f71-aebf-cb7d69325cd9}
+ contract @mozilla.org/network/protocol/about;1?what=reader {322ba47e-7047-4f71-aebf-cb7d69325cd9}
+ contract @mozilla.org/network/protocol/about;1?what=readercontent {322ba47e-7047-4f71-aebf-cb7d69325cd9}
++contract @mozilla.org/network/protocol/about;1?what=feedback {322ba47e-7047-4f71-aebf-cb7d69325cd9}
+ #ifdef MOZ_SAFE_BROWSING
+ contract @mozilla.org/network/protocol/about;1?what=blocked {322ba47e-7047-4f71-aebf-cb7d69325cd9}
+ #endif
+ 
+ # DirectoryProvider.js
+ component {ef0f7a87-c1ee-45a8-8d67-26f586e46a4b} DirectoryProvider.js
+ contract @mozilla.org/browser/directory-provider;1 {ef0f7a87-c1ee-45a8-8d67-26f586e46a4b}
+ category xpcom-directory-providers browser-directory-provider @mozilla.org/browser/directory-provider;1
+diff --git a/mobile/android/locales/en-US/chrome/aboutFeedback.dtd b/mobile/android/locales/en-US/chrome/aboutFeedback.dtd
+new file mode 100644
+--- /dev/null
++++ b/mobile/android/locales/en-US/chrome/aboutFeedback.dtd
+@@ -0,0 +1,49 @@
++<!-- This Source Code Form is subject to the terms of the Mozilla Public
++   - License, v. 2.0. If a copy of the MPL was not distributed with this
++   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
++
++<!ENTITY pageTitle                 "&brandShortName; Feedback">
++
++<!ENTITY intro.header              "Have a minute?">
++<!ENTITY intro.message             "Tell us what you think about &brandShortName; for Android so far.">
++<!ENTITY intro.happyLink           "I love it">
++<!ENTITY intro.sadLink             "I ran into some problems">
++<!ENTITY intro.ideaLink            "I have an idea">
++
++<!-- LOCALIZATION NOTE (support.pre): Include a trailing space as needed. -->
++<!-- LOCALIZATION NOTE (support.link): Avoid leading/trailing spaces, this text is a link. -->
++<!-- LOCALIZATION NOTE (support.post): Include a starting space as needed. -->
++<!ENTITY support.pre               "If you need help or have a problem with &brandShortName;, please visit ">
++<!ENTITY support.link              "&brandShortName; Support">
++<!ENTITY support.post              ".">
++
++<!ENTITY happy.header              "That's great to hear!">
++<!ENTITY happy.message             "Want to share the love by giving us a 5 star rating on Google Play?">
++<!ENTITY happy.finePrint           "It takes less than a minute and feels great.">
++<!ENTITY happy.ratingLink          "Yes, go to Google Play">
++<!ENTITY happy.maybeLater          "Maybe Later">
++<!ENTITY happy.noThanks            "No thanks">
++
++<!ENTITY sad.message               "We’re sorry that you had some problems with &brandShortName;. Please tell us what happened so that we can fix it.">
++<!ENTITY sad.placeholder           "Enter your feedback here">
++<!ENTITY sad.lastSite              "Last visited site (optional)">
++<!-- LOCALIZATION NOTE (sad.urlPlaceholder): Placeholder text that appears in "Last visited site" input box when there is no text. -->
++<!ENTITY sad.urlPlaceholder        "http://">
++<!ENTITY sad.thanksHeader          "Thanks for letting us know.">
++
++<!-- LOCALIZATION NOTE (sad.thanksMessageTop, sad.thanksMessageBottom): These two
++     strings will appear as separate paragraphs but make up one message. -->
++<!ENTITY sad.thanksMessageTop      "We’re always working to make &brandShortName; better. Rest assured that real people will look at your feedback and do their very best to resolve your issue.">
++<!ENTITY sad.thanksMessageBottom   "Or else.">
++
++<!ENTITY idea.message              "We love hearing your ideas! Please share your thoughts below. (Just the ones about &brandShortName;, please.)">
++<!ENTITY idea.placeholder          "Enter your idea here">
++<!ENTITY idea.thanksHeader         "Thanks!">
++
++<!-- LOCALIZATION NOTE (idea.thanksMessageTop, idea.thanksMessageBottom): These two
++     strings will appear as separate paragraphs but make up one message. -->
++<!ENTITY idea.thanksMessageTop     "We appreciate you taking the time to share your thoughts. We’re always working to make &brandShortName; better and contributions like yours can lead to great things.">
++<!ENTITY idea.thanksMessageBottom  "You can't see it, but we're giving you a high five right now.">
++
++<!ENTITY feedback.privacy          "For your privacy, please don't include any personally indentifiable information in your feedback.">
++<!ENTITY feedback.send             "Send Feedback">
+diff --git a/mobile/android/locales/jar.mn b/mobile/android/locales/jar.mn
+--- a/mobile/android/locales/jar.mn
++++ b/mobile/android/locales/jar.mn
+@@ -9,16 +9,17 @@
+   locale/@AB_CD@/browser/about.dtd                (%chrome/about.dtd)
+   locale/@AB_CD@/browser/aboutAddons.dtd          (%chrome/aboutAddons.dtd)
+   locale/@AB_CD@/browser/aboutAddons.properties   (%chrome/aboutAddons.properties)
+   locale/@AB_CD@/browser/aboutApps.dtd            (%chrome/aboutApps.dtd)
+   locale/@AB_CD@/browser/aboutApps.properties     (%chrome/aboutApps.properties)
+   locale/@AB_CD@/browser/aboutCertError.dtd       (%chrome/aboutCertError.dtd)
+   locale/@AB_CD@/browser/aboutDownloads.dtd       (%chrome/aboutDownloads.dtd)
+   locale/@AB_CD@/browser/aboutDownloads.properties (%chrome/aboutDownloads.properties)
++  locale/@AB_CD@/browser/aboutFeedback.dtd        (%chrome/aboutFeedback.dtd)
+   locale/@AB_CD@/browser/aboutReader.properties   (%chrome/aboutReader.properties)
+   locale/@AB_CD@/browser/browser.properties       (%chrome/browser.properties)
+   locale/@AB_CD@/browser/config.dtd               (%chrome/config.dtd)
+   locale/@AB_CD@/browser/config.properties        (%chrome/config.properties)
+   locale/@AB_CD@/browser/localepicker.properties  (%chrome/localepicker.properties)
+   locale/@AB_CD@/browser/aboutHome.dtd            (%chrome/aboutHome.dtd)
+   locale/@AB_CD@/browser/checkbox.dtd             (%chrome/checkbox.dtd)
+   locale/@AB_CD@/browser/notification.dtd         (%chrome/notification.dtd)
+diff --git a/mobile/android/themes/core/aboutFeedback.css b/mobile/android/themes/core/aboutFeedback.css
+new file mode 100644
+--- /dev/null
++++ b/mobile/android/themes/core/aboutFeedback.css
+@@ -0,0 +1,129 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++body {
++  -moz-text-size-adjust: none;
++  font-family: Roboto,"Droid Sans",helvetica,arial,clean,sans-serif;
++  font-size: 14px;
++  color: #222;
++  background-image: url("chrome://browser/skin/images/about-bg-lightblue.png");
++  padding: 40px 10px 10px 10px;
++}
++
++a {
++  color: #004b98;
++}
++
++section {
++  max-width: 500px;
++  margin-left: auto;
++  margin-right: auto;
++}
++
++section:not([active]) {
++  display: none;
++}
++
++.header {
++  font-size: 24px;
++  text-align: center;
++  margin-top: 20px;
++}
++
++.message-box,
++.message-box-bottom,
++.link-box,
++.link-box-bottom {
++  background-color: #e4e9ee;
++  padding: 15px;
++}
++
++.message-box,
++.link-box {
++  border-bottom: 1px solid #c8cdd4;
++}
++
++.message-box-bottom,
++.link-box-bottom {
++  border-bottom: 2px solid #c8cdd4;
++  margin-bottom: 10px;   
++}
++
++.link-box,
++.link-box-bottom {
++  text-align: center;
++}
++
++.link-box:active,
++.link-box-bottom:active {
++  background-color: #a7b0b8;
++}
++
++.message {
++  margin-bottom: 10px;
++}
++
++.fine-print {
++  font-size: 12px;
++  color: #666;
++}
++
++.stars {
++  width: 80px;
++  height: 10px;
++  margin: -20px auto 10px auto;
++  background-image: url("chrome://browser/skin/images/5stars.png");
++  background-size: 64px 10px;
++  background-position: center;
++  background-repeat: no-repeat;
++  background-color: #e4e9ee;
++}
++
++.link-box-bottom:active > .stars {
++  background-color: transparent;
++}
++
++.bottom-links {
++  text-align: center;
++  position: absolute;
++  left: 0;
++  bottom: 40px;
++  width: 100%;
++}
++
++.bottom-links > a {
++  margin: 0 25px;
++  text-decoration: underline;
++}
++
++#sumo-message {
++  position: absolute;
++  bottom: 20px;
++  color: #444;
++  -moz-padding-end: 30px;
++}
++
++.description,
++#last-url {
++  font-family: Roboto,"Droid Sans",helvetica,arial,clean,sans-serif;
++  font-size: 14px;
++  margin-bottom: 10px;
++  padding: 5px;
++  width: -moz-calc(100% - 10px);
++}
++
++.send-feedback {
++  margin-top: 10px;
++  padding: 10px;
++  font-size: 16px;
++  width: 100%;
++  background-image: -moz-linear-gradient(rgb(87,94,102), rgb(71,77,83) 90%, rgb(45,49,53));
++  border-radius: 4px;
++  border-width: 0;
++  color: #fff;
++}
++
++.send-feedback:active {
++  background-image: -moz-linear-gradient(rgb(138,143,148), rgb(127,130,135) 90%, rgb(108,111,114));
++}
+diff --git a/mobile/android/themes/core/images/5stars.png b/mobile/android/themes/core/images/5stars.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..7fc20b45011abdc8d36be4b0e5e8aa8236cfc6cc
+GIT binary patch
+literal 2175
+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
+V&_i85SFHLap!x=ptGwe5{tK)?b&dc4
+
+diff --git a/mobile/android/themes/core/images/about-bg-lightblue.png b/mobile/android/themes/core/images/about-bg-lightblue.png
+index 56fd38099cc5142d6a704bc02035b04fe18735ac..20660a6c846aee7fb10775998b958cacf34dcac8
+GIT binary patch
+literal 4684
+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
+
+diff --git a/mobile/android/themes/core/jar.mn b/mobile/android/themes/core/jar.mn
+--- a/mobile/android/themes/core/jar.mn
++++ b/mobile/android/themes/core/jar.mn
+@@ -6,29 +6,31 @@
+ 
+ chrome.jar:
+ % skin browser classic/1.0 %skin/
+   skin/aboutPage.css                        (aboutPage.css)
+   skin/about.css                            (about.css)
+   skin/aboutAddons.css                      (aboutAddons.css)
+   skin/aboutApps.css                        (aboutApps.css)
+ * skin/aboutDownloads.css                   (aboutDownloads.css)
++  skin/aboutFeedback.css                    (aboutFeedback.css)
+   skin/aboutReader.css                      (aboutReader.css)
+   skin/aboutReaderContent.css               (aboutReaderContent.css)
+ * skin/browser.css                          (browser.css)
+ * skin/content.css                          (content.css)
+   skin/config.css                           (config.css)
+   skin/touchcontrols.css                    (touchcontrols.css)
+   skin/netError.css                         (netError.css)
+ % override chrome://global/skin/about.css chrome://browser/skin/about.css
+ % override chrome://global/skin/media/videocontrols.css chrome://browser/skin/touchcontrols.css
+ % override chrome://global/skin/netError.css chrome://browser/skin/netError.css
+ 
+   skin/fonts/opensans-regular.ttf           (fonts/opensans-regular.ttf)
+   skin/fonts/opensans-light.ttf             (fonts/opensans-light.ttf)
++  skin/images/5stars.png                    (images/5stars.png)
+   skin/images/addons-32.png                 (images/addons-32.png)
+   skin/images/arrowleft-16.png              (images/arrowleft-16.png)
+   skin/images/arrowright-16.png             (images/arrowright-16.png)
+   skin/images/arrowdown-16.png              (images/arrowdown-16.png)
+   skin/images/checkbox_checked.png          (images/checkbox_checked.png)
+   skin/images/checkbox_checked_disabled.png (images/checkbox_checked_disabled.png)
+   skin/images/checkbox_checked_pressed.png  (images/checkbox_checked_pressed.png)
+   skin/images/checkbox_unchecked.png          (images/checkbox_unchecked.png)
+diff --git a/modules/libpref/src/init/all.js b/modules/libpref/src/init/all.js
+--- a/modules/libpref/src/init/all.js
++++ b/modules/libpref/src/init/all.js
+@@ -226,32 +226,29 @@ pref("gfx.font_rendering.harfbuzz.script
+ #endif
+ #endif
+ 
+ #ifdef XP_WIN
+ pref("gfx.font_rendering.directwrite.enabled", false);
+ pref("gfx.font_rendering.directwrite.use_gdi_table_loading", true);
+ #endif
+ 
++pref("gfx.canvas.azure.enabled", true);
+ #ifdef XP_WIN
+-pref("gfx.canvas.azure.enabled", true);
+ // comma separated list of backends to use in order of preference
+ // e.g., pref("gfx.canvas.azure.backends", "direct2d,skia,cairo");
+ pref("gfx.canvas.azure.backends", "direct2d,cairo");
+ pref("gfx.content.azure.enabled", true);
+ #else
+ #ifdef XP_MACOSX
+-pref("gfx.canvas.azure.enabled", true);
+ pref("gfx.canvas.azure.backends", "cg");
+ #else
+ #ifdef ANDROID
+-pref("gfx.canvas.azure.enabled", true);
+ pref("gfx.canvas.azure.backends", "cairo");
+ #else
+-pref("gfx.canvas.azure.enabled", false);
+ pref("gfx.canvas.azure.backends", "cairo");
+ #endif
+ #endif
+ #endif
+ 
+ #ifdef ANDROID
+ pref("gfx.textures.poweroftwo.force-enabled", false);
+ #endif
+diff --git a/toolkit/components/social/MozSocialAPI.jsm b/toolkit/components/social/MozSocialAPI.jsm
+--- a/toolkit/components/social/MozSocialAPI.jsm
++++ b/toolkit/components/social/MozSocialAPI.jsm
+@@ -4,17 +4,17 @@
+ 
+ const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
+ 
+ Cu.import("resource://gre/modules/Services.jsm");
+ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ 
+ XPCOMUtils.defineLazyModuleGetter(this, "SocialService", "resource://gre/modules/SocialService.jsm");
+ 
+-const EXPORTED_SYMBOLS = ["MozSocialAPI"];
++const EXPORTED_SYMBOLS = ["MozSocialAPI", "openChatWindow"];
+ 
+ var MozSocialAPI = {
+   _enabled: false,
+   _everEnabled: false,
+   set enabled(val) {
+     let enable = !!val;
+     if (enable == this._enabled) {
+       return;
+@@ -96,25 +96,16 @@ function attachToWindow(provider, target
+     hasBeenIdleFor: {
+       enumerable: true,
+       configurable: true,
+       writable: true,
+       value: function() {
+         return false;
+       }
+     },
+-    openServiceWindow: {
+-      enumerable: true,
+-      configurable: true,
+-      writable: true,
+-      value: function(toURL, name, options) {
+-        let url = targetWindow.document.documentURIObject.resolve(toURL);
+-        return openServiceWindow(provider, targetWindow, url, name, options);
+-      }
+-    },
+     openChatWindow: {
+       enumerable: true,
+       configurable: true,
+       writable: true,
+       value: function(toURL, callback) {
+         let url = targetWindow.document.documentURIObject.resolve(toURL);
+         openChatWindow(getChromeWindow(targetWindow), provider, url, callback);
+       }
+@@ -190,66 +181,28 @@ function getChromeWindow(contentWin) {
+ function ensureProviderOrigin(provider, url) {
+   // resolve partial URLs and check prePath matches
+   let uri;
+   let fullURL;
+   try {
+     fullURL = Services.io.newURI(provider.origin, null, null).resolve(url);
+     uri = Services.io.newURI(fullURL, null, null);
+   } catch (ex) {
+-    Cu.reportError("openServiceWindow: failed to resolve window URL: " + url + "; " + ex);
++    Cu.reportError("mozSocial: failed to resolve window URL: " + url + "; " + ex);
+     return null;
+   }
+ 
+   if (provider.origin != uri.prePath) {
+-    Cu.reportError("openServiceWindow: unable to load new location, " +
++    Cu.reportError("mozSocial: unable to load new location, " +
+                    provider.origin + " != " + uri.prePath);
+     return null;
+   }
+   return fullURL;
+ }
+ 
+-function openChatWindow(chromeWindow, provider, url, callback) {
++function openChatWindow(chromeWindow, provider, url, callback, mode) {
+   if (!chromeWindow.SocialChatBar)
+     return;
+   let fullURL = ensureProviderOrigin(provider, url);
+   if (!fullURL)
+     return;
+-  chromeWindow.SocialChatBar.newChat(provider, fullURL, callback);
++  chromeWindow.SocialChatBar.openChat(provider, fullURL, callback, mode);
+ }
+-
+-function openServiceWindow(provider, contentWindow, url, name, options) {
+-  // resolve partial URLs and check prePath matches
+-  let fullURL = ensureProviderOrigin(provider, url);
+-  if (!fullURL)
+-    return null;
+-
+-  let windowName = provider.origin + name;
+-  let chromeWindow = Services.ww.getWindowByName(windowName, null);
+-  let tabbrowser = chromeWindow && chromeWindow.gBrowser;
+-  if (tabbrowser &&
+-      tabbrowser.selectedBrowser.getAttribute("origin") == provider.origin) {
+-    return tabbrowser.contentWindow;
+-  }
+-
+-  let serviceWindow = contentWindow.openDialog(fullURL, windowName,
+-                                               "chrome=no,dialog=no" + options);
+-
+-  // Get the newly opened window's containing XUL window
+-  chromeWindow = getChromeWindow(serviceWindow);
+-
+-  // set the window's name and origin attribute on its browser, so that it can
+-  // be found via getWindowByName
+-  chromeWindow.name = windowName;
+-  chromeWindow.gBrowser.selectedBrowser.setAttribute("origin", provider.origin);
+-
+-  // disable global history for the new window.
+-  chromeWindow.gBrowser.docShell.QueryInterface(Components.interfaces.nsIDocShellHistory).useGlobalHistory = false;
+-
+-  // we dont want the default title the browser produces, we'll fixup whenever
+-  // it changes.
+-  serviceWindow.addEventListener("DOMTitleChanged", function() {
+-    let sep = xulWindow.document.documentElement.getAttribute("titlemenuseparator");
+-    xulWindow.document.title = provider.name + sep + serviceWindow.document.title;
+-  });
+-
+-  return serviceWindow;
+-}
+diff --git a/toolkit/components/social/WorkerAPI.jsm b/toolkit/components/social/WorkerAPI.jsm
+--- a/toolkit/components/social/WorkerAPI.jsm
++++ b/toolkit/components/social/WorkerAPI.jsm
+@@ -6,16 +6,17 @@
+ 
+ "use strict";
+ 
+ const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
+ Cu.import("resource://gre/modules/Services.jsm");
+ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ 
+ XPCOMUtils.defineLazyModuleGetter(this, "getFrameWorkerHandle", "resource://gre/modules/FrameWorker.jsm");
++XPCOMUtils.defineLazyModuleGetter(this, "openChatWindow", "resource://gre/modules/MozSocialAPI.jsm");
+ 
+ const EXPORTED_SYMBOLS = ["WorkerAPI"];
+ 
+ function WorkerAPI(provider, port) {
+   if (!port)
+     throw new Error("Can't initialize WorkerAPI with a null port");
+ 
+   this._provider = provider;
+@@ -65,39 +66,61 @@ WorkerAPI.prototype = {
+       cookies.forEach(function(aCookie) {
+         let [name, value] = aCookie.split("=");
+         results.push({name: unescape(name.trim()),
+                       value: unescape(value.trim())});
+       });
+       this._port.postMessage({topic: "social.cookies-get-response",
+                               data: results});
+     },
+-    
+-    // XXX backwards compat for existing providers, remove these eventually
+-    "social.ambient-notification-area": function (data) {
+-      // replaced with social.user-profile
+-      // handle the provider icon and user profile for the primary provider menu
+-      if (data.background) {
+-        // backwards compat
+-        try {
+-          data.iconURL = /url\((['"]?)(.*)(\1)\)/.exec(data.background)[2];
+-        } catch(e) {
+-          data.iconURL = data.background;
++    'social.request-chat': function(data) {
++      let xulWindow = Services.wm.getMostRecentWindow("navigator:browser").getTopWin();
++      openChatWindow(xulWindow, this._provider, data, null, "minimized");
++    },
++    'social.notification-create': function(data) {
++      let port = this._port;
++      let provider = this._provider;
++      let {id, type, icon, body, action, actionArgs} = data;
++      let alertsService = Cc["@mozilla.org/alerts-service;1"]
++                              .getService(Ci.nsIAlertsService);
++      function listener(subject, topic, data) {
++        if (topic === "alertclickcallback") {
++          // we always post back the click
++          port.postMessage({topic: "social.notification-action",
++                            data: {id: id,
++                                   action: action,
++                                   actionArgs: actionArgs}});
++          switch (action) {
++            case "link":
++              // if there is a url, make it open a tab
++              if (actionArgs.toURL) {
++                try {
++                  let pUri = Services.io.newURI(provider.origin, null, null);
++                  let nUri = Services.io.newURI(pUri.resolve(actionArgs.toURL),
++                                                null, null);
++                  // fixup
++                  if (nUri.scheme != pUri.scheme)
++                    nUri.scheme = pUri.scheme;
++                  if (nUri.prePath == provider.origin) {
++                    let xulWindow = Services.wm.getMostRecentWindow("navigator:browser");
++                    xulWindow.openUILink(nUri.spec);
++                  }
++                } catch(e) {
++                  Cu.reportError("social.notification-create error: "+e);
++                }
++              }
++              break;
++            default:
++              break;
++          }
+         }
+       }
+-
+-      this._provider.updateUserProfile(data);
++      alertsService.showAlertNotification(icon,
++                                          this._provider.name, // title
++                                          body,
++                                          !!action, // text clickable if an
++                                                    // action was provided.
++                                          null,
++                                          listener,
++                                          type); 
+     },
+-    "social.ambient-notification-update": function (data) {
+-      // replaced with social.ambient-notification
+-      // handle the provider icon and user profile for the primary provider menu
+-      if (data.background) {
+-        // backwards compat
+-        try {
+-          data.iconURL = /url\((['"]?)(.*)(\1)\)/.exec(data.background)[2];
+-        } catch(e) {
+-          data.iconURL = data.background;
+-        }
+-      }
+-      this._provider.setAmbientNotification(data);
+-    }
+   }
+ }
+diff --git a/toolkit/components/social/test/browser/Makefile.in b/toolkit/components/social/test/browser/Makefile.in
+--- a/toolkit/components/social/test/browser/Makefile.in
++++ b/toolkit/components/social/test/browser/Makefile.in
+@@ -17,11 +17,12 @@ MOCHITEST_BROWSER_FILES = \
+   data.json \
+   worker_xhr.js \
+   browser_frameworker.js \
+   worker_relative.js \
+   relative_import.js \
+   browser_workerAPI.js \
+   worker_social.js \
+   browser_SocialProvider.js \
++  browser_notifications.js \
+   $(NULL)
+ 
+ include $(topsrcdir)/config/rules.mk
+diff --git a/toolkit/components/social/test/browser/browser_notifications.js b/toolkit/components/social/test/browser/browser_notifications.js
+new file mode 100644
+--- /dev/null
++++ b/toolkit/components/social/test/browser/browser_notifications.js
+@@ -0,0 +1,128 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++const TEST_PROVIDER_ORIGIN = 'http://example.com';
++
++Cu.import("resource://gre/modules/Services.jsm");
++
++function ensureProvider(workerFunction, cb) {
++  let manifest = {
++    origin: TEST_PROVIDER_ORIGIN,
++    name: "Example Provider",
++    workerURL: "data:application/javascript," + encodeURI("let run=" + workerFunction.toSource()) + ";run();"
++  };
++
++  ensureSocialEnabled();
++  SocialService.addProvider(manifest, function (p) {
++    cb(p);
++  });
++}
++
++function test() {
++  waitForExplicitFinish();
++
++  let cbPostTest = function(cb) {
++    SocialService.removeProvider(TEST_PROVIDER_ORIGIN, function() {cb()});
++  };
++  runTests(tests, undefined, cbPostTest);
++}
++
++let tests = {
++  testNotificationCallback: function(cbnext) {
++    let run = function() {
++      let testPort, apiPort;
++      onconnect = function(e) {
++        let port = e.ports[0];
++        port.onmessage = function(e) {
++          if (e.data.topic == "social.initialize") { // this is the api port.
++            apiPort = port;
++          } else if (e.data.topic == "test.initialize") { // test suite port.
++            testPort = port;
++            apiPort.postMessage({topic: 'social.notification-create',
++                                 data: {
++                                        id: "the id",
++                                        body: 'test notification',
++                                        action: 'callback',
++                                        actionArgs: { data: "something" }
++                                       }
++                                });
++          } else if (e.data.topic == "social.notification-action") {
++            let data = e.data.data;
++            let ok = data && data.action == "callback" &&
++                     data.actionArgs && e.data.data.actionArgs.data == "something";
++            testPort.postMessage({topic: "test.done", data: ok});
++          }
++        }
++      }
++    }
++    ensureProvider(run, function(provider) {
++      if ('@mozilla.org/system-alerts-service;1' in Cc) {
++        // This is a platform that has a system-alerts-service so the "toast"
++        // notifications aren't implemented by XUL making it very tricky to test.
++        // So just punt.
++        info("this platform has a system alerts service - test skipped");
++        cbnext();
++        return;
++      }
++      if (!("@mozilla.org/alerts-service;1" in Cc)) {
++        info("Alerts service does not exist in this application");
++        cbnext();
++        return;
++      }
++      var notifier;
++      try {
++        notifier = Cc["@mozilla.org/alerts-service;1"].
++                   getService(Ci.nsIAlertsService);
++      } catch (ex) {
++        info("Alerts service is not available. (Mac OS X without Growl?)", ex);
++        cbnext();
++        return;
++      }
++
++      provider.port.onmessage = function(e) {
++        if (e.data.topic == "test.done") {
++          ok(e.data.data, "check the test worked");
++          cbnext();
++        }
++      }
++      provider.port.postMessage({topic: "test.initialize"});
++      let count = 0;
++      // this relies on the implementation of the alerts service.
++      const ALERT_CHROME_URL = "chrome://global/content/alerts/alert.xul";
++      const ALERT_TEXT_LABEL_ID = "alertTextLabel";
++      const ALERT_TITLE_LABEL_ID = "alertTitleLabel";
++      let findPopup = function() {
++        let wenum = Services.ww.getWindowEnumerator();
++        while (wenum.hasMoreElements()) {
++          let win = wenum.getNext();
++          if (win.location.href == ALERT_CHROME_URL) {
++            let doc = win.document;
++            // We found the window - wait until the ID we care about also exists.
++            if (doc.getElementById(ALERT_TEXT_LABEL_ID) &&
++                doc.getElementById(ALERT_TEXT_LABEL_ID).getAttribute("value")) {
++              // some sanity checking of the content.
++              is(doc.getElementById(ALERT_TEXT_LABEL_ID).getAttribute("value"),
++                 "test notification",
++                 "check the alert label is correct");
++              is(doc.getElementById(ALERT_TITLE_LABEL_ID).getAttribute("value"),
++                 "Example Provider",
++                 "check the alert title is correct");
++              // now click on the text - this should trigger a "callback" into
++              // our worker which will then send back a "test.done" message.
++              EventUtils.sendMouseEvent({type: "click"}, ALERT_TEXT_LABEL_ID, win);
++              return;
++            }
++          }
++        }
++        if (count++ > 50) {
++          ok(false, "failed to find the notification popup");
++          cbnext();
++          return;
++        }
++        executeSoon(findPopup);
++      }
++      executeSoon(findPopup);
++    });
++  }
++};
+diff --git a/toolkit/themes/pinstripe/global/media/videocontrols.css b/toolkit/themes/pinstripe/global/media/videocontrols.css
+--- a/toolkit/themes/pinstripe/global/media/videocontrols.css
++++ b/toolkit/themes/pinstripe/global/media/videocontrols.css
+@@ -72,24 +72,24 @@
+ }
+ 
+ /* .scale-thumb is an element inside the <scale> implementation. */
+ .volumeControl .scale-thumb {
+   /* Override the default thumb appearance with a custom image. */
+   -moz-appearance: none;
+   background: url(chrome://global/skin/media/volumeThumb.png) no-repeat center;
+   border: none;
+-  min-width: 16px;
+-  min-height: 11px;
++  min-width: 21px;
++  min-height: 10px;
+ }
+ 
+ .volumeBackgroundBar {
+   /* margin left/right: make bar 8px wide (control width = 28, minus 2 * 10 margin) */
+   margin: 0 10px;
+-  background-color: rgba(255,255,255,.5);
++  background-color: rgba(255,255,255,.75);
+   border-radius: 2.5px;
+ }
+ 
+ .durationBox {
+   -moz-box-pack: center;
+ }
+ 
+ .durationLabel {
+diff --git a/toolkit/themes/pinstripe/global/media/volumeThumb.png b/toolkit/themes/pinstripe/global/media/volumeThumb.png
+index 75ab7fb282ad3a867d64a03dba49694c0f319d26..cfd77f65045564e2db5ee7c6c5dcf82067594f64
+GIT binary patch
+literal 210
+zc%17D@N?(olHy`uVBq!ia0vp^qCm{W!3HFwr;FYIQY`6?zK#qG8~eHcB(eheoCO|{
+z#S9F52SAuH>slu#P*AGGHKHUqKdq!Zu_%=xATcwqM9<GPM4`-B&s5LQz~D>KLZB)?
+zPZ!4!3;*OF|Nq-Fa|DYnkX*%JGDnD~P<ocOXxO@lkMm`CN_onhZ%0M{pWN)u%j#+%
+zdsrkR)I{hWXUgNlC$b86iKy})xMZLw72d|kV8o!Jv8_(W2xu~cr>mdKI;Vst0Jxz$
+As{jB1
+
+diff --git a/toolkit/themes/winstripe/global/media/videocontrols.css b/toolkit/themes/winstripe/global/media/videocontrols.css
+--- a/toolkit/themes/winstripe/global/media/videocontrols.css
++++ b/toolkit/themes/winstripe/global/media/videocontrols.css
+@@ -74,24 +74,24 @@
+ }
+ 
+ /* .scale-thumb is an element inside the <scale> implementation. */
+ .volumeControl .scale-thumb {
+   /* Override the default thumb appearance with a custom image. */
+   -moz-appearance: none;
+   background: url(chrome://global/skin/media/volumeThumb.png) no-repeat center;
+   border: none;
+-  min-width: 16px;
+-  min-height: 11px;
++  min-width: 21px;
++  min-height: 10px;
+ }
+ 
+ .volumeBackgroundBar {
+   /* margin left/right: make bar 8px wide (control width = 28, minus 2 * 10 margin) */
+   margin: 0 10px;
+-  background-color: rgba(255,255,255,.5);
++  background-color: rgba(255,255,255,.75);
+   border-radius: 2.5px;
+ }
+ 
+ .durationBox {
+   -moz-box-pack: center;
+ }
+ 
+ .durationLabel {
+diff --git a/toolkit/themes/winstripe/global/media/volumeThumb.png b/toolkit/themes/winstripe/global/media/volumeThumb.png
+index 75ab7fb282ad3a867d64a03dba49694c0f319d26..cfd77f65045564e2db5ee7c6c5dcf82067594f64
+GIT binary patch
+literal 210
+zc%17D@N?(olHy`uVBq!ia0vp^qCm{W!3HFwr;FYIQY`6?zK#qG8~eHcB(eheoCO|{
+z#S9F52SAuH>slu#P*AGGHKHUqKdq!Zu_%=xATcwqM9<GPM4`-B&s5LQz~D>KLZB)?
+zPZ!4!3;*OF|Nq-Fa|DYnkX*%JGDnD~P<ocOXxO@lkMm`CN_onhZ%0M{pWN)u%j#+%
+zdsrkR)I{hWXUgNlC$b86iKy})xMZLw72d|kV8o!Jv8_(W2xu~cr>mdKI;Vst0Jxz$
+As{jB1
+
+diff --git a/widget/android/AndroidBridge.cpp b/widget/android/AndroidBridge.cpp
+--- a/widget/android/AndroidBridge.cpp
++++ b/widget/android/AndroidBridge.cpp
+@@ -94,17 +94,17 @@ AndroidBridge::Init(JNIEnv *jEnv,
+     mOpenedGraphicsLibraries = false;
+     mHasNativeBitmapAccess = false;
+     mHasNativeWindowAccess = false;
+     mHasNativeWindowFallback = false;
+ 
+     mGeckoAppShellClass = (jclass) jEnv->NewGlobalRef(jGeckoAppShellClass);
+ 
+     jNotifyIME = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "notifyIME", "(II)V");
+-    jNotifyIMEEnabled = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "notifyIMEEnabled", "(ILjava/lang/String;Ljava/lang/String;Z)V");
++    jNotifyIMEEnabled = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "notifyIMEEnabled", "(ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)V");
+     jNotifyIMEChange = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "notifyIMEChange", "(Ljava/lang/String;III)V");
+     jNotifyScreenShot = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "notifyScreenShot", "(Ljava/nio/ByteBuffer;IIIIIIII)V");
+     jAcknowledgeEventSync = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "acknowledgeEventSync", "()V");
+ 
+     jEnableLocation = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "enableLocation", "(Z)V");
+     jEnableLocationHighAccuracy = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "enableLocationHighAccuracy", "(Z)V");
+     jEnableSensor = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "enableSensor", "(I)V");
+     jDisableSensor = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "disableSensor", "(I)V");
+@@ -258,49 +258,51 @@ jstring NewJavaString(AutoLocalJNIFrame*
+     jstring ret = frame->GetEnv()->NewString( string, len);
+     if (frame->CheckForException())
+         return NULL;
+     return ret;
+ }
+ 
+ void
+ AndroidBridge::NotifyIMEEnabled(int aState, const nsAString& aTypeHint,
+-                                const nsAString& aActionHint)
++                                const nsAString& aModeHint, const nsAString& aActionHint)
+ {
+     ALOG_BRIDGE("AndroidBridge::NotifyIMEEnabled");
+     if (!sBridge)
+         return;
+ 
+     JNIEnv *env = GetJNIEnv();
+     if (!env)
+         return;
+ 
+     AutoLocalJNIFrame jniFrame(env);
+     nsPromiseFlatString typeHint(aTypeHint);
++    nsPromiseFlatString modeHint(aModeHint);
+     nsPromiseFlatString actionHint(aActionHint);
+ 
+-    jvalue args[4];
++    jvalue args[5];
+     args[0].i = aState;
+     args[1].l = NewJavaString(&jniFrame, typeHint.get(), typeHint.Length());
+-    args[2].l = NewJavaString(&jniFrame, actionHint.get(), actionHint.Length());
+-    args[3].z = false;
++    args[2].l = env->NewString(modeHint.get(), modeHint.Length());
++    args[3].l = env->NewString(actionHint.get(), actionHint.Length());
++    args[4].z = false;
+ 
+     int32_t landscapeFS;
+     if (NS_SUCCEEDED(Preferences::GetInt(IME_FULLSCREEN_PREF, &landscapeFS))) {
+         if (landscapeFS == 1) {
+-            args[3].z = true;
++            args[4].z = true;
+         } else if (landscapeFS == -1){
+             if (NS_SUCCEEDED(
+                     Preferences::GetInt(IME_FULLSCREEN_THRESHOLD_PREF,
+                                         &landscapeFS))) {
+                 // the threshold is hundreths of inches, so convert the
+                 // threshold to pixels and multiply the height by 100
+                 if (nsWindow::GetAndroidScreenBounds().height  * 100 <
+                     landscapeFS * Bridge()->GetDPI()) {
+-                    args[3].z = true;
++                    args[4].z = true;
+                 }
+             }
+ 
+         }
+     }
+ 
+     env->CallStaticVoidMethodA(sBridge->mGeckoAppShellClass,
+                                sBridge->jNotifyIMEEnabled, args);
+diff --git a/widget/android/AndroidBridge.h b/widget/android/AndroidBridge.h
+--- a/widget/android/AndroidBridge.h
++++ b/widget/android/AndroidBridge.h
+@@ -137,17 +137,17 @@ public:
+     // us to use.  toolkit/xre/nsAndroidStartup.cpp calls
+     // SetMainThread.
+     bool SetMainThread(void *thr);
+ 
+     /* These are all implemented in Java */
+     static void NotifyIME(int aType, int aState);
+ 
+     static void NotifyIMEEnabled(int aState, const nsAString& aTypeHint,
+-                                 const nsAString& aActionHint);
++                                 const nsAString& aModeHint, const nsAString& aActionHint);
+ 
+     static void NotifyIMEChange(const PRUnichar *aText, uint32_t aTextLen, int aStart, int aEnd, int aNewEnd);
+ 
+     nsresult TakeScreenshot(nsIDOMWindow *window, int32_t srcX, int32_t srcY, int32_t srcW, int32_t srcH, int32_t dstY, int32_t dstX, int32_t dstW, int32_t dstH, int32_t bufW, int32_t bufH, int32_t tabId, int32_t token, jobject buffer);
+ 
+     static void NotifyPaintedRect(float top, float left, float bottom, float right);
+ 
+     void AcknowledgeEventSync();
+diff --git a/widget/android/nsWindow.cpp b/widget/android/nsWindow.cpp
+--- a/widget/android/nsWindow.cpp
++++ b/widget/android/nsWindow.cpp
+@@ -2110,16 +2110,17 @@ nsWindow::SetInputContext(const InputCon
+     // This avoids showing it whenever a plugin is focused. Bug 747492
+     if (aContext.mIMEState.mEnabled == IMEState::PLUGIN &&
+         aContext.mIMEState.mOpen != IMEState::OPEN) {
+         enabled = int(IMEState::DISABLED);
+     }
+ 
+     AndroidBridge::NotifyIMEEnabled(enabled,
+                                     aContext.mHTMLInputType,
++                                    aContext.mHTMLInputInputmode,
+                                     aContext.mActionHint);
+ }
+ 
+ NS_IMETHODIMP_(InputContext)
+ nsWindow::GetInputContext()
+ {
+     mInputContext.mIMEState.mOpen = IMEState::OPEN_STATE_NOT_SUPPORTED;
+     return mInputContext;
+diff --git a/widget/nsIWidget.h b/widget/nsIWidget.h
+--- a/widget/nsIWidget.h
++++ b/widget/nsIWidget.h
+@@ -276,16 +276,19 @@ struct IMEState {
+ };
+ 
+ struct InputContext {
+   IMEState mIMEState;
+ 
+   /* The type of the input if the input is a html input field */
+   nsString mHTMLInputType;
+ 
++  /* The type of the inputmode */
++  nsString mHTMLInputInputmode;
++
+   /* A hint for the action that is performed when the input is submitted */
+   nsString mActionHint;
+ };
+ 
+ struct InputContextAction {
+   /**
+    * mCause indicates what action causes calling nsIWidget::SetInputContext().
+    * It must be one of following values.
+diff --git a/widget/xpwidgets/PuppetWidget.cpp b/widget/xpwidgets/PuppetWidget.cpp
+--- a/widget/xpwidgets/PuppetWidget.cpp
++++ b/widget/xpwidgets/PuppetWidget.cpp
+@@ -358,16 +358,17 @@ PuppetWidget::SetInputContext(const Inpu
+ {
+   if (!mTabChild) {
+     return;
+   }
+   mTabChild->SendSetInputContext(
+     static_cast<int32_t>(aContext.mIMEState.mEnabled),
+     static_cast<int32_t>(aContext.mIMEState.mOpen),
+     aContext.mHTMLInputType,
++    aContext.mHTMLInputInputmode,
+     aContext.mActionHint,
+     static_cast<int32_t>(aAction.mCause),
+     static_cast<int32_t>(aAction.mFocusChange));
+ }
+ 
+ NS_IMETHODIMP_(InputContext)
+ PuppetWidget::GetInputContext()
+ {

@@ -1,0 +1,125 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 724264 - Consolidate code that checks whether an element has a non-_moz_dirty attribute; r=ehsan
+
+diff --git a/editor/libeditor/html/nsHTMLCSSUtils.cpp b/editor/libeditor/html/nsHTMLCSSUtils.cpp
+--- a/editor/libeditor/html/nsHTMLCSSUtils.cpp
++++ b/editor/libeditor/html/nsHTMLCSSUtils.cpp
+@@ -609,34 +609,23 @@ nsresult
+ nsHTMLCSSUtils::RemoveCSSInlineStyle(nsIDOMNode *aNode, nsIAtom *aProperty, const nsAString & aPropertyValue)
+ {
+   nsCOMPtr<nsIDOMElement> elem = do_QueryInterface(aNode);
+ 
+   // remove the property from the style attribute
+   nsresult res = RemoveCSSProperty(elem, aProperty, aPropertyValue, false);
+   NS_ENSURE_SUCCESS(res, res);
+ 
+-  if (nsEditor::NodeIsType(aNode, nsEditProperty::span)) {
+-    nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
+-    uint32_t attrCount = content->GetAttrCount();
++  nsCOMPtr<dom::Element> element = do_QueryInterface(aNode);
++  if (!element || !element->IsHTML(nsGkAtoms::span) ||
++      nsHTMLEditor::HasAttributes(element)) {
++    return NS_OK;
++  }
+ 
+-    if (0 == attrCount) {
+-      // no more attributes on this span, let's remove the element
+-      res = mHTMLEditor->RemoveContainer(aNode);
+-      NS_ENSURE_SUCCESS(res, res);
+-    }
+-    else if (1 == attrCount) {
+-      // incredible hack in case the only remaining attribute is a _moz_dirty...
+-      if (content->GetAttrNameAt(0)->Equals(nsEditProperty::mozdirty)) {
+-        res = mHTMLEditor->RemoveContainer(aNode);
+-        NS_ENSURE_SUCCESS(res, res);
+-      }
+-    }
+-  }
+-  return NS_OK;
++  return mHTMLEditor->RemoveContainer(aNode);
+ }
+ 
+ // Answers true is the property can be removed by setting a "none" CSS value
+ // on a node
+ bool
+ nsHTMLCSSUtils::IsCSSInvertable(nsIAtom *aProperty, const nsAString *aAttribute)
+ {
+   return bool(nsEditProperty::b == aProperty);
+diff --git a/editor/libeditor/html/nsHTMLEditRules.cpp b/editor/libeditor/html/nsHTMLEditRules.cpp
+--- a/editor/libeditor/html/nsHTMLEditRules.cpp
++++ b/editor/libeditor/html/nsHTMLEditRules.cpp
+@@ -8940,25 +8940,18 @@ nsHTMLEditRules::RelativeChangeIndentati
+   // remove unnecessary DIV blocks:
+   // we could skip this section but that would cause a FAIL in
+   // editor/libeditor/html/tests/browserscope/richtext.html, which expects
+   // to unapply a CSS "indent" (<div style="margin-left: 40px;">) by
+   // removing the DIV container instead of just removing the CSS property.
+   nsCOMPtr<dom::Element> node = do_QueryInterface(aNode);
+   if (!node || !node->IsHTML(nsGkAtoms::div) ||
+       node == mHTMLEditor->GetActiveEditingHost() ||
+-      !mHTMLEditor->IsNodeInActiveEditor(node)) {
+-    return NS_OK;
+-  }
+-
+-  // We deal with an editable DIV; let's see if it is useless and if we can
+-  // remove it.
+-  uint32_t count = node->GetAttrCount();
+-  if (count > 1 ||
+-      (count == 1 && !node->HasAttr(kNameSpaceID_None, nsGkAtoms::mozdirty))) {
++      !mHTMLEditor->IsNodeInActiveEditor(node) ||
++      nsHTMLEditor::HasAttributes(node)) {
+     return NS_OK;
+   }
+ 
+   return mHTMLEditor->RemoveContainer(element);
+ }
+ 
+ //
+ // Support for Absolute Positioning
+diff --git a/editor/libeditor/html/nsHTMLEditor.h b/editor/libeditor/html/nsHTMLEditor.h
+--- a/editor/libeditor/html/nsHTMLEditor.h
++++ b/editor/libeditor/html/nsHTMLEditor.h
+@@ -66,16 +66,19 @@
+ #include "nsIHTMLInlineTableEditor.h"
+ #include "nsIHTMLObjectResizeListener.h"
+ 
+ #include "nsIDocumentObserver.h"
+ 
+ #include "nsPoint.h"
+ #include "nsTArray.h"
+ #include "nsAutoPtr.h"
++#include "nsAttrName.h"
++
++#include "mozilla/dom/Element.h"
+ 
+ class nsIDOMKeyEvent;
+ class nsITransferable;
+ class nsIDocumentEncoder;
+ class nsIClipboard;
+ class TypeInState;
+ class nsIContentFilter;
+ class nsIURL;
+@@ -420,16 +423,23 @@ public:
+   nsresult RemoveStyleSheetFromList(const nsAString &aURL);
+ 
+   bool IsCSSEnabled()
+   {
+     // TODO: removal of mCSSAware and use only the presence of mHTMLCSSUtils
+     return mCSSAware && mHTMLCSSUtils && mHTMLCSSUtils->IsCSSPrefChecked();
+   }
+ 
++  static bool HasAttributes(mozilla::dom::Element* aElement)
++  {
++    MOZ_ASSERT(aElement);
++    uint32_t attrCount = aElement->GetAttrCount();
++    return attrCount > 1 ||
++           (1 == attrCount && !aElement->GetAttrNameAt(0)->Equals(nsGkAtoms::mozdirty));
++  }
+ 
+ protected:
+ 
+   NS_IMETHOD  InitRules();
+ 
+   // Create the event listeners for the editor to install
+   virtual void CreateEventListeners();
+ 

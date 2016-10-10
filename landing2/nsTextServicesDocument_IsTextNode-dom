@@ -1,0 +1,143 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/txtsvc/src/nsTextServicesDocument.cpp b/editor/txtsvc/src/nsTextServicesDocument.cpp
+--- a/editor/txtsvc/src/nsTextServicesDocument.cpp
++++ b/editor/txtsvc/src/nsTextServicesDocument.cpp
+@@ -2306,24 +2306,16 @@ nsTextServicesDocument::HasSameBlockNode
+   while (p2 && !IsBlockNode(p2))
+   {
+     p2 = p2->GetParent();
+   }
+ 
+   return p1 == p2;
+ }
+ 
+-bool
+-nsTextServicesDocument::IsTextNode(nsIDOMNode *aNode)
+-{
+-  nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
+-  NS_ENSURE_TRUE(content, false);
+-  return content->NodeType() == nsIDOMNode::TEXT_NODE;
+-}
+-
+ nsresult
+ nsTextServicesDocument::SetSelectionInternal(int32_t aOffset, int32_t aLength, bool aDoUpdate)
+ {
+   nsresult result = NS_OK;
+ 
+   NS_ENSURE_TRUE(mSelCon && aOffset >= 0 && aLength >= 0, NS_ERROR_FAILURE);
+ 
+   nsIDOMNode *sNode = 0, *eNode = 0;
+@@ -2840,61 +2832,54 @@ nsTextServicesDocument::GetUncollapsedSe
+   // text block and range:
+ 
+   nsCOMPtr<nsIDOMNode> p1, p2;
+   int32_t     o1,  o2;
+ 
+   // The start of the range will be the rightmost
+   // start node.
+ 
+-  if (e1s1 >= 0)
+-  {
+-    p1 = do_QueryInterface(eStart->mNode);
++  if (e1s1 >= 0) {
++    p1 = eStart->mNode;
+     o1 = eStartOffset;
+-  }
+-  else
+-  {
++  } else {
+     p1 = startParent;
+     o1 = startOffset;
+   }
+ 
+   // The end of the range will be the leftmost
+   // end node.
+ 
+-  if (e2s2 <= 0)
+-  {
+-    p2 = do_QueryInterface(eEnd->mNode);
++  if (e2s2 <= 0) {
++    p2 = eEnd->mNode;
+     o2 = eEndOffset;
+-  }
+-  else
+-  {
++  } else {
+     p2 = endParent;
+     o2 = endOffset;
+   }
+ 
+   result = CreateRange(p1, o1, p2, o2, getter_AddRefs(range));
+-
+   NS_ENSURE_SUCCESS(result, result);
+ 
+   // Now iterate over this range to figure out the selection's
+   // block offset and length.
+ 
+   nsCOMPtr<nsIContentIterator> iter;
+-
+   result = CreateContentIterator(range, getter_AddRefs(iter));
+-
+   NS_ENSURE_SUCCESS(result, result);
+ 
+   // Find the first text node in the range.
+   
+   bool found;
+ 
+   iter->First();
+ 
+-  if (!IsTextNode(p1)) {
++  nsCOMPtr<nsINode> p1node = do_QueryInterface(p1);
++  MOZ_ASSERT(p1node);
++  if (p1node->NodeType() != nsIDOMNode::TEXT_NODE) {
+     found = false;
+ 
+     while (!iter->IsDone()) {
+       nsINode* cur = iter->GetCurrentNode();
+       if (cur->NodeType() == nsIDOMNode::TEXT_NODE) {
+         p1 = cur->AsDOMNode();
+         o1 = 0;
+         found = true;
+@@ -2906,17 +2891,19 @@ nsTextServicesDocument::GetUncollapsedSe
+ 
+     NS_ENSURE_TRUE(found, NS_ERROR_FAILURE);
+   }
+ 
+   // Find the last text node in the range.
+ 
+   iter->Last();
+ 
+-  if (!IsTextNode(p2)) {
++  nsCOMPtr<nsINode> p2node = do_QueryInterface(p2);
++  MOZ_ASSERT(p2node);
++  if (p2node->NodeType() != nsIDOMNode::TEXT_NODE) {
+     found = false;
+ 
+     while (!iter->IsDone()) {
+       nsINode* cur = iter->GetCurrentNode();
+       if (cur->NodeType() == nsIDOMNode::TEXT_NODE) {
+         p2 = cur->AsDOMNode();
+         o2 = static_cast<nsIContent*>(cur)->TextLength();
+         found = true;
+diff --git a/editor/txtsvc/src/nsTextServicesDocument.h b/editor/txtsvc/src/nsTextServicesDocument.h
+--- a/editor/txtsvc/src/nsTextServicesDocument.h
++++ b/editor/txtsvc/src/nsTextServicesDocument.h
+@@ -174,17 +174,16 @@ private:
+   static nsresult FirstTextNodeInCurrentBlock(nsIContentIterator *aIterator);
+   static nsresult FirstTextNodeInPrevBlock(nsIContentIterator *aIterator);
+   static nsresult FirstTextNodeInNextBlock(nsIContentIterator *aIterator);
+ 
+   nsresult GetFirstTextNodeInPrevBlock(nsIContent **aContent);
+   nsresult GetFirstTextNodeInNextBlock(nsIContent **aContent);
+ 
+   static bool IsBlockNode(nsIContent *aContent);
+-  static bool IsTextNode(nsIDOMNode *aNode);
+ 
+   static bool DidSkip(nsIContentIterator* aFilteredIter);
+   static void   ClearDidSkip(nsIContentIterator* aFilteredIter);
+ 
+   static bool HasSameBlockNodeParent(nsIContent *aContent1, nsIContent *aContent2);
+ 
+   nsresult SetSelectionInternal(int32_t aOffset, int32_t aLength, bool aDoUpdate);
+   nsresult GetSelection(TSDBlockSelectionStatus *aSelStatus, int32_t *aSelOffset, int32_t *aSelLength);

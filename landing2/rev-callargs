@@ -1,0 +1,1452 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsDOMBlobBuilder.cpp b/content/base/src/nsDOMBlobBuilder.cpp
+--- a/content/base/src/nsDOMBlobBuilder.cpp
++++ b/content/base/src/nsDOMBlobBuilder.cpp
+@@ -177,17 +177,17 @@ nsDOMMultipartFile::Initialize(nsISuppor
+     return InitBlob(aCx, aArgs.length(), aArgs.array(), GetXPConnectNative);
+   }
+   return InitFile(aCx, aArgs.length(), aArgs.array());
+ }
+ 
+ nsresult
+ nsDOMMultipartFile::InitBlob(JSContext* aCx,
+                              uint32_t aArgc,
+-                             RangedPtr<JS::Value> aArgv,
++                             JS::Value* aArgv,
+                              UnwrapFuncPtr aUnwrapFunc)
+ {
+   bool nativeEOL = false;
+   if (aArgc > 1) {
+     BlobPropertyBag d;
+     if (!d.Init(aCx, JS::Handle<JS::Value>::fromMarkedLocation(&aArgv[1]))) {
+       return NS_ERROR_TYPE_ERR;
+     }
+@@ -270,17 +270,17 @@ nsDOMMultipartFile::GetMozFullPathIntern
+   }
+ 
+   return file->GetMozFullPathInternal(aFilename);
+ }
+ 
+ nsresult
+ nsDOMMultipartFile::InitFile(JSContext* aCx,
+                              uint32_t aArgc,
+-                             RangedPtr<JS::Value> aArgv)
++                             JS::Value* aArgv)
+ {
+   nsresult rv;
+ 
+   NS_ASSERTION(!mImmutable, "Something went wrong ...");
+   NS_ENSURE_TRUE(!mImmutable, NS_ERROR_UNEXPECTED);
+ 
+   if (!nsContentUtils::IsCallerChrome()) {
+     return NS_ERROR_DOM_SECURITY_ERR; // Real short trip
+diff --git a/content/base/src/nsDOMBlobBuilder.h b/content/base/src/nsDOMBlobBuilder.h
+--- a/content/base/src/nsDOMBlobBuilder.h
++++ b/content/base/src/nsDOMBlobBuilder.h
+@@ -7,20 +7,16 @@
+ #define nsDOMBlobBuilder_h
+ 
+ #include "nsDOMFile.h"
+ 
+ #include "mozilla/CheckedInt.h"
+ #include "mozilla/Attributes.h"
+ #include <algorithm>
+ 
+-namespace mozilla {
+-template<typename> class RangedPtr;
+-} // namespace mozilla
+-
+ #define NS_DOMMULTIPARTBLOB_CID { 0x47bf0b43, 0xf37e, 0x49ef, \
+   { 0x81, 0xa0, 0x18, 0xba, 0xc0, 0x57, 0xb5, 0xcc } }
+ #define NS_DOMMULTIPARTBLOB_CONTRACTID "@mozilla.org/dom/multipart-blob;1"
+ 
+ #define NS_DOMMULTIPARTFILE_CID { 0xc3361f77, 0x60d1, 0x4ea9, \
+   { 0x94, 0x96, 0xdf, 0x5d, 0x6f, 0xcd, 0xd7, 0x8f } }
+ #define NS_DOMMULTIPARTFILE_CONTRACTID "@mozilla.org/dom/multipart-file;1"
+ 
+@@ -67,21 +63,21 @@ public:
+   NS_IMETHOD Initialize(nsISupports* aOwner,
+                         JSContext* aCx,
+                         JSObject* aObj,
+                         const JS::CallArgs& aArgs) MOZ_OVERRIDE;
+ 
+   typedef nsIDOMBlob* (*UnwrapFuncPtr)(JSContext*, JSObject*);
+   nsresult InitBlob(JSContext* aCx,
+                     uint32_t aArgc,
+-                    mozilla::RangedPtr<JS::Value> aArgv,
++                    JS::Value* aArgv,
+                     UnwrapFuncPtr aUnwrapFunc);
+   nsresult InitFile(JSContext* aCx,
+                     uint32_t aArgc,
+-                    mozilla::RangedPtr<JS::Value> aArgv);
++                    JS::Value* aArgv);
+ 
+   already_AddRefed<nsIDOMBlob>
+   CreateSlice(uint64_t aStart, uint64_t aLength, const nsAString& aContentType) MOZ_OVERRIDE;
+ 
+   NS_IMETHOD GetSize(uint64_t*) MOZ_OVERRIDE;
+   NS_IMETHOD GetInternalStream(nsIInputStream**) MOZ_OVERRIDE;
+ 
+   static nsresult
+diff --git a/dom/base/nsDOMWindowUtils.cpp b/dom/base/nsDOMWindowUtils.cpp
+--- a/dom/base/nsDOMWindowUtils.cpp
++++ b/dom/base/nsDOMWindowUtils.cpp
+@@ -2749,18 +2749,17 @@ GetFileOrBlob(const nsAString& aName, co
+   }
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   nsDOMMultipartFile* domFile =
+     static_cast<nsDOMMultipartFile*>(static_cast<nsIDOMFile*>(file.get()));
+ 
+   JS::Value args[2] = { aBlobParts, aParameters };
+ 
+-  rv = domFile->InitBlob(aCx, aOptionalArgCount, RangedPtr<JS::Value>(args),
+-                         GetXPConnectNative);
++  rv = domFile->InitBlob(aCx, aOptionalArgCount, args, GetXPConnectNative);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   file.forget(aResult);
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsDOMWindowUtils::GetFile(const nsAString& aName, const JS::Value& aBlobParts,
+diff --git a/dom/workers/File.cpp b/dom/workers/File.cpp
+--- a/dom/workers/File.cpp
++++ b/dom/workers/File.cpp
+@@ -78,29 +78,28 @@ private:
+   Unwrap(JSContext* aCx, JSObject* aObj)
+   {
+     return GetPrivate(aObj);
+   }
+ 
+   static bool
+   Construct(JSContext* aCx, unsigned aArgc, jsval* aVp)
+   {
+-    JS::CallArgs args = JS::CallArgsFromVp(aArgc, aVp);
+     nsRefPtr<nsDOMMultipartFile> file = new nsDOMMultipartFile();
+-    nsresult rv = file->InitBlob(aCx, args.length(), args.array(), Unwrap);
++    nsresult rv = file->InitBlob(aCx, aArgc, JS_ARGV(aCx, aVp), Unwrap);
+     if (NS_FAILED(rv)) {
+       return Throw(aCx, rv);
+     }
+ 
+     JSObject* obj = file::CreateBlob(aCx, file);
+     if (!obj) {
+       return false;
+     }
+ 
+-    args.rval().setObject(*obj);
++    JS_SET_RVAL(aCx, aVp, OBJECT_TO_JSVAL(obj));
+     return true;
+   }
+ 
+   static void
+   Finalize(JSFreeOp* aFop, JSObject* aObj)
+   {
+     JS_ASSERT(JS_GetClass(aObj) == &sClass);
+ 
+diff --git a/js/public/CallArgs.h b/js/public/CallArgs.h
+--- a/js/public/CallArgs.h
++++ b/js/public/CallArgs.h
+@@ -26,17 +26,16 @@
+  * methods' implementations, potentially under time pressure.
+  */
+ 
+ #ifndef js_CallArgs_h
+ #define js_CallArgs_h
+ 
+ #include "mozilla/Assertions.h"
+ #include "mozilla/Attributes.h"
+-#include "mozilla/RangedPtr.h"
+ #include "mozilla/TypeTraits.h"
+ 
+ #include "jstypes.h"
+ 
+ #include "js/RootingAPI.h"
+ #include "js/Value.h"
+ 
+ /* Typedef for native functions called by the JS VM. */
+@@ -152,17 +151,16 @@ class MOZ_STACK_CLASS CallReceiverBase :
+         WantUsedRval
+ #else
+         NoUsedRval
+ #endif
+     >
+ {
+   protected:
+     Value *argv_;
+-    unsigned argc_;
+ 
+   public:
+     /*
+      * Returns the function being called, as an object.  Must not be called
+      * after rval() has been used!
+      */
+     JSObject &callee() const {
+         MOZ_ASSERT(!this->usedRval_);
+@@ -190,17 +188,17 @@ class MOZ_STACK_CLASS CallReceiverBase :
+         // MOZ_ASSERT(!argv_[-1].isMagic(JS_IS_CONSTRUCTING));
+         return HandleValue::fromMarkedLocation(&argv_[-1]);
+     }
+ 
+     Value computeThis(JSContext *cx) const {
+         if (thisv().isObject())
+             return thisv();
+ 
+-        return JS_ComputeThis(cx, base().get());
++        return JS_ComputeThis(cx, base());
+     }
+ 
+     bool isConstructing() const {
+ #ifdef DEBUG
+         if (this->usedRval_)
+             CheckIsValidConstructible(calleev());
+ #endif
+         return argv_[-1].isMagic();
+@@ -221,19 +219,17 @@ class MOZ_STACK_CLASS CallReceiverBase :
+         this->setUsedRval();
+         return MutableHandleValue::fromMarkedLocation(&argv_[-2]);
+     }
+ 
+   public:
+     // These methods are only intended for internal use.  Embedders shouldn't
+     // use them!
+ 
+-    mozilla::RangedPtr<Value> base() const {
+-        return mozilla::RangedPtr<Value>(this->argv_ - 2, argc_ + 2);
+-    }
++    Value *base() const { return argv_ - 2; }
+ 
+     Value *spAfterCall() const {
+         this->setUsedRval();
+         return argv_ - 1;
+     }
+ 
+   public:
+     // These methods are publicly exposed, but they are *not* to be used when
+@@ -264,17 +260,16 @@ class MOZ_STACK_CLASS CallReceiver : pub
+ };
+ 
+ MOZ_ALWAYS_INLINE CallReceiver
+ CallReceiverFromArgv(Value *argv)
+ {
+     CallReceiver receiver;
+     receiver.clearUsedRval();
+     receiver.argv_ = argv;
+-    receiver.argc_ = 0;
+     return receiver;
+ }
+ 
+ MOZ_ALWAYS_INLINE CallReceiver
+ CallReceiverFromVp(Value *vp)
+ {
+     return CallReceiverFromArgv(vp + 2);
+ }
+@@ -306,23 +301,26 @@ CallReceiverFromVp(Value *vp)
+ namespace detail {
+ 
+ template<UsedRval WantUsedRval>
+ class MOZ_STACK_CLASS CallArgsBase :
+         public mozilla::Conditional<WantUsedRval == detail::IncludeUsedRval,
+                                     CallReceiver,
+                                     CallReceiverBase<NoUsedRval> >::Type
+ {
++  protected:
++    unsigned argc_;
++
+   public:
+     /* Returns the number of arguments. */
+-    unsigned length() const { return this->argc_; }
++    unsigned length() const { return argc_; }
+ 
+     /* Returns the i-th zero-indexed argument. */
+     MutableHandleValue operator[](unsigned i) const {
+-        MOZ_ASSERT(i < length());
++        MOZ_ASSERT(i < argc_);
+         return MutableHandleValue::fromMarkedLocation(&this->argv_[i]);
+     }
+ 
+     /*
+      * Returns the i-th zero-indexed argument, or |undefined| if there's no
+      * such argument.
+      */
+     HandleValue get(unsigned i) const {
+@@ -331,30 +329,26 @@ class MOZ_STACK_CLASS CallArgsBase :
+                : UndefinedHandleValue;
+     }
+ 
+     /*
+      * Returns true if the i-th zero-indexed argument is present and is not
+      * |undefined|.
+      */
+     bool hasDefined(unsigned i) const {
+-        return i < length() && !this->argv_[i].isUndefined();
++        return i < argc_ && !this->argv_[i].isUndefined();
+     }
+ 
+   public:
+     // These methods are publicly exposed, but we're less sure of the interface
+     // here than we'd like (because they're hackish and drop assertions).  Try
+     // to avoid using these if you can.
+ 
+-    mozilla::RangedPtr<Value> array() const {
+-        return mozilla::RangedPtr<Value>(this->argv_, this->argc_);
+-    }
+-    mozilla::RangedPtr<Value> end() const {
+-        return mozilla::RangedPtr<Value>(this->argv_ + this->argc_, this->argv_, this->argc_);
+-    }
++    Value *array() const { return this->argv_; }
++    Value *end() const { return this->argv_ + argc_; }
+ };
+ 
+ } // namespace detail
+ 
+ class MOZ_STACK_CLASS CallArgs : public detail::CallArgsBase<detail::IncludeUsedRval>
+ {
+   private:
+     friend CallArgs CallArgsFromVp(unsigned argc, Value *vp);
+diff --git a/js/src/ctypes/CTypes.cpp b/js/src/ctypes/CTypes.cpp
+--- a/js/src/ctypes/CTypes.cpp
++++ b/js/src/ctypes/CTypes.cpp
+@@ -4075,17 +4075,17 @@ PointerType::IsNull(JSContext* cx, unsig
+   void* data = *static_cast<void**>(CData::GetData(obj));
+   args.rval().setBoolean(data == nullptr);
+   return true;
+ }
+ 
+ bool
+ PointerType::OffsetBy(JSContext* cx, const CallArgs& args, int offset)
+ {
+-  JSObject* obj = args.computeThis(cx).toObjectOrNull();
++  JSObject* obj = JS_THIS_OBJECT(cx, args.base());
+   if (!obj)
+     return false;
+   if (!CData::IsCData(obj)) {
+     JS_ReportError(cx, "not a CData");
+     return false;
+   }
+ 
+   RootedObject typeObj(cx, CData::GetCType(obj));
+diff --git a/js/src/jit/Ion.cpp b/js/src/jit/Ion.cpp
+--- a/js/src/jit/Ion.cpp
++++ b/js/src/jit/Ion.cpp
+@@ -2080,17 +2080,17 @@ jit::SetEnterJitData(JSContext *cx, Ente
+         unsigned numFormals = state.script()->function()->nargs;
+         data.constructing = state.asInvoke()->constructing();
+         data.numActualArgs = args.length();
+         data.maxArgc = Max(args.length(), numFormals) + 1;
+         data.scopeChain = nullptr;
+         data.calleeToken = CalleeToToken(&args.callee().as<JSFunction>());
+ 
+         if (data.numActualArgs >= numFormals) {
+-            data.maxArgv = (args.base() + 1).get();
++            data.maxArgv = args.base() + 1;
+         } else {
+             // Pad missing arguments with |undefined|.
+             for (size_t i = 1; i < args.length() + 2; i++) {
+                 if (!vals.append(args.base()[i]))
+                     return false;
+             }
+ 
+             while (vals.length() < numFormals + 1) {
+@@ -2158,17 +2158,17 @@ jit::FastInvoke(JSContext *cx, HandleFun
+ 
+     EnterIonCode enter = cx->runtime()->ionRuntime()->enterIon();
+     void *calleeToken = CalleeToToken(fun);
+ 
+     RootedValue result(cx, Int32Value(args.length()));
+     JS_ASSERT(args.length() >= fun->nargs);
+ 
+     JSAutoResolveFlags rf(cx, RESOLVE_INFER);
+-    enter(jitcode, args.length() + 1, (args.array() - 1).get(), nullptr, calleeToken,
++    enter(jitcode, args.length() + 1, args.array() - 1, nullptr, calleeToken,
+           /* scopeChain = */ nullptr, 0, result.address());
+ 
+     JS_ASSERT(!cx->runtime()->hasIonReturnOverride());
+ 
+     args.rval().set(result);
+ 
+     JS_ASSERT_IF(result.isMagic(), result.isMagic(JS_ION_ERROR));
+     return result.isMagic() ? IonExec_Error : IonExec_Ok;
+diff --git a/js/src/jsapi.cpp b/js/src/jsapi.cpp
+--- a/js/src/jsapi.cpp
++++ b/js/src/jsapi.cpp
+@@ -5173,17 +5173,17 @@ JS_New(JSContext *cx, JSObject *ctorArg,
+     // of object to create, create it, and clamp the return value to an object,
+     // among other details. InvokeConstructor does the hard work.
+     InvokeArgs args(cx);
+     if (!args.init(argc))
+         return nullptr;
+ 
+     args.setCallee(ObjectValue(*ctor));
+     args.setThis(NullValue());
+-    PodCopy(args.array().get(), argv, argc);
++    PodCopy(args.array(), argv, argc);
+ 
+     if (!InvokeConstructor(cx, args))
+         return nullptr;
+ 
+     if (!args.rval().isObject()) {
+         /*
+          * Although constructors may return primitives (via proxies), this
+          * API is asking for an object, so we report an error.
+diff --git a/js/src/jsarray.cpp b/js/src/jsarray.cpp
+--- a/js/src/jsarray.cpp
++++ b/js/src/jsarray.cpp
+@@ -2065,17 +2065,17 @@ js::array_push(JSContext *cx, unsigned a
+     }
+ 
+     /* Steps 2-3. */
+     uint32_t length;
+     if (!GetLengthProperty(cx, obj, &length))
+         return false;
+ 
+     /* Steps 4-5. */
+-    if (!InitArrayElements(cx, obj, length, args.length(), args.array().get(), UpdateTypes))
++    if (!InitArrayElements(cx, obj, length, args.length(), args.array(), UpdateTypes))
+         return false;
+ 
+     /* Steps 6-7. */
+     double newlength = length + double(args.length());
+     args.rval().setNumber(newlength);
+     return SetLengthProperty(cx, obj, newlength);
+ }
+ 
+@@ -2274,17 +2274,17 @@ array_unshift(JSContext *cx, unsigned ar
+                         if (!SetArrayElement(cx, obj, upperIndex, value))
+                             return false;
+                     }
+                 } while (last != 0);
+             }
+         }
+ 
+         /* Copy from args to the bottom of the array. */
+-        if (!InitArrayElements(cx, obj, 0, args.length(), args.array().get(), UpdateTypes))
++        if (!InitArrayElements(cx, obj, 0, args.length(), args.array(), UpdateTypes))
+             return false;
+ 
+         newlen += args.length();
+     }
+     if (!SetLengthProperty(cx, obj, newlen))
+         return false;
+ 
+     /* Follow Perl by returning the new array length. */
+@@ -2542,19 +2542,22 @@ array_splice(JSContext *cx, unsigned arg
+                 } else {
+                     if (!SetArrayElement(cx, obj, to, fromValue))
+                         return false;
+                 }
+             }
+         }
+     }
+ 
+-    /* Steps 10, 14-15. */
++    /* Step 10. */
++    Value *items = args.array() + 2;
++
++    /* Steps 14-15. */
+     for (uint32_t k = actualStart, i = 0; i < itemCount; i++, k++) {
+-        if (!SetArrayElement(cx, obj, k, args[i + 2]))
++        if (!SetArrayElement(cx, obj, k, HandleValue::fromMarkedLocation(&items[i])))
+             return false;
+     }
+ 
+     /* Step 16. */
+     double finalLength = double(len) - actualDeleteCount + itemCount;
+     if (!SetLengthProperty(cx, obj, finalLength))
+         return false;
+ 
+@@ -2594,17 +2597,17 @@ js::array_concat_dense(JSContext *cx, Ha
+  * Python-esque sequence operations.
+  */
+ bool
+ js::array_concat(JSContext *cx, unsigned argc, Value *vp)
+ {
+     CallArgs args = CallArgsFromVp(argc, vp);
+ 
+     /* Treat our |this| object as the first argument; see ECMA 15.4.4.4. */
+-    Value *p = args.array().get() - 1;
++    Value *p = args.array() - 1;
+ 
+     /* Create a new Array object and root it using *vp. */
+     RootedObject aobj(cx, ToObject(cx, args.thisv()));
+     if (!aobj)
+         return false;
+ 
+     Rooted<ArrayObject*> narr(cx);
+     uint32_t length;
+@@ -2849,21 +2852,21 @@ IsArrayConstructor(const Value &v)
+            v.toObject().is<JSFunction>() &&
+            v.toObject().as<JSFunction>().isNative() &&
+            v.toObject().as<JSFunction>().native() == js_Array;
+ }
+ 
+ static bool
+ ArrayFromCallArgs(JSContext *cx, RootedTypeObject &type, CallArgs &args)
+ {
+-    if (!InitArrayTypes(cx, type, args.array().get(), args.length()))
++    if (!InitArrayTypes(cx, type, args.array(), args.length()))
+         return false;
+     JSObject *obj = (args.length() == 0)
+         ? NewDenseEmptyArray(cx)
+-        : NewDenseCopiedArray(cx, args.length(), args.array().get());
++        : NewDenseCopiedArray(cx, args.length(), args.array());
+     if (!obj)
+         return false;
+     obj->setType(type);
+     args.rval().setObject(*obj);
+     return true;
+ }
+ 
+ static bool
+diff --git a/js/src/jscntxtinlines.h b/js/src/jscntxtinlines.h
+--- a/js/src/jscntxtinlines.h
++++ b/js/src/jscntxtinlines.h
+@@ -95,17 +95,17 @@ class CompartmentChecker
+     }
+ 
+     void check(const JSValueArray &arr) {
+         for (size_t i = 0; i < arr.length; i++)
+             check(arr.array[i]);
+     }
+ 
+     void check(const CallArgs &args) {
+-        for (mozilla::RangedPtr<Value> p = args.base(); p != args.end(); ++p)
++        for (Value *p = args.base(); p != args.end(); ++p)
+             check(*p);
+     }
+ 
+     void check(jsid id) {
+         if (JSID_IS_OBJECT(id))
+             check(JSID_TO_OBJECT(id));
+     }
+ 
+@@ -212,17 +212,17 @@ JS_ALWAYS_INLINE bool
+ CallJSNative(JSContext *cx, Native native, const CallArgs &args)
+ {
+     JS_CHECK_RECURSION(cx, return false);
+ 
+ #ifdef DEBUG
+     bool alreadyThrowing = cx->isExceptionPending();
+ #endif
+     assertSameCompartment(cx, args);
+-    bool ok = native(cx, args.length(), args.base().get());
++    bool ok = native(cx, args.length(), args.base());
+     if (ok) {
+         assertSameCompartment(cx, args.rval());
+         JS_ASSERT_IF(!alreadyThrowing, !cx->isExceptionPending());
+     }
+     return ok;
+ }
+ 
+ STATIC_PRECONDITION_ASSUME(ubound(args.argv_) >= argc)
+diff --git a/js/src/jsfriendapi.h b/js/src/jsfriendapi.h
+--- a/js/src/jsfriendapi.h
++++ b/js/src/jsfriendapi.h
+@@ -1330,17 +1330,17 @@ struct JSJitMethodCallArgsTraits;
+ class JSJitMethodCallArgs : protected JS::detail::CallArgsBase<JS::detail::NoUsedRval>
+ {
+   private:
+     typedef JS::detail::CallArgsBase<JS::detail::NoUsedRval> Base;
+     friend struct JSJitMethodCallArgsTraits;
+ 
+   public:
+     explicit JSJitMethodCallArgs(const JS::CallArgs& args) {
+-        argv_ = args.array().get();
++        argv_ = args.array();
+         argc_ = args.length();
+     }
+ 
+     JS::MutableHandleValue rval() const {
+         return Base::rval();
+     }
+ 
+     unsigned length() const { return Base::length(); }
+diff --git a/js/src/jsfun.cpp b/js/src/jsfun.cpp
+--- a/js/src/jsfun.cpp
++++ b/js/src/jsfun.cpp
+@@ -866,17 +866,17 @@ js_fun_call(JSContext *cx, unsigned argc
+     /* Allocate stack space for fval, obj, and the args. */
+     InvokeArgs args(cx);
+     if (!args.init(argc))
+         return false;
+ 
+     /* Push fval, thisv, and the args. */
+     args.setCallee(fval);
+     args.setThis(thisv);
+-    PodCopy(args.array().get(), argv, argc);
++    PodCopy(args.array(), argv, argc);
+ 
+     bool ok = Invoke(cx, args);
+     *vp = args.rval();
+     return ok;
+ }
+ 
+ #ifdef JS_ION
+ static bool
+@@ -889,17 +889,17 @@ PushBaselineFunApplyArguments(JSContext 
+     if (!args.init(length))
+         return false;
+ 
+     /* Push fval, obj, and aobj's elements as args. */
+     args.setCallee(vp[1]);
+     args.setThis(vp[2]);
+ 
+     /* Steps 7-8. */
+-    frame.forEachCanonicalActualArg(CopyTo(args.array().get()), 0, -1);
++    frame.forEachCanonicalActualArg(CopyTo(args.array()), 0, -1);
+     return true;
+ }
+ #endif
+ 
+ /* ES5 15.3.4.3 */
+ bool
+ js_fun_apply(JSContext *cx, unsigned argc, Value *vp)
+ {
+@@ -947,17 +947,17 @@ js_fun_apply(JSContext *cx, unsigned arg
+                     if (!args.init(length))
+                         return false;
+ 
+                     /* Push fval, obj, and aobj's elements as args. */
+                     args.setCallee(fval);
+                     args.setThis(vp[2]);
+ 
+                     /* Steps 7-8. */
+-                    iter.forEachCanonicalActualArg(cx, CopyTo(args.array().get()), 0, -1);
++                    iter.forEachCanonicalActualArg(cx, CopyTo(args.array()), 0, -1);
+                 } else {
+                     JS_ASSERT(frame.isBaselineStub());
+ 
+                     ++frame;
+                     JS_ASSERT(frame.isBaselineJS());
+ 
+                     if (!PushBaselineFunApplyArguments(cx, frame, args, vp))
+                         return false;
+@@ -984,17 +984,17 @@ js_fun_apply(JSContext *cx, unsigned arg
+             if (!args.init(length))
+                 return false;
+ 
+             /* Push fval, obj, and aobj's elements as args. */
+             args.setCallee(fval);
+             args.setThis(vp[2]);
+ 
+             /* Steps 7-8. */
+-            fp->forEachUnaliasedActual(CopyTo(args.array().get()));
++            fp->forEachUnaliasedActual(CopyTo(args.array()));
+         }
+     } else {
+         /* Step 3. */
+         if (!vp[3].isObject()) {
+             JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr,
+                                  JSMSG_BAD_APPLY_ARGS, js_apply_str);
+             return false;
+         }
+@@ -1017,17 +1017,17 @@ js_fun_apply(JSContext *cx, unsigned arg
+         if (!args.init(length))
+             return false;
+ 
+         /* Push fval, obj, and aobj's elements as args. */
+         args.setCallee(fval);
+         args.setThis(vp[2]);
+ 
+         /* Steps 7-8. */
+-        if (!GetElements(cx, aobj, length, args.array().get()))
++        if (!GetElements(cx, aobj, length, args.array()))
+             return false;
+     }
+ 
+     /* Step 9. */
+     if (!Invoke(cx, args))
+         return false;
+ 
+     *vp = args.rval();
+@@ -1241,17 +1241,17 @@ js::CallOrConstructBoundFunction(JSConte
+ 
+     InvokeArgs invokeArgs(cx);
+     if (!invokeArgs.init(argc + argslen))
+         return false;
+ 
+     /* 15.3.4.5.1, 15.3.4.5.2 step 4. */
+     for (unsigned i = 0; i < argslen; i++)
+         invokeArgs[i].set(fun->getBoundFunctionArgument(i));
+-    PodCopy((invokeArgs.array() + argslen).get(), vp + 2, argc);
++    PodCopy(invokeArgs.array() + argslen, vp + 2, argc);
+ 
+     /* 15.3.4.5.1, 15.3.4.5.2 step 5. */
+     invokeArgs.setCallee(ObjectValue(*target));
+ 
+     if (!constructing)
+         invokeArgs.setThis(boundThis);
+ 
+     if (constructing ? !InvokeConstructor(cx, invokeArgs) : !Invoke(cx, invokeArgs))
+@@ -1288,17 +1288,17 @@ fun_bind(JSContext *cx, unsigned argc, V
+         ReportIncompatibleMethod(cx, args, &JSFunction::class_);
+         return false;
+     }
+ 
+     /* Step 3. */
+     Value *boundArgs = nullptr;
+     unsigned argslen = 0;
+     if (args.length() > 1) {
+-        boundArgs = args.array().get() + 1;
++        boundArgs = args.array() + 1;
+         argslen = args.length() - 1;
+     }
+ 
+     /* Steps 7-9. */
+     RootedValue thisArg(cx, args.length() >= 1 ? args[0] : UndefinedValue());
+     RootedObject target(cx, &thisv.toObject());
+     JSObject *boundFunction = js_fun_bind(cx, target, thisArg, boundArgs, argslen);
+     if (!boundFunction)
+diff --git a/js/src/jsproxy.cpp b/js/src/jsproxy.cpp
+--- a/js/src/jsproxy.cpp
++++ b/js/src/jsproxy.cpp
+@@ -446,25 +446,25 @@ DirectProxyHandler::enumerate(JSContext 
+     return GetPropertyNames(cx, target, 0, &props);
+ }
+ 
+ bool
+ DirectProxyHandler::call(JSContext *cx, HandleObject proxy, const CallArgs &args)
+ {
+     assertEnteredPolicy(cx, proxy, JSID_VOID);
+     RootedValue target(cx, proxy->as<ProxyObject>().private_());
+-    return Invoke(cx, args.thisv(), target, args.length(), args.array().get(), args.rval());
++    return Invoke(cx, args.thisv(), target, args.length(), args.array(), args.rval());
+ }
+ 
+ bool
+ DirectProxyHandler::construct(JSContext *cx, HandleObject proxy, const CallArgs &args)
+ {
+     assertEnteredPolicy(cx, proxy, JSID_VOID);
+     RootedValue target(cx, proxy->as<ProxyObject>().private_());
+-    return InvokeConstructor(cx, target, args.length(), args.array().get(), args.rval().address());
++    return InvokeConstructor(cx, target, args.length(), args.array(), args.rval().address());
+ }
+ 
+ bool
+ DirectProxyHandler::nativeCall(JSContext *cx, IsAcceptableThis test, NativeImpl impl,
+                                CallArgs args)
+ {
+     args.setThis(ObjectValue(*args.thisv().toObject().as<ProxyObject>().target()));
+     if (!test(args.thisv())) {
+@@ -1004,28 +1004,28 @@ ScriptedIndirectProxyHandler::iterate(JS
+ bool
+ ScriptedIndirectProxyHandler::call(JSContext *cx, HandleObject proxy, const CallArgs &args)
+ {
+     assertEnteredPolicy(cx, proxy, JSID_VOID);
+     RootedObject ccHolder(cx, &proxy->as<ProxyObject>().extra(0).toObject());
+     JS_ASSERT(ccHolder->getClass() == &CallConstructHolder);
+     RootedValue call(cx, ccHolder->getReservedSlot(0));
+     JS_ASSERT(call.isObject() && call.toObject().isCallable());
+-    return Invoke(cx, args.thisv(), call, args.length(), args.array().get(), args.rval());
++    return Invoke(cx, args.thisv(), call, args.length(), args.array(), args.rval());
+ }
+ 
+ bool
+ ScriptedIndirectProxyHandler::construct(JSContext *cx, HandleObject proxy, const CallArgs &args)
+ {
+     assertEnteredPolicy(cx, proxy, JSID_VOID);
+     RootedObject ccHolder(cx, &proxy->as<ProxyObject>().extra(0).toObject());
+     JS_ASSERT(ccHolder->getClass() == &CallConstructHolder);
+     RootedValue construct(cx, ccHolder->getReservedSlot(1));
+     JS_ASSERT(construct.isObject() && construct.toObject().isCallable());
+-    return InvokeConstructor(cx, construct, args.length(), args.array().get(),
++    return InvokeConstructor(cx, construct, args.length(), args.array(),
+                              args.rval().address());
+ }
+ 
+ bool
+ ScriptedIndirectProxyHandler::nativeCall(JSContext *cx, IsAcceptableThis test, NativeImpl impl,
+                                          CallArgs args)
+ {
+     return BaseProxyHandler::nativeCall(cx, test, impl, args);
+@@ -2213,17 +2213,17 @@ ScriptedDirectProxyHandler::call(JSConte
+     RootedObject target(cx, proxy->as<ProxyObject>().target());
+ 
+     /*
+      * NB: Remember to throw a TypeError here if we change NewProxyObject so that this trap can get
+      * called for non-callable objects
+      */
+ 
+     // step 3
+-    RootedObject argsArray(cx, NewDenseCopiedArray(cx, args.length(), args.array().get()));
++    RootedObject argsArray(cx, NewDenseCopiedArray(cx, args.length(), args.array()));
+     if (!argsArray)
+         return false;
+ 
+     // step 4
+     RootedValue trap(cx);
+     if (!JSObject::getProperty(cx, handler, handler, cx->names().apply, &trap))
+         return false;
+ 
+@@ -2251,17 +2251,17 @@ ScriptedDirectProxyHandler::construct(JS
+     RootedObject target(cx, proxy->as<ProxyObject>().target());
+ 
+     /*
+      * NB: Remember to throw a TypeError here if we change NewProxyObject so that this trap can get
+      * called for non-callable objects
+      */
+ 
+     // step 3
+-    RootedObject argsArray(cx, NewDenseCopiedArray(cx, args.length(), args.array().get()));
++    RootedObject argsArray(cx, NewDenseCopiedArray(cx, args.length(), args.array()));
+     if (!argsArray)
+         return false;
+ 
+     // step 4
+     RootedValue trap(cx);
+     if (!JSObject::getProperty(cx, handler, handler, cx->names().construct, &trap))
+         return false;
+ 
+diff --git a/js/src/jsstr.cpp b/js/src/jsstr.cpp
+--- a/js/src/jsstr.cpp
++++ b/js/src/jsstr.cpp
+@@ -2792,19 +2792,20 @@ str_replace_flat_lambda(JSContext *cx, C
+     static const uint32_t lambdaArgc = 3;
+     if (!rdata.fig.args().init(lambdaArgc))
+         return false;
+ 
+     CallArgs &args = rdata.fig.args();
+     args.setCallee(ObjectValue(*rdata.lambda));
+     args.setThis(UndefinedValue());
+ 
+-    args[0].setString(matchStr);
+-    args[1].setInt32(fm.match());
+-    args[2].setString(rdata.str);
++    Value *sp = args.array();
++    sp[0].setString(matchStr);
++    sp[1].setInt32(fm.match());
++    sp[2].setString(rdata.str);
+ 
+     if (!rdata.fig.invoke(cx))
+         return false;
+ 
+     RootedString repstr(cx, ToString<CanGC>(cx, args.rval()));
+     if (!repstr)
+         return false;
+ 
+diff --git a/js/src/jswrapper.cpp b/js/src/jswrapper.cpp
+--- a/js/src/jswrapper.cpp
++++ b/js/src/jswrapper.cpp
+@@ -486,19 +486,19 @@ CrossCompartmentWrapper::nativeCall(JSCo
+ 
+     RootedObject wrapped(cx, wrappedObject(wrapper));
+     {
+         AutoCompartment call(cx, wrapped);
+         InvokeArgs dstArgs(cx);
+         if (!dstArgs.init(srcArgs.length()))
+             return false;
+ 
+-        mozilla::RangedPtr<Value> src = srcArgs.base();
+-        mozilla::RangedPtr<Value> srcend = srcArgs.end();
+-        mozilla::RangedPtr<Value> dst = dstArgs.base();
++        Value *src = srcArgs.base();
++        Value *srcend = srcArgs.array() + srcArgs.length();
++        Value *dst = dstArgs.base();
+ 
+         RootedValue source(cx);
+         for (; src < srcend; ++src, ++dst) {
+             source = *src;
+             if (!cx->compartment()->wrap(cx, &source))
+                 return false;
+             *dst = source.get();
+ 
+diff --git a/js/src/shell/js.cpp b/js/src/shell/js.cpp
+--- a/js/src/shell/js.cpp
++++ b/js/src/shell/js.cpp
+@@ -1395,17 +1395,17 @@ PrintErr(JSContext *cx, unsigned argc, j
+ 
+ static bool
+ Help(JSContext *cx, unsigned argc, jsval *vp);
+ 
+ static bool
+ Quit(JSContext *cx, unsigned argc, jsval *vp)
+ {
+     CallArgs args = CallArgsFromVp(argc, vp);
+-    JS_ConvertArguments(cx, args.length(), args.array().get(), "/ i", &gExitCode);
++    JS_ConvertArguments(cx, args.length(), args.array(), "/ i", &gExitCode);
+ 
+     gQuitting = true;
+     return false;
+ }
+ 
+ static const char *
+ ToSource(JSContext *cx, MutableHandleValue vp, JSAutoByteString *bytes)
+ {
+@@ -1587,34 +1587,34 @@ Trap(JSContext *cx, unsigned argc, jsval
+         JS_ReportErrorNumber(cx, my_GetErrorMessage, nullptr, JSSMSG_TRAP_USAGE);
+         return false;
+     }
+     argc = args.length() - 1;
+     RootedString str(cx, JS_ValueToString(cx, args[argc]));
+     if (!str)
+         return false;
+     args[argc].setString(str);
+-    if (!GetScriptAndPCArgs(cx, argc, args.array().get(), &script, &i))
++    if (!GetScriptAndPCArgs(cx, argc, args.array(), &script, &i))
+         return false;
+     if (uint32_t(i) >= script->length) {
+         JS_ReportErrorNumber(cx, my_GetErrorMessage, nullptr, JSSMSG_TRAP_USAGE);
+         return false;
+     }
+     args.rval().setUndefined();
+     return JS_SetTrap(cx, script, script->code + i, TrapHandler, STRING_TO_JSVAL(str));
+ }
+ 
+ static bool
+ Untrap(JSContext *cx, unsigned argc, jsval *vp)
+ {
+     CallArgs args = CallArgsFromVp(argc, vp);
+     RootedScript script(cx);
+     int32_t i;
+ 
+-    if (!GetScriptAndPCArgs(cx, args.length(), args.array().get(), &script, &i))
++    if (!GetScriptAndPCArgs(cx, args.length(), args.array(), &script, &i))
+         return false;
+     JS_ClearTrap(cx, script, script->code + i, nullptr, nullptr);
+     args.rval().setUndefined();
+     return true;
+ }
+ 
+ static JSTrapStatus
+ DebuggerAndThrowHandler(JSContext *cx, JSScript *script, jsbytecode *pc, jsval *rval,
+@@ -1697,17 +1697,17 @@ LineToPC(JSContext *cx, unsigned argc, j
+ static bool
+ PCToLine(JSContext *cx, unsigned argc, jsval *vp)
+ {
+     CallArgs args = CallArgsFromVp(argc, vp);
+     RootedScript script(cx);
+     int32_t i;
+     unsigned lineno;
+ 
+-    if (!GetScriptAndPCArgs(cx, args.length(), args.array().get(), &script, &i))
++    if (!GetScriptAndPCArgs(cx, args.length(), args.array(), &script, &i))
+         return false;
+     lineno = JS_PCToLineNumber(cx, script, script->code + i);
+     if (!lineno)
+         return false;
+     args.rval().setInt32(lineno);
+     return true;
+ }
+ 
+@@ -1943,21 +1943,21 @@ DisassembleScript(JSContext *cx, HandleS
+     }
+     return true;
+ }
+ 
+ namespace {
+ 
+ struct DisassembleOptionParser {
+     unsigned   argc;
+-    mozilla::RangedPtr<Value> argv;
++    jsval   *argv;
+     bool    lines;
+     bool    recursive;
+ 
+-    DisassembleOptionParser(unsigned argc, mozilla::RangedPtr<Value> argv)
++    DisassembleOptionParser(unsigned argc, jsval *argv)
+       : argc(argc), argv(argv), lines(false), recursive(false) {}
+ 
+     bool parse(JSContext *cx) {
+         /* Read options off early arguments */
+         while (argc > 0 && argv[0].isString()) {
+             JSString *str = argv[0].toString();
+             JSFlatString *flatStr = JS_FlattenString(cx, str);
+             if (!flatStr)
+@@ -2290,17 +2290,17 @@ DumpHeap(JSContext *cx, unsigned argc, j
+     return false;
+ }
+ 
+ static bool
+ DumpObject(JSContext *cx, unsigned argc, jsval *vp)
+ {
+     CallArgs args = CallArgsFromVp(argc, vp);
+     RootedObject arg0(cx);
+-    if (!JS_ConvertArguments(cx, args.length(), args.array().get(), "o", arg0.address()))
++    if (!JS_ConvertArguments(cx, args.length(), args.array(), "o", arg0.address()))
+         return false;
+ 
+     js_DumpObject(arg0);
+ 
+     args.rval().setUndefined();
+     return true;
+ }
+ 
+diff --git a/js/src/vm/Debugger.cpp b/js/src/vm/Debugger.cpp
+--- a/js/src/vm/Debugger.cpp
++++ b/js/src/vm/Debugger.cpp
+@@ -5071,17 +5071,17 @@ ApplyOrCall(JSContext *cx, unsigned argc
+                 return false;
+             callArgc = unsigned(Min(callArgc, ARGS_LENGTH_MAX));
+             if (!argv.growBy(callArgc) || !GetElements(cx, argsobj, callArgc, argv.begin()))
+                 return false;
+             callArgv = argv.begin();
+         }
+     } else {
+         callArgc = argc > 0 ? unsigned(Min(argc - 1, ARGS_LENGTH_MAX)) : 0;
+-        callArgv = args.array().get() + 1;
++        callArgv = args.array() + 1;
+     }
+ 
+     AutoArrayRooter callArgvRooter(cx, callArgc, callArgv);
+     for (unsigned i = 0; i < callArgc; i++) {
+         if (!dbg->unwrapDebuggeeValue(cx, callArgvRooter.handleAt(i)))
+             return false;
+     }
+ 
+diff --git a/js/src/vm/Interpreter.cpp b/js/src/vm/Interpreter.cpp
+--- a/js/src/vm/Interpreter.cpp
++++ b/js/src/vm/Interpreter.cpp
+@@ -195,31 +195,31 @@ js::OnUnknownMethod(JSContext *cx, Handl
+         obj->setSlot(JSSLOT_FOUND_FUNCTION, value);
+         obj->setSlot(JSSLOT_SAVED_ID, idval);
+         vp.setObject(*obj);
+     }
+     return true;
+ }
+ 
+ static bool
+-NoSuchMethod(JSContext *cx, unsigned argc, mozilla::RangedPtr<Value> vp)
++NoSuchMethod(JSContext *cx, unsigned argc, Value *vp)
+ {
+     InvokeArgs args(cx);
+     if (!args.init(2))
+         return false;
+ 
+     JS_ASSERT(vp[0].isObject());
+     JS_ASSERT(vp[1].isObject());
+     JSObject *obj = &vp[0].toObject();
+     JS_ASSERT(obj->getClass() == &js_NoSuchMethodClass);
+ 
+     args.setCallee(obj->getReservedSlot(JSSLOT_FOUND_FUNCTION));
+     args.setThis(vp[1]);
+     args[0].set(obj->getReservedSlot(JSSLOT_SAVED_ID));
+-    JSObject *argsobj = NewDenseCopiedArray(cx, argc, (vp + 2).get());
++    JSObject *argsobj = NewDenseCopiedArray(cx, argc, vp + 2);
+     if (!argsobj)
+         return false;
+     args[1].setObject(*argsobj);
+     bool ok = Invoke(cx, args);
+     vp[0] = args.rval();
+     return ok;
+ }
+ 
+@@ -490,17 +490,17 @@ js::Invoke(JSContext *cx, const Value &t
+            MutableHandleValue rval)
+ {
+     InvokeArgs args(cx);
+     if (!args.init(argc))
+         return false;
+ 
+     args.setCallee(fval);
+     args.setThis(thisv);
+-    PodCopy(args.array().get(), argv, argc);
++    PodCopy(args.array(), argv, argc);
+ 
+     if (args.thisv().isObject()) {
+         /*
+          * We must call the thisObject hook in case we are not called from the
+          * interpreter, where a prior bytecode has computed an appropriate
+          * |this| already.
+          */
+         RootedObject thisObj(cx, &args.thisv().toObject());
+@@ -557,17 +557,17 @@ bool
+ js::InvokeConstructor(JSContext *cx, Value fval, unsigned argc, Value *argv, Value *rval)
+ {
+     InvokeArgs args(cx);
+     if (!args.init(argc))
+         return false;
+ 
+     args.setCallee(fval);
+     args.setThis(MagicValue(JS_THIS_POISON));
+-    PodCopy(args.array().get(), argv, argc);
++    PodCopy(args.array(), argv, argc);
+ 
+     if (!InvokeConstructor(cx, args))
+         return false;
+ 
+     *rval = args.rval();
+     return true;
+ }
+ 
+@@ -2386,17 +2386,17 @@ BEGIN_CASE(JSOP_SPREADEVAL)
+     InvokeArgs args(cx);
+ 
+     if (!args.init(length))
+         return false;
+ 
+     args.setCallee(regs.sp[-3]);
+     args.setThis(regs.sp[-2]);
+ 
+-    if (!GetElements(cx, aobj, length, args.array().get()))
++    if (!GetElements(cx, aobj, length, args.array()))
+         goto error;
+ 
+     if (op == JSOP_SPREADNEW) {
+         if (!InvokeConstructor(cx, args))
+             goto error;
+     } else if (op == JSOP_SPREADCALL) {
+         if (!Invoke(cx, args))
+             goto error;
+@@ -2415,17 +2415,17 @@ BEGIN_CASE(JSOP_SPREADEVAL)
+     regs.sp[-1] = args.rval();
+     TypeScript::Monitor(cx, script, regs.pc, regs.sp[-1]);
+ }
+ END_CASE(JSOP_SPREADCALL)
+ 
+ BEGIN_CASE(JSOP_FUNAPPLY)
+ {
+     CallArgs args = CallArgsFromSp(GET_ARGC(regs.pc), regs.sp);
+-    if (!GuardFunApplyArgumentsOptimization(cx, regs.fp(), args.calleev(), args.array().get(),
++    if (!GuardFunApplyArgumentsOptimization(cx, regs.fp(), args.calleev(), args.array(),
+                                             args.length()))
+         goto error;
+     /* FALL THROUGH */
+ }
+ 
+ BEGIN_CASE(JSOP_NEW)
+ BEGIN_CASE(JSOP_CALL)
+ BEGIN_CASE(JSOP_FUNCALL)
+diff --git a/js/src/vm/Stack-inl.h b/js/src/vm/Stack-inl.h
+--- a/js/src/vm/Stack-inl.h
++++ b/js/src/vm/Stack-inl.h
+@@ -254,45 +254,45 @@ InterpreterStack::getCallFrame(JSContext
+ {
+     JSFunction *fun = &args.callee().as<JSFunction>();
+ 
+     JS_ASSERT(fun->nonLazyScript() == script);
+     unsigned nformal = fun->nargs;
+     unsigned nvals = script->nslots;
+ 
+     if (args.length() >= nformal) {
+-        *pargv = args.array().get();
++        *pargv = args.array();
+         uint8_t *buffer = allocateFrame(cx, sizeof(StackFrame) + nvals * sizeof(Value));
+         return reinterpret_cast<StackFrame *>(buffer);
+     }
+ 
+     // Pad any missing arguments with |undefined|.
+     JS_ASSERT(args.length() < nformal);
+ 
+     nvals += nformal + 2; // Include callee, |this|.
+     uint8_t *buffer = allocateFrame(cx, sizeof(StackFrame) + nvals * sizeof(Value));
+     if (!buffer)
+         return nullptr;
+ 
+     Value *argv = reinterpret_cast<Value *>(buffer);
+     unsigned nmissing = nformal - args.length();
+ 
+-    mozilla::PodCopy(argv, args.base().get(), 2 + args.length());
++    mozilla::PodCopy(argv, args.base(), 2 + args.length());
+     SetValueRangeToUndefined(argv + 2 + args.length(), nmissing);
+ 
+     *pargv = argv + 2;
+     return reinterpret_cast<StackFrame *>(argv + 2 + nformal);
+ }
+ 
+ JS_ALWAYS_INLINE bool
+ InterpreterStack::pushInlineFrame(JSContext *cx, FrameRegs &regs, const CallArgs &args,
+                                   HandleScript script, InitialFrameFlags initial)
+ {
+     RootedFunction callee(cx, &args.callee().as<JSFunction>());
+-    JS_ASSERT(regs.sp == args.end().get());
++    JS_ASSERT(regs.sp == args.end());
+     JS_ASSERT(callee->nonLazyScript() == script);
+ 
+     StackFrame *prev = regs.fp();
+     jsbytecode *prevpc = regs.pc;
+     Value *prevsp = regs.sp;
+     JS_ASSERT(prev);
+ 
+     LifoAlloc::Mark mark = allocator_.mark();
+diff --git a/js/src/vm/TypedArrayObject.cpp b/js/src/vm/TypedArrayObject.cpp
+--- a/js/src/vm/TypedArrayObject.cpp
++++ b/js/src/vm/TypedArrayObject.cpp
+@@ -580,17 +580,17 @@ ArrayBufferObject::createDataViewForThis
+     Rooted<JSObject*> proto(cx, &args[args.length() - 1].toObject());
+ 
+     Rooted<JSObject*> buffer(cx, &args.thisv().toObject());
+ 
+     /*
+      * Pop off the passed-along prototype and delegate to normal DataViewObject
+      * construction.
+      */
+-    CallArgs frobbedArgs = CallArgsFromVp(args.length() - 1, args.base().get());
++    CallArgs frobbedArgs = CallArgsFromVp(args.length() - 1, args.base());
+     return DataViewObject::construct(cx, buffer, frobbedArgs, proto);
+ }
+ 
+ bool
+ ArrayBufferObject::createDataViewForThis(JSContext *cx, unsigned argc, Value *vp)
+ {
+     CallArgs args = CallArgsFromVp(argc, vp);
+     return CallNonGenericMethod<IsArrayBuffer, createDataViewForThisImpl>(cx, args);
+@@ -2790,17 +2790,17 @@ DataViewObject::class_constructor(JSCont
+         if (!proto)
+             return false;
+ 
+         InvokeArgs args2(cx);
+         if (!args2.init(args.length() + 1))
+             return false;
+         args2.setCallee(global->createDataViewForThis());
+         args2.setThis(ObjectValue(*bufobj));
+-        PodCopy(args2.array().get(), args.array().get(), args.length());
++        PodCopy(args2.array(), args.array(), args.length());
+         args2[argc].setObject(*proto);
+         if (!Invoke(cx, args2))
+             return false;
+         args.rval().set(args2.rval());
+         return true;
+     }
+ 
+     return construct(cx, bufobj, args, NullPtr());
+diff --git a/js/xpconnect/src/Sandbox.cpp b/js/xpconnect/src/Sandbox.cpp
+--- a/js/xpconnect/src/Sandbox.cpp
++++ b/js/xpconnect/src/Sandbox.cpp
+@@ -693,17 +693,17 @@ xpc::SandboxCallableProxyHandler::call(J
+     // if the sandboxPrototype is an Xray Wrapper, which lets us appropriately
+     // remap |this|.
+     JS::Value thisVal =
+       WrapperFactory::IsXrayWrapper(sandboxProxy) ? args.computeThis(cx) : args.thisv();
+     if (thisVal == ObjectValue(*sandboxGlobal)) {
+         thisVal = ObjectValue(*js::GetProxyTargetObject(sandboxProxy));
+     }
+ 
+-    return JS::Call(cx, thisVal, js::GetProxyPrivate(proxy), args.length(), args.array().get(),
++    return JS::Call(cx, thisVal, js::GetProxyPrivate(proxy), args.length(), args.array(),
+                     args.rval());
+ }
+ 
+ xpc::SandboxCallableProxyHandler xpc::sandboxCallableProxyHandler;
+ 
+ /*
+  * Wrap a callable such that if we're called with oldThisObj as the
+  * "this" we will instead call it with newThisObj as the this.
+@@ -1636,17 +1636,17 @@ NonCloningFunctionForwarder(JSContext *c
+ 
+     RootedValue v(cx, js::GetFunctionNativeReserved(&args.callee(), 0));
+     MOZ_ASSERT(v.isObject(), "weird function");
+ 
+     JSObject *obj = JS_THIS_OBJECT(cx, vp);
+     if (!obj) {
+         return false;
+     }
+-    return JS_CallFunctionValue(cx, obj, v, args.length(), args.array().get(), vp);
++    return JS_CallFunctionValue(cx, obj, v, args.length(), args.array(), vp);
+ }
+ 
+ /*
+  * Forwards the call to the exported function. Clones all the non reflectors, ignores
+  * the |this| argument.
+  */
+ static bool
+ CloningFunctionForwarder(JSContext *cx, unsigned argc, Value *vp)
+@@ -1666,17 +1666,17 @@ CloningFunctionForwarder(JSContext *cx, 
+             }
+         }
+ 
+         // JS API does not support any JSObject to JSFunction conversion,
+         // so let's use JS_CallFunctionValue instead.
+         RootedValue functionVal(cx);
+         functionVal.setObject(*origFunObj);
+ 
+-        if (!JS_CallFunctionValue(cx, nullptr, functionVal, args.length(), args.array().get(), vp))
++        if (!JS_CallFunctionValue(cx, nullptr, functionVal, args.length(), args.array(), vp))
+             return false;
+     }
+ 
+     // Return value must be wrapped.
+     return JS_WrapValue(cx, vp);
+ }
+ 
+ bool
+diff --git a/js/xpconnect/src/XPCComponents.cpp b/js/xpconnect/src/XPCComponents.cpp
+--- a/js/xpconnect/src/XPCComponents.cpp
++++ b/js/xpconnect/src/XPCComponents.cpp
+@@ -2234,17 +2234,17 @@ nsXPCConstructor::CallOrConstruct(nsIXPC
+         // first check existence of function property for better error reporting
+         RootedValue fun(cx);
+         if (!JS_GetProperty(cx, newObj, mInitializer, &fun) ||
+             fun.isPrimitive()) {
+             return ThrowAndFail(NS_ERROR_XPC_BAD_INITIALIZER_NAME, cx, _retval);
+         }
+ 
+         RootedValue dummy(cx);
+-        if (!JS_CallFunctionValue(cx, newObj, fun, args.length(), args.array().get(), dummy.address())) {
++        if (!JS_CallFunctionValue(cx, newObj, fun, args.length(), args.array(), dummy.address())) {
+             // function should have thrown an exception
+             *_retval = false;
+             return NS_OK;
+         }
+     }
+ 
+     return NS_OK;
+ }
+diff --git a/js/xpconnect/src/XPCJSID.cpp b/js/xpconnect/src/XPCJSID.cpp
+--- a/js/xpconnect/src/XPCJSID.cpp
++++ b/js/xpconnect/src/XPCJSID.cpp
+@@ -820,17 +820,17 @@ nsJSCID::Construct(nsIXPConnectWrappedNa
+ {
+     RootedObject obj(cx, objArg);
+     XPCJSRuntime* rt = nsXPConnect::GetRuntimeInstance();
+     if (!rt)
+         return NS_ERROR_FAILURE;
+ 
+     // 'push' a call context and call on it
+     RootedId name(cx, rt->GetStringID(XPCJSRuntime::IDX_CREATE_INSTANCE));
+-    XPCCallContext ccx(JS_CALLER, cx, obj, NullPtr(), name, args.length(), args.array().get(),
++    XPCCallContext ccx(JS_CALLER, cx, obj, NullPtr(), name, args.length(), args.array(),
+                        args.rval().address());
+ 
+     *_retval = XPCWrappedNative::CallMethod(ccx);
+     return NS_OK;
+ }
+ 
+ /* bool hasInstance (in nsIXPConnectWrappedNative wrapper, in JSContextPtr cx, in JSObjectPtr obj, in jsval val, out bool bp); */
+ NS_IMETHODIMP
+diff --git a/js/xpconnect/src/XPCWrappedNativeJSOps.cpp b/js/xpconnect/src/XPCWrappedNativeJSOps.cpp
+--- a/js/xpconnect/src/XPCWrappedNativeJSOps.cpp
++++ b/js/xpconnect/src/XPCWrappedNativeJSOps.cpp
+@@ -856,17 +856,17 @@ XPC_WN_Helper_CheckAccess(JSContext *cx,
+ static bool
+ XPC_WN_Helper_Call(JSContext *cx, unsigned argc, jsval *vp)
+ {
+     JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+     // N.B. we want obj to be the callee, not JS_THIS(cx, vp)
+     RootedObject obj(cx, &args.callee());
+ 
+     XPCCallContext ccx(JS_CALLER, cx, obj, NullPtr(), JSID_VOIDHANDLE, args.length(),
+-                       args.array().get(), args.rval().address());
++                       args.array(), args.rval().address());
+     if (!ccx.IsValid())
+         return false;
+ 
+     MOZ_ASSERT(obj == ccx.GetFlattenedJSObject());
+ 
+     PRE_HELPER_STUB
+     Call(wrapper, cx, obj, args, &retval);
+     POST_HELPER_STUB
+@@ -876,17 +876,17 @@ static bool
+ XPC_WN_Helper_Construct(JSContext *cx, unsigned argc, jsval *vp)
+ {
+     JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+     RootedObject obj(cx, &args.callee());
+     if (!obj)
+         return false;
+ 
+     XPCCallContext ccx(JS_CALLER, cx, obj, NullPtr(), JSID_VOIDHANDLE, args.length(),
+-                       args.array().get(), args.rval().address());
++                       args.array(), args.rval().address());
+     if (!ccx.IsValid())
+         return false;
+ 
+     MOZ_ASSERT(obj == ccx.GetFlattenedJSObject());
+ 
+     PRE_HELPER_STUB
+     Construct(wrapper, cx, obj, args, &retval);
+     POST_HELPER_STUB
+diff --git a/js/xpconnect/wrappers/XrayWrapper.cpp b/js/xpconnect/wrappers/XrayWrapper.cpp
+--- a/js/xpconnect/wrappers/XrayWrapper.cpp
++++ b/js/xpconnect/wrappers/XrayWrapper.cpp
+@@ -977,17 +977,17 @@ bool
+ XPCWrappedNativeXrayTraits::call(JSContext *cx, HandleObject wrapper,
+                                  const JS::CallArgs &args,
+                                  js::Wrapper& baseInstance)
+ {
+     // Run the resolve hook of the wrapped native.
+     XPCWrappedNative *wn = getWN(wrapper);
+     if (NATIVE_HAS_FLAG(wn, WantCall)) {
+         XPCCallContext ccx(JS_CALLER, cx, wrapper, NullPtr(), JSID_VOIDHANDLE, args.length(),
+-                           args.array().get(), args.rval().address());
++                           args.array(), args.rval().address());
+         if (!ccx.IsValid())
+             return false;
+         bool ok = true;
+         nsresult rv = wn->GetScriptableInfo()->GetCallback()->Call(
+             wn, cx, wrapper, args, &ok);
+         if (NS_FAILED(rv)) {
+             if (ok)
+                 XPCThrower::Throw(rv, cx);
+@@ -1003,17 +1003,17 @@ bool
+ XPCWrappedNativeXrayTraits::construct(JSContext *cx, HandleObject wrapper,
+                                       const JS::CallArgs &args,
+                                       js::Wrapper& baseInstance)
+ {
+     // Run the resolve hook of the wrapped native.
+     XPCWrappedNative *wn = getWN(wrapper);
+     if (NATIVE_HAS_FLAG(wn, WantConstruct)) {
+         XPCCallContext ccx(JS_CALLER, cx, wrapper, NullPtr(), JSID_VOIDHANDLE, args.length(),
+-                           args.array().get(), args.rval().address());
++                           args.array(), args.rval().address());
+         if (!ccx.IsValid())
+             return false;
+         bool ok = true;
+         nsresult rv = wn->GetScriptableInfo()->GetCallback()->Construct(
+             wn, cx, wrapper, args, &ok);
+         if (NS_FAILED(rv)) {
+             if (ok)
+                 XPCThrower::Throw(rv, cx);
+@@ -1092,17 +1092,17 @@ DOMXrayTraits::call(JSContext *cx, Handl
+     // are using "legacycaller", which basically means plug-ins.  We want to
+     // call those on the content compartment.
+     if (clasp->flags & JSCLASS_IS_DOMIFACEANDPROTOJSCLASS) {
+         if (!clasp->call) {
+             js_ReportIsNotFunction(cx, JS::ObjectValue(*wrapper));
+             return false;
+         }
+         // call it on the Xray compartment
+-        if (!clasp->call(cx, args.length(), args.base().get()))
++        if (!clasp->call(cx, args.length(), args.base()))
+             return false;
+     } else {
+         // This is only reached for WebIDL instance objects, and in practice
+         // only for plugins.  Just call them on the content compartment.
+         if (!baseInstance.call(cx, wrapper, args))
+             return false;
+     }
+     return JS_WrapValue(cx, args.rval().address());
+@@ -1116,17 +1116,17 @@ DOMXrayTraits::construct(JSContext *cx, 
+     MOZ_ASSERT(mozilla::dom::HasConstructor(obj));
+     const js::Class* clasp = js::GetObjectClass(obj);
+     // See comments in DOMXrayTraits::call() explaining what's going on here.
+     if (clasp->flags & JSCLASS_IS_DOMIFACEANDPROTOJSCLASS) {
+         if (!clasp->construct) {
+             js_ReportIsNotFunction(cx, JS::ObjectValue(*wrapper));
+             return false;
+         }
+-        if (!clasp->construct(cx, args.length(), args.base().get()))
++        if (!clasp->construct(cx, args.length(), args.base()))
+             return false;
+     } else {
+         if (!baseInstance.construct(cx, wrapper, args))
+             return false;
+     }
+     if (!args.rval().isObject() || !JS_WrapValue(cx, args.rval().address()))
+         return false;
+     return true;
+diff --git a/mfbt/RangedPtr.h b/mfbt/RangedPtr.h
+--- a/mfbt/RangedPtr.h
++++ b/mfbt/RangedPtr.h
+@@ -200,20 +200,16 @@ class RangedPtr
+       MOZ_ASSERT(size_t(index > 0 ? index : -index) <= size_t(-1) / sizeof(T));
+       return *create(ptr + index);
+     }
+ 
+     T& operator*() const {
+       return *ptr;
+     }
+ 
+-    T* operator->() const {
+-      return ptr;
+-    }
+-
+     template <typename U>
+     bool operator==(const RangedPtr<U>& other) const {
+       return ptr == other.ptr;
+     }
+     template <typename U>
+     bool operator!=(const RangedPtr<U>& other) const {
+       return !(*this == other);
+     }

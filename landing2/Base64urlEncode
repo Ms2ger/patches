@@ -1,0 +1,147 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/toolkit/components/places/Helpers.cpp b/toolkit/components/places/Helpers.cpp
+--- a/toolkit/components/places/Helpers.cpp
++++ b/toolkit/components/places/Helpers.cpp
+@@ -33,25 +33,26 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "Helpers.h"
+ #include "mozIStorageError.h"
+-#include "plbase64.h"
+ #include "prio.h"
+ #include "nsString.h"
+ #include "nsNavHistory.h"
++
++#include "mozilla/Base64.h"
+ #include "mozilla/Services.h"
++
+ #if defined(XP_OS2)
+ #include "nsIRandomGenerator.h"
+ #endif
+-#include "nsContentUtils.h"
+ 
+ // The length of guids that are used by history and bookmarks.
+ #define GUID_LENGTH 12
+ 
+ namespace mozilla {
+ namespace places {
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+@@ -233,40 +234,16 @@ void
+ ReverseString(const nsString& aInput, nsString& aReversed)
+ {
+   aReversed.Truncate(0);
+   for (int32_t i = aInput.Length() - 1; i >= 0; i--) {
+     aReversed.Append(aInput[i]);
+   }
+ }
+ 
+-static
+-nsresult
+-Base64urlEncode(const uint8_t* aBytes,
+-                uint32_t aNumBytes,
+-                nsCString& _result)
+-{
+-  // SetLength does not set aside space for NULL termination.  PL_Base64Encode
+-  // will not NULL terminate, however, nsCStrings must be NULL terminated.  As a
+-  // result, we set the capacity to be one greater than what we need, and the
+-  // length to our desired length.
+-  uint32_t length = (aNumBytes + 2) / 3 * 4; // +2 due to integer math.
+-  NS_ENSURE_TRUE(_result.SetCapacity(length + 1, fallible_t()),
+-                 NS_ERROR_OUT_OF_MEMORY);
+-  _result.SetLength(length);
+-  (void)PL_Base64Encode(reinterpret_cast<const char*>(aBytes), aNumBytes,
+-                        _result.BeginWriting());
+-
+-  // base64url encoding is defined in RFC 4648.  It replaces the last two
+-  // alphabet characters of base64 encoding with '-' and '_' respectively.
+-  _result.ReplaceChar('+', '-');
+-  _result.ReplaceChar('/', '_');
+-  return NS_OK;
+-}
+-
+ #ifdef XP_WIN
+ // Included here because windows.h conflicts with the use of mozIStorageError
+ // above.
+ #include <windows.h>
+ #include <wincrypt.h>
+ #endif
+ 
+ static
+@@ -321,17 +298,18 @@ GenerateGUID(nsCString& _guid)
+   // bytes, we get one character.
+   const uint32_t kRequiredBytesLength =
+     static_cast<uint32_t>(GUID_LENGTH / 4 * 3);
+ 
+   uint8_t buffer[kRequiredBytesLength];
+   nsresult rv = GenerateRandomBytes(kRequiredBytesLength, buffer);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+-  rv = Base64urlEncode(buffer, kRequiredBytesLength, _guid);
++  nsDependentCString stringBuffer(buffer, kRequiredBytesLength);
++  rv = Base64URLEncode(stringBuffer, _guid);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   NS_ASSERTION(_guid.Length() == GUID_LENGTH, "GUID is not the right size!");
+   return NS_OK;
+ }
+ 
+ bool
+ IsValidGUID(const nsCString& aGUID)
+diff --git a/xpcom/io/Base64.cpp b/xpcom/io/Base64.cpp
+--- a/xpcom/io/Base64.cpp
++++ b/xpcom/io/Base64.cpp
+@@ -356,16 +356,29 @@ Base64Decode(const nsAString &aBinaryDat
+     CopyASCIItoUTF16(string, aString);
+   } else {
+     aString.Truncate();
+   }
+ 
+   return rv;
+ }
+ 
++nsresult
++Base64URLEncode(const nsACString& aBytes, nsCString& aResult)
++{
++  nsresult rv = Base64Decode(aBytes, aResult);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  // base64url encoding is defined in RFC 4648.  It replaces the last two
++  // alphabet characters of base64 encoding with '-' and '_' respectively.
++  aResult.ReplaceChar('+', '-');
++  aResult.ReplaceChar('/', '_');
++  return NS_OK;
++}
++
+ static void
+ UnUrlsafeBase64(nsACString& str)
+ {
+   char* iter = str.BeginWriting();
+   char* end = str.EndWriting();
+   while (iter != end) {
+     if (*iter == '-') {
+       *iter = '+';
+diff --git a/xpcom/io/Base64.h b/xpcom/io/Base64.h
+--- a/xpcom/io/Base64.h
++++ b/xpcom/io/Base64.h
+@@ -67,13 +67,15 @@ Base64Decode(const nsAString &aBinaryDat
+ 
+ // These functions implement <http://www.whatwg.org/html/#atob>.
+ nsresult
+ Btoa(const nsAString& aBinaryData, nsAString& aAsciiBase64String);
+ nsresult
+ Atob(const nsAString& aAsciiString, nsAString& aBinaryData);
+ 
+ nsresult
++Base64urlEncode(const nsACString& aBytes, nsCString& aResult);
++nsresult
+ Base64URLDecode(const nsACString& aBinaryData, nsACString& aString);
+ 
+ } // namespace mozilla
+ 
+ #endif

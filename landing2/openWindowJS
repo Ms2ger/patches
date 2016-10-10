@@ -1,0 +1,65 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/embedding/components/windowwatcher/public/nsPIWindowWatcher.idl b/embedding/components/windowwatcher/public/nsPIWindowWatcher.idl
+--- a/embedding/components/windowwatcher/public/nsPIWindowWatcher.idl
++++ b/embedding/components/windowwatcher/public/nsPIWindowWatcher.idl
+@@ -41,17 +41,17 @@
+ */
+ 
+ #include "nsISupports.idl"
+ 
+ interface nsIDOMWindow;
+ interface nsISimpleEnumerator;
+ interface nsIWebBrowserChrome;
+ interface nsIDocShellTreeItem;
+-interface nsIArray;
++interface nsIJSArgArray;
+ 
+ [uuid(8624594a-28d7-4bc3-8d12-b1c2b9eefd90)]
+ 
+ interface nsPIWindowWatcher : nsISupports
+ {
+   /** A window has been created. Add it to our list.
+       @param aWindow the window to add
+       @param aChrome the corresponding chrome window. The DOM window
+@@ -87,17 +87,17 @@ interface nsPIWindowWatcher : nsISupport
+             window named aName.
+       @note This method should try to set the default charset for the new
+             window to the default charset of the document in the calling window
+             (which is determined based on the JS stack and the value of
+             aParent).  This is not guaranteed, however.
+   */
+   nsIDOMWindow openWindowJS(in nsIDOMWindow aParent, in string aUrl,
+                in string aName, in string aFeatures, in boolean aDialog,
+-               in nsIArray aArgs);
++               in nsIJSArgArray aArgs);
+ 
+   /**
+    * Find a named docshell tree item amongst all windows registered
+    * with the window watcher.  This may be a subframe in some window,
+    * for example.
+    *
+    * @param aName the name of the window.  Must not be null.
+    * @param aRequestor the tree item immediately making the request.
+diff --git a/embedding/components/windowwatcher/src/nsWindowWatcher.cpp b/embedding/components/windowwatcher/src/nsWindowWatcher.cpp
+--- a/embedding/components/windowwatcher/src/nsWindowWatcher.cpp
++++ b/embedding/components/windowwatcher/src/nsWindowWatcher.cpp
+@@ -456,17 +456,17 @@ struct SizeSpec {
+ };
+ 
+ NS_IMETHODIMP
+ nsWindowWatcher::OpenWindowJS(nsIDOMWindow *aParent,
+                               const char *aUrl,
+                               const char *aName,
+                               const char *aFeatures,
+                               bool aDialog,
+-                              nsIArray *argv,
++                              nsIJSArgArray *argv,
+                               nsIDOMWindow **_retval)
+ {
+   if (argv) {
+     uint32_t argc;
+     nsresult rv = argv->GetLength(&argc);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     // For compatibility with old code, no arguments implies that we shouldn't

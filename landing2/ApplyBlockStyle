@@ -1,0 +1,448 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/base/nsEditor.cpp b/editor/libeditor/base/nsEditor.cpp
+--- a/editor/libeditor/base/nsEditor.cpp
++++ b/editor/libeditor/base/nsEditor.cpp
+@@ -3835,39 +3835,16 @@ nsEditor::GetTag(nsIDOMNode *aNode)
+     return nsnull;
+   }
+   
+   return content->Tag();
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+-// GetTagString: digs out string for the tag of this node
+-//                    
+-nsresult 
+-nsEditor::GetTagString(nsIDOMNode *aNode, nsAString& outString)
+-{
+-  if (!aNode) 
+-  {
+-    NS_NOTREACHED("null node passed to nsEditor::GetTag()");
+-    return NS_ERROR_NULL_POINTER;
+-  }
+-  
+-  nsIAtom *atom = GetTag(aNode);
+-  if (!atom)
+-  {
+-    return NS_ERROR_FAILURE;
+-  }
+-
+-  atom->ToString(outString);
+-  return NS_OK;
+-}
+-
+-
+-///////////////////////////////////////////////////////////////////////////
+ // NodesSameType: do these nodes have the same tag?
+ //                    
+ bool 
+ nsEditor::NodesSameType(nsIDOMNode *aNode1, nsIDOMNode *aNode2)
+ {
+   if (!aNode1 || !aNode2) {
+     NS_NOTREACHED("null node passed to nsEditor::NodesSameType()");
+     return false;
+diff --git a/editor/libeditor/base/nsEditor.h b/editor/libeditor/base/nsEditor.h
+--- a/editor/libeditor/base/nsEditor.h
++++ b/editor/libeditor/base/nsEditor.h
+@@ -571,17 +571,16 @@ public:
+   /** Find the deep first and last children. */
+   nsINode* GetFirstEditableNode(nsINode* aRoot);
+ 
+   int32_t GetIMEBufferLength();
+   bool IsIMEComposing();    /* test if IME is in composition state */
+   void SetIsIMEComposing(); /* call this before |IsIMEComposing()| */
+ 
+   /** from html rules code - migration in progress */
+-  static nsresult GetTagString(nsIDOMNode *aNode, nsAString& outString);
+   static nsIAtom *GetTag(nsIDOMNode *aNode);
+ 
+   bool NodesSameType(nsIDOMNode *aNode1, nsIDOMNode *aNode2);
+   virtual bool AreNodesSameType(nsIContent* aNode1, nsIContent* aNode2);
+ 
+   static bool IsTextOrElementNode(nsIDOMNode *aNode);
+   static bool IsTextNode(nsIDOMNode *aNode);
+   static bool IsTextNode(nsINode *aNode);
+diff --git a/editor/libeditor/html/nsHTMLEditRules.cpp b/editor/libeditor/html/nsHTMLEditRules.cpp
+--- a/editor/libeditor/html/nsHTMLEditRules.cpp
++++ b/editor/libeditor/html/nsHTMLEditRules.cpp
+@@ -6879,165 +6879,154 @@ nsHTMLEditRules::ApplyBlockStyle(nsCOMAr
+   // headers, paragraphs, pre, and address.  Those blocks
+   // that pretty much just contain inline things...
+   
+   NS_ENSURE_TRUE(aBlockTag, NS_ERROR_NULL_POINTER);
+ 
+   nsCOMPtr<nsIAtom> blockTag = do_GetAtom(*aBlockTag);
+   NS_ENSURE_STATE(blockTag);
+ 
+-  nsresult res = NS_OK;
+-  
+-  nsCOMPtr<nsIDOMNode> curNode, curParent, curBlock, newBlock;
+-  int32_t offset;
++  // Remove all non-editable nodes.  Leave them be.
+   int32_t listCount = arrayOfNodes.Count();
+-
+-  // Remove all non-editable nodes.  Leave them be.
+-  int32_t j;
+-  for (j=listCount-1; j>=0; j--)
+-  {
+-    if (!mHTMLEditor->IsEditable(arrayOfNodes[j]))
+-    {
++  for (int32_t j = listCount - 1; j >= 0; --j) {
++    if (!mHTMLEditor->IsEditable(arrayOfNodes[j])) {
+       arrayOfNodes.RemoveObjectAt(j);
+     }
+   }
+-  
++
+   // reset list count
+   listCount = arrayOfNodes.Count();
+-  
+-  int32_t i;
+-  for (i=0; i<listCount; i++)
+-  {
++
++  nsCOMPtr<nsIDOMNode> curBlock;
++
++  for (int32_t i = 0; i < listCount; ++i) {
++    nsresult res = NS_OK;
++
+     // get the node to act on, and its location
+-    curNode = arrayOfNodes[i];
+-    res = nsEditor::GetNodeLocation(curNode, address_of(curParent), &offset);
+-    NS_ENSURE_SUCCESS(res, res);
+-    nsAutoString curNodeTag;
+-    nsEditor::GetTagString(curNode, curNodeTag);
+-    ToLowerCase(curNodeTag);
+- 
++    nsCOMPtr<nsIDOMNode> curNode = arrayOfNodes[i];
++    nsCOMPtr<nsIContent> curContent = do_QueryInterface(curNode);
++    NS_ENSURE_STATE(curContent);
++
++    nsCOMPtr<nsIContent> curParent = curContent->GetParent();
++    NS_ENSURE_STATE(curParent);
++
+     // is it already the right kind of block?
+-    if (curNodeTag == *aBlockTag)
+-    {
+-      curBlock = 0;  // forget any previous block used for previous inline nodes
++    if (curContent->Tag() == blockTag) {
++      curBlock = nsnull;  // forget any previous block used for previous inline nodes
+       continue;  // do nothing to this block
+     }
+-        
+-    // if curNode is a address, p, header, address, or pre, replace 
+-    // it with a new block of correct type.
+-    // xxx floppy moose: pre can't hold everything the others can
+-    if (nsHTMLEditUtils::IsMozDiv(curNode)     ||
+-        nsHTMLEditUtils::IsFormatNode(curNode))
+-    {
+-      curBlock = 0;  // forget any previous block used for previous inline nodes
+-      res = mHTMLEditor->ReplaceContainer(curNode, address_of(newBlock), *aBlockTag,
+-                                          nsnull, nsnull, true);
+-      NS_ENSURE_SUCCESS(res, res);
+-    }
+-    else if (nsHTMLEditUtils::IsTable(curNode)                    || 
+-             (curNodeTag.EqualsLiteral("tbody"))      ||
+-             (curNodeTag.EqualsLiteral("tr"))         ||
+-             (curNodeTag.EqualsLiteral("td"))         ||
+-             nsHTMLEditUtils::IsList(curNode)                     ||
+-             (curNodeTag.EqualsLiteral("li"))         ||
+-             nsHTMLEditUtils::IsBlockquote(curNode)               ||
+-             nsHTMLEditUtils::IsDiv(curNode))
+-    {
+-      curBlock = 0;  // forget any previous block used for previous inline nodes
+-      // recursion time
+-      nsCOMArray<nsIDOMNode> childArray;
+-      res = GetChildNodesForOperation(curNode, childArray);
+-      NS_ENSURE_SUCCESS(res, res);
+-      int32_t childCount = childArray.Count();
+-      if (childCount)
+-      {
+-        res = ApplyBlockStyle(childArray, aBlockTag);
++
++    if (curContent->IsElement()) {
++      dom::Element* element = curContent->AsElement();
++      // if curNode is a address, p, header, address, or pre, replace 
++      // it with a new block of correct type.
++      // xxx floppy moose: pre can't hold everything the others can
++      if (nsHTMLEditUtils::IsMozDiv(element) ||
++          nsHTMLEditUtils::IsFormatNode(element)) {
++        curBlock = nsnull;  // forget any previous block used for previous inline nodes
++
++        nsCOMPtr<nsIDOMNode> newBlock;
++        res = mHTMLEditor->ReplaceContainer(curNode, address_of(newBlock), *aBlockTag,
++                                            nsnull, nsnull, true);
+         NS_ENSURE_SUCCESS(res, res);
+-      }
+-      else
+-      {
+-        // make sure we can put a block here
+-        res = SplitAsNeeded(blockTag, address_of(curParent), &offset);
++        continue;
++      }
++
++      if (element->IsHTML(nsGkAtoms::table)       ||
++          element->IsHTML(nsGkAtoms::tbody)       ||
++          element->IsHTML(nsGkAtoms::tr)          ||
++          element->IsHTML(nsGkAtoms::td)          ||
++          nsHTMLEditUtils::IsList(element)        ||
++          element->IsHTML(nsGkAtoms::li)          ||
++          element->IsHTML(nsGkAtoms::blockquote)  ||
++          element->IsHTML(nsGkAtoms::div)) {
++        curBlock = nsnull;  // forget any previous block used for previous inline nodes
++        // recursion time
++        nsCOMArray<nsIDOMNode> childArray;
++        res = GetChildNodesForOperation(curNode, childArray);
+         NS_ENSURE_SUCCESS(res, res);
+-        nsCOMPtr<nsIDOMNode> theBlock;
+-        res = mHTMLEditor->CreateNode(*aBlockTag, curParent, offset, getter_AddRefs(theBlock));
+-        NS_ENSURE_SUCCESS(res, res);
+-        // remember our new block for postprocessing
+-        mNewBlock = theBlock;
+-      }
+-    }
++        if (childArray.Count()) {
++          res = ApplyBlockStyle(childArray, aBlockTag);
++          NS_ENSURE_SUCCESS(res, res);
++        } else {
++          // make sure we can put a block here
++          nsCOMPtr<nsIDOMNode> curDOMParent = curParent->AsDOMNode();
++          int32_t offset;
++          res = SplitAsNeeded(blockTag, address_of(curDOMParent), &offset);
++          NS_ENSURE_SUCCESS(res, res);
++          nsCOMPtr<nsIDOMNode> theBlock;
++          res = mHTMLEditor->CreateNode(*aBlockTag, curDOMParent, offset, getter_AddRefs(theBlock));
++          NS_ENSURE_SUCCESS(res, res);
++          // remember our new block for postprocessing
++          mNewBlock = theBlock;
++        }
++        continue;
++      }
+     
+-    // if the node is a break, we honor it by putting further nodes in a new parent
+-    else if (curNodeTag.EqualsLiteral("br"))
+-    {
+-      if (curBlock)
+-      {
+-        curBlock = 0;  // forget any previous block used for previous inline nodes
+-        res = mHTMLEditor->DeleteNode(curNode);
+-        NS_ENSURE_SUCCESS(res, res);
+-      }
+-      else
+-      {
+-        // the break is the first (or even only) node we encountered.  Create a
+-        // block for it.
+-        nsCOMPtr<nsIAtom> blockTag = do_GetAtom(*aBlockTag);
+-        NS_ENSURE_STATE(blockTag);
+-
+-        res = SplitAsNeeded(blockTag, address_of(curParent), &offset);
+-        NS_ENSURE_SUCCESS(res, res);
+-        res = mHTMLEditor->CreateNode(*aBlockTag, curParent, offset, getter_AddRefs(curBlock));
+-        NS_ENSURE_SUCCESS(res, res);
+-        // remember our new block for postprocessing
+-        mNewBlock = curBlock;
+-        // note: doesn't matter if we set mNewBlock multiple times.
+-        res = mHTMLEditor->MoveNode(curNode, curBlock, -1);
+-        NS_ENSURE_SUCCESS(res, res);
+-      }
+-    }
+-        
+-    
++      // if the node is a break, we honor it by putting further nodes in a new parent
++      if (element->IsHTML(nsGkAtoms::br)) {
++        if (curBlock) {
++          curBlock = nsnull;  // forget any previous block used for previous inline nodes
++          res = mHTMLEditor->DeleteNode(curNode);
++          NS_ENSURE_SUCCESS(res, res);
++        } else {
++          // the break is the first (or even only) node we encountered.  Create a
++          // block for it.
++          nsCOMPtr<nsIDOMNode> curDOMParent = curParent->AsDOMNode();
++          int32_t offset;
++          res = SplitAsNeeded(blockTag, address_of(curDOMParent), &offset);
++          NS_ENSURE_SUCCESS(res, res);
++          res = mHTMLEditor->CreateNode(*aBlockTag, curDOMParent, offset, getter_AddRefs(curBlock));
++          NS_ENSURE_SUCCESS(res, res);
++          // remember our new block for postprocessing
++          mNewBlock = curBlock;
++          // note: doesn't matter if we set mNewBlock multiple times.
++          res = mHTMLEditor->MoveNode(curNode, curBlock, -1);
++          NS_ENSURE_SUCCESS(res, res);
++        }
++        continue;
++      }
++    }
++
+     // if curNode is inline, pull it into curBlock
+     // note: it's assumed that consecutive inline nodes in the 
+     // arrayOfNodes are actually members of the same block parent.
+     // this happens to be true now as a side effect of how
+     // arrayOfNodes is contructed, but some additional logic should
+     // be added here if that should change
+     
+-    else if (IsInlineNode(curNode))
+-    {
++    if (IsInlineNode(curNode)) {
+       // if curNode is a non editable, drop it if we are going to <pre>
+       if (blockTag == nsGkAtoms::pre && !mHTMLEditor->IsEditable(curNode)) {
+         continue; // do nothing to this block
+       }
+       
+       // if no curBlock, make one
+-      if (!curBlock)
+-      {
+-        nsCOMPtr<nsIAtom> blockTag = do_GetAtom(*aBlockTag);
+-        NS_ENSURE_STATE(blockTag);
+-
+-        res = SplitAsNeeded(blockTag, address_of(curParent), &offset);
++      if (!curBlock) {
++        nsCOMPtr<nsIDOMNode> curDOMParent = curParent->AsDOMNode();
++        int32_t offset;
++        res = SplitAsNeeded(blockTag, address_of(curDOMParent), &offset);
+         NS_ENSURE_SUCCESS(res, res);
+-        res = mHTMLEditor->CreateNode(*aBlockTag, curParent, offset, getter_AddRefs(curBlock));
++        res = mHTMLEditor->CreateNode(*aBlockTag, curDOMParent, offset, getter_AddRefs(curBlock));
+         NS_ENSURE_SUCCESS(res, res);
+         // remember our new block for postprocessing
+         mNewBlock = curBlock;
+         // note: doesn't matter if we set mNewBlock multiple times.
+       }
+-      
++
+       // if curNode is a Break, replace it with a return if we are going to <pre>
+       // xxx floppy moose
+- 
++
+       // this is a continuation of some inline nodes that belong together in
+       // the same block item.  use curBlock
+       res = mHTMLEditor->MoveNode(curNode, curBlock, -1);
+       NS_ENSURE_SUCCESS(res, res);
+     }
+   }
+-  return res;
++  return NS_OK;
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // SplitAsNeeded:  given a tag name, split inOutParent up to the point   
+ //                 where we can insert the tag.  Adjust inOutParent and
+ //                 inOutOffset to point to new location for tag.
+ nsresult 
+diff --git a/editor/libeditor/html/nsHTMLEditUtils.cpp b/editor/libeditor/html/nsHTMLEditUtils.cpp
+--- a/editor/libeditor/html/nsHTMLEditUtils.cpp
++++ b/editor/libeditor/html/nsHTMLEditUtils.cpp
+@@ -407,18 +407,26 @@ nsHTMLEditUtils::IsDiv(nsIDOMNode *node)
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // IsMozDiv: true if node an html div node with type = _moz
+ //                  
+ bool 
+ nsHTMLEditUtils::IsMozDiv(nsIDOMNode *node)
+ {
+-  if (IsDiv(node) && nsTextEditUtils::HasMozAttr(node)) return true;
+-  return false;
++  nsCOMPtr<dom::Element> element = do_QueryInterface(node);
++  NS_ENSURE_TRUE(element, false);
++  return IsMozDiv(element);
++}
++
++bool
++nsHTMLEditUtils::IsMozDiv(dom::Element* aElement)
++{
++  return aElement->IsHTML(nsGkAtoms::div) &&
++         nsTextEditUtils::HasMozAttr(aElement);
+ }
+ 
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // IsMailCite: true if node an html blockquote with type=cite
+ //                  
+ bool
+diff --git a/editor/libeditor/html/nsHTMLEditUtils.h b/editor/libeditor/html/nsHTMLEditUtils.h
+--- a/editor/libeditor/html/nsHTMLEditUtils.h
++++ b/editor/libeditor/html/nsHTMLEditUtils.h
+@@ -51,16 +51,17 @@ public:
+   static bool IsPre(nsIDOMNode *aNode);
+   static bool IsAnchor(nsIDOMNode *aNode);
+   static bool IsImage(nsIDOMNode *aNode);
+   static bool IsLink(mozilla::dom::Element* aNode);
+   static bool IsLink(nsIDOMNode *aNode);
+   static bool IsNamedAnchor(mozilla::dom::Element* aNode);
+   static bool IsNamedAnchor(nsIDOMNode *aNode);
+   static bool IsDiv(nsIDOMNode *aNode);
++  static bool IsMozDiv(mozilla::dom::Element* aNode);
+   static bool IsMozDiv(nsIDOMNode *aNode);
+   static bool IsMailCite(mozilla::dom::Element* aNode);
+   static bool IsMailCite(nsIDOMNode *aNode);
+   static bool IsFormWidget(mozilla::dom::Element* aNode);
+   static bool IsFormWidget(nsIDOMNode *aNode);
+   static bool SupportsAlignAttr(nsIDOMNode *aNode);
+   static bool CanContain(int32_t aParent, int32_t aChild);
+   static bool IsContainer(int32_t aTag);
+diff --git a/editor/libeditor/text/nsTextEditUtils.cpp b/editor/libeditor/text/nsTextEditUtils.cpp
+--- a/editor/libeditor/text/nsTextEditUtils.cpp
++++ b/editor/libeditor/text/nsTextEditUtils.cpp
+@@ -55,27 +55,28 @@ nsTextEditUtils::IsMozBR(dom::Element* a
+ // HasMozAttr: true if node has type attribute = _moz
+ //             (used to indicate the div's and br's we use in
+ //              mail compose rules)
+ //                  
+ bool 
+ nsTextEditUtils::HasMozAttr(nsIDOMNode *node)
+ {
+   NS_PRECONDITION(node, "null parent passed to nsHTMLEditUtils::HasMozAttr");
+-  nsCOMPtr<nsIDOMElement> elem = do_QueryInterface(node);
+-  if (elem)
+-  {
+-    nsAutoString typeAttrVal;
+-    nsresult res = elem->GetAttribute(NS_LITERAL_STRING("type"), typeAttrVal);
+-    if (NS_SUCCEEDED(res) && (typeAttrVal.LowerCaseEqualsLiteral("_moz")))
+-      return true;
+-  }
+-  return false;
++  nsCOMPtr<dom::Element> element = do_QueryInterface(node);
++  NS_ENSURE_TRUE(element, false);
++  return HasMozAttr(element);
+ }
+ 
++bool
++nsTextEditUtils::HasMozAttr(dom::Element* aElement)
++{
++  MOZ_ASSERT(aElement);
++  return aElement->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
++                               NS_LITERAL_STRING("_moz"), eIgnoreCase);
++}
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // nsAutoEditInitRulesTrigger methods
+ //
+ nsAutoEditInitRulesTrigger::nsAutoEditInitRulesTrigger( nsPlaintextEditor *aEd, nsresult &aRes) : mEd(aEd), mRes(aRes)
+ {
+     if (mEd) mEd->BeginEditorInit();
+ }
+diff --git a/editor/libeditor/text/nsTextEditUtils.h b/editor/libeditor/text/nsTextEditUtils.h
+--- a/editor/libeditor/text/nsTextEditUtils.h
++++ b/editor/libeditor/text/nsTextEditUtils.h
+@@ -21,16 +21,17 @@ class nsTextEditUtils
+ {
+ public:
+   // from nsTextEditRules:
+   static bool IsBody(nsIDOMNode* aNode);
+   static bool IsBreak(nsIDOMNode* aNode);
+   static bool IsMozBR(nsIDOMNode* aNode);
+   static bool IsMozBR(mozilla::dom::Element* aNode);
+   static bool HasMozAttr(nsIDOMNode* aNode);
++  static bool HasMozAttr(mozilla::dom::Element* aNode);
+ };
+ 
+ /***************************************************************************
+  * stack based helper class for detecting end of editor initialization, in
+  * order to trigger "end of init" initialization of the edit rules.
+  */
+ class nsAutoEditInitRulesTrigger
+ {

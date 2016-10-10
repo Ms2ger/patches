@@ -1,0 +1,865 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/document/src/HTMLAllCollection.cpp b/content/html/document/src/HTMLAllCollection.cpp
+new file mode 100644
+--- /dev/null
++++ b/content/html/document/src/HTMLAllCollection.cpp
+@@ -0,0 +1,158 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "mozilla/dom/HTMLAllCollection.h"
++
++#include "nsHTMLDocument.h"
++
++namespace mozilla {
++namespace dom {
++
++NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(HTMLAllCollection, AddRef)
++NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(HTMLAllCollection, Release)
++
++NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(HTMLAllCollection, mDocument)
++
++HTMLAllCollection::HTMLAllCollection(nsHTMLDocument* aDocument)
++  : mDocument(aDocument)
++{
++}
++
++/* virtual */ JSObject*
++HTMLAllCollection::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
++{
++  return HTMLAllCollectionBinding::Wrap(aCx, aScope, this);
++}
++
++uint32_t
++HTMLAllCollection::Length()
++{
++  return NodeList()->Length();
++}
++
++nsISupports*
++HTMLAllCollection::Item(const nsAString& aName)
++{
++  uint32_t index;
++  if (!IsIndex(aName, &index)) {
++    bool dummy;
++    return NamedGetter(aName, dummy);
++  }
++  return NodeList()->Item(index);
++}
++
++nsISupports*
++HTMLAllCollection::NamedItem(const nsAString& aName)
++{
++  return Item(aName);
++}
++
++Element*
++HTMLAllCollection::IndexedGetter(uint32_t aIndex, bool& aFound)
++{
++  return NodeList()->IndexedGetter(aIndex, aFound);
++}
++
++static bool
++DocAllResultMatch(nsIContent* aContent, int32_t aNamespaceID, nsIAtom* aAtom,
++                  void* aData)
++{
++  if (aContent->GetID() == aAtom) {
++    return true;
++  }
++
++  nsGenericHTMLElement* elm = nsGenericHTMLElement::FromContent(aContent);
++  if (!elm) {
++    return false;
++  }
++
++  nsIAtom* tag = elm->Tag();
++  if (tag != nsGkAtoms::a &&
++      tag != nsGkAtoms::applet &&
++      tag != nsGkAtoms::button &&
++      tag != nsGkAtoms::embed &&
++      tag != nsGkAtoms::form &&
++      tag != nsGkAtoms::iframe &&
++      tag != nsGkAtoms::img &&
++      tag != nsGkAtoms::input &&
++      tag != nsGkAtoms::map &&
++      tag != nsGkAtoms::meta &&
++      tag != nsGkAtoms::object &&
++      tag != nsGkAtoms::select &&
++      tag != nsGkAtoms::textarea) {
++    return false;
++  }
++
++  const nsAttrValue* val = elm->GetParsedAttr(nsGkAtoms::name);
++  return val && val->Type() == nsAttrValue::eAtom &&
++         val->GetAtomValue() == aAtom;
++}
++
++nsContentList*
++HTMLAllCollection::GetNamedList(const nsAString& aName)
++{
++  nsIdentifierMapEntry* entry = mDocument->mIdentifierMap.PutEntry(aName);
++
++  Element* root = mDocument->GetRootElement();
++  if (!root) {
++    return nullptr;
++  }
++
++  if (!entry->GetDocAllList()) {
++    nsCOMPtr<nsIAtom> id = do_GetAtom(aName);
++    entry->SetDocAllList(new nsContentList(root, DocAllResultMatch, nullptr,
++                                           nullptr, true, id));
++  }
++
++  return entry->GetDocAllList();
++}
++
++nsISupports*
++HTMLAllCollection::NamedGetter(const nsAString& aName, bool& aFound)
++{
++  aFound = false;
++  nsContentList* docAllList = GetNamedList(aName);
++  if (!docAllList) {
++    return nullptr;
++  }
++
++  // Check if there are more than 1 entries. Do this by getting the second one
++  // rather than the length since getting the length always requires walking
++  // the entire document.
++
++  docAllList->IndexedGetter(1, aFound);
++  if (aFound) {
++    *aCache = docAllList;
++    return static_cast<nsINodeList*>(docAllList);
++  }
++
++  return docAllList->IndexedGetter(0, aFound);
++}
++
++nsISupports*
++HTMLAllCollection::LegacyCall(JS::Handle<JS::Value>, nsAString& aName)
++{
++  bool dummy;
++  return NamedGetter(aName, dummy);
++}
++
++nsContentList*
++HTMLAllCollection::NodeList()
++{
++  if (!mNodeList) {
++    mNodeList = mDocument->GetElementsByTagName(NS_LITERAL_STRING("*"));
++  }
++
++  MOZ_ASSERT(mNodeList);
++  return mNodeList;
++}
++
++bool
++HTMLAllCollection::IsIndex(const nsAString& aName, uint32_t* aIndex)
++{
++  return false;
++}
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/content/html/document/src/HTMLAllCollection.h b/content/html/document/src/HTMLAllCollection.h
+new file mode 100644
+--- /dev/null
++++ b/content/html/document/src/HTMLAllCollection.h
+@@ -0,0 +1,53 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_HTMLAllCollection_h
++#define mozilla_dom_HTMLAllCollection_h
++
++#include "nsStringGlue.h"
++#include "nsWrapperCache.h"
++
++template<class> class nsTArray;
++
++namespace mozilla {
++namespace dom {
++
++class HTMLAllCollection MOZ_FINAL : public nsWrapperCache
++{
++public:
++  HTMLAllCollection(nsHTMLDocument* aDocument);
++
++  NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(HTMLAllCollection)
++  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(HTMLAllCollection)
++
++  virtual JSObject*
++  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
++  nsHTMLDocument* GetParentObject() const
++  {
++    return mDocument;
++  }
++
++  uint32_t Length();
++  nsISupports* Item(const nsAString& aName);
++  nsISupports* NamedItem(const nsAString& aName);
++
++  Element* IndexedGetter(uint32_t aIndex, bool& aFound);
++  nsISupports* NamedGetter(const nsAString& aName, bool& aFound);
++  nsISupports* LegacyCall(JS::Handle<JS::Value> aThisVal, nsAString& aName);
++
++  void GetSupportedNames(nsTArray<nsString> aNames) {}
++
++private:
++  nsContentList* NodeList();
++  nsContentList* GetNamedList(const nsAString& aName);
++  bool IsIndex(const nsAString& aName, uint32_t* aIndex);
++
++  nsRefPtr<nsHTMLDocument> mDocument;
++  nsRefPtr<nsContentList> mNodeList;
++};
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_HTMLAllCollection_h
+diff --git a/content/html/document/src/moz.build b/content/html/document/src/moz.build
+--- a/content/html/document/src/moz.build
++++ b/content/html/document/src/moz.build
+@@ -6,19 +6,21 @@
+ 
+ MODULE = 'content'
+ 
+ EXPORTS += [
+     'nsIHTMLDocument.h',
+ ]
+ 
+ EXPORTS.mozilla.dom += [
++    'HTMLAllCollection.h',
+     'ImageDocument.h',
+ ]
+ 
+ CPP_SOURCES += [
++    'HTMLAllCollection.cpp',
+     'ImageDocument.cpp',
+     'MediaDocument.cpp',
+     'PluginDocument.cpp',
+     'VideoDocument.cpp',
+     'nsHTMLContentSink.cpp',
+     'nsHTMLDocument.cpp',
+ ]
+diff --git a/content/html/document/src/nsHTMLDocument.cpp b/content/html/document/src/nsHTMLDocument.cpp
+--- a/content/html/document/src/nsHTMLDocument.cpp
++++ b/content/html/document/src/nsHTMLDocument.cpp
+@@ -2634,115 +2634,21 @@ nsHTMLDocument::DeferredContentEditableC
+         if (spellChecker) {
+           rv = spellChecker->SpellCheckRange(range);
+         }
+       }
+     }
+   }
+ }
+ 
+-static bool
+-DocAllResultMatch(nsIContent* aContent, int32_t aNamespaceID, nsIAtom* aAtom,
+-                  void* aData)
+-{
+-  if (aContent->GetID() == aAtom) {
+-    return true;
+-  }
+-
+-  nsGenericHTMLElement* elm = nsGenericHTMLElement::FromContent(aContent);
+-  if (!elm) {
+-    return false;
+-  }
+-
+-  nsIAtom* tag = elm->Tag();
+-  if (tag != nsGkAtoms::a &&
+-      tag != nsGkAtoms::applet &&
+-      tag != nsGkAtoms::button &&
+-      tag != nsGkAtoms::embed &&
+-      tag != nsGkAtoms::form &&
+-      tag != nsGkAtoms::iframe &&
+-      tag != nsGkAtoms::img &&
+-      tag != nsGkAtoms::input &&
+-      tag != nsGkAtoms::map &&
+-      tag != nsGkAtoms::meta &&
+-      tag != nsGkAtoms::object &&
+-      tag != nsGkAtoms::select &&
+-      tag != nsGkAtoms::textarea) {
+-    return false;
+-  }
+-
+-  const nsAttrValue* val = elm->GetParsedAttr(nsGkAtoms::name);
+-  return val && val->Type() == nsAttrValue::eAtom &&
+-         val->GetAtomValue() == aAtom;
+-}
+-
+-
+-nsISupports*
+-nsHTMLDocument::GetDocumentAllResult(const nsAString& aID,
+-                                     nsWrapperCache** aCache,
+-                                     nsresult *aResult)
+-{
+-  *aCache = nullptr;
+-  *aResult = NS_OK;
+-
+-  nsIdentifierMapEntry *entry = mIdentifierMap.PutEntry(aID);
+-  if (!entry) {
+-    *aResult = NS_ERROR_OUT_OF_MEMORY;
+-
+-    return nullptr;
+-  }
+-
+-  Element* root = GetRootElement();
+-  if (!root) {
+-    return nullptr;
+-  }
+-
+-  nsRefPtr<nsContentList> docAllList = entry->GetDocAllList();
+-  if (!docAllList) {
+-    nsCOMPtr<nsIAtom> id = do_GetAtom(aID);
+-
+-    docAllList = new nsContentList(root, DocAllResultMatch,
+-                                   nullptr, nullptr, true, id);
+-    entry->SetDocAllList(docAllList);
+-  }
+-
+-  // Check if there are more than 1 entries. Do this by getting the second one
+-  // rather than the length since getting the length always requires walking
+-  // the entire document.
+-
+-  nsIContent* cont = docAllList->Item(1, true);
+-  if (cont) {
+-    *aCache = docAllList;
+-    return static_cast<nsINodeList*>(docAllList);
+-  }
+-
+-  // There's only 0 or 1 items. Return the first one or null.
+-  *aCache = cont = docAllList->Item(0, true);
+-
+-  return cont;
+-}
+-
+-JSObject*
+-nsHTMLDocument::GetAll(JSContext* aCx, ErrorResult& aRv)
++HTMLAllCollection*
++nsHTMLDocument::All()
+ {
+   if (!mAll) {
+-    JS::Rooted<JSObject*> wrapper(aCx, GetWrapper());
+-    JSAutoCompartment ac(aCx, wrapper);
+-    mAll = JS_NewObject(aCx, &sHTMLDocumentAllClass, nullptr,
+-                        JS_GetGlobalForObject(aCx, wrapper));
+-    if (!mAll) {
+-      aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+-      return nullptr;
+-    }
+-
+-    // Make the JSObject hold a reference to this.
+-    JS_SetPrivate(mAll, static_cast<nsINode*>(this));
+-    NS_ADDREF_THIS();
+-
+-    NS_HOLD_JS_OBJECTS(this, nsHTMLDocument);
++    mAll = new HTMLAllCollection(this);
+   }
+ 
+   return mAll;
+ }
+ 
+ static void
+ NotifyEditableStateChange(nsINode *aNode, nsIDocument *aDocument)
+ {
+diff --git a/content/html/document/src/nsHTMLDocument.h b/content/html/document/src/nsHTMLDocument.h
+--- a/content/html/document/src/nsHTMLDocument.h
++++ b/content/html/document/src/nsHTMLDocument.h
+@@ -99,25 +99,17 @@ public:
+   using nsDocument::GetMozFullScreenElement;
+ 
+   // nsIDOMNode interface
+   NS_FORWARD_NSIDOMNODE_TO_NSINODE
+ 
+   // nsIDOMHTMLDocument interface
+   NS_DECL_NSIDOMHTMLDOCUMENT
+ 
+-  /**
+-   * Returns the result of document.all[aID] which can either be a node
+-   * or a nodelist depending on if there are multiple nodes with the same
+-   * id.
+-   */
+-  nsISupports *GetDocumentAllResult(const nsAString& aID,
+-                                    nsWrapperCache **aCache,
+-                                    nsresult *aResult);
+-  JSObject* GetAll(JSContext* aCx, mozilla::ErrorResult& aRv);
++  mozilla::dom::HTMLAllCollection* All();
+ 
+   nsISupports* ResolveName(const nsAString& aName, nsWrapperCache **aCache);
+   virtual already_AddRefed<nsISupports> ResolveName(const nsAString& aName,
+                                                     nsIContent *aForm,
+                                                     nsWrapperCache **aCache) MOZ_OVERRIDE;
+ 
+   virtual void AddedForm() MOZ_OVERRIDE;
+   virtual void RemovedForm() MOZ_OVERRIDE;
+@@ -292,17 +284,17 @@ protected:
+   nsRefPtr<nsContentList> mApplets;
+   nsRefPtr<nsContentList> mEmbeds;
+   nsRefPtr<nsContentList> mLinks;
+   nsRefPtr<nsContentList> mAnchors;
+   nsRefPtr<nsContentList> mScripts;
+   nsRefPtr<nsContentList> mForms;
+   nsRefPtr<nsContentList> mFormControls;
+ 
+-  JSObject* mAll;
++  nsRefPtr<mozilla::dom::HTMLAllCollection> mAll;
+ 
+   /** # of forms in the document, synchronously set */
+   int32_t mNumForms;
+ 
+   static uint32_t gWyciwygSessionCnt;
+ 
+   static void TryHintCharset(nsIMarkupDocumentViewer* aMarkupDV,
+                              int32_t& aCharsetSource,
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -2696,24 +2696,16 @@ ChildWindowGetter(JSContext *cx, JSHandl
+   JS::Rooted<JS::Value> v(cx);
+   nsresult rv = WrapNative(cx, JS_GetGlobalForScopeChain(cx), child,
+                            /* aAllowWrapping = */ true, v.address());
+   NS_ENSURE_SUCCESS(rv, false);
+   vp.set(v);
+   return true;
+ }
+ 
+-static nsHTMLDocument*
+-GetDocument(JSObject *obj)
+-{
+-  MOZ_ASSERT(js::GetObjectJSClass(obj) == &sHTMLDocumentAllClass);
+-  return static_cast<nsHTMLDocument*>(
+-    static_cast<nsINode*>(JS_GetPrivate(obj)));
+-}
+-
+ // static
+ JSBool
+ nsWindowSH::GlobalScopePolluterNewResolve(JSContext *cx, JSHandleObject obj,
+                                           JSHandleId id, unsigned flags,
+                                           JS::MutableHandle<JSObject*> objp)
+ {
+   if (!JSID_IS_STRING(id)) {
+     // Nothing to do if we're resolving a non-string property.
+@@ -5600,291 +5592,16 @@ nsNamedArraySH::GetProperty(nsIXPConnect
+     // Don't fall through to nsArraySH::GetProperty() here
+     return rv;
+   }
+ 
+   return nsArraySH::GetProperty(wrapper, cx, obj, id, vp, _retval);
+ }
+ 
+ 
+-// HTMLAllCollection
+-
+-JSClass sHTMLDocumentAllClass = {
+-  "HTML document.all class",
+-  JSCLASS_HAS_PRIVATE | JSCLASS_PRIVATE_IS_NSISUPPORTS | JSCLASS_NEW_RESOLVE |
+-  JSCLASS_EMULATES_UNDEFINED | JSCLASS_HAS_RESERVED_SLOTS(1),
+-  JS_PropertyStub,                                         /* addProperty */
+-  JS_DeletePropertyStub,                                   /* delProperty */
+-  nsHTMLDocumentSH::DocumentAllGetProperty,                /* getProperty */
+-  JS_StrictPropertyStub,                                   /* setProperty */
+-  JS_EnumerateStub,
+-  (JSResolveOp)nsHTMLDocumentSH::DocumentAllNewResolve,
+-  JS_ConvertStub,
+-  nsHTMLDocumentSH::ReleaseDocument,
+-  nullptr,                                                  /* checkAccess */
+-  nsHTMLDocumentSH::CallToGetPropMapper
+-};
+-
+-
+-// static
+-JSBool
+-nsHTMLDocumentSH::GetDocumentAllNodeList(JSContext *cx,
+-                                         JS::Handle<JSObject*> obj,
+-                                         nsDocument *domdoc,
+-                                         nsContentList **nodeList)
+-{
+-  // The document.all object is a mix of the node list returned by
+-  // document.getElementsByTagName("*") and a map of elements in the
+-  // document exposed by their id and/or name. To make access to the
+-  // node list part (i.e. access to elements by index) not walk the
+-  // document each time, we create a nsContentList and hold on to it
+-  // in a reserved slot (0) on the document.all JSObject.
+-  nsresult rv = NS_OK;
+-
+-  JS::Rooted<JS::Value> collection(cx, JS_GetReservedSlot(obj, 0));
+-
+-  if (!JSVAL_IS_PRIMITIVE(collection)) {
+-    // We already have a node list in our reserved slot, use it.
+-    JS::Rooted<JSObject*> obj(cx, JSVAL_TO_OBJECT(collection));
+-    nsIHTMLCollection* htmlCollection;
+-    rv = mozilla::dom::UnwrapObject<nsIHTMLCollection>(cx, obj, htmlCollection);
+-    if (NS_SUCCEEDED(rv)) {
+-      NS_ADDREF(*nodeList = static_cast<nsContentList*>(htmlCollection));
+-    }
+-    else {
+-      nsISupports *native = nsDOMClassInfo::XPConnect()->GetNativeOfWrapper(cx, obj);
+-      if (native) {
+-        NS_ADDREF(*nodeList = nsContentList::FromSupports(native));
+-        rv = NS_OK;
+-      }
+-      else {
+-        rv = NS_ERROR_FAILURE;
+-      }
+-    }
+-  } else {
+-    // No node list for this document.all yet, create one...
+-
+-    nsRefPtr<nsContentList> list =
+-      domdoc->GetElementsByTagName(NS_LITERAL_STRING("*"));
+-    if (!list) {
+-      rv = NS_ERROR_OUT_OF_MEMORY;
+-    }
+-
+-    nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
+-    nsresult tmp = WrapNative(cx, JS_GetGlobalForScopeChain(cx),
+-                              static_cast<nsINodeList*>(list), list, false,
+-                              collection.address(), getter_AddRefs(holder));
+-    if (NS_FAILED(tmp)) {
+-      rv = tmp;
+-    }
+-
+-    list.forget(nodeList);
+-
+-    // ... and store it in our reserved slot.
+-    JS_SetReservedSlot(obj, 0, collection);
+-  }
+-
+-  if (NS_FAILED(rv)) {
+-    xpc::Throw(cx, NS_ERROR_FAILURE);
+-
+-    return JS_FALSE;
+-  }
+-
+-  return *nodeList != nullptr;
+-}
+-
+-JSBool
+-nsHTMLDocumentSH::DocumentAllGetProperty(JSContext *cx, JSHandleObject obj_,
+-                                         JSHandleId id, JSMutableHandleValue vp)
+-{
+-  JS::Rooted<JSObject*> obj(cx, obj_);
+-
+-  // document.all.item and .namedItem get their value in the
+-  // newResolve hook, so nothing to do for those properties here. And
+-  // we need to return early to prevent <div id="item"> from shadowing
+-  // document.all.item(), etc.
+-  if (nsDOMClassInfo::sItem_id == id || nsDOMClassInfo::sNamedItem_id == id) {
+-    return JS_TRUE;
+-  }
+-
+-  JS::Rooted<JSObject*> proto(cx);
+-  while (js::GetObjectJSClass(obj) != &sHTMLDocumentAllClass) {
+-    if (!js::GetObjectProto(cx, obj, &proto)) {
+-      return JS_FALSE;
+-    }
+-
+-    if (!proto) {
+-      NS_ERROR("The JS engine lies!");
+-      return JS_TRUE;
+-    }
+-
+-    obj = proto;
+-  }
+-
+-  nsHTMLDocument *doc = GetDocument(obj);
+-  nsISupports *result;
+-  nsWrapperCache *cache;
+-  nsresult rv = NS_OK;
+-
+-  if (JSID_IS_STRING(id)) {
+-    if (nsDOMClassInfo::sLength_id == id) {
+-      // Map document.all.length to the length of the collection
+-      // document.getElementsByTagName("*"), and make sure <div
+-      // id="length"> doesn't shadow document.all.length.
+-
+-      nsRefPtr<nsContentList> nodeList;
+-      if (!GetDocumentAllNodeList(cx, obj, doc, getter_AddRefs(nodeList))) {
+-        return JS_FALSE;
+-      }
+-
+-      uint32_t length;
+-      rv = nodeList->GetLength(&length);
+-
+-      if (NS_FAILED(rv)) {
+-        xpc::Throw(cx, rv);
+-
+-        return JS_FALSE;
+-      }
+-
+-      vp.set(INT_TO_JSVAL(length));
+-
+-      return JS_TRUE;
+-    }
+-
+-    // For all other strings, look for an element by id or name.
+-    nsDependentJSString str(id);
+-    result = doc->GetDocumentAllResult(str, &cache, &rv);
+-
+-    if (NS_FAILED(rv)) {
+-      xpc::Throw(cx, rv);
+-      return JS_FALSE;
+-    }
+-  } else if (JSID_IS_INT(id) && JSID_TO_INT(id) >= 0) {
+-    // Map document.all[n] (where n is a number) to the n:th item in
+-    // the document.all node list.
+-
+-    nsRefPtr<nsContentList> nodeList;
+-    if (!GetDocumentAllNodeList(cx, obj, doc, getter_AddRefs(nodeList))) {
+-      return JS_FALSE;
+-    }
+-
+-    nsIContent *node = nodeList->Item(JSID_TO_INT(id));
+-
+-    result = node;
+-    cache = node;
+-  } else {
+-    result = nullptr;
+-  }
+-
+-  if (result) {
+-    rv = WrapNative(cx, JS_GetGlobalForScopeChain(cx), result, cache, true, vp.address());
+-    if (NS_FAILED(rv)) {
+-      xpc::Throw(cx, rv);
+-
+-      return JS_FALSE;
+-    }
+-  } else {
+-    vp.setUndefined();
+-  }
+-
+-  return JS_TRUE;
+-}
+-
+-JSBool
+-nsHTMLDocumentSH::DocumentAllNewResolve(JSContext *cx, JSHandleObject obj, JSHandleId id,
+-                                        unsigned flags, JS::MutableHandle<JSObject*> objp)
+-{
+-  JS::RootedValue v(cx);
+-
+-  if (nsDOMClassInfo::sItem_id == id || nsDOMClassInfo::sNamedItem_id == id) {
+-    // Define the item() or namedItem() method.
+-
+-    JSFunction *fnc = ::JS_DefineFunctionById(cx, obj, id, CallToGetPropMapper,
+-                                              0, JSPROP_ENUMERATE);
+-    objp.set(obj);
+-
+-    return fnc != nullptr;
+-  }
+-
+-  if (nsDOMClassInfo::sLength_id == id) {
+-    // document.all.length. Any jsval other than undefined would do
+-    // here, all we need is to get into the code below that defines
+-    // this propery on obj, the rest happens in
+-    // DocumentAllGetProperty().
+-
+-    v = JSVAL_ONE;
+-  } else {
+-    if (!DocumentAllGetProperty(cx, obj, id, &v)) {
+-      return JS_FALSE;
+-    }
+-  }
+-
+-  JSBool ok = JS_TRUE;
+-
+-  if (v.get() != JSVAL_VOID) {
+-    ok = ::JS_DefinePropertyById(cx, obj, id, v, nullptr, nullptr, 0);
+-    objp.set(obj);
+-  }
+-
+-  return ok;
+-}
+-
+-void
+-nsHTMLDocumentSH::ReleaseDocument(JSFreeOp *fop, JSObject *obj)
+-{
+-  nsIHTMLDocument* doc = GetDocument(obj);
+-  if (doc) {
+-    xpc::DeferredRelease(doc);
+-  }
+-}
+-
+-JSBool
+-nsHTMLDocumentSH::CallToGetPropMapper(JSContext *cx, unsigned argc, jsval *vp)
+-{
+-  // Handle document.all("foo") style access to document.all.
+-
+-  if (argc != 1) {
+-    // XXX: Should throw NS_ERROR_XPC_NOT_ENOUGH_ARGS for argc < 1,
+-    // and create a new NS_ERROR_XPC_TOO_MANY_ARGS for argc > 1? IE
+-    // accepts nothing other than one arg.
+-    xpc::Throw(cx, NS_ERROR_INVALID_ARG);
+-
+-    return JS_FALSE;
+-  }
+-
+-  // Convert all types to string.
+-  JS::Rooted<JSString*> str(cx, ::JS_ValueToString(cx, JS_ARGV(cx, vp)[0]));
+-  if (!str) {
+-    return JS_FALSE;
+-  }
+-
+-  // If we are called via document.all(id) instead of document.all.item(i) or
+-  // another method, use the document.all callee object as self.
+-  JSObject *self;
+-  JS::Value callee = JS_CALLEE(cx, vp);
+-  if (callee.isObject() &&
+-      JS_GetClass(&callee.toObject()) == &sHTMLDocumentAllClass) {
+-    self = JSVAL_TO_OBJECT(JS_CALLEE(cx, vp));
+-  } else {
+-    self = JS_THIS_OBJECT(cx, vp);
+-    if (!self)
+-      return JS_FALSE;
+-  }
+-
+-  size_t length;
+-  JS::Anchor<JSString *> anchor(str);
+-  const jschar *chars = ::JS_GetStringCharsAndLength(cx, str, &length);
+-  if (!chars) {
+-    return JS_FALSE;
+-  }
+-
+-  return ::JS_GetUCProperty(cx, self, chars, length, vp);
+-}
+-
+-
+ // HTMLFormElement helper
+ 
+ NS_IMETHODIMP
+ nsHTMLFormElementSH::NewResolve(nsIXPConnectWrappedNative *wrapper,
+                                 JSContext *cx, JSObject *aObj, jsid aId,
+                                 uint32_t flags, JSObject **objp,
+                                 bool *_retval)
+ {
+diff --git a/dom/base/nsDOMClassInfo.h b/dom/base/nsDOMClassInfo.h
+--- a/dom/base/nsDOMClassInfo.h
++++ b/dom/base/nsDOMClassInfo.h
+@@ -585,36 +585,16 @@ public:
+                          JSObject *obj, jsid id, jsval *vp, bool *_retval) MOZ_OVERRIDE;
+ 
+ private:
+   // Not implemented, nothing should create an instance of this class.
+   static nsIClassInfo *doCreate(nsDOMClassInfoData* aData);
+ };
+ 
+ 
+-// HTMLAllCollection
+-
+-extern JSClass sHTMLDocumentAllClass;
+-
+-class nsHTMLDocumentSH
+-{
+-protected:
+-  static JSBool GetDocumentAllNodeList(JSContext *cx, JS::Handle<JSObject*> obj,
+-                                       nsDocument *doc,
+-                                       nsContentList **nodeList);
+-public:
+-  static JSBool DocumentAllGetProperty(JSContext *cx, JSHandleObject obj, JSHandleId id,
+-                                       JSMutableHandleValue vp);
+-  static JSBool DocumentAllNewResolve(JSContext *cx, JSHandleObject obj, JSHandleId id,
+-                                      unsigned flags, JS::MutableHandle<JSObject*> objp);
+-  static void ReleaseDocument(JSFreeOp *fop, JSObject *obj);
+-  static JSBool CallToGetPropMapper(JSContext *cx, unsigned argc, jsval *vp);
+-};
+-
+-
+ // HTMLFormElement helper
+ 
+ class nsHTMLFormElementSH : public nsElementSH
+ {
+ protected:
+   nsHTMLFormElementSH(nsDOMClassInfoData* aData) : nsElementSH(aData)
+   {
+   }
+diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
+--- a/dom/bindings/Bindings.conf
++++ b/dom/bindings/Bindings.conf
+@@ -415,16 +415,20 @@ DOMInterfaces = {
+ 'Gamepad': {
+     'nativeType': 'nsDOMGamepad',
+ },
+ 
+ 'Geolocation': {
+     'headerFile': 'nsGeolocation.h'
+ },
+ 
++'HTMLAllCollection': {
++    'nativeOwnership': 'refcounted',
++},
++
+ 'HTMLAppletElement': {
+     'nativeType': 'mozilla::dom::HTMLSharedObjectElement'
+ },
+ 
+ 'HTMLBaseElement': {
+     'nativeType': 'mozilla::dom::HTMLSharedElement'
+ },
+ 
+diff --git a/dom/webidl/HTMLAllCollection.webidl b/dom/webidl/HTMLAllCollection.webidl
+new file mode 100644
+--- /dev/null
++++ b/dom/webidl/HTMLAllCollection.webidl
+@@ -0,0 +1,16 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++// Bug 874788
++// [EmulatesUndefined]
++interface HTMLAllCollection {
++  readonly attribute unsigned long length;
++  nsISupports? item(DOMString name);
++  nsISupports? namedItem(DOMString name);
++
++  getter Element (unsigned long index);
++  getter nsISupports (DOMString name);
++// Bug 874787
++//  legacycaller nsISupports (DOMString name);
++};
+diff --git a/dom/webidl/HTMLDocument.webidl b/dom/webidl/HTMLDocument.webidl
+--- a/dom/webidl/HTMLDocument.webidl
++++ b/dom/webidl/HTMLDocument.webidl
+@@ -60,15 +60,14 @@ interface HTMLDocument : Document {
+   [TreatNullAs=EmptyString] attribute DOMString alinkColor;
+   [TreatNullAs=EmptyString] attribute DOMString bgColor;
+ 
+   readonly attribute HTMLCollection anchors;
+   readonly attribute HTMLCollection applets;
+ 
+   void clear();
+ 
+-  [Throws]
+-  readonly attribute object all;
++  readonly attribute HTMLAllCollection all;
+ 
+   // https://dvcs.w3.org/hg/editing/raw-file/tip/editing.html#selections
+   [Throws]
+   Selection getSelection();
+ };
+diff --git a/dom/webidl/WebIDL.mk b/dom/webidl/WebIDL.mk
+--- a/dom/webidl/WebIDL.mk
++++ b/dom/webidl/WebIDL.mk
+@@ -85,16 +85,17 @@ webidl_files = \
+   FileReaderSync.webidl \
+   FileRequest.webidl \
+   FocusEvent.webidl \
+   FormData.webidl \
+   Function.webidl \
+   Future.webidl \
+   GainNode.webidl \
+   Geolocation.webidl \
++  HTMLAllCollection.webidl \
+   HTMLAnchorElement.webidl \
+   HTMLAppletElement.webidl \
+   HTMLAreaElement.webidl \
+   HTMLAudioElement.webidl \
+   HTMLBaseElement.webidl \
+   HTMLBodyElement.webidl \
+   HTMLBRElement.webidl \
+   HTMLButtonElement.webidl \

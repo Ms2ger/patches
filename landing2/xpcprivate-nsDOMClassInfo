@@ -1,0 +1,508 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsContentList.h b/content/base/src/nsContentList.h
+--- a/content/base/src/nsContentList.h
++++ b/content/base/src/nsContentList.h
+@@ -19,16 +19,17 @@
+ #include "nsIDOMNodeList.h"
+ #include "nsINodeList.h"
+ #include "nsStubMutationObserver.h"
+ #include "nsIAtom.h"
+ #include "nsINameSpaceManager.h"
+ #include "nsCycleCollectionParticipant.h"
+ #include "nsWrapperCache.h"
+ #include "nsHashKeys.h"
++#include "nsIContent.h"
+ #include "mozilla/HashFunctions.h"
+ 
+ // Magic namespace id that means "match all namespaces".  This is
+ // negative so it won't collide with actual namespace constants.
+ #define kNameSpaceID_Wildcard PR_INT32_MIN
+ 
+ // This is a callback function type that can be used to implement an
+ // arbitrary matching algorithm.  aContent is the content that may
+diff --git a/dom/base/Makefile.in b/dom/base/Makefile.in
+--- a/dom/base/Makefile.in
++++ b/dom/base/Makefile.in
+@@ -118,17 +118,16 @@ DEFINES += -DMOZ_B2G_RIL
+ endif
+ 
+ include $(topsrcdir)/config/config.mk
+ include $(topsrcdir)/ipc/chromium/chromium-config.mk
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+ LOCAL_INCLUDES += \
+-		-I$(topsrcdir)/js/xpconnect/src \
+ 		-I$(topsrcdir)/js/xpconnect/wrappers \
+ 		-I$(topsrcdir)/xpcom/ds \
+ 		$(NULL)
+ 
+ ifdef MOZ_X11
+ CXXFLAGS += $(TK_CFLAGS)
+ LDFLAGS += $(TK_LIBS)
+ endif
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -17,20 +17,16 @@
+ #include "jsfriendapi.h"
+ #include "jsprvtd.h"    // we are using private JS typedefs...
+ #include "jsdbgapi.h"
+ #include "WrapperFactory.h"
+ #include "AccessCheck.h"
+ #include "XrayWrapper.h"
+ 
+ #include "xpcpublic.h"
+-#include "xpcprivate.h"
+-#include "XPCWrapper.h"
+-#include "XPCQuickStubs.h"
+-#include "nsDOMQS.h"
+ 
+ #include "mozilla/dom/RegisterBindings.h"
+ 
+ #include "nscore.h"
+ #include "nsDOMClassInfo.h"
+ #include "nsCRT.h"
+ #include "nsCRTGlue.h"
+ #include "nsIServiceManager.h"
+@@ -6966,28 +6962,24 @@ ContentWindowGetter(JSContext *cx, unsig
+ static JSNewResolveOp sOtherResolveFuncs[] = {
+   mozilla::dom::workers::ResolveWorkerClasses
+ };
+ 
+ template<class Interface>
+ static nsresult
+ LocationSetterGuts(JSContext *cx, JSObject *obj, jsval *vp)
+ {
+-  // This function duplicates some of the logic in XPC_WN_HelperSetProperty
+-  XPCWrappedNative *wrapper =
+-    XPCWrappedNative::GetWrappedNativeOfJSObject(cx, obj);
+-
+-  // The error checks duplicate code in THROW_AND_RETURN_IF_BAD_WRAPPER
+-  NS_ENSURE_TRUE(!wrapper || wrapper->IsValid(), NS_ERROR_XPC_HAS_BEEN_SHUTDOWN);
+-
+-  nsCOMPtr<Interface> xpcomObj = do_QueryWrappedNative(wrapper, obj);
+-  NS_ENSURE_TRUE(xpcomObj, NS_ERROR_UNEXPECTED);
++  nsCOMPtr<Interface> xpcomObj;
++  nsresult rv =
++    xpc::GetWrappedNativeInterface(cx, obj, getter_AddRefs(xpcomObj));
++  NS_ENSURE_SUCCESS(rv, rv);
++  MOZ_ASSERT(xpcomObj);
+ 
+   nsCOMPtr<nsIDOMLocation> location;
+-  nsresult rv = xpcomObj->GetLocation(getter_AddRefs(location));
++  rv = xpcomObj->GetLocation(getter_AddRefs(location));
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   // Grab the value we're being set to before we stomp on |vp|
+   JSString *val = ::JS_ValueToString(cx, *vp);
+   NS_ENSURE_TRUE(val, NS_ERROR_UNEXPECTED);
+ 
+   // Make sure |val| stays alive below
+   JS::Anchor<JSString *> anchor(val);
+@@ -7026,17 +7018,17 @@ LocationSetter(JSContext *cx, JSHandleOb
+ }
+ 
+ static JSBool
+ LocationSetterUnwrapper(JSContext *cx, JSHandleObject obj_, JSHandleId id, JSBool strict,
+                         jsval *vp)
+ {
+   JS::RootedObject obj(cx, obj_);
+ 
+-  JSObject *wrapped = XPCWrapper::UnsafeUnwrapSecurityWrapper(obj);
++  JSObject *wrapped = xpc::UnsafeUnwrapSecurityWrapper(obj);
+   if (wrapped) {
+     obj = wrapped;
+   }
+ 
+   return LocationSetter<nsIDOMWindow>(cx, obj, id, strict, vp);
+ }
+ 
+ NS_IMETHODIMP
+@@ -7699,44 +7691,34 @@ GetterShim(JSContext *cx, JSHandleObject
+ 
+   return JS_TRUE;  
+ }
+ 
+ // Can't be static so GetterShim will compile
+ nsresult
+ BaseURIObjectGetter(JSContext *cx, JSObject *obj, jsval *vp)
+ {
+-  // This function duplicates some of the logic in XPC_WN_HelperGetProperty
+-  XPCWrappedNative *wrapper =
+-    XPCWrappedNative::GetWrappedNativeOfJSObject(cx, obj);
+-
+-  // The error checks duplicate code in THROW_AND_RETURN_IF_BAD_WRAPPER
+-  NS_ENSURE_TRUE(!wrapper || wrapper->IsValid(), NS_ERROR_XPC_HAS_BEEN_SHUTDOWN);
+-
+-  nsCOMPtr<nsINode> node = do_QueryWrappedNative(wrapper, obj);
+-  NS_ENSURE_TRUE(node, NS_ERROR_UNEXPECTED);
++  nsCOMPtr<nsINode> node;
++  nsresult rv = xpc::GetWrappedNativeInterface(cx, obj, getter_AddRefs(node));
++  NS_ENSURE_SUCCESS(rv, rv);
++  MOZ_ASSERT(node);
+ 
+   nsCOMPtr<nsIURI> uri = node->GetBaseURI();
+   return WrapNative(cx, JS_GetGlobalForScopeChain(cx), uri,
+                     &NS_GET_IID(nsIURI), true, vp);
+ }
+ 
+ // Can't be static so GetterShim will compile
+ nsresult
+ NodePrincipalGetter(JSContext *cx, JSObject *obj, jsval *vp)
+ {
+-  // This function duplicates some of the logic in XPC_WN_HelperGetProperty
+-  XPCWrappedNative *wrapper =
+-    XPCWrappedNative::GetWrappedNativeOfJSObject(cx, obj);
+-
+-  // The error checks duplicate code in THROW_AND_RETURN_IF_BAD_WRAPPER
+-  NS_ENSURE_TRUE(!wrapper || wrapper->IsValid(), NS_ERROR_XPC_HAS_BEEN_SHUTDOWN);
+-
+-  nsCOMPtr<nsINode> node = do_QueryWrappedNative(wrapper, obj);
+-  NS_ENSURE_TRUE(node, NS_ERROR_UNEXPECTED);
++  nsCOMPtr<nsINode> node;
++  nsresult rv = xpc::GetWrappedNativeInterface(cx, obj, getter_AddRefs(node));
++  NS_ENSURE_SUCCESS(rv, rv);
++  MOZ_ASSERT(node);
+ 
+   return WrapNative(cx, JS_GetGlobalForScopeChain(cx), node->NodePrincipal(),
+                     &NS_GET_IID(nsIPrincipal), true, vp);
+ }
+ 
+ NS_IMETHODIMP
+ nsNodeSH::PostCreatePrototype(JSContext * cx, JSObject * proto)
+ {
+@@ -8559,25 +8541,20 @@ nsDOMStringMapSH::JSIDToProp(const jsid&
+ 
+   return true;
+ }
+ 
+ // Can't be static so GetterShim will compile
+ nsresult
+ DocumentURIObjectGetter(JSContext *cx, JSObject *obj, jsval *vp)
+ {
+-  // This function duplicates some of the logic in XPC_WN_HelperGetProperty
+-  XPCWrappedNative *wrapper =
+-    XPCWrappedNative::GetWrappedNativeOfJSObject(cx, obj);
+-
+-  // The error checks duplicate code in THROW_AND_RETURN_IF_BAD_WRAPPER
+-  NS_ENSURE_TRUE(!wrapper || wrapper->IsValid(), NS_ERROR_XPC_HAS_BEEN_SHUTDOWN);
+-
+-  nsCOMPtr<nsIDocument> doc = do_QueryWrappedNative(wrapper, obj);
+-  NS_ENSURE_TRUE(doc, NS_ERROR_UNEXPECTED);
++  nsCOMPtr<nsIDocument> doc;
++  nsresult rv = xpc::GetWrappedNativeInterface(cx, obj, getter_AddRefs(doc));
++  NS_ENSURE_SUCCESS(rv, rv);
++  MOZ_ASSERT(doc);
+ 
+   return WrapNative(cx, JS_GetGlobalForScopeChain(cx), doc->GetDocumentURI(),
+                     &NS_GET_IID(nsIURI), true, vp);
+ }
+ 
+ NS_IMETHODIMP
+ nsDocumentSH::PostCreatePrototype(JSContext * cx, JSObject * proto)
+ {
+diff --git a/dom/base/nsJSEnvironment.cpp b/dom/base/nsJSEnvironment.cpp
+--- a/dom/base/nsJSEnvironment.cpp
++++ b/dom/base/nsJSEnvironment.cpp
+@@ -45,17 +45,16 @@
+ 
+ #include "jsdbgapi.h"           // for JS_ClearWatchPointsForObject
+ #include "jswrapper.h"
+ #include "nsIArray.h"
+ #include "nsIObjectInputStream.h"
+ #include "nsIObjectOutputStream.h"
+ #include "nsDOMScriptObjectHolder.h"
+ #include "prmem.h"
+-#include "WrapperFactory.h"
+ #include "nsGlobalWindow.h"
+ #include "nsScriptNameSpaceManager.h"
+ #include "StructuredCloneTags.h"
+ #include "mozilla/dom/ImageData.h"
+ 
+ #include "nsJSPrincipals.h"
+ 
+ #ifdef XP_MACOSX
+diff --git a/js/xpconnect/src/XPCWrapper.cpp b/js/xpconnect/src/XPCWrapper.cpp
+--- a/js/xpconnect/src/XPCWrapper.cpp
++++ b/js/xpconnect/src/XPCWrapper.cpp
+@@ -94,23 +94,19 @@ Unwrap(JSContext *cx, JSObject *wrapper,
+     if (xpc::AccessCheck::isScriptAccessOnly(cx, wrapper))
+       return nsnull;
+     return js::UnwrapObject(wrapper, stopAtOuter);
+   }
+ 
+   return nsnull;
+ }
+ 
+-} // namespace xpc
+-
+-namespace XPCWrapper {
+-
+ JSObject *
+ UnsafeUnwrapSecurityWrapper(JSObject *obj)
+ {
+   if (js::IsProxy(obj)) {
+     return js::UnwrapObject(obj);
+   }
+ 
+   return obj;
+ }
+ 
+-} // namespace XPCWrapper
++} // namespace xpc
+diff --git a/js/xpconnect/src/XPCWrapper.h b/js/xpconnect/src/XPCWrapper.h
+--- a/js/xpconnect/src/XPCWrapper.h
++++ b/js/xpconnect/src/XPCWrapper.h
+@@ -48,15 +48,18 @@ IsSecurityWrapper(JSObject *wrapper)
+ }
+ 
+ inline JSObject *
+ Unwrap(JSContext *cx, JSObject *wrapper, bool stopAtOuter = true)
+ {
+   return xpc::Unwrap(cx, wrapper, stopAtOuter);
+ }
+ 
+-JSObject *
+-UnsafeUnwrapSecurityWrapper(JSObject *obj);
++inline JSObject *
++UnsafeUnwrapSecurityWrapper(JSObject *obj)
++{
++  return xpc::UnsafeUnwrapSecurityWrapper(obj);
++}
+ 
+ } // namespace XPCWrapper
+ 
+ 
+ #endif
+diff --git a/js/xpconnect/src/nsDOMQS.h b/js/xpconnect/src/nsDOMQS.h
+--- a/js/xpconnect/src/nsDOMQS.h
++++ b/js/xpconnect/src/nsDOMQS.h
+@@ -191,33 +191,9 @@ xpc_qsUnwrapArg<mozilla::dom::ImageData>
+     nsresult rv = xpc_qsUnwrapArg<nsIDOMImageData>(cx, v, &arg, &argRef, vp);
+     if (NS_SUCCEEDED(rv)) {
+         *ppArg = static_cast<mozilla::dom::ImageData*>(arg);
+         *ppArgRef = static_cast<mozilla::dom::ImageData*>(argRef);
+     }
+     return rv;
+ }
+ 
+-inline nsISupports*
+-ToSupports(nsContentList *p)
+-{
+-    return static_cast<nsINodeList*>(p);
+-}
+-
+-inline nsISupports*
+-ToCanonicalSupports(nsINode* p)
+-{
+-    return p;
+-}
+-
+-inline nsISupports*
+-ToSupports(nsINode* p)
+-{
+-  return p;
+-}
+-
+-inline nsISupports*
+-ToCanonicalSupports(nsContentList *p)
+-{
+-    return static_cast<nsINodeList*>(p);
+-}
+-
+ #endif /* nsDOMQS_h__ */
+diff --git a/js/xpconnect/src/nsXPConnect.cpp b/js/xpconnect/src/nsXPConnect.cpp
+--- a/js/xpconnect/src/nsXPConnect.cpp
++++ b/js/xpconnect/src/nsXPConnect.cpp
+@@ -3046,9 +3046,59 @@ ReparentWrappers(JSContext *cx, JSObject
+     if (!priv || !priv->waiverWrapperMap)
+         return;
+ 
+     NS_ASSERTION(!JS_IsExceptionPending(cx),
+                  "We might overwrite a pending exception!");
+     priv->waiverWrapperMap->Reparent(cx, newInner);
+ }
+ 
++// This function duplicates code from nsDOMClassInfo::GetNative.
++nsISupports*
++GetNative(nsIXPConnectWrappedNative *aWrapper, JSObject *aObject)
++{
++    return aWrapper ? aWrapper->Native()
++                    : static_cast<nsISupports*>(js::GetObjectPrivate(aObject));
++}
++
++template<class Interface>
++nsresult
++GetWrappedNativeInterfaceImpl(JSContext *aCx, JSObject *aObject, Interface **aRetVal)
++{
++    // This function duplicates some of the logic in XPC_WN_HelperSetProperty
++    XPCWrappedNative *wrapper =
++        XPCWrappedNative::GetWrappedNativeOfJSObject(aCx, aObject);
++
++    // The error checks duplicates code in THROW_AND_RETURN_IF_BAD_WRAPPER
++    NS_ENSURE_TRUE(!wrapper || wrapper->IsValid(), NS_ERROR_XPC_HAS_BEEN_SHUTDOWN);
++
++    nsCOMPtr<Interface> xpcomObj = do_QueryInterface(GetNative(wrapper, aObject));
++    NS_ENSURE_TRUE(xpcomObj, NS_ERROR_UNEXPECTED);
++
++    xpcomObj.forget(aRetVal);
++    return NS_OK;
++}
++
++nsresult
++GetWrappedNativeInterface(JSContext *aCx, JSObject *aObject, nsINode **aRetVal)
++{
++    return GetWrappedNativeInterfaceImpl(aCx, aObject, aRetVal);
++}
++
++nsresult
++GetWrappedNativeInterface(JSContext *aCx, JSObject *aObject, nsIDocument **aRetVal)
++{
++    return GetWrappedNativeInterfaceImpl(aCx, aObject, aRetVal);
++}
++
++nsresult
++GetWrappedNativeInterface(JSContext *aCx, JSObject *aObject, nsIDOMDocument **aRetVal)
++{
++    return GetWrappedNativeInterfaceImpl(aCx, aObject, aRetVal);
++}
++
++nsresult
++GetWrappedNativeInterface(JSContext *aCx, JSObject *aObject, nsIDOMWindow **aRetVal)
++{
++    return GetWrappedNativeInterfaceImpl(aCx, aObject, aRetVal);
++}
++
+ } // namespace xpc
+diff --git a/js/xpconnect/src/qsObjectHelper.h b/js/xpconnect/src/qsObjectHelper.h
+--- a/js/xpconnect/src/qsObjectHelper.h
++++ b/js/xpconnect/src/qsObjectHelper.h
+@@ -4,32 +4,57 @@
+ 
+ #ifndef qsObjectHelper_h
+ #define qsObjectHelper_h
+ 
+ #include "xpcObjectHelper.h"
+ 
+ #include "nsAutoPtr.h"
+ #include "nsCOMPtr.h"
++#include "nsContentList.h"
+ #include "nsIDOMNode.h"
+ #include "nsINode.h"
+ #include "nsWrapperCache.h"
+ 
+ inline nsISupports*
+ ToSupports(nsISupports *p)
+ {
+     return p;
+ }
+ 
+ inline nsISupports*
+ ToCanonicalSupports(nsISupports *p)
+ {
+     return NULL;
+ }
+ 
++inline nsISupports*
++ToSupports(nsContentList *p)
++{
++    return static_cast<nsINodeList*>(p);
++}
++
++inline nsISupports*
++ToCanonicalSupports(nsContentList *p)
++{
++    return static_cast<nsINodeList*>(p);
++}
++
++inline nsISupports*
++ToSupports(nsINode *p)
++{
++    return p;
++}
++
++inline nsISupports*
++ToCanonicalSupports(nsINode *p)
++{
++    return p;
++}
++
+ #if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ > 2) || \
+     _MSC_FULL_VER >= 140050215
+ 
+ /* Use a compiler intrinsic if one is available. */
+ 
+ #define QS_CASTABLE_TO(_interface, _class) __is_base_of(_interface, _class)
+ 
+ #else
+diff --git a/js/xpconnect/src/xpcpublic.h b/js/xpconnect/src/xpcpublic.h
+--- a/js/xpconnect/src/xpcpublic.h
++++ b/js/xpconnect/src/xpcpublic.h
+@@ -11,28 +11,34 @@
+ #include "jsapi.h"
+ #include "js/MemoryMetrics.h"
+ #include "jsclass.h"
+ #include "jsfriendapi.h"
+ #include "jsgc.h"
+ #include "jspubtd.h"
+ #include "jsproxy.h"
+ 
++#include "nsCOMPtr.h"
+ #include "nsISupports.h"
+ #include "nsIPrincipal.h"
+ #include "nsWrapperCache.h"
+ #include "nsStringGlue.h"
+ #include "nsTArray.h"
+ #include "mozilla/dom/DOMJSClass.h"
+ #include "nsMathUtils.h"
+ 
++class nsIDocument;
++class nsIDOMDocument;
++class nsIDOMWindow;
++class nsINode;
+ class nsIPrincipal;
+ class nsIThreadJSContextStack;
+ class nsIXPConnect;
+ class nsIXPConnectWrappedJS;
++class nsIXPConnectWrappedNative;
+ class nsScriptNameSpaceManager;
+ 
+ #ifndef BAD_TLS_INDEX
+ #define BAD_TLS_INDEX ((uint32_t) -1)
+ #endif
+ 
+ namespace xpc {
+ JSObject *
+@@ -360,16 +366,30 @@ void RemoveDOMExpandoObject(JSObject *ob
+  * Reparents those wrappers in the waiverWrapperMap for |oldInner|'s compartment
+  * that have as their parent an inner window whose outer has newInner as its
+  * current inner.
+  *
+  * Not for casual consumers.
+  */
+ void ReparentWrappers(JSContext *cx, JSObject *oldInner, JSObject *newInner);
+ 
++JSObject *UnsafeUnwrapSecurityWrapper(JSObject*);
++
++nsresult
++GetWrappedNativeInterface(JSContext *aCx, JSObject *aObject, nsINode **aRetVal);
++nsresult
++GetWrappedNativeInterface(JSContext *aCx, JSObject *aObject, nsIDocument **aRetVal);
++nsresult
++GetWrappedNativeInterface(JSContext *aCx, JSObject *aObject, nsIDOMDocument **aRetVal);
++nsresult
++GetWrappedNativeInterface(JSContext *aCx, JSObject *aObject, nsIDOMWindow **aRetVal);
++
++nsISupports*
++GetNative(nsIXPConnectWrappedNative *aWrapper, JSObject *aObject);
++
+ } // namespace xpc
+ 
+ nsCycleCollectionParticipant *
+ xpc_JSCompartmentParticipant();
+ 
+ namespace mozilla {
+ namespace dom {
+ namespace binding {

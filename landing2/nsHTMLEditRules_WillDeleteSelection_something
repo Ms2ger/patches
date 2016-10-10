@@ -1,0 +1,187 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/html/nsHTMLEditRules.cpp b/editor/libeditor/html/nsHTMLEditRules.cpp
+--- a/editor/libeditor/html/nsHTMLEditRules.cpp
++++ b/editor/libeditor/html/nsHTMLEditRules.cpp
+@@ -1871,103 +1871,95 @@ nsHTMLEditRules::WillDeleteSelection(nsI
+     
+     bCollapsed = aSelection->Collapsed();
+   }
+ 
+   if (bCollapsed)
+   {
+     // what's in the direction we are deleting?
+     nsWSRunObject wsObj(mHTMLEditor, startNode, startOffset);
+-    nsCOMPtr<nsIDOMNode> visNode;
++    nsCOMPtr<nsIDOMNode> visDOMNode;
+     int32_t visOffset;
+     int16_t wsType;
+ 
+     // find next visible node
+     if (aAction == nsIEditor::eNext)
+-      res = wsObj.NextVisibleNode(startNode, startOffset, address_of(visNode), &visOffset, &wsType);
++      res = wsObj.NextVisibleNode(startNode, startOffset, address_of(visDOMNode), &visOffset, &wsType);
+     else
+-      res = wsObj.PriorVisibleNode(startNode, startOffset, address_of(visNode), &visOffset, &wsType);
+-    NS_ENSURE_SUCCESS(res, res);
+-    
+-    if (!visNode) // can't find anything to delete!
+-    {
++      res = wsObj.PriorVisibleNode(startNode, startOffset, address_of(visDOMNode), &visOffset, &wsType);
++    NS_ENSURE_SUCCESS(res, res);
++
++    nsCOMPtr<nsINode> visNode = do_QueryInterface(visDOMNode);
++    if (!visNode) {
++      // can't find anything to delete!
+       *aCancel = true;
+       return res;
+     }
+     
+-    if (wsType==nsWSRunObject::eNormalWS)
+-    {
++    if (wsType == nsWSRunObject::eNormalWS) {
+       // we found some visible ws to delete.  Let ws code handle it.
+       if (aAction == nsIEditor::eNext)
+         res = wsObj.DeleteWSForward();
+       else
+         res = wsObj.DeleteWSBackward();
+       *aHandled = true;
+       NS_ENSURE_SUCCESS(res, res);
+       res = InsertBRIfNeeded(aSelection);
+       return res;
+-    } 
+-    else if (wsType==nsWSRunObject::eText)
+-    {
++    }
++
++    if (wsType == nsWSRunObject::eText) {
+       // found normal text to delete.  
+       int32_t so = visOffset;
+       int32_t eo = visOffset+1;
+       if (aAction == nsIEditor::ePrevious) 
+       { 
+         if (so == 0) return NS_ERROR_UNEXPECTED;
+         so--; 
+         eo--; 
+-      }
+-      else
+-      {
++      } else {
+         nsCOMPtr<nsIDOMRange> range;
+         res = aSelection->GetRangeAt(0, getter_AddRefs(range));
+         NS_ENSURE_SUCCESS(res, res);
+ 
+-#ifdef DEBUG
+-        nsIDOMNode *container;
+-
+-        res = range->GetStartContainer(&container);
+-        NS_ENSURE_SUCCESS(res, res);
+-        NS_ASSERTION(container == visNode, "selection start not in visNode");
+-
+-        res = range->GetEndContainer(&container);
+-        NS_ENSURE_SUCCESS(res, res);
+-        NS_ASSERTION(container == visNode, "selection end not in visNode");
+-#endif
+-
+-        res = range->GetStartOffset(&so);
+-        NS_ENSURE_SUCCESS(res, res);
+-        res = range->GetEndOffset(&eo);
+-        NS_ENSURE_SUCCESS(res, res);
+-      }
+-      res = nsWSRunObject::PrepareToDeleteRange(mHTMLEditor, address_of(visNode), &so, address_of(visNode), &eo);
+-      NS_ENSURE_SUCCESS(res, res);
+-      nsCOMPtr<nsIDOMCharacterData> nodeAsText(do_QueryInterface(visNode));
++        nsRange* concreteRange = static_cast<nsRange*>(range);
++
++        NS_ASSERTION(concreteRange->GetStartParent() == visNode,
++                     "selection start not in visNode");
++        NS_ASSERTION(concreteRange->GetEndParent() == visNode,
++                     "selection end not in visNode");
++
++        so = concreteRange->StartOffset();
++        eo = concreteRange->EndOffset();
++      }
++      res = nsWSRunObject::PrepareToDeleteRange(mHTMLEditor, address_of(visDOMNode), &so, address_of(visDOMNode), &eo);
++      NS_ENSURE_SUCCESS(res, res);
++
++      nsCOMPtr<nsIDOMCharacterData> nodeAsText = do_QueryInterface(visDOMNode);
+       res = mHTMLEditor->DeleteText(nodeAsText, NS_MIN(so, eo), NS_ABS(eo - so));
+       *aHandled = true;
+       NS_ENSURE_SUCCESS(res, res);    
+       res = InsertBRIfNeeded(aSelection);
+       return res;
+     }
+-    else if ( (wsType==nsWSRunObject::eSpecial)  || 
+-              (wsType==nsWSRunObject::eBreak)    ||
+-              nsHTMLEditUtils::IsHR(visNode) ) 
+-    {
++
++    if (wsType == nsWSRunObject::eSpecial || wsType == nsWSRunObject::eBreak ||
++        (visNode->IsElement() && visNode->AsElement()->IsHTML(nsGkAtoms::hr))) {
+       // short circuit for invisible breaks.  delete them and recurse.
+-      if (nsTextEditUtils::IsBreak(visNode) && !mHTMLEditor->IsVisBreak(visNode))
+-      {
+-        res = mHTMLEditor->DeleteNode(visNode);
++      if (visNode->IsElement() && visNode->AsElement()->IsHTML(nsGkAtoms::br) &&
++          !mHTMLEditor->IsVisBreak(visNode->AsDOMNode())) {
++        res = mHTMLEditor->DeleteNode(visNode->AsDOMNode());
+         NS_ENSURE_SUCCESS(res, res);
+         return WillDeleteSelection(aSelection, aAction, aStripWrappers,
+                                    aCancel, aHandled);
+       }
+-      
++
+       // special handling for backspace when positioned after <hr>
+-      if (aAction == nsIEditor::ePrevious && nsHTMLEditUtils::IsHR(visNode))
++      if (aAction == nsIEditor::ePrevious &&
++          visNode->IsElement() && visNode->AsElement()->IsHTML(nsGkAtoms::hr)) {
+       {
+         /*
+           Only if the caret is positioned at the end-of-hr-line position,
+           we want to delete the <hr>.
+           
+           In other words, we only want to delete, if
+           our selection position (indicated by startNode and startOffset)
+           is the position directly after the <hr>,
+@@ -2062,18 +2054,18 @@ nsHTMLEditRules::WillDeleteSelection(nsI
+           // fix up selection
+           res = aSelection->Collapse(selNode, selOffset);
+         }
+       }
+       NS_ENSURE_SUCCESS(res, res);    
+       res = InsertBRIfNeeded(aSelection);
+       return res;
+     }
+-    else if (wsType==nsWSRunObject::eOtherBlock)
+-    {
++
++    if (wsType == nsWSRunObject::eOtherBlock) {
+       // make sure it's not a table element.  If so, cancel the operation 
+       // (translation: users cannot backspace or delete across table cells)
+       if (nsHTMLEditUtils::IsTableElement(visNode))
+       {
+         *aCancel = true;
+         return NS_OK;
+       }
+       
+@@ -2159,18 +2151,18 @@ nsHTMLEditRules::WillDeleteSelection(nsI
+       {
+         nsAutoTrackDOMPoint tracker(mHTMLEditor->mRangeUpdater, address_of(selPointNode), &selPointOffset);
+         res = JoinBlocks(address_of(leftParent), address_of(rightParent), aCancel);
+         *aHandled = true;
+       }
+       aSelection->Collapse(selPointNode, selPointOffset);
+       return res;
+     }
+-    else if (wsType==nsWSRunObject::eThisBlock)
+-    {
++
++    if (wsType == nsWSRunObject::eThisBlock) {
+       // at edge of our block.  Look beside it and see if we can join to an adjacent block
+       
+       // make sure it's not a table element.  If so, cancel the operation 
+       // (translation: users cannot backspace or delete across table cells)
+       if (nsHTMLEditUtils::IsTableElement(visNode))
+       {
+         *aCancel = true;
+         return NS_OK;

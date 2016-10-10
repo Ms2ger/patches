@@ -1,0 +1,356 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/public/nsISelectionController.idl b/content/base/public/nsISelectionController.idl
+--- a/content/base/public/nsISelectionController.idl
++++ b/content/base/public/nsISelectionController.idl
+@@ -1,11 +1,10 @@
+-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+- *
+- * ***** BEGIN LICENSE BLOCK *****
++/* -*- Mode: IDL; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
++/* ***** BEGIN LICENSE BLOCK *****
+  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+  *
+  * The contents of this file are subject to the Mozilla Public License Version
+  * 1.1 (the "License"); you may not use this file except in compliance with
+  * the License. You may obtain a copy of the License at
+  * http://www.mozilla.org/MPL/
+  *
+  * Software distributed under the License is distributed on an "AS IS" basis,
+@@ -42,16 +41,17 @@
+ #include "nsISelection.idl"
+ #include "nsISelectionDisplay.idl"
+ 
+ %{C++
+ typedef short SelectionType;
+ typedef short SelectionRegion;
+ %}
+ 
++interface nsIContent;
+ interface nsIDOMNode;
+ interface nsISelection;
+ interface nsISelectionDisplay;
+ 
+ [scriptable, uuid(cf30315f-b65d-44c3-8c57-557e36d18fd2)]
+ interface nsISelectionController : nsISelectionDisplay
+ {
+    const short SELECTION_NONE=0;
+@@ -270,15 +270,16 @@ interface nsISelectionController : nsISe
+   /** CheckVisibility will return true if textnode and offsets are actually rendered 
+    *  in the current precontext.
+    *  @param aNode textNode to test
+    *  @param aStartOffset  offset in dom to first char of textnode to test
+    *  @param aEndOffset    offset in dom to last char of textnode to test
+    *  @param aReturnBool   boolean returned TRUE if visible FALSE if not
+    */
+     boolean checkVisibility(in nsIDOMNode node, in short startOffset, in short endOffset);
++    [noscript,nostdcall] boolean checkVisibilityContent(in nsIContent node, in short startOffset, in short endOffset);
+ 
+ };
+ %{ C++
+    #define NS_ISELECTIONCONTROLLER_CID \
+    { 0x513b9460, 0xd56a, 0x4c4e, \
+    { 0xb6, 0xf9, 0x0b, 0x8a, 0xe4, 0x37, 0x2a, 0x3b }}
+ %}
+diff --git a/content/html/content/src/nsTextEditorState.cpp b/content/html/content/src/nsTextEditorState.cpp
+--- a/content/html/content/src/nsTextEditorState.cpp
++++ b/content/html/content/src/nsTextEditorState.cpp
+@@ -212,16 +212,17 @@ public:
+   NS_IMETHOD PageMove(bool aForward, bool aExtend);
+   NS_IMETHOD CompleteScroll(bool aForward);
+   NS_IMETHOD CompleteMove(bool aForward, bool aExtend);
+   NS_IMETHOD ScrollPage(bool aForward);
+   NS_IMETHOD ScrollLine(bool aForward);
+   NS_IMETHOD ScrollCharacter(bool aRight);
+   NS_IMETHOD SelectAll(void);
+   NS_IMETHOD CheckVisibility(nsIDOMNode *node, int16_t startOffset, int16_t EndOffset, bool *_retval);
++  virtual nsresult CheckVisibilityContent(nsIContent* aNode, int16_t aStartOffset, int16_t aEndOffset, bool* aRetval);
+ 
+ private:
+   nsRefPtr<nsFrameSelection> mFrameSelection;
+   nsCOMPtr<nsIContent>       mLimiter;
+   nsIScrollableFrame        *mScrollFrame;
+   nsWeakPtr mPresShellWeak;
+ };
+ 
+@@ -601,16 +602,32 @@ nsTextInputSelectionImpl::CheckVisibilit
+   if (shell)
+   {
+     return shell->CheckVisibility(node,startOffset,EndOffset, _retval);
+   }
+   return NS_ERROR_FAILURE;
+ 
+ }
+ 
++nsresult
++nsTextInputSelectionImpl::CheckVisibilityContent(nsIContent* aNode,
++                                                 int16_t aStartOffset,
++                                                 int16_t aEndOffset,
++                                                 bool* aRetval)
++{
++  if (!mPresShellWeak) {
++    return NS_ERROR_NOT_INITIALIZED;
++  }
++
++  nsCOMPtr<nsISelectionController> shell = do_QueryReferent(mPresShellWeak);
++  NS_ENSURE_TRUE(shell, NS_ERROR_FAILURE);
++
++  return shell->CheckVisibilityContent(aNode, aStartOffset, aEndOffset, aRetval);
++}
++
+ class nsTextInputListener : public nsISelectionListener,
+                             public nsIDOMEventListener,
+                             public nsIEditorObserver,
+                             public nsSupportsWeakReference
+ {
+ public:
+   /** the default constructor
+    */ 
+diff --git a/editor/libeditor/html/nsHTMLEditRules.cpp b/editor/libeditor/html/nsHTMLEditRules.cpp
+--- a/editor/libeditor/html/nsHTMLEditRules.cpp
++++ b/editor/libeditor/html/nsHTMLEditRules.cpp
+@@ -2432,31 +2432,30 @@ nsHTMLEditRules::WillDeleteSelection(nsI
+           nsDOMSubtreeIterator iter;
+           res = iter.Init(range);
+           NS_ENSURE_SUCCESS(res, res);
+           res = iter.AppendList(functor, arrayOfNodes);
+           NS_ENSURE_SUCCESS(res, res);
+       
+           // now that we have the list, delete non table elements
+           int32_t listCount = arrayOfNodes.Count();
+-          int32_t j;
+-
+-          for (j = 0; j < listCount; j++)
+-          {
++          for (int32_t j = 0; j < listCount; j++) {
+             nsIDOMNode* somenode = arrayOfNodes[0];
+             res = DeleteNonTableElements(somenode);
+             arrayOfNodes.RemoveObjectAt(0);
+             // If something visible is deleted, no need to join.
+             // Visible means all nodes except non-visible textnodes and breaks.
+             if (join && origCollapsed) {
+-              if (mHTMLEditor->IsTextNode(somenode)) {
+-                mHTMLEditor->IsVisTextNode(somenode, &join, true);
+-              }
+-              else {
+-                join = nsTextEditUtils::IsBreak(somenode) && 
++              nsCOMPtr<nsIContent> content = do_QueryInterface(somenode);
++              if (!content) {
++                join = false;
++              } else if (content->NodeType() == nsIDOMNode::TEXT_NODE) {
++                mHTMLEditor->IsVisTextNode(content, &join, true);
++              } else {
++                join = content->IsHTML(nsGkAtoms::br) &&
+                        !mHTMLEditor->IsVisBreak(somenode);
+               }
+             }
+           }
+         }
+         
+         // check endopints for possible text deletion.
+         // we can assume that if text node is found, we can
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -4794,68 +4794,61 @@ nsHTMLEditor::IsTextInDirtyFrameVisible(
+ ///////////////////////////////////////////////////////////////////////////
+ // IsVisTextNode: figure out if textnode aTextNode has any visible content.
+ //                  
+ nsresult
+ nsHTMLEditor::IsVisTextNode(nsIContent* aNode,
+                             bool* outIsEmptyNode,
+                             bool aSafeToAskFrames)
+ {
+-  nsCOMPtr<nsIDOMNode> node = do_QueryInterface(aNode);
+-  return IsVisTextNode(node);
+-}
+-
+-nsresult
+-nsHTMLEditor::IsVisTextNode( nsIDOMNode* aNode, 
+-                             bool *outIsEmptyNode, 
+-                             bool aSafeToAskFrames)
+-{
+   NS_ENSURE_TRUE(aNode && outIsEmptyNode, NS_ERROR_NULL_POINTER);
+   *outIsEmptyNode = true;
+-  nsresult res = NS_OK;
+-
+-  nsCOMPtr<nsIContent> textContent = do_QueryInterface(aNode);
++
+   // callers job to only call us with text nodes
+-  if (!textContent || !textContent->IsNodeOfType(nsINode::eTEXT)) 
++  if (!aNode->IsNodeOfType(nsINode::eTEXT)) {
+     return NS_ERROR_NULL_POINTER;
+-  uint32_t length = textContent->TextLength();
++  }
++
++  uint32_t length = aNode->TextLength();
+   if (aSafeToAskFrames)
+   {
+     nsCOMPtr<nsISelectionController> selCon;
+-    res = GetSelectionController(getter_AddRefs(selCon));
++    nsresult res = GetSelectionController(getter_AddRefs(selCon));
+     NS_ENSURE_SUCCESS(res, res);
+     NS_ENSURE_TRUE(selCon, NS_ERROR_FAILURE);
+     bool isVisible = false;
+     // ask the selection controller for information about whether any
+     // of the data in the node is really rendered.  This is really
+     // something that frames know about, but we aren't supposed to talk to frames.
+     // So we put a call in the selection controller interface, since it's already
+     // in bed with frames anyway.  (this is a fix for bug 22227, and a
+     // partial fix for bug 46209)
+-    res = selCon->CheckVisibility(aNode, 0, length, &isVisible);
++    res = selCon->CheckVisibilityContent(aNode, 0, length, &isVisible);
+     NS_ENSURE_SUCCESS(res, res);
+     if (isVisible) 
+     {
+       *outIsEmptyNode = false;
+     }
+   }
+   else if (length)
+   {
+-    if (textContent->TextIsOnlyWhitespace())
++    if (aNode->TextIsOnlyWhitespace())
+     {
+-      nsWSRunObject wsRunObj(this, aNode, 0);
++      nsCOMPtr<nsIDOMNode> node = do_QueryInterface(aNode);
++      nsWSRunObject wsRunObj(this, node, 0);
+       nsCOMPtr<nsIDOMNode> visNode;
+       int32_t outVisOffset=0;
+       int16_t visType=0;
+-      res = wsRunObj.NextVisibleNode(aNode, 0, address_of(visNode), &outVisOffset, &visType);
++      nsresult res = wsRunObj.NextVisibleNode(node, 0, address_of(visNode),
++                                              &outVisOffset, &visType);
+       NS_ENSURE_SUCCESS(res, res);
+       if ( (visType == nsWSRunObject::eNormalWS) ||
+            (visType == nsWSRunObject::eText) )
+       {
+-        *outIsEmptyNode = (aNode != visNode);
++        *outIsEmptyNode = (node != visNode);
+       }
+     }
+     else
+     {
+       *outIsEmptyNode = false;
+     }
+   }
+   return NS_OK;  
+diff --git a/editor/libeditor/html/nsHTMLEditor.h b/editor/libeditor/html/nsHTMLEditor.h
+--- a/editor/libeditor/html/nsHTMLEditor.h
++++ b/editor/libeditor/html/nsHTMLEditor.h
+@@ -386,19 +386,16 @@ public:
+   // aSelection is optional -- if null, we get current seletion
+   nsresult CollapseSelectionToDeepestNonTableFirstChild(nsISelection *aSelection, nsIDOMNode *aNode);
+ 
+   virtual bool IsTextInDirtyFrameVisible(nsIContent *aNode);
+ 
+   nsresult IsVisTextNode(nsIContent* aNode,
+                          bool* outIsEmptyNode,
+                          bool aSafeToAskFrames);
+-  nsresult IsVisTextNode( nsIDOMNode *aNode, 
+-                          bool *outIsEmptyNode, 
+-                          bool aSafeToAskFrames);
+   nsresult IsEmptyNode(nsIDOMNode *aNode, bool *outIsEmptyBlock, 
+                        bool aMozBRDoesntCount = false,
+                        bool aListOrCellNotEmpty = false,
+                        bool aSafeToAskFrames = false);
+   nsresult IsEmptyNodeImpl(nsINode* aNode,
+                            bool *outIsEmptyBlock, 
+                            bool aMozBRDoesntCount,
+                            bool aListOrCellNotEmpty,
+diff --git a/layout/base/nsPresShell.cpp b/layout/base/nsPresShell.cpp
+--- a/layout/base/nsPresShell.cpp
++++ b/layout/base/nsPresShell.cpp
+@@ -2545,33 +2545,63 @@ PresShell::CompleteMove(bool aForward, b
+ }
+ 
+ NS_IMETHODIMP 
+ PresShell::SelectAll()
+ {
+   return mSelection->SelectAll();
+ }
+ 
++static void
++DoCheckVisibility(nsPresContext* aPresContext,
++                  nsIContent* aNode,
++                  int16_t aStartOffset,
++                  int16_t aEndOffset,
++                  bool* aRetval)
++{
++  nsIFrame* frame = aNode->GetPrimaryFrame();
++  if (!frame) {
++    // No frame to look at so it must not be visible.
++    return;
++  }
++
++  // Start process now to go through all frames to find startOffset. Then check
++  // chars after that to see if anything until EndOffset is visible.
++  bool finished = false;
++  frame->CheckVisibility(aPresContext, aStartOffset, aEndOffset, true,
++                         &finished, aRetval);
++  // Don't worry about other return value.
++}
++
+ NS_IMETHODIMP
+ PresShell::CheckVisibility(nsIDOMNode *node, int16_t startOffset, int16_t EndOffset, bool *_retval)
+ {
+   if (!node || startOffset>EndOffset || !_retval || startOffset<0 || EndOffset<0)
+     return NS_ERROR_INVALID_ARG;
+   *_retval = false; //initialize return parameter
+   nsCOMPtr<nsIContent> content(do_QueryInterface(node));
+   if (!content)
+     return NS_ERROR_FAILURE;
+-  nsIFrame *frame = content->GetPrimaryFrame();
+-  if (!frame) //no frame to look at so it must not be visible
+-    return NS_OK;  
+-  //start process now to go through all frames to find startOffset. then check chars after that to see 
+-  //if anything until EndOffset is visible.
+-  bool finished = false;
+-  frame->CheckVisibility(mPresContext,startOffset,EndOffset,true,&finished, _retval);
+-  return NS_OK;//dont worry about other return val
++
++  DoCheckVisibility(mPresContext, content, startOffset, EndOffset, _retval);
++  return NS_OK;
++}
++
++nsresult
++PresShell::CheckVisibilityContent(nsIContent* aNode, int16_t aStartOffset,
++                                  int16_t aEndOffset, bool* aRetval)
++{
++  if (!aNode || aStartOffset > aEndOffset || !aRetval ||
++      aStartOffset < 0 || aEndOffset < 0) {
++    return NS_ERROR_INVALID_ARG;
++  }
++
++  *aRetval = false;
++  DoCheckVisibility(mPresContext, aNode, aStartOffset, aEndOffset, aRetval);
++  return NS_OK;
+ }
+ 
+ //end implementations nsISelectionController
+ 
+ 
+ void
+ PresShell::StyleChangeReflow()
+ {
+diff --git a/layout/base/nsPresShell.h b/layout/base/nsPresShell.h
+--- a/layout/base/nsPresShell.h
++++ b/layout/base/nsPresShell.h
+@@ -360,16 +360,18 @@ public:
+   NS_IMETHOD PageMove(bool aForward, bool aExtend);
+   NS_IMETHOD ScrollPage(bool aForward);
+   NS_IMETHOD ScrollLine(bool aForward);
+   NS_IMETHOD ScrollCharacter(bool aRight);
+   NS_IMETHOD CompleteScroll(bool aForward);
+   NS_IMETHOD CompleteMove(bool aForward, bool aExtend);
+   NS_IMETHOD SelectAll();
+   NS_IMETHOD CheckVisibility(nsIDOMNode *node, int16_t startOffset, int16_t EndOffset, bool *_retval);
++  virtual nsresult CheckVisibilityContent(nsIContent* aNode, int16_t aStartOffset,
++                                          int16_t aEndOffset, bool* aRetval);
+ 
+   // nsIDocumentObserver
+   NS_DECL_NSIDOCUMENTOBSERVER_BEGINUPDATE
+   NS_DECL_NSIDOCUMENTOBSERVER_ENDUPDATE
+   NS_DECL_NSIDOCUMENTOBSERVER_BEGINLOAD
+   NS_DECL_NSIDOCUMENTOBSERVER_ENDLOAD
+   NS_DECL_NSIDOCUMENTOBSERVER_CONTENTSTATECHANGED
+   NS_DECL_NSIDOCUMENTOBSERVER_DOCUMENTSTATESCHANGED

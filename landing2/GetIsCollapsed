@@ -1,0 +1,195 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/composer/src/nsComposerCommandsUpdater.cpp b/editor/composer/src/nsComposerCommandsUpdater.cpp
+--- a/editor/composer/src/nsComposerCommandsUpdater.cpp
++++ b/editor/composer/src/nsComposerCommandsUpdater.cpp
+@@ -334,19 +334,17 @@ bool
+ nsComposerCommandsUpdater::SelectionIsCollapsed()
+ {
+   nsCOMPtr<nsIDOMWindow> domWindow = do_QueryReferent(mDOMWindow);
+   NS_ENSURE_TRUE(domWindow, true);
+ 
+   nsCOMPtr<nsISelection> domSelection;
+   if (NS_SUCCEEDED(domWindow->GetSelection(getter_AddRefs(domSelection))) && domSelection)
+   {
+-    bool selectionCollapsed = false;
+-    domSelection->GetIsCollapsed(&selectionCollapsed);
+-    return selectionCollapsed;
++    return domSelection->Collapsed();
+   }
+ 
+   NS_WARNING("nsComposerCommandsUpdater::SelectionIsCollapsed - no domSelection");
+ 
+   return false;
+ }
+ 
+ already_AddRefed<nsPICommandUpdater>
+diff --git a/editor/libeditor/text/nsTextEditRules.cpp b/editor/libeditor/text/nsTextEditRules.cpp
+--- a/editor/libeditor/text/nsTextEditRules.cpp
++++ b/editor/libeditor/text/nsTextEditRules.cpp
+@@ -358,21 +358,17 @@ nsTextEditRules::WillInsertBreak(Selecti
+     if (didTruncate) {
+       *aCancel = true;
+       return NS_OK;
+     }
+ 
+     *aCancel = false;
+ 
+     // if the selection isn't collapsed, delete it.
+-    bool bCollapsed;
+-    res = aSelection->GetIsCollapsed(&bCollapsed);
+-    NS_ENSURE_SUCCESS(res, res);
+-    if (!bCollapsed)
+-    {
++    if (!aSelection->Collapsed()) {
+       res = mEditor->DeleteSelection(nsIEditor::eNone, nsIEditor::eStrip);
+       NS_ENSURE_SUCCESS(res, res);
+     }
+ 
+     res = WillInsert(aSelection, aCancel);
+     NS_ENSURE_SUCCESS(res, res);
+     // initialize out param
+     // we want to ignore result of WillInsert()
+@@ -584,21 +580,17 @@ nsTextEditRules::WillInsertText(nsEditor
+ 
+   // handle password field docs
+   if (IsPasswordEditor()) {
+     nsContentUtils::GetSelectionInTextControl(aSelection, mEditor->GetRoot(),
+                                               start, end);
+   }
+ 
+   // if the selection isn't collapsed, delete it.
+-  bool bCollapsed;
+-  res = aSelection->GetIsCollapsed(&bCollapsed);
+-  NS_ENSURE_SUCCESS(res, res);
+-  if (!bCollapsed)
+-  {
++  if (!aSelection->Collapsed()) {
+     res = mEditor->DeleteSelection(nsIEditor::eNone, nsIEditor::eStrip);
+     NS_ENSURE_SUCCESS(res, res);
+   }
+ 
+   res = WillInsert(aSelection, aCancel);
+   NS_ENSURE_SUCCESS(res, res);
+   // initialize out param
+   // we want to ignore result of WillInsert()
+@@ -810,22 +802,19 @@ nsTextEditRules::WillDeleteSelection(Sel
+   else
+   {
+     nsCOMPtr<nsIDOMNode> startNode;
+     int32_t startOffset;
+     res = mEditor->GetStartNodeAndOffset(aSelection, getter_AddRefs(startNode), &startOffset);
+     NS_ENSURE_SUCCESS(res, res);
+     NS_ENSURE_TRUE(startNode, NS_ERROR_FAILURE);
+     
+-    bool bCollapsed;
+-    res = aSelection->GetIsCollapsed(&bCollapsed);
+-    NS_ENSURE_SUCCESS(res, res);
+-  
+-    if (!bCollapsed)
++    if (!aSelection->Collapsed()) {
+       return NS_OK;
++    }
+ 
+     // Test for distance between caret and text that will be deleted
+     res = CheckBidiLevelForDeletion(aSelection, startNode, startOffset, aCollapsedAction, aCancel);
+     NS_ENSURE_SUCCESS(res, res);
+     if (*aCancel) return NS_OK;
+ 
+     res = mEditor->ExtendSelectionForDelete(aSelection, &aCollapsedAction);
+     NS_ENSURE_SUCCESS(res, res);
+diff --git a/editor/txtsvc/src/nsTextServicesDocument.cpp b/editor/txtsvc/src/nsTextServicesDocument.cpp
+--- a/editor/txtsvc/src/nsTextServicesDocument.cpp
++++ b/editor/txtsvc/src/nsTextServicesDocument.cpp
+@@ -507,33 +507,26 @@ nsTextServicesDocument::LastSelectedBloc
+ 
+   if (!mSelCon || !mIterator)
+   {
+     UNLOCK_DOC(this);
+     return NS_ERROR_FAILURE;
+   }
+ 
+   nsCOMPtr<nsISelection> selection;
+-  bool isCollapsed = false;
+ 
+   result = mSelCon->GetSelection(nsISelectionController::SELECTION_NORMAL, getter_AddRefs(selection));
+ 
+   if (NS_FAILED(result))
+   {
+     UNLOCK_DOC(this);
+     return result;
+   }
+ 
+-  result = selection->GetIsCollapsed(&isCollapsed);
+-
+-  if (NS_FAILED(result))
+-  {
+-    UNLOCK_DOC(this);
+-    return result;
+-  }
++  bool isCollapsed = selection->Collapsed();
+ 
+   nsCOMPtr<nsIContentIterator> iter;
+   nsCOMPtr<nsIDOMRange>        range;
+   nsCOMPtr<nsIDOMNode>         parent;
+   int32_t                      i, rangeCount, offset;
+ 
+   if (isCollapsed)
+   {
+@@ -2511,34 +2504,26 @@ nsTextServicesDocument::GetSelection(nsI
+   *aSelLength = -1;
+ 
+   NS_ENSURE_TRUE(mDOMDocument && mSelCon, NS_ERROR_FAILURE);
+ 
+   if (mIteratorStatus == nsTextServicesDocument::eIsDone)
+     return NS_OK;
+ 
+   nsCOMPtr<nsISelection> selection;
+-  bool isCollapsed;
+-
+   result = mSelCon->GetSelection(nsISelectionController::SELECTION_NORMAL, getter_AddRefs(selection));
+-
+   NS_ENSURE_SUCCESS(result, result);
+-
+   NS_ENSURE_TRUE(selection, NS_ERROR_FAILURE);
+ 
+-  result = selection->GetIsCollapsed(&isCollapsed);
+-
+-  NS_ENSURE_SUCCESS(result, result);
+-
+   // XXX: If we expose this method publicly, we need to
+   //      add LOCK_DOC/UNLOCK_DOC calls!
+ 
+   // LOCK_DOC(this);
+ 
+-  if (isCollapsed)
++  if (selection->Collapsed())
+     result = GetCollapsedSelection(aSelStatus, aSelOffset, aSelLength);
+   else
+     result = GetUncollapsedSelection(aSelStatus, aSelOffset, aSelLength);
+ 
+   // UNLOCK_DOC(this);
+ 
+   return result;
+ }
+@@ -2546,18 +2531,18 @@ nsTextServicesDocument::GetSelection(nsI
+ nsresult
+ nsTextServicesDocument::GetCollapsedSelection(nsITextServicesDocument::TSDBlockSelectionStatus *aSelStatus, int32_t *aSelOffset, int32_t *aSelLength)
+ {
+   nsCOMPtr<nsISelection> selection;
+   nsresult result = mSelCon->GetSelection(nsISelectionController::SELECTION_NORMAL, getter_AddRefs(selection));
+   NS_ENSURE_SUCCESS(result, result);
+   NS_ENSURE_TRUE(selection, NS_ERROR_FAILURE);
+ 
+-  // The calling function should have done the GetIsCollapsed()
+-  // check already. Just assume it's collapsed!
++  MOZ_ASSERT(selection->Collapsed());
++
+   *aSelStatus = nsITextServicesDocument::eBlockOutside;
+   *aSelOffset = *aSelLength = -1;
+ 
+   int32_t tableCount = mOffsetTable.Length();
+ 
+   if (tableCount == 0)
+     return NS_OK;
+ 

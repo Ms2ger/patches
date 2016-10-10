@@ -1,0 +1,259 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/public/nsContentUtils.h b/content/base/public/nsContentUtils.h
+--- a/content/base/public/nsContentUtils.h
++++ b/content/base/public/nsContentUtils.h
+@@ -871,21 +871,16 @@ public:
+   }
+ 
+   /**
+    * Returns true if aDocument is a chrome document
+    */
+   static bool IsChromeDoc(nsIDocument *aDocument);
+ 
+   /**
+-   * Returns true if aDocument is in a docshell whose parent is the same type
+-   */
+-  static bool IsChildOfSameType(nsIDocument* aDoc);
+-
+-  /**
+   '* Returns true if the content-type will be rendered as plain-text.
+    */
+   static bool IsPlainTextType(const nsACString& aContentType);
+ 
+   /**
+    * Get the script file name to use when compiling the script
+    * referenced by aURI. In cases where there's no need for any extra
+    * security wrapper automation the script file name that's returned
+diff --git a/content/base/src/nsContentUtils.cpp b/content/base/src/nsContentUtils.cpp
+--- a/content/base/src/nsContentUtils.cpp
++++ b/content/base/src/nsContentUtils.cpp
+@@ -3063,28 +3063,16 @@ nsContentUtils::IsChromeDoc(nsIDocument 
+   
+   nsCOMPtr<nsIPrincipal> systemPrincipal;
+   sSecurityManager->GetSystemPrincipal(getter_AddRefs(systemPrincipal));
+ 
+   return aDocument->NodePrincipal() == systemPrincipal;
+ }
+ 
+ bool
+-nsContentUtils::IsChildOfSameType(nsIDocument* aDoc)
+-{
+-  nsCOMPtr<nsISupports> container = aDoc->GetContainer();
+-  nsCOMPtr<nsIDocShellTreeItem> docShellAsItem(do_QueryInterface(container));
+-  nsCOMPtr<nsIDocShellTreeItem> sameTypeParent;
+-  if (docShellAsItem) {
+-    docShellAsItem->GetSameTypeParent(getter_AddRefs(sameTypeParent));
+-  }
+-  return sameTypeParent != nullptr;
+-}
+-
+-bool
+ nsContentUtils::IsPlainTextType(const nsACString& aContentType)
+ {
+   return aContentType.EqualsLiteral(TEXT_PLAIN) ||
+          aContentType.EqualsLiteral(TEXT_CSS) ||
+          aContentType.EqualsLiteral(TEXT_CACHE_MANIFEST) ||
+          aContentType.EqualsLiteral(APPLICATION_JAVASCRIPT) ||
+          aContentType.EqualsLiteral(APPLICATION_XJAVASCRIPT) ||
+          aContentType.EqualsLiteral(TEXT_ECMASCRIPT) ||
+diff --git a/content/html/document/src/ImageDocument.cpp b/content/html/document/src/ImageDocument.cpp
+--- a/content/html/document/src/ImageDocument.cpp
++++ b/content/html/document/src/ImageDocument.cpp
+@@ -257,17 +257,17 @@ ImageDocument::SetScriptGlobalObject(nsI
+     }
+ 
+     target = do_QueryInterface(aScriptGlobalObject);
+     target->AddEventListener(NS_LITERAL_STRING("resize"), this, false);
+     target->AddEventListener(NS_LITERAL_STRING("keypress"), this, false);
+ 
+     if (GetReadyStateEnum() != nsIDocument::READYSTATE_COMPLETE) {
+       LinkStylesheet(NS_LITERAL_STRING("resource://gre/res/ImageDocument.css"));
+-      if (!nsContentUtils::IsChildOfSameType(this)) {
++      if (!IsChildOfSameType()) {
+         LinkStylesheet(NS_LITERAL_STRING("resource://gre/res/TopLevelImageDocument.css"));
+         LinkStylesheet(NS_LITERAL_STRING("chrome://global/skin/media/TopLevelImageDocument.css"));
+       }
+     }
+     BecomeInteractive();
+   }
+ }
+ 
+@@ -325,17 +325,17 @@ ImageDocument::GetImageRequest(imgIReque
+ 
+ void
+ ImageDocument::ShrinkToFit()
+ {
+   if (!mImageContent) {
+     return;
+   }
+   if (GetZoomLevel() != mOriginalZoomLevel && mImageIsResized &&
+-      !nsContentUtils::IsChildOfSameType(this)) {
++      !IsChildOfSameType()) {
+     return;
+   }
+ 
+   // Keep image content alive while changing the attributes.
+   nsCOMPtr<nsIContent> imageContent = mImageContent;
+   nsCOMPtr<nsIDOMHTMLImageElement> image = do_QueryInterface(mImageContent);
+   image->SetWidth(std::max(1, NSToCoordFloor(GetRatio() * mImageWidth)));
+   image->SetHeight(std::max(1, NSToCoordFloor(GetRatio() * mImageHeight)));
+@@ -453,28 +453,28 @@ ImageDocument::Notify(imgIRequest* aRequ
+     nsCOMPtr<imgIContainer> image;
+     aRequest->GetImage(getter_AddRefs(image));
+     return OnStartContainer(aRequest, image);
+   }
+ 
+   nsDOMTokenList* classList = mImageContent->AsElement()->GetClassList();
+   mozilla::ErrorResult rv;
+   if (aType == imgINotificationObserver::DECODE_COMPLETE) {
+-    if (mImageContent && !nsContentUtils::IsChildOfSameType(this)) {
++    if (mImageContent && !IsChildOfSameType()) {
+       // Update the background-color of the image only after the
+       // image has been decoded to prevent flashes of just the
+       // background-color.
+       classList->Add(NS_LITERAL_STRING("decoded"), rv);
+       NS_ENSURE_SUCCESS(rv.ErrorCode(), rv.ErrorCode());
+     }
+   }
+ 
+   if (aType == imgINotificationObserver::DISCARD) {
+     // mImageContent can be null if the document is already destroyed
+-    if (mImageContent && !nsContentUtils::IsChildOfSameType(this)) {
++    if (mImageContent && !IsChildOfSameType()) {
+       // Remove any decoded-related styling when the image is unloaded.
+       classList->Remove(NS_LITERAL_STRING("decoded"), rv);
+       NS_ENSURE_SUCCESS(rv.ErrorCode(), rv.ErrorCode());
+     }
+   }
+ 
+   if (aType == imgINotificationObserver::LOAD_COMPLETE) {
+     uint32_t reqStatus;
+@@ -721,17 +721,17 @@ ImageDocument::UpdateTitleAndCharset()
+                                        mImageWidth, mImageHeight, status);
+ }
+ 
+ void
+ ImageDocument::ResetZoomLevel()
+ {
+   nsCOMPtr<nsIDocShell> docShell = do_QueryReferent(mDocumentContainer);
+   if (docShell) {
+-    if (nsContentUtils::IsChildOfSameType(this)) {
++    if (IsChildOfSameType()) {
+       return;
+     }
+ 
+     nsCOMPtr<nsIContentViewer> cv;
+     docShell->GetContentViewer(getter_AddRefs(cv));
+     nsCOMPtr<nsIMarkupDocumentViewer> mdv = do_QueryInterface(cv);
+     if (mdv) {
+       mdv->SetFullZoom(mOriginalZoomLevel);
+diff --git a/content/html/document/src/VideoDocument.cpp b/content/html/document/src/VideoDocument.cpp
+--- a/content/html/document/src/VideoDocument.cpp
++++ b/content/html/document/src/VideoDocument.cpp
+@@ -66,17 +66,17 @@ VideoDocument::StartDocumentLoad(const c
+ void
+ VideoDocument::SetScriptGlobalObject(nsIScriptGlobalObject* aScriptGlobalObject)
+ {
+   // Set the script global object on the superclass before doing
+   // anything that might require it....
+   MediaDocument::SetScriptGlobalObject(aScriptGlobalObject);
+ 
+   if (aScriptGlobalObject) {
+-    if (!nsContentUtils::IsChildOfSameType(this) &&
++    if (!IsChildOfSameType() &&
+         GetReadyStateEnum() != nsIDocument::READYSTATE_COMPLETE) {
+       LinkStylesheet(NS_LITERAL_STRING("resource://gre/res/TopLevelVideoDocument.css"));
+       LinkStylesheet(NS_LITERAL_STRING("chrome://global/skin/media/TopLevelVideoDocument.css"));
+     }
+     BecomeInteractive();
+   }
+ }
+ 
+@@ -105,17 +105,17 @@ VideoDocument::CreateSyntheticVideoDocum
+                                                           NOT_FROM_PARSER));
+   if (!element)
+     return NS_ERROR_OUT_OF_MEMORY;
+   element->SetAutoplay(true);
+   element->SetControls(true);
+   element->LoadWithChannel(aChannel, aListener);
+   UpdateTitle(aChannel);
+ 
+-  if (nsContentUtils::IsChildOfSameType(this)) {
++  if (IsChildOfSameType()) {
+     // Video documents that aren't toplevel should fill their frames and
+     // not have margins
+     element->SetAttr(kNameSpaceID_None, nsGkAtoms::style,
+         NS_LITERAL_STRING("position:absolute; top:0; left:0; width:100%; height:100%"),
+         true);
+   }
+ 
+   return body->AppendChildTo(element, false);
+diff --git a/content/html/document/src/nsHTMLDocument.cpp b/content/html/document/src/nsHTMLDocument.cpp
+--- a/content/html/document/src/nsHTMLDocument.cpp
++++ b/content/html/document/src/nsHTMLDocument.cpp
+@@ -861,17 +861,17 @@ nsHTMLDocument::StartDocumentLoad(const 
+       // about:blank *only*
+       nsCOMPtr<nsIHTMLContentSink> htmlsink;
+       NS_NewHTMLContentSink(getter_AddRefs(htmlsink), this, uri,
+                             docShell, aChannel);
+       mParser->SetContentSink(htmlsink);
+     }
+   }
+ 
+-  if (plainText && !nsContentUtils::IsChildOfSameType(this) &&
++  if (plainText && !IsChildOfSameType() &&
+       Preferences::GetBool("plain_text.wrap_long_lines")) {
+     nsCOMPtr<nsIStringBundleService> bundleService = do_GetService(NS_STRINGBUNDLE_CONTRACTID, &rv);
+     NS_ASSERTION(NS_SUCCEEDED(rv) && bundleService, "The bundle service could not be loaded");
+     nsCOMPtr<nsIStringBundle> bundle;
+     rv = bundleService->CreateBundle("chrome://global/locale/browser.properties",
+                                      getter_AddRefs(bundle));
+     NS_ASSERTION(NS_SUCCEEDED(rv) && bundle, "chrome://global/locale/browser.properties could not be loaded");
+     nsXPIDLString title;
+@@ -3827,8 +3827,20 @@ nsHTMLDocument::WillIgnoreCharsetOverrid
+                                       nsIProtocolHandler::URI_IS_UI_RESOURCE,
+                                       &isResource);
+     if (NS_FAILED(rv) || isResource) {
+       return true;
+     }
+   }
+   return false;
+ }
++
++bool
++nsHTMLDocument::IsChildOfSameType() const
++{
++  nsCOMPtr<nsISupports> container = GetContainer();
++  nsCOMPtr<nsIDocShellTreeItem> docShellAsItem = do_QueryInterface(container);
++  nsCOMPtr<nsIDocShellTreeItem> sameTypeParent;
++  if (docShellAsItem) {
++    docShellAsItem->GetSameTypeParent(getter_AddRefs(sameTypeParent));
++  }
++  return !!sameTypeParent;
++}
+diff --git a/content/html/document/src/nsHTMLDocument.h b/content/html/document/src/nsHTMLDocument.h
+--- a/content/html/document/src/nsHTMLDocument.h
++++ b/content/html/document/src/nsHTMLDocument.h
+@@ -247,16 +247,21 @@ public:
+   // We're picking up GetLocation from Document
+   already_AddRefed<nsIDOMLocation> GetLocation() const {
+     return nsIDocument::GetLocation();
+   }
+ 
+   virtual nsHTMLDocument* AsHTMLDocument() MOZ_OVERRIDE { return this; }
+ 
+ protected:
++  /**
++   * Returns true if aDocument is in a docshell whose parent is the same type
++   */
++  bool IsChildOfSameType() const;
++
+   nsresult GetBodySize(int32_t* aWidth,
+                        int32_t* aHeight);
+ 
+   nsIContent *MatchId(nsIContent *aContent, const nsAString& aId);
+ 
+   static bool MatchLinks(nsIContent *aContent, int32_t aNamespaceID,
+                            nsIAtom* aAtom, void* aData);
+   static bool MatchAnchors(nsIContent *aContent, int32_t aNamespaceID,

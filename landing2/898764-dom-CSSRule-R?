@@ -1,0 +1,646 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 898764 - Part a: Introduce a CSSRule class and implement nsIDOMCSSRule::GetCSSRule; r=?heycam
+
+diff --git a/dom/interfaces/css/nsIDOMCSSRule.idl b/dom/interfaces/css/nsIDOMCSSRule.idl
+--- a/dom/interfaces/css/nsIDOMCSSRule.idl
++++ b/dom/interfaces/css/nsIDOMCSSRule.idl
+@@ -8,16 +8,26 @@
+ /**
+  * The nsIDOMCSSRule interface is a datatype for a CSS style rule in
+  * the Document Object Model.
+  *
+  * For more information on this interface please see
+  * http://www.w3.org/TR/DOM-Level-2-Style
+  */
+ 
++%{C++
++namespace mozilla {
++namespace dom {
++class CSSRule;
++} // namespace dom
++} // namespace mozilla
++%}
++
++[ptr] native CSSRule(mozilla::dom::CSSRule);
++
+ [scriptable, uuid(2938307a-9d70-4b63-8afc-0197e82318ad)]
+ interface nsIDOMCSSRule : nsISupports
+ {
+   // RuleType
+   const unsigned short      UNKNOWN_RULE                   = 0;
+   const unsigned short      STYLE_RULE                     = 1;
+   const unsigned short      CHARSET_RULE                   = 2;
+   const unsigned short      IMPORT_RULE                    = 3;
+@@ -35,9 +45,11 @@ interface nsIDOMCSSRule : nsISupports
+   const unsigned short      FONT_FEATURE_VALUES_RULE       = 14;
+ 
+   readonly attribute unsigned short      type;
+            attribute DOMString           cssText;
+                                         // raises(DOMException) on setting
+ 
+   readonly attribute nsIDOMCSSStyleSheet parentStyleSheet;
+   readonly attribute nsIDOMCSSRule       parentRule;
++
++  [noscript,notxpcom,nostdcall] CSSRule GetCSSRule();
+ };
+diff --git a/layout/style/CSSRule.h b/layout/style/CSSRule.h
+new file mode 100644
+--- /dev/null
++++ b/layout/style/CSSRule.h
+@@ -0,0 +1,33 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_CSSRule_h
++#define mozilla_dom_CSSRule_h
++
++namespace mozilla {
++namespace dom {
++
++class CSSRule
++{
++public:
++};
++
++#define FORWARD_NSIDOMCSSRULE_TO_CSSRULE                                      \
++  NS_IMETHOD GetType(uint16_t* aType) MOZ_OVERRIDE;                           \
++  NS_IMETHOD GetCssText(nsAString& aCssText) MOZ_OVERRIDE;                    \
++  NS_IMETHOD SetCssText(const nsAString& aCssText) MOZ_OVERRIDE;              \
++  NS_IMETHOD GetParentStyleSheet(nsIDOMCSSStyleSheet** aParentStyleSheet)     \
++    MOZ_OVERRIDE;                                                             \
++  NS_IMETHOD GetParentRule(nsIDOMCSSRule** aParentRule) MOZ_OVERRIDE;         \
++  virtual mozilla::dom::CSSRule* GetCSSRule() MOZ_OVERRIDE                    \
++  {                                                                           \
++    return this;                                                              \
++  }
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_CSSRule_h
+diff --git a/layout/style/ImportRule.h b/layout/style/ImportRule.h
+--- a/layout/style/ImportRule.h
++++ b/layout/style/ImportRule.h
+@@ -4,29 +4,30 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ /* class for CSS @import rules */
+ 
+ #ifndef mozilla_css_ImportRule_h__
+ #define mozilla_css_ImportRule_h__
+ 
+ #include "mozilla/Attributes.h"
+-
++#include "mozilla/css/Rule.h"
++#include "mozilla/dom/CSSRule.h"
+ #include "mozilla/MemoryReporting.h"
+-#include "mozilla/css/Rule.h"
++#include "nsCSSRules.h"
+ #include "nsIDOMCSSImportRule.h"
+-#include "nsCSSRules.h"
+ 
+ class nsMediaList;
+ class nsString;
+ 
+ namespace mozilla {
+ namespace css {
+ 
+ class ImportRule MOZ_FINAL : public Rule,
++                             public dom::CSSRule,
+                              public nsIDOMCSSImportRule
+ {
+ public:
+   ImportRule(nsMediaList* aMedia, const nsString& aURLSpec);
+ private:
+   // for |Clone|
+   ImportRule(const ImportRule& aCopy);
+   ~ImportRule();
+@@ -48,17 +49,17 @@ public:
+   virtual int32_t GetType() const;
+   virtual already_AddRefed<Rule> Clone() const;
+ 
+   void SetSheet(nsCSSStyleSheet*);
+ 
+   virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+ 
+   // nsIDOMCSSRule interface
+-  NS_DECL_NSIDOMCSSRULE
++  FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+   // nsIDOMCSSImportRule interface
+   NS_DECL_NSIDOMCSSIMPORTRULE
+ 
+ private:
+   nsString  mURLSpec;
+   nsRefPtr<nsMediaList> mMedia;
+   nsRefPtr<nsCSSStyleSheet> mChildSheet;
+diff --git a/layout/style/NameSpaceRule.h b/layout/style/NameSpaceRule.h
+--- a/layout/style/NameSpaceRule.h
++++ b/layout/style/NameSpaceRule.h
+@@ -4,32 +4,33 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ /* class for CSS @namespace rules */
+ 
+ #ifndef mozilla_css_NameSpaceRule_h__
+ #define mozilla_css_NameSpaceRule_h__
+ 
+ #include "mozilla/Attributes.h"
++#include "mozilla/css/Rule.h"
++#include "mozilla/dom/CSSRule.h"
+ #include "mozilla/MemoryReporting.h"
+-#include "mozilla/css/Rule.h"
+-
+ #include "nsIDOMCSSRule.h"
+ 
+ class nsIAtom;
+ 
+ // IID for the NameSpaceRule class {f0b0dbe1-5031-4a21-b06a-dc141ef2af98}
+ #define NS_CSS_NAMESPACE_RULE_IMPL_CID     \
+ {0xf0b0dbe1, 0x5031, 0x4a21, {0xb0, 0x6a, 0xdc, 0x14, 0x1e, 0xf2, 0xaf, 0x98}}
+ 
+ 
+ namespace mozilla {
+ namespace css {
+ 
+ class NameSpaceRule MOZ_FINAL : public Rule,
++                                public dom::CSSRule,
+                                 public nsIDOMCSSRule
+ {
+ public:
+   NameSpaceRule(nsIAtom* aPrefix, const nsString& aURLSpec);
+ private:
+   // for |Clone|
+   NameSpaceRule(const NameSpaceRule& aCopy);
+   ~NameSpaceRule();
+@@ -52,17 +53,17 @@ public:
+   nsIAtom* GetPrefix() const { return mPrefix; }
+ 
+   void GetURLSpec(nsString& aURLSpec) const { aURLSpec = mURLSpec; }
+ 
+   virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+     MOZ_MUST_OVERRIDE;
+ 
+   // nsIDOMCSSRule interface
+-  NS_DECL_NSIDOMCSSRULE
++  FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+ private:
+   nsCOMPtr<nsIAtom> mPrefix;
+   nsString          mURLSpec;
+ };
+ 
+ } // namespace css
+ } // namespace mozilla
+diff --git a/layout/style/StyleRule.cpp b/layout/style/StyleRule.cpp
+--- a/layout/style/StyleRule.cpp
++++ b/layout/style/StyleRule.cpp
+@@ -6,19 +6,20 @@
+ /*
+  * representation of CSS style rules (selectors+declaration), CSS
+  * selectors, and DOM objects for style rules, selectors, and
+  * declarations
+  */
+ 
+ #include "mozilla/css/StyleRule.h"
+ 
++#include "mozilla/css/Declaration.h"
++#include "mozilla/css/GroupRule.h"
++#include "mozilla/dom/CSSRule.h"
+ #include "mozilla/MemoryReporting.h"
+-#include "mozilla/css/GroupRule.h"
+-#include "mozilla/css/Declaration.h"
+ #include "nsCSSStyleSheet.h"
+ #include "nsIDocument.h"
+ #include "nsIAtom.h"
+ #include "nsString.h"
+ #include "nsStyleUtil.h"
+ #include "nsICSSStyleRuleDOMWrapper.h"
+ #include "nsDOMCSSDeclaration.h"
+ #include "nsINameSpaceManager.h"
+@@ -30,17 +31,17 @@
+ #include "nsDOMClassInfoID.h"
+ #include "nsContentUtils.h"
+ #include "nsError.h"
+ #include "mozAutoDocUpdate.h"
+ 
+ class nsIDOMCSSStyleDeclaration;
+ class nsIDOMCSSStyleSheet;
+ 
+-namespace css = mozilla::css;
++using namespace mozilla;
+ 
+ #define NS_IF_CLONE(member_)                                                  \
+   PR_BEGIN_MACRO                                                              \
+     if (member_) {                                                            \
+       result->member_ = member_->Clone();                                     \
+       if (!result->member_) {                                                 \
+         delete result;                                                        \
+         return nullptr;                                                        \
+@@ -996,24 +997,25 @@ private:
+   // DOMCSSStyleRule.
+   void* operator new(size_t size) CPP_THROW_NEW;
+ };
+ 
+ namespace mozilla {
+ namespace css {
+ 
+ class DOMCSSStyleRule : public nsICSSStyleRuleDOMWrapper
++                      , public dom::CSSRule
+ {
+ public:
+   DOMCSSStyleRule(StyleRule *aRule);
+   virtual ~DOMCSSStyleRule();
+ 
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(DOMCSSStyleRule)
+-  NS_DECL_NSIDOMCSSRULE
++  FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+   NS_DECL_NSIDOMCSSSTYLERULE
+ 
+   // nsICSSStyleRuleDOMWrapper
+   NS_IMETHOD GetCSSStyleRule(StyleRule **aResult);
+ 
+   DOMCSSDeclarationImpl* DOMDeclaration() { return &mDOMDeclaration; }
+ 
+   friend class ::DOMCSSDeclarationImpl;
+diff --git a/layout/style/moz.build b/layout/style/moz.build
+--- a/layout/style/moz.build
++++ b/layout/style/moz.build
+@@ -55,16 +55,17 @@ EXPORTS += [
+     'nsStyleStructInlines.h',
+     'nsStyleStructList.h',
+     'nsStyleTransformMatrix.h',
+     'nsStyleUtil.h',
+ ]
+ 
+ EXPORTS.mozilla.dom += [
+     'CSS.h',
++    'CSSRule.h',
+     'CSSValue.h',
+ ]
+ 
+ EXPORTS.mozilla.css += [
+     'Declaration.h',
+     'ErrorReporter.h',
+     'GroupRule.h',
+     'ImageLoader.h',
+diff --git a/layout/style/nsCSSRules.h b/layout/style/nsCSSRules.h
+--- a/layout/style/nsCSSRules.h
++++ b/layout/style/nsCSSRules.h
+@@ -8,16 +8,17 @@
+ 
+ #ifndef nsCSSRules_h_
+ #define nsCSSRules_h_
+ 
+ #include "mozilla/Attributes.h"
+ 
+ #include "mozilla/MemoryReporting.h"
+ #include "mozilla/css/GroupRule.h"
++#include "mozilla/dom/CSSRule.h"
+ #include "mozilla/Preferences.h"
+ #include "nsIDOMCSSConditionRule.h"
+ #include "nsIDOMCSSFontFaceRule.h"
+ #include "nsIDOMCSSFontFeatureValuesRule.h"
+ #include "nsIDOMCSSGroupingRule.h"
+ #include "nsIDOMCSSMediaRule.h"
+ #include "nsIDOMCSSMozDocumentRule.h"
+ #include "nsIDOMCSSSupportsRule.h"
+@@ -39,16 +40,17 @@ class nsMediaList;
+ 
+ namespace mozilla {
+ 
+ class ErrorResult;
+ 
+ namespace css {
+ 
+ class MediaRule MOZ_FINAL : public GroupRule,
++                            public dom::CSSRule,
+                             public nsIDOMCSSMediaRule
+ {
+ public:
+   MediaRule();
+ private:
+   MediaRule(const MediaRule& aCopy);
+   ~MediaRule();
+ public:
+@@ -69,17 +71,17 @@ public:
+     return this;
+   }
+   virtual nsIDOMCSSRule* GetExistingDOMRule()
+   {
+     return this;
+   }
+ 
+   // nsIDOMCSSRule interface
+-  NS_DECL_NSIDOMCSSRULE
++  FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+   // nsIDOMCSSGroupingRule interface
+   NS_DECL_NSIDOMCSSGROUPINGRULE
+ 
+   // nsIDOMCSSConditionRule interface
+   NS_DECL_NSIDOMCSSCONDITIONRULE
+ 
+   // nsIDOMCSSMediaRule interface
+@@ -97,16 +99,17 @@ public:
+ 
+ protected:
+   void AppendConditionText(nsAString& aOutput);
+ 
+   nsRefPtr<nsMediaList> mMedia;
+ };
+ 
+ class DocumentRule MOZ_FINAL : public GroupRule,
++                               public dom::CSSRule,
+                                public nsIDOMCSSMozDocumentRule
+ {
+ public:
+   DocumentRule();
+ private:
+   DocumentRule(const DocumentRule& aCopy);
+   ~DocumentRule();
+ public:
+@@ -126,17 +129,17 @@ public:
+     return this;
+   }
+   virtual nsIDOMCSSRule* GetExistingDOMRule()
+   {
+     return this;
+   }
+ 
+   // nsIDOMCSSRule interface
+-  NS_DECL_NSIDOMCSSRULE
++  FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+   // nsIDOMCSSGroupingRule interface
+   NS_DECL_NSIDOMCSSGROUPINGRULE
+ 
+   // nsIDOMCSSConditionRule interface
+   NS_DECL_NSIDOMCSSCONDITIONRULE
+ 
+   // nsIDOMCSSMozDocumentRule interface
+@@ -222,16 +225,17 @@ protected:
+ private:
+   // NOT TO BE IMPLEMENTED
+   // This object cannot be allocated on its own, only as part of
+   // nsCSSFontFaceRule.
+   void* operator new(size_t size) CPP_THROW_NEW;
+ };
+ 
+ class nsCSSFontFaceRule MOZ_FINAL : public mozilla::css::Rule,
++                                    public mozilla::dom::CSSRule,
+                                     public nsIDOMCSSFontFaceRule
+ {
+ public:
+   nsCSSFontFaceRule() {}
+ 
+   nsCSSFontFaceRule(const nsCSSFontFaceRule& aCopy)
+     // copy everything except our reference count
+     : mozilla::css::Rule(aCopy), mDecl(aCopy.mDecl) {}
+@@ -247,17 +251,17 @@ public:
+ 
+   // Rule methods
+   DECL_STYLE_RULE_INHERIT
+ 
+   virtual int32_t GetType() const MOZ_OVERRIDE;
+   virtual already_AddRefed<mozilla::css::Rule> Clone() const;
+ 
+   // nsIDOMCSSRule interface
+-  NS_DECL_NSIDOMCSSRULE
++  FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+   // nsIDOMCSSFontFaceRule interface
+   NS_DECL_NSIDOMCSSFONTFACERULE
+ 
+   void SetDesc(nsCSSFontDesc aDescID, nsCSSValue const & aValue);
+   void GetDesc(nsCSSFontDesc aDescID, nsCSSValue & aValue);
+ 
+   virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
+@@ -285,16 +289,17 @@ inline const nsCSSFontFaceRule*
+ nsCSSFontFaceStyleDecl::ContainingRule() const
+ {
+   return reinterpret_cast<const nsCSSFontFaceRule*>
+     (reinterpret_cast<const char*>(this) - offsetof(nsCSSFontFaceRule, mDecl));
+ }
+ 
+ class nsCSSFontFeatureValuesRule MOZ_FINAL :
+                                        public mozilla::css::Rule,
++                                       public mozilla::dom::CSSRule,
+                                        public nsIDOMCSSFontFeatureValuesRule
+ {
+ public:
+   nsCSSFontFeatureValuesRule() {}
+ 
+   nsCSSFontFeatureValuesRule(const nsCSSFontFeatureValuesRule& aCopy)
+     // copy everything except our reference count
+     : mozilla::css::Rule(aCopy),
+@@ -310,17 +315,17 @@ public:
+ 
+   // Rule methods
+   DECL_STYLE_RULE_INHERIT
+ 
+   virtual int32_t GetType() const MOZ_OVERRIDE;
+   virtual already_AddRefed<mozilla::css::Rule> Clone() const MOZ_OVERRIDE;
+ 
+   // nsIDOMCSSRule interface
+-  NS_DECL_NSIDOMCSSRULE
++  FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+   // nsIDOMCSSFontFaceRule interface
+   NS_DECL_NSIDOMCSSFONTFEATUREVALUESRULE
+ 
+   const nsTArray<nsString>& GetFamilyList() { return mFamilyList; }
+   void SetFamilyList(const nsAString& aFamilyList, bool& aContainsGeneric);
+ 
+   void AddValueList(int32_t aVariantAlternate,
+@@ -342,16 +347,17 @@ protected:
+   nsTArray<nsString> mFamilyList;
+   nsTArray<gfxFontFeatureValueSet::FeatureValues> mFeatureValues;
+ };
+ 
+ namespace mozilla {
+ namespace css {
+ 
+ class CharsetRule MOZ_FINAL : public Rule,
++                              public dom::CSSRule,
+                               public nsIDOMCSSCharsetRule
+ {
+ public:
+   CharsetRule(const nsAString& aEncoding);
+ private:
+   // For |Clone|
+   CharsetRule(const CharsetRule& aCopy);
+   ~CharsetRule() {}
+@@ -366,17 +372,17 @@ public:
+   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const MOZ_OVERRIDE;
+ #endif
+ 
+   // Rule methods
+   virtual int32_t GetType() const;
+   virtual already_AddRefed<Rule> Clone() const;
+ 
+   // nsIDOMCSSRule interface
+-  NS_DECL_NSIDOMCSSRULE
++  FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+   // nsIDOMCSSCharsetRule methods
+   NS_IMETHOD GetEncoding(nsAString& aEncoding) MOZ_OVERRIDE;
+   NS_IMETHOD SetEncoding(const nsAString& aEncoding) MOZ_OVERRIDE;
+ 
+   virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+ 
+ private:
+@@ -409,16 +415,17 @@ public:
+ 
+ protected:
+   // This reference is not reference-counted. The rule object tells us
+   // when it's about to go away.
+   nsCSSKeyframeRule *mRule;
+ };
+ 
+ class nsCSSKeyframeRule MOZ_FINAL : public mozilla::css::Rule,
++                                    public mozilla::dom::CSSRule,
+                                     public nsIDOMMozCSSKeyframeRule
+ {
+ public:
+   // WARNING: Steals the contents of aKeys *and* aDeclaration
+   nsCSSKeyframeRule(InfallibleTArray<float>& aKeys,
+                     nsAutoPtr<mozilla::css::Declaration> aDeclaration)
+     : mDeclaration(aDeclaration)
+   {
+@@ -437,17 +444,17 @@ public:
+ #endif
+ 
+   // Rule methods
+   DECL_STYLE_RULE_INHERIT
+   virtual int32_t GetType() const MOZ_OVERRIDE;
+   virtual already_AddRefed<mozilla::css::Rule> Clone() const;
+ 
+   // nsIDOMCSSRule interface
+-  NS_DECL_NSIDOMCSSRULE
++  FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+   // nsIDOMMozCSSKeyframeRule interface
+   NS_DECL_NSIDOMMOZCSSKEYFRAMERULE
+ 
+   const nsTArray<float>& GetKeys() const     { return mKeys; }
+   mozilla::css::Declaration* Declaration()   { return mDeclaration; }
+ 
+   void ChangeDeclaration(mozilla::css::Declaration* aDeclaration);
+@@ -459,16 +466,17 @@ public:
+ private:
+   nsTArray<float>                            mKeys;
+   nsAutoPtr<mozilla::css::Declaration>       mDeclaration;
+   // lazily created when needed:
+   nsRefPtr<nsCSSKeyframeStyleDeclaration>    mDOMDeclaration;
+ };
+ 
+ class nsCSSKeyframesRule MOZ_FINAL : public mozilla::css::GroupRule,
++                                     public mozilla::dom::CSSRule,
+                                      public nsIDOMMozCSSKeyframesRule
+ {
+ public:
+   nsCSSKeyframesRule(const nsSubstring& aName)
+     : mName(aName)
+   {
+   }
+ private:
+@@ -488,19 +496,18 @@ public:
+   virtual nsIDOMCSSRule* GetDOMRule()
+   {
+     return this;
+   }
+   virtual nsIDOMCSSRule* GetExistingDOMRule()
+   {
+     return this;
+   }
+-
+   // nsIDOMCSSRule interface
+-  NS_DECL_NSIDOMCSSRULE
++  FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+   // nsIDOMMozCSSKeyframesRule interface
+   NS_DECL_NSIDOMMOZCSSKEYFRAMESRULE
+ 
+   // rest of GroupRule
+   virtual bool UseForPresentation(nsPresContext* aPresContext,
+                                     nsMediaQueryResultCacheKey& aKey) MOZ_OVERRIDE;
+ 
+@@ -537,16 +544,17 @@ public:
+ 
+ protected:
+   // This reference is not reference-counted. The rule object tells us
+   // when it's about to go away.
+   nsCSSPageRule *mRule;
+ };
+ 
+ class nsCSSPageRule MOZ_FINAL : public mozilla::css::Rule,
++                                public mozilla::dom::CSSRule,
+                                 public nsIDOMCSSPageRule
+ {
+ public:
+   // WARNING: Steals the contents of aDeclaration
+   nsCSSPageRule(nsAutoPtr<mozilla::css::Declaration> aDeclaration)
+     : mDeclaration(aDeclaration),
+       mImportantRule(nullptr)
+   {
+@@ -564,17 +572,17 @@ public:
+ #endif
+ 
+   // Rule methods
+   DECL_STYLE_RULE_INHERIT
+   virtual int32_t GetType() const MOZ_OVERRIDE;
+   virtual already_AddRefed<mozilla::css::Rule> Clone() const;
+ 
+   // nsIDOMCSSRule interface
+-  NS_DECL_NSIDOMCSSRULE
++  FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+   // nsIDOMCSSPageRule interface
+   NS_DECL_NSIDOMCSSPAGERULE
+ 
+   mozilla::css::Declaration* Declaration()   { return mDeclaration; }
+ 
+   void ChangeDeclaration(mozilla::css::Declaration* aDeclaration);
+ 
+@@ -586,16 +594,17 @@ private:
+   // lazily created when needed:
+   nsRefPtr<nsCSSPageStyleDeclaration>     mDOMDeclaration;
+   nsRefPtr<mozilla::css::ImportantRule>   mImportantRule;
+ };
+ 
+ namespace mozilla {
+ 
+ class CSSSupportsRule : public css::GroupRule,
++                        public dom::CSSRule,
+                         public nsIDOMCSSSupportsRule
+ {
+ public:
+   CSSSupportsRule(bool aConditionMet, const nsString& aCondition);
+   CSSSupportsRule(const CSSSupportsRule& aCopy);
+ 
+   // nsIStyleRule methods
+ #ifdef DEBUG
+@@ -614,17 +623,17 @@ public:
+   virtual nsIDOMCSSRule* GetExistingDOMRule()
+   {
+     return this;
+   }
+ 
+   NS_DECL_ISUPPORTS_INHERITED
+ 
+   // nsIDOMCSSRule interface
+-  NS_DECL_NSIDOMCSSRULE
++  FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+   // nsIDOMCSSGroupingRule interface
+   NS_DECL_NSIDOMCSSGROUPINGRULE
+ 
+   // nsIDOMCSSConditionRule interface
+   NS_DECL_NSIDOMCSSCONDITIONRULE
+ 
+   // nsIDOMCSSSupportsRule interface

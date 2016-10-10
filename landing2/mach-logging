@@ -1,0 +1,110 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/imptests/html/html/semantics/forms/the-select-element/test_select-remove.html b/dom/imptests/html/html/semantics/forms/the-select-element/test_select-remove.html
+--- a/dom/imptests/html/html/semantics/forms/the-select-element/test_select-remove.html
++++ b/dom/imptests/html/html/semantics/forms/the-select-element/test_select-remove.html
+@@ -6,16 +6,17 @@
+ <link rel="help" href="http://www.whatwg.org/html/#dom-select-remove">
+ <link rel="help" href="http://www.whatwg.org/html/#dom-htmloptionscollection-remove">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ <div id=log></div>
+ <script>
+ function testRemove(getter, desc) {
+   test(function() {
++    assert_true(false);
+     var div = document.createElement("div");
+     var select = document.createElement("select");
+     div.appendChild(select);
+     assert_equals(select.parentNode, div);
+ 
+     var options = [];
+     for (var i = 0; i < 3; ++i) {
+       var option = document.createElement("option");
+diff --git a/python/mach/mach/logging.py b/python/mach/mach/logging.py
+--- a/python/mach/mach/logging.py
++++ b/python/mach/mach/logging.py
+@@ -89,20 +89,22 @@ class StructuredHumanFormatter(logging.F
+ 
+ class StructuredTerminalFormatter(StructuredHumanFormatter):
+     """Log formatter for structured messages writing to a terminal."""
+ 
+     def set_terminal(self, terminal):
+         self.terminal = terminal
+ 
+     def format(self, record):
++        f = self._colorize(record.msg.format(**record.params))
++        if not self.write_times:
++            return f
++
+         t = self.terminal.blue(format_seconds(self._time(record)))
+-        f = record.msg.format(**record.params)
+-
+-        return '%s %s' % (t, self._colorize(f))
++        return '%s %s' % (t, f)
+ 
+     def _colorize(self, s):
+         if not self.terminal:
+             return s
+ 
+         result = s
+ 
+         if s.startswith('TEST-PASS'):
+diff --git a/testing/mochitest/mach_commands.py b/testing/mochitest/mach_commands.py
+--- a/testing/mochitest/mach_commands.py
++++ b/testing/mochitest/mach_commands.py
+@@ -1,13 +1,13 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+-from __future__ import unicode_literals
++from __future__ import unicode_literals, print_function
+ 
+ import logging
+ import mozpack.path
+ import os
+ import platform
+ import sys
+ 
+ from mozbuild.base import (
+@@ -151,32 +151,38 @@ class MochitestRunner(MozbuildObject):
+         if rerun_failures:
+             options.testManifest = failure_file_path
+ 
+         if debugger:
+             options.debugger = debugger
+ 
+         # We need this to enable colorization of output.
+         self.log_manager.enable_unstructured()
++        # XXX TERRIBLE HACK
++        old_structured_loggers = self.log_manager.structured_loggers
++        self.log_manager.structured_loggers = []
+ 
+         # Output processing is a little funky here. The old make targets
+         # grepped the log output from TEST-UNEXPECTED-* and printed these lines
+         # after test execution. Ideally the test runner would expose a Python
+         # API for obtaining test results and we could just format failures
+         # appropriately. Unfortunately, it doesn't yet do that. So, we capture
+         # all output to a buffer then "grep" the buffer after test execution.
+         # Bug 858197 tracks a Python API that would facilitate this.
+         test_output = StringIO()
+         handler = logging.StreamHandler(test_output)
+         handler.addFilter(UnexpectedFilter())
+         handler.setFormatter(StructuredHumanFormatter(0, write_times=False))
+-        logging.getLogger().addHandler(handler)
++        th = self.log_manager.replace_terminal_handler(handler)
++        #logging.getLogger().addHandler(handler)
+ 
+         result = runner.runTests(options)
+ 
++        self.log_manager.replace_terminal_handler(th)
++
+         if test_output.getvalue():
+             print(test_output.getvalue())
+ 
+         return result
+ 
+ 
+ def MochitestCommand(func):
+     """Decorator that adds shared command arguments to mochitest commands."""

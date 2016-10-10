@@ -1,0 +1,131 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/src/builtin/RegExp.cpp b/js/src/builtin/RegExp.cpp
+--- a/js/src/builtin/RegExp.cpp
++++ b/js/src/builtin/RegExp.cpp
+@@ -345,17 +345,17 @@ regexp_construct(JSContext *cx, unsigned
+ 
+     if (!IsConstructing(args)) {
+         /*
+          * If first arg is regexp and no flags are given, just return the arg.
+          * Otherwise, delegate to the standard constructor.
+          * See ECMAv5 15.10.3.1.
+          */
+         if (args.hasDefined(0) &&
+-            IsObjectWithClass(args[0], ESClass_RegExp, cx) &&
++            IsObjectWithClass(args.handleAt(0), ESClass_RegExp, cx) &&
+             !args.hasDefined(1))
+         {
+             args.rval().set(args[0]);
+             return true;
+         }
+     }
+ 
+     RegExpObjectBuilder builder(cx);
+diff --git a/js/src/jsarray.cpp b/js/src/jsarray.cpp
+--- a/js/src/jsarray.cpp
++++ b/js/src/jsarray.cpp
+@@ -2320,17 +2320,17 @@ array_filter(JSContext *cx, unsigned arg
+     args.rval().setObject(*arr);
+     return true;
+ }
+ 
+ static JSBool
+ array_isArray(JSContext *cx, unsigned argc, Value *vp)
+ {
+     CallArgs args = CallArgsFromVp(argc, vp);
+-    bool isArray = args.length() > 0 && IsObjectWithClass(args[0], ESClass_Array, cx);
++    bool isArray = args.length() > 0 && IsObjectWithClass(args.handleAt(0), ESClass_Array, cx);
+     args.rval().setBoolean(isArray);
+     return true;
+ }
+ 
+ #define GENERIC JSFUN_GENERIC_NATIVE
+ 
+ static JSFunctionSpec array_methods[] = {
+ #if JS_HAS_TOSOURCE
+diff --git a/js/src/jsclass.h b/js/src/jsclass.h
+--- a/js/src/jsclass.h
++++ b/js/src/jsclass.h
+@@ -393,17 +393,17 @@ enum ESClassValue {
+  * so the caller must not assume anything about obj's representation (e.g., obj
+  * may be a proxy).
+  */
+ inline bool
+ ObjectClassIs(JSObject &obj, ESClassValue classValue, JSContext *cx);
+ 
+ /* Just a helper that checks v.isObject before calling ObjectClassIs. */
+ inline bool
+-IsObjectWithClass(const Value &v, ESClassValue classValue, JSContext *cx);
++IsObjectWithClass(HandleValue v, ESClassValue classValue, JSContext *cx);
+ 
+ inline bool
+ IsPoisonedSpecialId(js::SpecialId iden)
+ {
+     if (iden.isObject())
+         return IsPoisonedPtr(iden.toObject());
+     return false;
+ }
+diff --git a/js/src/jsobjinlines.h b/js/src/jsobjinlines.h
+--- a/js/src/jsobjinlines.h
++++ b/js/src/jsobjinlines.h
+@@ -1725,17 +1725,17 @@ ObjectClassIs(JSObject &obj, ESClassValu
+       case ESClass_RegExp: return obj.isRegExp();
+       case ESClass_ArrayBuffer: return obj.isArrayBuffer();
+     }
+     JS_NOT_REACHED("bad classValue");
+     return false;
+ }
+ 
+ inline bool
+-IsObjectWithClass(const Value &v, ESClassValue classValue, JSContext *cx)
++IsObjectWithClass(HandleValue v, ESClassValue classValue, JSContext *cx)
+ {
+     if (!v.isObject())
+         return false;
+     return ObjectClassIs(v.toObject(), classValue, cx);
+ }
+ 
+ static JS_ALWAYS_INLINE bool
+ ValueIsSpecial(JSObject *obj, MutableHandleValue propval, MutableHandle<SpecialId> sidp,
+diff --git a/js/src/jsstr.cpp b/js/src/jsstr.cpp
+--- a/js/src/jsstr.cpp
++++ b/js/src/jsstr.cpp
+@@ -1583,17 +1583,17 @@ class StringRegExpGuard
+   public:
+     StringRegExpGuard(JSContext *cx)
+       : re_(cx), fm(cx)
+     { }
+ 
+     /* init must succeed in order to call tryFlatMatch or normalizeRegExp. */
+     bool init(JSContext *cx, CallArgs args, bool convertVoid = false)
+     {
+-        if (args.length() != 0 && IsObjectWithClass(args[0], ESClass_RegExp, cx)) {
++        if (args.length() != 0 && IsObjectWithClass(args.handleAt(0), ESClass_RegExp, cx)) {
+             if (!RegExpToShared(cx, args[0].toObject(), &re_))
+                 return false;
+         } else {
+             if (convertVoid && !args.hasDefined(0)) {
+                 fm.patstr = cx->runtime->emptyString;
+                 return true;
+             }
+ 
+@@ -2818,17 +2818,17 @@ js::str_split(JSContext *cx, unsigned ar
+         limit = UINT32_MAX;
+     }
+ 
+     /* Step 8. */
+     RegExpGuard re(cx);
+     Rooted<JSLinearString*> sepstr(cx);
+     bool sepDefined = args.hasDefined(0);
+     if (sepDefined) {
+-        if (IsObjectWithClass(args[0], ESClass_RegExp, cx)) {
++        if (IsObjectWithClass(args.handleAt(0), ESClass_RegExp, cx)) {
+             if (!RegExpToShared(cx, args[0].toObject(), &re))
+                 return false;
+         } else {
+             sepstr = ArgToRootedString(cx, args, 0);
+             if (!sepstr)
+                 return false;
+         }
+     }

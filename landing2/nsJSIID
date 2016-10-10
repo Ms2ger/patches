@@ -1,0 +1,129 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCJSID.cpp b/js/xpconnect/src/XPCJSID.cpp
+--- a/js/xpconnect/src/XPCJSID.cpp
++++ b/js/xpconnect/src/XPCJSID.cpp
+@@ -37,16 +37,17 @@
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* An xpcom implementation of the JavaScript nsIID and nsCID objects. */
+ 
+ #include "nsJSID.h"
++#include "nsJSIID.h"
+ 
+ #include "xpcprivate.h"
+ 
+ /***************************************************************************/
+ // nsJSID
+ 
+ NS_IMPL_THREADSAFE_ISUPPORTS1(nsJSID, nsIJSID)
+ 
+diff --git a/js/xpconnect/src/nsJSIID.h b/js/xpconnect/src/nsJSIID.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/nsJSIID.h
+@@ -0,0 +1,36 @@
++#ifndef nsJSIID_h
++#define nsJSIID_h
++
++#include "xpcjsid.h"
++#include "nsIXPCScriptable.h"
++#include "nsISecurityCheckedComponent.h"
++
++#include "nsCOMPtr.h"
++#include "nsIInterfaceInfo.h"
++
++class nsJSIID : public nsIJSIID,
++                public nsIXPCScriptable,
++                public nsISecurityCheckedComponent
++{
++public:
++    NS_DECL_ISUPPORTS
++
++    // we manually delagate these to nsJSID
++    NS_DECL_NSIJSID
++
++    // we implement the rest...
++    NS_DECL_NSIJSIID
++    NS_DECL_NSIXPCSCRIPTABLE
++    NS_DECL_NSISECURITYCHECKEDCOMPONENT
++
++    static nsJSIID* NewID(nsIInterfaceInfo* aInfo);
++
++    nsJSIID(nsIInterfaceInfo* aInfo);
++    nsJSIID(); // not implemented
++    virtual ~nsJSIID();
++
++private:
++    nsCOMPtr<nsIInterfaceInfo> mInfo;
++};
++
++#endif // nsJSIID_h
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -166,16 +166,17 @@
+ #include "nsXPCWrappedJSClass.h"
+ #include "xpcObjectHelper.h"
+ #include "XPCConvert.h"
+ #include "XPCStringConvert.h"
+ #include "XPCThrower.h"
+ #include "XPCJSStack.h"
+ #include "nsXPCException.h"
+ #include "nsJSID.h"
++#include "nsJSIID.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -473,43 +474,16 @@ enum WrapperType {
+ ****************************************************************************
+ ***************************************************************************/
+ 
+ /***************************************************************************/
+ 
+ extern void xpc_InitJSxIDClassObjects();
+ extern void xpc_DestroyJSxIDClassObjects();
+ 
+-// nsJSIID
+-
+-class nsJSIID : public nsIJSIID,
+-                public nsIXPCScriptable,
+-                public nsISecurityCheckedComponent
+-{
+-public:
+-    NS_DECL_ISUPPORTS
+-
+-    // we manually delagate these to nsJSID
+-    NS_DECL_NSIJSID
+-
+-    // we implement the rest...
+-    NS_DECL_NSIJSIID
+-    NS_DECL_NSIXPCSCRIPTABLE
+-    NS_DECL_NSISECURITYCHECKEDCOMPONENT
+-
+-    static nsJSIID* NewID(nsIInterfaceInfo* aInfo);
+-
+-    nsJSIID(nsIInterfaceInfo* aInfo);
+-    nsJSIID(); // not implemented
+-    virtual ~nsJSIID();
+-
+-private:
+-    nsCOMPtr<nsIInterfaceInfo> mInfo;
+-};
+-
+ // nsJSCID
+ 
+ class nsJSCID : public nsIJSCID, public nsIXPCScriptable
+ {
+ public:
+     NS_DECL_ISUPPORTS
+ 
+     // we manually delagate these to nsJSID

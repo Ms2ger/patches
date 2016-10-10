@@ -1,0 +1,448 @@
+diff --git a/accessible/src/base/nsCoreUtils.cpp b/accessible/src/base/nsCoreUtils.cpp
+--- a/accessible/src/base/nsCoreUtils.cpp
++++ b/accessible/src/base/nsCoreUtils.cpp
+@@ -151,17 +151,17 @@ nsCoreUtils::DispatchTouchEvent(uint32_t
+     return;
+ 
+   nsTouchEvent event(true, aEventType, aRootWidget);
+ 
+   event.time = PR_IntervalNow();
+ 
+   // XXX: Touch has an identifier of -1 to hint that it is synthesized.
+   nsRefPtr<mozilla::dom::Touch> t =
+-    new mozilla::dom::Touch(-1, nsIntPoint(aX, aY),
++    new mozilla::dom::Touch(-1, LayoutDeviceIntPoint(aX, aY),
+                             nsIntPoint(1, 1), 0.0f, 1.0f);
+   t->SetTarget(aContent);
+   event.touches.AppendElement(t);
+   nsEventStatus status = nsEventStatus_eIgnore;
+   aPresShell->HandleEventWithTarget(&event, aFrame, aContent, &status);
+ }
+ 
+ uint32_t
+diff --git a/content/events/src/Touch.cpp b/content/events/src/Touch.cpp
+--- a/content/events/src/Touch.cpp
++++ b/content/events/src/Touch.cpp
+@@ -27,30 +27,30 @@ Touch::Touch(mozilla::dom::EventTarget* 
+              float aForce)
+ {
+   SetIsDOMBinding();
+   mTarget = aTarget;
+   mIdentifier = aIdentifier;
+   mPagePoint = CSSIntPoint(aPageX, aPageY);
+   mScreenPoint = nsIntPoint(aScreenX, aScreenY);
+   mClientPoint = CSSIntPoint(aClientX, aClientY);
+-  mRefPoint = nsIntPoint(0, 0);
++  mRefPoint = LayoutDeviceIntPoint(0, 0);
+   mPointsInitialized = true;
+   mRadius.x = aRadiusX;
+   mRadius.y = aRadiusY;
+   mRotationAngle = aRotationAngle;
+   mForce = aForce;
+ 
+   mChanged = false;
+   mMessage = 0;
+   nsJSContext::LikelyShortLivingObjectCreated();
+ }
+ 
+ Touch::Touch(int32_t aIdentifier,
+-             nsIntPoint aPoint,
++             LayoutDeviceIntPoint aPoint,
+              nsIntPoint aRadius,
+              float aRotationAngle,
+              float aForce)
+ {
+   SetIsDOMBinding();
+   mIdentifier = aIdentifier;
+   mPagePoint = CSSIntPoint(0, 0);
+   mScreenPoint = nsIntPoint(0, 0);
+@@ -99,24 +99,21 @@ Touch::Target() const
+ }
+ 
+ void
+ Touch::InitializePoints(nsPresContext* aPresContext, nsEvent* aEvent)
+ {
+   if (mPointsInitialized) {
+     return;
+   }
+-  mClientPoint = nsDOMEvent::GetClientCoords(
+-    aPresContext, aEvent, LayoutDeviceIntPoint::FromUntyped(mRefPoint),
+-    mClientPoint);
+-  mPagePoint = nsDOMEvent::GetPageCoords(
+-    aPresContext, aEvent, LayoutDeviceIntPoint::FromUntyped(mRefPoint),
+-    mClientPoint);
+-  mScreenPoint = nsDOMEvent::GetScreenCoords(aPresContext, aEvent,
+-    LayoutDeviceIntPoint::FromUntyped(mRefPoint));
++  mClientPoint = nsDOMEvent::GetClientCoords(aPresContext, aEvent, mRefPoint,
++                                             mClientPoint);
++  mPagePoint = nsDOMEvent::GetPageCoords(aPresContext, aEvent, mRefPoint,
++                                         mClientPoint);
++  mScreenPoint = nsDOMEvent::GetScreenCoords(aPresContext, aEvent, mRefPoint);
+   mPointsInitialized = true;
+ }
+ 
+ void
+ Touch::SetTarget(mozilla::dom::EventTarget* aTarget)
+ {
+   mTarget = aTarget;
+ }
+diff --git a/content/events/src/Touch.h b/content/events/src/Touch.h
+--- a/content/events/src/Touch.h
++++ b/content/events/src/Touch.h
+@@ -33,17 +33,17 @@ public:
+         int32_t aScreenY,
+         int32_t aClientX,
+         int32_t aClientY,
+         int32_t aRadiusX,
+         int32_t aRadiusY,
+         float aRotationAngle,
+         float aForce);
+   Touch(int32_t aIdentifier,
+-        nsIntPoint aPoint,
++        LayoutDeviceIntPoint aPoint,
+         nsIntPoint aRadius,
+         float aRotationAngle,
+         float aForce);
+ 
+   ~Touch();
+ 
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(Touch)
+@@ -68,17 +68,17 @@ public:
+   int32_t PageX() const { return mPagePoint.x; }
+   int32_t PageY() const { return mPagePoint.y; }
+   int32_t RadiusX() const { return mRadius.x; }
+   int32_t RadiusY() const { return mRadius.y; }
+   float RotationAngle() const { return mRotationAngle; }
+   float Force() const { return mForce; }
+ 
+   nsCOMPtr<EventTarget> mTarget;
+-  nsIntPoint mRefPoint;
++  LayoutDeviceIntPoint mRefPoint;
+   bool mChanged;
+   uint32_t mMessage;
+   int32_t mIdentifier;
+   CSSIntPoint mPagePoint;
+   CSSIntPoint mClientPoint;
+   nsIntPoint mScreenPoint;
+   nsIntPoint mRadius;
+   float mRotationAngle;
+diff --git a/dom/base/nsDOMWindowUtils.cpp b/dom/base/nsDOMWindowUtils.cpp
+--- a/dom/base/nsDOMWindowUtils.cpp
++++ b/dom/base/nsDOMWindowUtils.cpp
+@@ -878,17 +878,17 @@ nsDOMWindowUtils::SendTouchEvent(const n
+   if (!presContext) {
+     return NS_ERROR_FAILURE;
+   }
+   event.touches.SetCapacity(aCount);
+   for (uint32_t i = 0; i < aCount; ++i) {
+     LayoutDeviceIntPoint pt =
+       ToWidgetPoint(CSSPoint(aXs[i], aYs[i]), offset, presContext);
+     nsRefPtr<Touch> t = new Touch(aIdentifiers[i],
+-                                  LayoutDeviceIntPoint::ToUntyped(pt),
++                                  pt,
+                                   nsIntPoint(aRxs[i], aRys[i]),
+                                   aRotationAngles[i],
+                                   aForces[i]);
+     event.touches.AppendElement(t);
+   }
+ 
+   nsEventStatus status;
+   nsresult rv = widget->DispatchEvent(&event, status);
+diff --git a/dom/interfaces/events/nsIDOMTouchEvent.idl b/dom/interfaces/events/nsIDOMTouchEvent.idl
+--- a/dom/interfaces/events/nsIDOMTouchEvent.idl
++++ b/dom/interfaces/events/nsIDOMTouchEvent.idl
+@@ -1,17 +1,17 @@
+ /* vim: set shiftwidth=2 tabstop=8 autoindent cindent expandtab: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "nsIDOMUIEvent.idl"
+ %{C++
+ #include "nsWeakPtr.h"
+-#include "nsPoint.h"
++#include "Units.h"
+ %}
+ interface nsIVariant;
+ 
+ /**
+  * @see http://dvcs.w3.org/hg/webevents/raw-file/tip/touchevents.html
+  */
+ 
+ [scriptable, builtinclass, uuid(2311671f-ff7e-43d2-adfb-d9e07006955e)]
+diff --git a/dom/ipc/TabChild.cpp b/dom/ipc/TabChild.cpp
+--- a/dom/ipc/TabChild.cpp
++++ b/dom/ipc/TabChild.cpp
+@@ -1822,17 +1822,17 @@ TabChild::UpdateTapState(const nsTouchEv
+       return;
+     }
+     if (aStatus == nsEventStatus_eConsumeNoDefault ||
+         nsIPresShell::gPreventMouseEvents) {
+       return;
+     }
+ 
+     Touch* touch = static_cast<Touch*>(aEvent.touches[0].get());
+-    mGestureDownPoint = LayoutDevicePoint(touch->mRefPoint.x, touch->mRefPoint.y);
++    mGestureDownPoint = touch->mRefPoint;
+     mActivePointerId = touch->mIdentifier;
+     if (sClickHoldContextMenusEnabled) {
+       MOZ_ASSERT(!mTapHoldTimer);
+       mTapHoldTimer = NewRunnableMethod(this,
+                                         &TabChild::FireContextMenuEvent);
+       MessageLoop::current()->PostDelayedTask(FROM_HERE, mTapHoldTimer,
+                                               sContextMenuDelayMs);
+     }
+@@ -1844,17 +1844,17 @@ TabChild::UpdateTapState(const nsTouchEv
+   if (!currentlyTrackingTouch) {
+     return;
+   }
+   Touch* trackedTouch = GetTouchForIdentifier(aEvent, mActivePointerId);
+   if (!trackedTouch) {
+     return;
+   }
+ 
+-  LayoutDevicePoint currentPoint = LayoutDevicePoint(trackedTouch->mRefPoint.x, trackedTouch->mRefPoint.y);
++  LayoutDeviceIntPoint currentPoint = trackedTouch->mRefPoint;
+   int64_t time = aEvent.time;
+   switch (aEvent.message) {
+   case NS_TOUCH_MOVE:
+     if (abs(currentPoint.x - mGestureDownPoint.x) > sDragThreshold.width ||
+         abs(currentPoint.y - mGestureDownPoint.y) > sDragThreshold.height) {
+       CancelTapTracking();
+     }
+     return;
+diff --git a/dom/ipc/TabParent.cpp b/dom/ipc/TabParent.cpp
+--- a/dom/ipc/TabParent.cpp
++++ b/dom/ipc/TabParent.cpp
+@@ -625,17 +625,17 @@ TabParent::MapEventCoordinatesForChildPr
+     aEvent->refPoint = LayoutDeviceIntPoint();
+     nsTouchEvent* touchEvent = static_cast<nsTouchEvent*>(aEvent);
+     // Then offset all the touch points by that distance, to put them
+     // in the space where top-left is 0,0.
+     const nsTArray< nsRefPtr<Touch> >& touches = touchEvent->touches;
+     for (uint32_t i = 0; i < touches.Length(); ++i) {
+       Touch* touch = touches[i];
+       if (touch) {
+-        touch->mRefPoint += LayoutDeviceIntPoint::ToUntyped(aOffset);
++        touch->mRefPoint += aOffset;
+       }
+     }
+   }
+ }
+ 
+ bool TabParent::SendRealMouseEvent(nsMouseEvent& event)
+ {
+   if (mIsDestroyed) {
+diff --git a/gfx/layers/composite/APZCTreeManager.cpp b/gfx/layers/composite/APZCTreeManager.cpp
+--- a/gfx/layers/composite/APZCTreeManager.cpp
++++ b/gfx/layers/composite/APZCTreeManager.cpp
+@@ -282,17 +282,17 @@ APZCTreeManager::ReceiveInputEvent(const
+   gfx3DMatrix transformToScreen;
+   switch (aEvent.eventStructType) {
+     case NS_TOUCH_EVENT: {
+       const nsTouchEvent& touchEvent = static_cast<const nsTouchEvent&>(aEvent);
+       if (touchEvent.touches.Length() == 0) {
+         break;
+       }
+       if (touchEvent.message == NS_TOUCH_START) {
+-        nsIntPoint point = touchEvent.touches[0]->mRefPoint;
++        LayoutDeviceIntPoint point = touchEvent.touches[0]->mRefPoint;
+         mApzcForInputBlock = GetTargetAPZC(ScreenPoint(point.x, point.y));
+         for (size_t i = 1; i < touchEvent.touches.Length(); i++) {
+           point = touchEvent.touches[i]->mRefPoint;
+           nsRefPtr<AsyncPanZoomController> apzc2 =
+             GetTargetAPZC(ScreenPoint(point.x, point.y));
+           mApzcForInputBlock = CommonAncestor(mApzcForInputBlock.get(), apzc2.get());
+           APZC_LOG("Using APZC %p as the common ancestor\n", mApzcForInputBlock.get());
+           // For now, we only ever want to do pinching on the root APZC for a given layers id. So
+diff --git a/layout/base/nsPresShell.cpp b/layout/base/nsPresShell.cpp
+--- a/layout/base/nsPresShell.cpp
++++ b/layout/base/nsPresShell.cpp
+@@ -6166,17 +6166,17 @@ PresShell::HandleEvent(nsIFrame        *
+         for (int32_t i = touchEvent->touches.Length(); i; ) {
+           --i;
+           dom::Touch* touch = touchEvent->touches[i];
+ 
+           int32_t id = touch->Identifier();
+           if (!gCaptureTouchList->Get(id, nullptr)) {
+             // find the target for this touch
+             eventPoint = nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent,
+-              LayoutDeviceIntPoint::FromUntyped(touch->mRefPoint), frame);
++              touch->mRefPoint, frame);
+             nsIFrame* target = FindFrameTargetedByInputEvent(aEvent,
+                                                              frame,
+                                                              eventPoint,
+                                                              flags);
+             if (target && !anyTarget) {
+               target->GetContentForEvent(aEvent, getter_AddRefs(anyTarget));
+               while (anyTarget && !anyTarget->IsElement()) {
+                 anyTarget = anyTarget->GetParent();
+diff --git a/layout/forms/nsRangeFrame.cpp b/layout/forms/nsRangeFrame.cpp
+--- a/layout/forms/nsRangeFrame.cpp
++++ b/layout/forms/nsRangeFrame.cpp
+@@ -472,18 +472,17 @@ nsRangeFrame::GetValueAtEventPoint(nsGUI
+     return minimum;
+   }
+   Decimal range = maximum - minimum;
+ 
+   LayoutDeviceIntPoint absPoint;
+   if (aEvent->eventStructType == NS_TOUCH_EVENT) {
+     MOZ_ASSERT(static_cast<nsTouchEvent*>(aEvent)->touches.Length() == 1,
+                "Unexpected number of touches");
+-    absPoint = LayoutDeviceIntPoint::FromUntyped(
+-      static_cast<nsTouchEvent*>(aEvent)->touches[0]->mRefPoint);
++    absPoint = static_cast<nsTouchEvent*>(aEvent)->touches[0]->mRefPoint;
+   } else {
+     absPoint = aEvent->refPoint;
+   }
+   nsPoint point =
+     nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, absPoint, this);
+ 
+   if (point == nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE)) {
+     // We don't want to change the current value for this error state.
+diff --git a/layout/xul/base/src/nsBoxFrame.cpp b/layout/xul/base/src/nsBoxFrame.cpp
+--- a/layout/xul/base/src/nsBoxFrame.cpp
++++ b/layout/xul/base/src/nsBoxFrame.cpp
+@@ -2079,14 +2079,14 @@ nsBoxFrame::GetEventPoint(nsGUIEvent* aE
+     if (touchEvent->touches.Length() != 1) {
+       return false;
+     }
+ 
+     dom::Touch* touch = touchEvent->touches.SafeElementAt(0);
+     if (!touch) {
+       return false;
+     }
+-    aPoint = LayoutDeviceIntPoint::FromUntyped(touch->mRefPoint);
++    aPoint = touch->mRefPoint;
+   } else {
+     aPoint = aEvent->refPoint;
+   }
+   return true;
+ }
+diff --git a/widget/android/AndroidJavaWrappers.cpp b/widget/android/AndroidJavaWrappers.cpp
+--- a/widget/android/AndroidJavaWrappers.cpp
++++ b/widget/android/AndroidJavaWrappers.cpp
+@@ -730,17 +730,17 @@ AndroidGeckoEvent::MakeTouchEvent(nsIWid
+ 
+     const nsIntPoint& offset = widget->WidgetToScreenOffset();
+     event.touches.SetCapacity(endIndex - startIndex);
+     for (int i = startIndex; i < endIndex; i++) {
+         // In this code branch, we are dispatching this event directly
+         // into Gecko (as opposed to going through the AsyncPanZoomController),
+         // and the Points() array has points in CSS pixels, which we need
+         // to convert.
+-        nsIntPoint pt(
++        LayoutDeviceIntPoint pt(
+             (Points()[i].x * widget->GetDefaultScale()) - offset.x,
+             (Points()[i].y * widget->GetDefaultScale()) - offset.y);
+         nsIntPoint radii(
+             PointRadii()[i].x * widget->GetDefaultScale(),
+             PointRadii()[i].y * widget->GetDefaultScale());
+         nsRefPtr<Touch> t = new Touch(PointIndicies()[i],
+                                       pt,
+                                       radii,
+diff --git a/widget/gonk/nsAppShell.cpp b/widget/gonk/nsAppShell.cpp
+--- a/widget/gonk/nsAppShell.cpp
++++ b/widget/gonk/nsAppShell.cpp
+@@ -156,17 +156,17 @@ sendMouseEvent(uint32_t msg, uint64_t ti
+ }
+ 
+ static void
+ addDOMTouch(UserInputData& data, nsTouchEvent& event, int i)
+ {
+     const ::Touch& touch = data.motion.touches[i];
+     event.touches.AppendElement(
+         new dom::Touch(touch.id,
+-                       nsIntPoint(touch.coords.getX(), touch.coords.getY()),
++                       LayoutDeviceIntPoint(touch.coords.getX(), touch.coords.getY()),
+                        nsIntPoint(touch.coords.getAxisValue(AMOTION_EVENT_AXIS_SIZE),
+                                   touch.coords.getAxisValue(AMOTION_EVENT_AXIS_SIZE)),
+                        0,
+                        touch.coords.getAxisValue(AMOTION_EVENT_AXIS_PRESSURE))
+     );
+ }
+ 
+ static nsEventStatus
+diff --git a/widget/nsGUIEventIPC.h b/widget/nsGUIEventIPC.h
+--- a/widget/nsGUIEventIPC.h
++++ b/widget/nsGUIEventIPC.h
+@@ -235,19 +235,18 @@ struct ParamTraits<nsTouchEvent>
+         if (!ReadParam(aMsg, aIter, &identifier) ||
+             !ReadParam(aMsg, aIter, &refPoint) ||
+             !ReadParam(aMsg, aIter, &radius) ||
+             !ReadParam(aMsg, aIter, &rotationAngle) ||
+             !ReadParam(aMsg, aIter, &force)) {
+           return false;
+         }
+         aResult->touches.AppendElement(
+-          new mozilla::dom::Touch(
+-            identifier, mozilla::LayoutDeviceIntPoint::ToUntyped(refPoint),
+-            radius, rotationAngle, force));
++          new mozilla::dom::Touch(identifier, refPoint, radius, rotationAngle,
++            force));
+     }
+     return true;
+   }
+ };
+ 
+ template<>
+ struct ParamTraits<nsKeyEvent>
+ {
+diff --git a/widget/windows/nsWindow.cpp b/widget/windows/nsWindow.cpp
+--- a/widget/windows/nsWindow.cpp
++++ b/widget/windows/nsWindow.cpp
+@@ -6117,17 +6117,17 @@ bool nsWindow::OnTouch(WPARAM wParam, LP
+ 
+       // Setup the touch point we'll append to the touch event array
+       nsPointWin touchPoint;
+       touchPoint.x = TOUCH_COORD_TO_PIXEL(pInputs[i].x);
+       touchPoint.y = TOUCH_COORD_TO_PIXEL(pInputs[i].y);
+       touchPoint.ScreenToClient(mWnd);
+       nsRefPtr<Touch> touch =
+         new Touch(pInputs[i].dwID,
+-                  touchPoint,
++                  LayoutDeviceIntPoint::FromUntyped(touchPoint),
+                   /* radius, if known */
+                   pInputs[i].dwFlags & TOUCHINPUTMASKF_CONTACTAREA ?
+                     nsIntPoint(
+                       TOUCH_COORD_TO_PIXEL(pInputs[i].cxContact) / 2,
+                       TOUCH_COORD_TO_PIXEL(pInputs[i].cyContact) / 2) :
+                     nsIntPoint(1,1),
+                   /* rotation angle and force */
+                   0.0f, 0.0f);
+diff --git a/widget/windows/winrt/MetroInput.cpp b/widget/windows/winrt/MetroInput.cpp
+--- a/widget/windows/winrt/MetroInput.cpp
++++ b/widget/windows/winrt/MetroInput.cpp
+@@ -1,9 +1,10 @@
+-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ // Moz headers (alphabetical)
+ #include "MetroInput.h"
+ #include "MetroUtils.h" // Logging, POINT_CEIL_*, ActivateGenericInstance, etc
+ #include "MetroWidget.h" // MetroInput::mWidget
+@@ -65,17 +66,18 @@ namespace {
+     float pressure;
+ 
+     aPoint->get_Properties(props.GetAddressOf());
+     aPoint->get_Position(&position);
+     aPoint->get_PointerId(&pointerId);
+     props->get_ContactRect(&contactRect);
+     props->get_Pressure(&pressure);
+ 
+-    nsIntPoint touchPoint = MetroUtils::LogToPhys(position);
++    LayoutDeviceIntPoint touchPoint =
++      LayoutDeviceIntPoint::FromUntyped(MetroUtils::LogToPhys(position));
+     nsIntPoint touchRadius;
+     touchRadius.x = MetroUtils::LogToPhys(contactRect.Width) / 2;
+     touchRadius.y = MetroUtils::LogToPhys(contactRect.Height) / 2;
+     return new Touch(pointerId,
+                      touchPoint,
+                      // Rotation radius and angle.
+                      // W3C touch events v1 do not use these.
+                      // The draft for W3C touch events v2 explains that

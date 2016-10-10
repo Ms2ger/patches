@@ -1,0 +1,153 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCString.cpp b/js/xpconnect/src/XPCString.cpp
+--- a/js/xpconnect/src/XPCString.cpp
++++ b/js/xpconnect/src/XPCString.cpp
+@@ -47,45 +47,49 @@
+  * reference to the buffer handle until the JSString is finalized.
+  *
+  * Exporting a JSString as an nsAReadable:
+  * Wrap the JSString with a root-holding XPCJSReadableStringWrapper, which roots
+  * the string and exposes its buffer via the nsAString interface, as
+  * well as providing refcounting support.
+  */
+ 
++#include "XPCStringConvert.h"
++
+ #include "xpcprivate.h"
+ #include "nsStringBuffer.h"
+ 
++namespace XPCStringConvert {
++
+ static int sDOMStringFinalizerIndex = -1;
+ 
+ static void
+ DOMStringFinalizer(JSContext *cx, JSString *str)
+ {
+     jschar *chars = const_cast<jschar *>(JS_GetStringCharsZ(cx, str));
+     NS_ASSERTION(chars, "How could this OOM if we allocated the memory?");
+     nsStringBuffer::FromData(chars)->Release();
+ }
+ 
+ void
+-XPCStringConvert::ShutdownDOMStringFinalizer()
++ShutdownDOMStringFinalizer()
+ {
+     if (sDOMStringFinalizerIndex == -1)
+         return;
+ 
+     JS_RemoveExternalStringFinalizer(DOMStringFinalizer);
+     sDOMStringFinalizerIndex = -1;
+ }
+ 
+ // convert a readable to a JSString, copying string data
+ // static
+-jsval
+-XPCStringConvert::ReadableToJSVal(JSContext *cx,
+-                                  const nsAString &readable,
+-                                  nsStringBuffer** sharedBuffer)
++JS::Value
++ReadableToJSVal(JSContext *cx,
++                const nsAString &readable,
++                nsStringBuffer** sharedBuffer)
+ {
+     JSString *str;
+     *sharedBuffer = nsnull;
+ 
+     uint32_t length = readable.Length();
+ 
+     JSAtom *atom;
+     if (length == 0 && (atom = cx->runtime->atomState.emptyAtom)) {
+@@ -129,8 +133,10 @@ XPCStringConvert::ReadableToJSVal(JSCont
+         chars[length] = 0;
+ 
+         str = JS_NewUCString(cx, chars, length);
+         if (!str)
+             JS_free(cx, chars);
+     }
+     return str ? STRING_TO_JSVAL(str) : JSVAL_NULL;
+ }
++
++} // namespace XPCStringConvert
+diff --git a/js/xpconnect/src/XPCStringConvert.h b/js/xpconnect/src/XPCStringConvert.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCStringConvert.h
+@@ -0,0 +1,22 @@
++#ifndef XPCStringConvert_h
++#define XPCStringConvert_h
++
++#include "jspubtd.h"
++
++class nsAString;
++class nsStringBuffer;
++
++// readable string conversions
++namespace XPCStringConvert {
++
++// If the string shares the readable's buffer, that buffer will
++// get assigned to *sharedBuffer.  Otherwise null will be
++// assigned.
++JS::Value ReadableToJSVal(JSContext *cx, const nsAString &readable,
++                          nsStringBuffer** sharedBuffer);
++
++void ShutdownDOMStringFinalizer();
++
++} // namespace XPCStringConvert
++
++#endif // XPCStringConvert_h
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -161,16 +161,17 @@
+ #include "XPCNativeScriptableShared.h"
+ #include "XPCNativeScriptableInfo.h"
+ #include "XPCNativeScriptableCreateInfo.h"
+ #include "XPCWrappedNativeProto.h"
+ #include "XPCWrappedNative.h"
+ #include "nsXPCWrappedJSClass.h"
+ #include "xpcObjectHelper.h"
+ #include "XPCConvert.h"
++#include "XPCStringConvert.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -463,33 +464,16 @@ enum WrapperType {
+ /***************************************************************************
+ ****************************************************************************
+ *
+ * All manner of utility classes follow...
+ *
+ ****************************************************************************
+ ***************************************************************************/
+ 
+-// readable string conversions, static methods only
+-class XPCStringConvert
+-{
+-public:
+-
+-    // If the string shares the readable's buffer, that buffer will
+-    // get assigned to *sharedBuffer.  Otherwise null will be
+-    // assigned.
+-    static jsval ReadableToJSVal(JSContext *cx, const nsAString &readable,
+-                                 nsStringBuffer** sharedBuffer);
+-
+-    static void ShutdownDOMStringFinalizer();
+-
+-private:
+-    XPCStringConvert();         // not implemented
+-};
+-
+ /***************************************************************************/
+ // code for throwing exceptions into JS
+ 
+ class XPCThrower
+ {
+ public:
+     static void Throw(nsresult rv, JSContext* cx);
+     static void Throw(nsresult rv, XPCCallContext& ccx);

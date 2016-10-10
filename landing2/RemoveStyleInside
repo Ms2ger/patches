@@ -1,0 +1,293 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/base/nsEditor.cpp b/editor/libeditor/base/nsEditor.cpp
+--- a/editor/libeditor/base/nsEditor.cpp
++++ b/editor/libeditor/base/nsEditor.cpp
+@@ -3838,16 +3838,24 @@ nsEditor::GetTag(nsIDOMNode *aNode)
+     NS_ASSERTION(aNode, "null node passed to nsEditor::Tag()");
+ 
+     return nsnull;
+   }
+   
+   return content->Tag();
+ }
+ 
++nsIAtom*
++nsEditor::GetTag(nsINode* aNode)
++{
++  MOZ_ASSERT(aNode);
++  nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
++  return content ? content->Tag() : NULL;
++}
++
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // GetTagString: digs out string for the tag of this node
+ //                    
+ nsresult 
+ nsEditor::GetTagString(nsIDOMNode *aNode, nsAString& outString)
+ {
+   if (!aNode) 
+diff --git a/editor/libeditor/base/nsEditor.h b/editor/libeditor/base/nsEditor.h
+--- a/editor/libeditor/base/nsEditor.h
++++ b/editor/libeditor/base/nsEditor.h
+@@ -63,16 +63,18 @@
+ #include "nsIEditorSpellCheck.h"
+ #include "nsIInlineSpellChecker.h"
+ #include "nsIDOMEventTarget.h"
+ #include "nsStubMutationObserver.h"
+ #include "nsIViewManager.h"
+ #include "nsCycleCollectionParticipant.h"
+ #include "nsIObserver.h"
+ 
++#include "mozilla/Attributes.h"
++
+ class nsIDOMCharacterData;
+ class nsIDOMRange;
+ class nsIPresShell;
+ class ChangeAttributeTxn;
+ class CreateElementTxn;
+ class InsertElementTxn;
+ class DeleteElementTxn;
+ class InsertTextTxn;
+@@ -535,16 +537,22 @@ public:
+                                bool     bNoBlockCrossing = false);
+ 
+   /** returns true if aNode is of the type implied by aTag */
+   static inline bool NodeIsType(nsIDOMNode *aNode, nsIAtom *aTag)
+   {
+     return GetTag(aNode) == aTag;
+   }
+ 
++  static inline bool NodeIsType(nsINode* aNode, nsIAtom* aTag)
++  {
++    return GetTag(aNode) == aTag;
++  }
++  static bool NodeIsType(nsIContent* aNode, nsIAtom* aTag) MOZ_DELETE;
++
+   // we should get rid of this method if we can
+   static inline bool NodeIsTypeString(nsIDOMNode *aNode, const nsAString &aTag)
+   {
+     nsIAtom *nodeAtom = GetTag(aNode);
+     return nodeAtom && nodeAtom->Equals(aTag);
+   }
+ 
+ 
+@@ -580,17 +588,19 @@ public:
+   nsINode* GetFirstEditableNode(nsINode* aRoot);
+ 
+   nsresult GetIMEBufferLength(int32_t* length);
+   bool     IsIMEComposing();    /* test if IME is in composition state */
+   void     SetIsIMEComposing(); /* call this before |IsIMEComposing()| */
+ 
+   /** from html rules code - migration in progress */
+   static nsresult GetTagString(nsIDOMNode *aNode, nsAString& outString);
+-  static nsIAtom *GetTag(nsIDOMNode *aNode);
++  static nsIAtom* GetTag(nsIDOMNode* aNode);
++  static nsIAtom* GetTag(nsINode* aNode);
++  static nsIAtom* GetTag(nsIContent* aNode) MOZ_DELETE;
+   virtual bool NodesSameType(nsIDOMNode *aNode1, nsIDOMNode *aNode2);
+   static bool IsTextOrElementNode(nsIDOMNode *aNode);
+   static bool IsTextNode(nsIDOMNode *aNode);
+   static bool IsTextNode(nsINode *aNode);
+   
+   static int32_t GetIndexOf(nsIDOMNode *aParent, nsIDOMNode *aChild);
+   static nsCOMPtr<nsIDOMNode> GetChildAt(nsIDOMNode *aParent, int32_t aOffset);
+   static nsCOMPtr<nsIDOMNode> GetNodeAtRangeOffsetPoint(nsIDOMNode* aParentOrNode, int32_t aOffset);
+diff --git a/editor/libeditor/html/nsHTMLEditor.h b/editor/libeditor/html/nsHTMLEditor.h
+--- a/editor/libeditor/html/nsHTMLEditor.h
++++ b/editor/libeditor/html/nsHTMLEditor.h
+@@ -708,21 +708,24 @@ protected:
+   nsresult ApplyDefaultProperties();
+   nsresult RemoveStyleInside(nsIDOMNode *aNode, 
+                              nsIAtom *aProperty, 
+                              const nsAString *aAttribute, 
+                              const bool aChildrenOnly = false);
+   nsresult RemoveInlinePropertyImpl(nsIAtom *aProperty, const nsAString *aAttribute);
+ 
+   bool NodeIsProperty(nsIDOMNode *aNode);
++  bool NodeIsProperty(nsINode* aNode);
++  bool NodeIsProperty(nsIContent* aNode);
+   bool HasAttr(nsIDOMNode *aNode, const nsAString *aAttribute);
+   bool HasAttrVal(nsIDOMNode *aNode, const nsAString *aAttribute, const nsAString *aValue);
+   bool IsAtFrontOfNode(nsIDOMNode *aNode, int32_t aOffset);
+   bool IsAtEndOfNode(nsIDOMNode *aNode, int32_t aOffset);
+   bool IsOnlyAttribute(nsIDOMNode *aElement, const nsAString *aAttribute);
++  bool IsOnlyAttribute(nsIContent* aElement, const nsAString& aAttribute);
+ 
+   nsresult RemoveBlockContainer(nsIDOMNode *inNode);
+   nsINode* GetPriorHTMLSibling(nsINode* aNode);
+   nsresult GetPriorHTMLSibling(nsIDOMNode *inNode, nsCOMPtr<nsIDOMNode> *outNode);
+   nsINode* GetPriorHTMLSibling(nsINode* aParent, int32_t aOffset);
+   nsresult GetPriorHTMLSibling(nsIDOMNode *inParent, int32_t inOffset, nsCOMPtr<nsIDOMNode> *outNode);
+   nsINode* GetNextHTMLSibling(nsINode* aNode);
+   nsresult GetNextHTMLSibling(nsIDOMNode *inNode, nsCOMPtr<nsIDOMNode> *outNode);
+diff --git a/editor/libeditor/html/nsHTMLEditorStyle.cpp b/editor/libeditor/html/nsHTMLEditorStyle.cpp
+--- a/editor/libeditor/html/nsHTMLEditorStyle.cpp
++++ b/editor/libeditor/html/nsHTMLEditorStyle.cpp
+@@ -622,21 +622,51 @@ nsresult nsHTMLEditor::SplitStyleAbovePo
+     tmp->GetParentNode(getter_AddRefs(parent));
+     tmp = parent;
+   }
+   return NS_OK;
+ }
+ 
+ bool nsHTMLEditor::NodeIsProperty(nsIDOMNode *aNode)
+ {
+-  NS_ENSURE_TRUE(aNode, false);
+-  if (!IsContainer(aNode))  return false;
+-  if (!IsEditable(aNode))   return false;
+-  if (IsBlockNode(aNode))   return false;
+-  if (NodeIsType(aNode, nsEditProperty::a)) return false;
++  nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
++  NS_ENSURE_TRUE(content, false);
++  return NodeIsProperty(content);
++}
++
++bool nsHTMLEditor::NodeIsProperty(nsINode* aNode)
++{
++  MOZ_ASSERT(aNode);
++  nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
++  if (!content) {
++    return false;
++  }
++
++  return NodeIsProperty(content);
++}
++
++bool nsHTMLEditor::NodeIsProperty(nsIContent* aNode)
++{
++  MOZ_ASSERT(aNode);
++  if (!IsContainer(aNode)) {
++    return false;
++  }
++
++  if (!IsEditable(aNode)) {
++    return false;
++  }
++
++  if (IsBlockNode(aNode)) {
++    return false;
++  }
++
++  if (aNode->IsHTML(nsEditProperty::a)) {
++    return false;
++  }
++
+   return true;
+ }
+ 
+ nsresult nsHTMLEditor::ApplyDefaultProperties()
+ {
+   nsresult res = NS_OK;
+   uint32_t j, defcon = mDefaultStyles.Length();
+   for (j=0; j<defcon; j++)
+@@ -651,81 +681,88 @@ nsresult nsHTMLEditor::ApplyDefaultPrope
+ 
+ nsresult nsHTMLEditor::RemoveStyleInside(nsIDOMNode *aNode, 
+                                          // null here means remove all properties
+                                          nsIAtom *aProperty,
+                                          const nsAString *aAttribute,
+                                          const bool aChildrenOnly)
+ {
+   NS_ENSURE_TRUE(aNode, NS_ERROR_NULL_POINTER);
+-  if (IsTextNode(aNode)) {
++}
++
++nsresult nsHTMLEditor::RemoveStyleInside(nsINode* aNode,
++                                         // null here means remove all properties
++                                         nsIAtom* aProperty,
++                                         const nsAString* aAttribute,
++                                         const bool aChildrenOnly)
++{
++  if (aNode->NodeType() == nsIDOMNode::TEXT_NODE) {
+     return NS_OK;
+   }
++
+   nsresult res;
+ 
+   // first process the children
+-  nsCOMPtr<nsIDOMNode> child, tmp;
+-  aNode->GetFirstChild(getter_AddRefs(child));
++  nsIContent* child = aNode->GetFirstChild();
+   while (child) {
+     // cache next sibling since we might remove child
+-    child->GetNextSibling(getter_AddRefs(tmp));
+-    res = RemoveStyleInside(child, aProperty, aAttribute);
+-    NS_ENSURE_SUCCESS(res, res);
++    nsIContent* tmp = child->GetNextSibling();
++    nsresult rv = RemoveStyleInside(child, aProperty, aAttribute);
++    NS_ENSURE_SUCCESS(rv, rv);
+     child = tmp;
+   }
+ 
+   // then process the node itself
+   if (
+     (!aChildrenOnly &&
+       (
+         // node is prop we asked for
+         (aProperty && NodeIsType(aNode, aProperty)) ||
+         // but check for link (<a href=...)
+-        (aProperty == nsEditProperty::href && nsHTMLEditUtils::IsLink(aNode)) ||
++        (aProperty == nsEditProperty::href && aNode->IsElement() && nsHTMLEditUtils::IsLink(aNode->AsElement())) ||
+         // and for named anchors
+-        (aProperty == nsEditProperty::name && nsHTMLEditUtils::IsNamedAnchor(aNode))
++        (aProperty == nsEditProperty::name && aNode->IsElement() && nsHTMLEditUtils::IsNamedAnchor(aNode->AsElement()))
+       )
+     ) ||
+     // or node is any prop and we asked for that
+     (!aProperty && NodeIsProperty(aNode))
+   ) {
+     // if we weren't passed an attribute, then we want to 
+     // remove any matching inlinestyles entirely
+     if (!aAttribute || aAttribute->IsEmpty()) {
+-      NS_NAMED_LITERAL_STRING(styleAttr, "style");
+-      NS_NAMED_LITERAL_STRING(classAttr, "class");
+-      bool hasStyleAttr = HasAttr(aNode, &styleAttr);
+-      bool hasClassAttr = HasAttr(aNode, &classAttr);
+-      if (aProperty && (hasStyleAttr || hasClassAttr)) {
++      if (aProperty && aNode->IsElement() &&
++          (aNode->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::style) ||
++           aNode->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::_class))) {
+         // aNode carries inline styles or a class attribute so we can't
+         // just remove the element... We need to create above the element
+         // a span that will carry those styles or class, then we can delete
+         // the node.
+         nsCOMPtr<nsIDOMNode> spanNode;
+         res = InsertContainerAbove(aNode, address_of(spanNode),
+                                    NS_LITERAL_STRING("span"));
+         NS_ENSURE_SUCCESS(res, res);
+-        res = CloneAttribute(styleAttr, spanNode, aNode);
++        res = CloneAttribute(NS_LITERAL_STRING("style"), spanNode, aNode);
+         NS_ENSURE_SUCCESS(res, res);
+-        res = CloneAttribute(classAttr, spanNode, aNode);
++        res = CloneAttribute(NS_LITERAL_STRING("class"), spanNode, aNode);
+         NS_ENSURE_SUCCESS(res, res);
+       }
+       res = RemoveContainer(aNode);
+       NS_ENSURE_SUCCESS(res, res);
+     } else {
+       // otherwise we just want to eliminate the attribute
+-      if (HasAttr(aNode, aAttribute)) {
++      nsCOMPtr<nsIAtom> atom = do_GetAtom(*aAttribute);
++      if (aNode->IsElement() &&
++          aNode->AsElement()->HasAttr(kNameSpaceID_None, atom)) {
+         // if this matching attribute is the ONLY one on the node,
+         // then remove the whole node.  Otherwise just nix the attribute.
+-        if (IsOnlyAttribute(aNode, aAttribute)) {
++        if (IsOnlyAttribute(aNode->AsElement(), aAttribute)) {
+           res = RemoveContainer(aNode);
+         } else {
+-          nsCOMPtr<nsIDOMElement> elem = do_QueryInterface(aNode);
+-          NS_ENSURE_TRUE(elem, NS_ERROR_NULL_POINTER);
+-          res = RemoveAttribute(elem, *aAttribute);
++          res = RemoveAttribute(static_cast<nsIDOMElement*>(aNode->AsDOMNode()),
++                                *aAttribute);
+         }
+         NS_ENSURE_SUCCESS(res, res);
+       }
+     }
+   }
+ 
+   if (!aChildrenOnly &&
+       mHTMLCSSUtils->IsCSSEditableProperty(aNode, aProperty, aAttribute)) {

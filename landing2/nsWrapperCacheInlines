@@ -1,0 +1,182 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsGenericElement.cpp b/content/base/src/nsGenericElement.cpp
+--- a/content/base/src/nsGenericElement.cpp
++++ b/content/base/src/nsGenericElement.cpp
+@@ -159,28 +159,16 @@ using namespace mozilla::dom;
+ NS_DEFINE_IID(kThisPtrOffsetsSID, NS_THISPTROFFSETS_SID);
+ 
+ int32_t nsIContent::sTabFocusModel = eTabFocus_any;
+ bool nsIContent::sTabFocusModelAppliesToXUL = false;
+ uint32_t nsMutationGuard::sMutationCount = 0;
+ 
+ nsresult NS_NewContentIterator(nsIContentIterator** aInstancePtrResult);
+ 
+-void
+-nsWrapperCache::RemoveExpandoObject()
+-{
+-  JSObject *expando = GetExpandoObjectPreserveColor();
+-  if (expando) {
+-    JSCompartment *compartment = js::GetObjectCompartment(expando);
+-    xpc::CompartmentPrivate *priv =
+-      static_cast<xpc::CompartmentPrivate *>(js_GetCompartmentPrivate(compartment));
+-    priv->RemoveDOMExpandoObject(expando);
+-  }
+-}
+-
+ //----------------------------------------------------------------------
+ 
+ nsINode::nsSlots::~nsSlots()
+ {
+   if (mChildNodes) {
+     mChildNodes->DropReference();
+     NS_RELEASE(mChildNodes);
+   }
+diff --git a/dom/base/Makefile.in b/dom/base/Makefile.in
+--- a/dom/base/Makefile.in
++++ b/dom/base/Makefile.in
+@@ -118,16 +118,17 @@ CPPSRCS =			\
+ 	nsDOMScriptObjectFactory.cpp \
+ 	nsQueryContentEventResult.cpp \
+ 	nsContentPermissionHelper.cpp \
+ 	nsStructuredCloneContainer.cpp \
+ 	nsDOMNavigationTiming.cpp \
+ 	nsPerformance.cpp	\
+ 	nsDOMMemoryReporter.cpp \
+ 	Navigator.cpp \
++	nsWrapperCache.cpp \
+ 	$(NULL)
+ 
+ include $(topsrcdir)/dom/dom-config.mk
+ 
+ ifdef MOZ_JSDEBUGGER
+ DEFINES += -DMOZ_JSDEBUGGER
+ endif
+ 
+diff --git a/dom/base/nsWrapperCache.cpp b/dom/base/nsWrapperCache.cpp
+new file mode 100644
+--- /dev/null
++++ b/dom/base/nsWrapperCache.cpp
+@@ -0,0 +1,57 @@
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is DOM binding code.
++ *
++ * The Initial Developer of the Original Code is
++ * the MOzilla FOundation.
++ * Portions created by the Initial Developer are Copyright (C) 2011
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *   Peter Van der Beken <peterv@propagandism.org>
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#include "nsWrapperCache.h"
++
++#include "xpcprivate.h" // xpc::CompartmentPrivate
++
++#include "jsapi.h"
++#include "jsgc.h" // js::GetObjectCompartment
++
++#include "nsWrapperCacheInlines.h"
++
++void
++nsWrapperCache::RemoveExpandoObject()
++{
++  JSObject *expando = GetExpandoObjectPreserveColor();
++  if (expando) {
++    JSCompartment *compartment = js::GetObjectCompartment(expando);
++    xpc::CompartmentPrivate *priv =
++      static_cast<xpc::CompartmentPrivate *>(js_GetCompartmentPrivate(compartment));
++    priv->RemoveDOMExpandoObject(expando);
++  }
++}
+diff --git a/dom/base/nsWrapperCacheInlines.h b/dom/base/nsWrapperCacheInlines.h
+--- a/dom/base/nsWrapperCacheInlines.h
++++ b/dom/base/nsWrapperCacheInlines.h
+@@ -35,17 +35,17 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #ifndef nsWrapperCacheInline_h___
+ #define nsWrapperCacheInline_h___
+ 
+ #include "nsWrapperCache.h"
+-#include "xpcprivate.h"
++#include "xpcpublic.h"
+ 
+ inline JSObject*
+ nsWrapperCache::GetWrapperPreserveColor() const
+ {
+   JSObject *obj = GetJSObjectFromBits();
+   return !IsProxy() || !obj || js::IsProxy(obj) ? obj : nsnull;
+ }
+ 
+diff --git a/dom/indexedDB/Key.h b/dom/indexedDB/Key.h
+--- a/dom/indexedDB/Key.h
++++ b/dom/indexedDB/Key.h
+@@ -39,17 +39,16 @@
+ 
+ #ifndef mozilla_dom_indexeddb_key_h__
+ #define mozilla_dom_indexeddb_key_h__
+ 
+ #include "mozilla/dom/indexedDB/IndexedDatabase.h"
+ 
+ #include "mozIStorageStatement.h"
+ 
+-#include "xpcprivate.h"
+ #include "XPCQuickStubs.h"
+ 
+ BEGIN_INDEXEDDB_NAMESPACE
+ 
+ class Key
+ {
+ public:
+   Key()
+diff --git a/js/xpconnect/src/XPCQuickStubs.h b/js/xpconnect/src/XPCQuickStubs.h
+--- a/js/xpconnect/src/XPCQuickStubs.h
++++ b/js/xpconnect/src/XPCQuickStubs.h
+@@ -35,16 +35,18 @@
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #ifndef xpcquickstubs_h___
+ #define xpcquickstubs_h___
+ 
++#include "xpcprivate.h"
++
+ #include "nsINode.h"
+ 
+ /* XPCQuickStubs.h - Support functions used only by quick stubs. */
+ 
+ class XPCCallContext;
+ 
+ #define XPC_QS_NULL_INDEX  ((size_t) -1)
+ 

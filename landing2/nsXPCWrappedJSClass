@@ -1,0 +1,316 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCWrappedJSClass.cpp b/js/xpconnect/src/XPCWrappedJSClass.cpp
+--- a/js/xpconnect/src/XPCWrappedJSClass.cpp
++++ b/js/xpconnect/src/XPCWrappedJSClass.cpp
+@@ -37,16 +37,18 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* Sharable code and data for wrapper around JSObjects. */
+ 
++#include "nsXPCWrappedJSClass.h"
++
+ #include "xpcprivate.h"
+ #include "nsWrapperCache.h"
+ #include "XPCWrapper.h"
+ #include "AccessCheck.h"
+ #include "nsXPCWrappedJS.h"
+ 
+ #include "nsArrayEnumerator.h"
+ #include "nsJSUtils.h"
+diff --git a/js/xpconnect/src/nsXPCWrappedJSClass.h b/js/xpconnect/src/nsXPCWrappedJSClass.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/nsXPCWrappedJSClass.h
+@@ -0,0 +1,131 @@
++#ifndef nsXPCWrappedJSClass_h
++#define nsXPCWrappedJSClass_h
++
++#include "nsID.h"
++#include "nsISupports.h"
++
++#include "jspubtd.h"
++
++class XPCCallContext;
++class XPCJSRuntime;
++class nsIInterfaceInfo;
++class nsXPCWrappedJS;
++class nsIVariant;
++class nsISimpleEnumerator;
++class XPTMethodDescriptor;
++class nsXPTType;
++class nsXPTCMiniVariant;
++class nsXPTParamInfo;
++
++// this interfaces exists so we can refcount nsXPCWrappedJSClass
++// XXX Remove it?
++// {2453EBA0-A9B8-11d2-BA64-00805F8A5DD7}
++#define NS_IXPCONNECT_WRAPPED_JS_CLASS_IID                                    \
++{ 0x2453eba0, 0xa9b8, 0x11d2,                                                 \
++  { 0xba, 0x64, 0x0, 0x80, 0x5f, 0x8a, 0x5d, 0xd7 } }
++
++class nsIXPCWrappedJSClass : public nsISupports
++{
++public:
++    NS_DECLARE_STATIC_IID_ACCESSOR(NS_IXPCONNECT_WRAPPED_JS_CLASS_IID)
++    NS_IMETHOD DebugDump(int16_t depth) = 0;
++};
++
++NS_DEFINE_STATIC_IID_ACCESSOR(nsIXPCWrappedJSClass,
++                              NS_IXPCONNECT_WRAPPED_JS_CLASS_IID)
++
++/*************************/
++// nsXPCWrappedJSClass represents the sharable factored out common code and
++// data for nsXPCWrappedJS instances for the same interface type.
++
++class nsXPCWrappedJSClass : public nsIXPCWrappedJSClass
++{
++    // all the interface method declarations...
++    NS_DECL_ISUPPORTS
++    NS_IMETHOD DebugDump(int16_t depth);
++public:
++
++    static nsresult
++    GetNewOrUsed(XPCCallContext& ccx,
++                 REFNSIID aIID,
++                 nsXPCWrappedJSClass** clazz);
++
++    REFNSIID GetIID() const {return mIID;}
++    XPCJSRuntime* GetRuntime() const {return mRuntime;}
++    nsIInterfaceInfo* GetInterfaceInfo() const {return mInfo;}
++    const char* GetInterfaceName();
++
++    static JSBool IsWrappedJS(nsISupports* aPtr);
++
++    NS_IMETHOD DelegatedQueryInterface(nsXPCWrappedJS* self, REFNSIID aIID,
++                                       void** aInstancePtr);
++
++    JSObject* GetRootJSObject(XPCCallContext& ccx, JSObject* aJSObj);
++
++    NS_IMETHOD CallMethod(nsXPCWrappedJS* wrapper, uint16 methodIndex,
++                          const XPTMethodDescriptor* info,
++                          nsXPTCMiniVariant* params);
++
++    JSObject*  CallQueryInterfaceOnJSObject(XPCCallContext& ccx,
++                                            JSObject* jsobj, REFNSIID aIID);
++
++    static nsresult BuildPropertyEnumerator(XPCCallContext& ccx,
++                                            JSObject* aJSObj,
++                                            nsISimpleEnumerator** aEnumerate);
++
++    static nsresult GetNamedPropertyAsVariant(XPCCallContext& ccx,
++                                              JSObject* aJSObj,
++                                              JS::Value aName,
++                                              nsIVariant** aResult);
++
++    virtual ~nsXPCWrappedJSClass();
++
++    static nsresult CheckForException(XPCCallContext & ccx,
++                                      const char * aPropertyName,
++                                      const char * anInterfaceName,
++                                      bool aForceReport);
++private:
++    nsXPCWrappedJSClass();   // not implemented
++    nsXPCWrappedJSClass(XPCCallContext& ccx, REFNSIID aIID,
++                        nsIInterfaceInfo* aInfo);
++
++    JSObject*  NewOutObject(JSContext* cx, JSObject* scope);
++
++    JSBool IsReflectable(uint16 i) const
++        {return (JSBool)(mDescriptors[i/32] & (1 << (i%32)));}
++    void SetReflectable(uint16 i, JSBool b)
++        {if (b) mDescriptors[i/32] |= (1 << (i%32));
++         else mDescriptors[i/32] &= ~(1 << (i%32));}
++
++    JSBool GetArraySizeFromParam(JSContext* cx,
++                                 const XPTMethodDescriptor* method,
++                                 const nsXPTParamInfo& param,
++                                 uint16 methodIndex,
++                                 uint8 paramIndex,
++                                 nsXPTCMiniVariant* params,
++                                 JSUint32* result);
++
++    JSBool GetInterfaceTypeFromParam(JSContext* cx,
++                                     const XPTMethodDescriptor* method,
++                                     const nsXPTParamInfo& param,
++                                     uint16 methodIndex,
++                                     const nsXPTType& type,
++                                     nsXPTCMiniVariant* params,
++                                     nsID* result);
++
++    void CleanupPointerArray(const nsXPTType& datum_type,
++                             JSUint32 array_count,
++                             void** arrayp);
++
++    void CleanupPointerTypeObject(const nsXPTType& type,
++                                  void** pp);
++
++private:
++    XPCJSRuntime* mRuntime;
++    nsIInterfaceInfo* mInfo;
++    char* mName;
++    nsIID mIID;
++    uint32* mDescriptors;
++};
++
++#endif // nsXPCWrappedJSClass_h
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -158,16 +158,17 @@
+ #include "XPCNativeInterface.h"
+ #include "XPCNativeSetKey.h"
+ #include "XPCNativeScriptableFlags.h"
+ #include "XPCNativeScriptableShared.h"
+ #include "XPCNativeScriptableInfo.h"
+ #include "XPCNativeScriptableCreateInfo.h"
+ #include "XPCWrappedNativeProto.h"
+ #include "XPCWrappedNative.h"
++#include "nsXPCWrappedJSClass.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -455,134 +456,16 @@ enum WrapperType {
+     SOW             = 1 << 5
+ };
+ 
+ }
+ 
+ /***************************************************************************
+ ****************************************************************************
+ *
+-* Core classes for wrapped JSObject for use from native code...
+-*
+-****************************************************************************
+-***************************************************************************/
+-
+-// this interfaces exists so we can refcount nsXPCWrappedJSClass
+-// {2453EBA0-A9B8-11d2-BA64-00805F8A5DD7}
+-#define NS_IXPCONNECT_WRAPPED_JS_CLASS_IID                                    \
+-{ 0x2453eba0, 0xa9b8, 0x11d2,                                                 \
+-  { 0xba, 0x64, 0x0, 0x80, 0x5f, 0x8a, 0x5d, 0xd7 } }
+-
+-class nsIXPCWrappedJSClass : public nsISupports
+-{
+-public:
+-    NS_DECLARE_STATIC_IID_ACCESSOR(NS_IXPCONNECT_WRAPPED_JS_CLASS_IID)
+-    NS_IMETHOD DebugDump(int16_t depth) = 0;
+-};
+-
+-NS_DEFINE_STATIC_IID_ACCESSOR(nsIXPCWrappedJSClass,
+-                              NS_IXPCONNECT_WRAPPED_JS_CLASS_IID)
+-
+-/*************************/
+-// nsXPCWrappedJSClass represents the sharable factored out common code and
+-// data for nsXPCWrappedJS instances for the same interface type.
+-
+-class nsXPCWrappedJSClass : public nsIXPCWrappedJSClass
+-{
+-    // all the interface method declarations...
+-    NS_DECL_ISUPPORTS
+-    NS_IMETHOD DebugDump(int16_t depth);
+-public:
+-
+-    static nsresult
+-    GetNewOrUsed(XPCCallContext& ccx,
+-                 REFNSIID aIID,
+-                 nsXPCWrappedJSClass** clazz);
+-
+-    REFNSIID GetIID() const {return mIID;}
+-    XPCJSRuntime* GetRuntime() const {return mRuntime;}
+-    nsIInterfaceInfo* GetInterfaceInfo() const {return mInfo;}
+-    const char* GetInterfaceName();
+-
+-    static JSBool IsWrappedJS(nsISupports* aPtr);
+-
+-    NS_IMETHOD DelegatedQueryInterface(nsXPCWrappedJS* self, REFNSIID aIID,
+-                                       void** aInstancePtr);
+-
+-    JSObject* GetRootJSObject(XPCCallContext& ccx, JSObject* aJSObj);
+-
+-    NS_IMETHOD CallMethod(nsXPCWrappedJS* wrapper, uint16 methodIndex,
+-                          const XPTMethodDescriptor* info,
+-                          nsXPTCMiniVariant* params);
+-
+-    JSObject*  CallQueryInterfaceOnJSObject(XPCCallContext& ccx,
+-                                            JSObject* jsobj, REFNSIID aIID);
+-
+-    static nsresult BuildPropertyEnumerator(XPCCallContext& ccx,
+-                                            JSObject* aJSObj,
+-                                            nsISimpleEnumerator** aEnumerate);
+-
+-    static nsresult GetNamedPropertyAsVariant(XPCCallContext& ccx,
+-                                              JSObject* aJSObj,
+-                                              jsval aName,
+-                                              nsIVariant** aResult);
+-
+-    virtual ~nsXPCWrappedJSClass();
+-
+-    static nsresult CheckForException(XPCCallContext & ccx,
+-                                      const char * aPropertyName,
+-                                      const char * anInterfaceName,
+-                                      bool aForceReport);
+-private:
+-    nsXPCWrappedJSClass();   // not implemented
+-    nsXPCWrappedJSClass(XPCCallContext& ccx, REFNSIID aIID,
+-                        nsIInterfaceInfo* aInfo);
+-
+-    JSObject*  NewOutObject(JSContext* cx, JSObject* scope);
+-
+-    JSBool IsReflectable(uint16 i) const
+-        {return (JSBool)(mDescriptors[i/32] & (1 << (i%32)));}
+-    void SetReflectable(uint16 i, JSBool b)
+-        {if (b) mDescriptors[i/32] |= (1 << (i%32));
+-         else mDescriptors[i/32] &= ~(1 << (i%32));}
+-
+-    JSBool GetArraySizeFromParam(JSContext* cx,
+-                                 const XPTMethodDescriptor* method,
+-                                 const nsXPTParamInfo& param,
+-                                 uint16 methodIndex,
+-                                 uint8 paramIndex,
+-                                 nsXPTCMiniVariant* params,
+-                                 JSUint32* result);
+-
+-    JSBool GetInterfaceTypeFromParam(JSContext* cx,
+-                                     const XPTMethodDescriptor* method,
+-                                     const nsXPTParamInfo& param,
+-                                     uint16 methodIndex,
+-                                     const nsXPTType& type,
+-                                     nsXPTCMiniVariant* params,
+-                                     nsID* result);
+-
+-    void CleanupPointerArray(const nsXPTType& datum_type,
+-                             JSUint32 array_count,
+-                             void** arrayp);
+-
+-    void CleanupPointerTypeObject(const nsXPTType& type,
+-                                  void** pp);
+-
+-private:
+-    XPCJSRuntime* mRuntime;
+-    nsIInterfaceInfo* mInfo;
+-    char* mName;
+-    nsIID mIID;
+-    uint32* mDescriptors;
+-};
+-
+-/***************************************************************************
+-****************************************************************************
+-*
+ * All manner of utility classes follow...
+ *
+ ****************************************************************************
+ ***************************************************************************/
+ 
+ class xpcProperty : public nsIProperty
+ {
+ public:

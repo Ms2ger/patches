@@ -1,0 +1,132 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCThrower.cpp b/js/xpconnect/src/XPCThrower.cpp
+--- a/js/xpconnect/src/XPCThrower.cpp
++++ b/js/xpconnect/src/XPCThrower.cpp
+@@ -35,16 +35,18 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* Code for throwing errors into JavaScript. */
+ 
++#include "XPCThrower.h"
++
+ #include "xpcprivate.h"
+ #include "XPCWrapper.h"
+ 
+ JSBool XPCThrower::sVerbose = true;
+ 
+ // static
+ void
+ XPCThrower::Throw(nsresult rv, JSContext* cx)
+diff --git a/js/xpconnect/src/XPCThrower.h b/js/xpconnect/src/XPCThrower.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCThrower.h
+@@ -0,0 +1,36 @@
++#ifndef XPCThrower_h
++#define XPCThrower_h
++
++#include "nscore.h"
++
++#include "jspubtd.h"
++
++class nsIException;
++class XPCCallContext;
++
++// code for throwing exceptions into JS
++
++class XPCThrower
++{
++public:
++    static void Throw(nsresult rv, JSContext* cx);
++    static void Throw(nsresult rv, XPCCallContext& ccx);
++    static void ThrowBadResult(nsresult rv, nsresult result, XPCCallContext& ccx);
++    static void ThrowBadParam(nsresult rv, uintN paramNum, XPCCallContext& ccx);
++    static JSBool SetVerbosity(JSBool state)
++        {JSBool old = sVerbose; sVerbose = state; return old;}
++
++    static void BuildAndThrowException(JSContext* cx, nsresult rv, const char* sz);
++    static JSBool CheckForPendingException(nsresult result, JSContext *cx);
++
++private:
++    static void Verbosify(XPCCallContext& ccx,
++                          char** psz, bool own);
++
++    static JSBool ThrowExceptionObject(JSContext* cx, nsIException* e);
++
++private:
++    static JSBool sVerbose;
++};
++
++#endif // XPCThrower_h
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -162,16 +162,17 @@
+ #include "XPCNativeScriptableInfo.h"
+ #include "XPCNativeScriptableCreateInfo.h"
+ #include "XPCWrappedNativeProto.h"
+ #include "XPCWrappedNative.h"
+ #include "nsXPCWrappedJSClass.h"
+ #include "xpcObjectHelper.h"
+ #include "XPCConvert.h"
+ #include "XPCStringConvert.h"
++#include "XPCThrower.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -464,45 +465,16 @@ enum WrapperType {
+ /***************************************************************************
+ ****************************************************************************
+ *
+ * All manner of utility classes follow...
+ *
+ ****************************************************************************
+ ***************************************************************************/
+ 
+-/***************************************************************************/
+-// code for throwing exceptions into JS
+-
+-class XPCThrower
+-{
+-public:
+-    static void Throw(nsresult rv, JSContext* cx);
+-    static void Throw(nsresult rv, XPCCallContext& ccx);
+-    static void ThrowBadResult(nsresult rv, nsresult result, XPCCallContext& ccx);
+-    static void ThrowBadParam(nsresult rv, uintN paramNum, XPCCallContext& ccx);
+-    static JSBool SetVerbosity(JSBool state)
+-        {JSBool old = sVerbose; sVerbose = state; return old;}
+-
+-    static void BuildAndThrowException(JSContext* cx, nsresult rv, const char* sz);
+-    static JSBool CheckForPendingException(nsresult result, JSContext *cx);
+-
+-private:
+-    static void Verbosify(XPCCallContext& ccx,
+-                          char** psz, bool own);
+-
+-    static JSBool ThrowExceptionObject(JSContext* cx, nsIException* e);
+-
+-private:
+-    static JSBool sVerbose;
+-};
+-
+-
+-/***************************************************************************/
+-
+ class XPCJSStack
+ {
+ public:
+     static nsresult
+     CreateStack(JSContext* cx, nsIStackFrame** stack);
+ 
+     static nsresult
+     CreateStackFrameLocation(uint32_t aLanguage,

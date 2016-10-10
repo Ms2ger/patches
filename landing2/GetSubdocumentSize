@@ -1,0 +1,295 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsFrameLoader.cpp b/content/base/src/nsFrameLoader.cpp
+--- a/content/base/src/nsFrameLoader.cpp
++++ b/content/base/src/nsFrameLoader.cpp
+@@ -436,17 +436,17 @@ nsFrameLoader::ReallyStartLoadingInterna
+       TryRemoteBrowser();
+ 
+       if (!mRemoteBrowser) {
+         NS_WARNING("Couldn't create child process for iframe.");
+         return NS_ERROR_FAILURE;
+       }
+     }
+ 
+-    if (mRemoteBrowserShown || ShowRemoteFrame(nsIntSize(0, 0))) {
++    if (mRemoteBrowserShown || ShowRemoteFrame(LayoutDeviceIntSize(0, 0))) {
+       // FIXME get error codes from child
+       mRemoteBrowser->LoadURL(mURIToLoad);
+     } else {
+       NS_WARNING("[nsFrameLoader] ReallyStartLoadingInternal tried but couldn't show remote browser.\n");
+     }
+ 
+     return NS_OK;
+   }
+@@ -820,17 +820,17 @@ nsFrameLoader::Show(int32_t marginWidth,
+       if (rootScrollFrame) {
+         presShell->FrameNeedsReflow(rootScrollFrame, nsIPresShell::eResize,
+                                     NS_FRAME_IS_DIRTY);
+       }
+       return true;
+     }
+   }
+ 
+-  nsIntSize size = frame->GetSubdocumentSize();
++  LayoutDeviceIntSize size = frame->GetSubdocumentSize();
+   if (mRemoteFrame) {
+     return ShowRemoteFrame(size, frame);
+   }
+ 
+   nsView* view = frame->EnsureInnerView();
+   if (!view)
+     return false;
+ 
+@@ -912,17 +912,17 @@ nsFrameLoader::MarginsChanged(uint32_t a
+   // Trigger a restyle if there's a prescontext
+   nsRefPtr<nsPresContext> presContext;
+   mDocShell->GetPresContext(getter_AddRefs(presContext));
+   if (presContext)
+     presContext->RebuildAllStyleData(nsChangeHint(0));
+ }
+ 
+ bool
+-nsFrameLoader::ShowRemoteFrame(const nsIntSize& size,
++nsFrameLoader::ShowRemoteFrame(const LayoutDeviceIntSize& size,
+                                nsSubDocumentFrame *aFrame)
+ {
+   NS_ASSERTION(mRemoteFrame, "ShowRemote only makes sense on remote frames.");
+ 
+   if (!mRemoteBrowser) {
+     TryRemoteBrowser();
+ 
+     if (!mRemoteBrowser) {
+@@ -942,34 +942,35 @@ nsFrameLoader::ShowRemoteFrame(const nsI
+ 
+     nsRefPtr<layers::LayerManager> layerManager =
+       nsContentUtils::LayerManagerForDocument(mOwnerContent->GetCurrentDoc());
+     if (!layerManager) {
+       // This is just not going to work.
+       return false;
+     }
+ 
+-    mRemoteBrowser->Show(size);
++    mRemoteBrowser->Show(LayoutDeviceIntSize::ToUntyped(size));
+     mRemoteBrowserShown = true;
+ 
+     EnsureMessageManager();
+ 
+     nsCOMPtr<nsIObserverService> os = services::GetObserverService();
+     if (OwnerIsBrowserOrAppFrame() && os && !mRemoteBrowserInitialized) {
+       os->NotifyObservers(NS_ISUPPORTS_CAST(nsIFrameLoader*, this),
+                           "remote-browser-frame-shown", nullptr);
+       mRemoteBrowserInitialized = true;
+     }
+   } else {
+     nsRect dimensions;
+     NS_ENSURE_SUCCESS(GetWindowDimensions(dimensions), false);
+ 
+     // Don't show remote iframe if we are waiting for the completion of reflow.
+     if (!aFrame || !(aFrame->GetStateBits() & NS_FRAME_FIRST_REFLOW)) {
+-      mRemoteBrowser->UpdateDimensions(dimensions, size);
++      mRemoteBrowser->UpdateDimensions(dimensions,
++                                       LayoutDeviceIntSize::ToUntyped(size));
+     }
+   }
+ 
+   return true;
+ }
+ 
+ void
+ nsFrameLoader::Hide()
+@@ -1835,20 +1836,21 @@ nsFrameLoader::GetWindowDimensions(nsRec
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsFrameLoader::UpdatePositionAndSize(nsSubDocumentFrame *aIFrame)
+ {
+   if (mRemoteFrame) {
+     if (mRemoteBrowser) {
+-      nsIntSize size = aIFrame->GetSubdocumentSize();
++      LayoutDeviceIntSize size = aIFrame->GetSubdocumentSize();
+       nsRect dimensions;
+       NS_ENSURE_SUCCESS(GetWindowDimensions(dimensions), NS_ERROR_FAILURE);
+-      mRemoteBrowser->UpdateDimensions(dimensions, size);
++      mRemoteBrowser->UpdateDimensions(dimensions,
++        LayoutDeviceIntSize::ToUntyped(size));
+     }
+     return NS_OK;
+   }
+   return UpdateBaseWindowPositionAndSize(aIFrame);
+ }
+ 
+ nsresult
+ nsFrameLoader::UpdateBaseWindowPositionAndSize(nsSubDocumentFrame *aIFrame)
+@@ -1866,17 +1868,17 @@ nsFrameLoader::UpdateBaseWindowPositionA
+ 
+     baseWindow->GetPositionAndSize(&x, &y, nullptr, nullptr);
+ 
+     if (!weakFrame.IsAlive()) {
+       // GetPositionAndSize() killed us
+       return NS_OK;
+     }
+ 
+-    nsIntSize size = aIFrame->GetSubdocumentSize();
++    LayoutDeviceIntSize size = aIFrame->GetSubdocumentSize();
+ 
+     baseWindow->SetPositionAndSize(x, y, size.width, size.height, false);
+   }
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+@@ -2447,17 +2449,17 @@ nsFrameLoader::GetOwnerElement(nsIDOMEle
+ void
+ nsFrameLoader::SetRemoteBrowser(nsITabParent* aTabParent)
+ {
+   MOZ_ASSERT(!mRemoteBrowser);
+   MOZ_ASSERT(!mCurrentRemoteFrame);
+   mRemoteFrame = true;
+   mRemoteBrowser = static_cast<TabParent*>(aTabParent);
+ 
+-  ShowRemoteFrame(nsIntSize(0, 0));
++  ShowRemoteFrame(LayoutDeviceIntSize(0, 0));
+ }
+ 
+ void
+ nsFrameLoader::SetDetachedSubdocView(nsView* aDetachedViews,
+                                      nsIDocument* aContainerDoc)
+ {
+   mDetachedSubdocViews = aDetachedViews;
+   mContainerDocWhileDetached = aContainerDoc;
+diff --git a/content/base/src/nsFrameLoader.h b/content/base/src/nsFrameLoader.h
+--- a/content/base/src/nsFrameLoader.h
++++ b/content/base/src/nsFrameLoader.h
+@@ -369,17 +369,17 @@ private:
+   nsresult CheckURILoad(nsIURI* aURI);
+   void FireErrorEvent();
+   nsresult ReallyStartLoadingInternal();
+ 
+   // Return true if remote browser created; nothing else to do
+   bool TryRemoteBrowser();
+ 
+   // Tell the remote browser that it's now "virtually visible"
+-  bool ShowRemoteFrame(const nsIntSize& size,
++  bool ShowRemoteFrame(const mozilla::LayoutDeviceIntSize& size,
+                        nsSubDocumentFrame *aFrame = nullptr);
+ 
+   bool AddTreeItemToTreeOwner(nsIDocShellTreeItem* aItem,
+                               nsIDocShellTreeOwner* aOwner,
+                               int32_t aParentType,
+                               nsIDocShellTreeNode* aParentNode);
+ 
+   nsIAtom* TypeAttrName() const {
+diff --git a/layout/base/Units.h b/layout/base/Units.h
+--- a/layout/base/Units.h
++++ b/layout/base/Units.h
+@@ -162,16 +162,27 @@ struct LayoutDevicePixel {
+ 
+   static LayoutDeviceIntPoint FromAppUnitsToNearest(const nsPoint& aPoint, nscoord aAppUnitsPerDevPixel) {
+     return FromUntyped(aPoint.ToNearestPixels(aAppUnitsPerDevPixel));
+   }
+ 
+   static LayoutDeviceIntRect FromAppUnitsToNearest(const nsRect& aRect, nscoord aAppUnitsPerDevPixel) {
+     return FromUntyped(aRect.ToNearestPixels(aAppUnitsPerDevPixel));
+   }
++
++  static nsIntSize ToUntyped(const LayoutDeviceIntSize& aSize)
++  {
++    return nsIntSize(aSize.width, aSize.height);
++  }
++
++  static LayoutDeviceIntSize FromAppUnits(const nsSize& aSize, int32_t aAppUnitsPerDevPixel)
++  {
++    return LayoutDeviceIntSize(NSAppUnitsToIntPixels(aSize.width, float(aAppUnitsPerDevPixel)),
++                               NSAppUnitsToIntPixels(aSize.height, float(aAppUnitsPerDevPixel)));
++  }
+ };
+ 
+ /*
+  * The pixels that layout rasterizes and delivers to the graphics code.
+  * These are generally referred to as "device pixels" in layout code. Layer
+  * pixels are affected by:
+  * 1) the "display resolution" (see nsIPresShell::SetResolution)
+  * 2) the "full zoom" (see nsPresContext::SetFullZoom)
+diff --git a/layout/generic/nsSubDocumentFrame.cpp b/layout/generic/nsSubDocumentFrame.cpp
+--- a/layout/generic/nsSubDocumentFrame.cpp
++++ b/layout/generic/nsSubDocumentFrame.cpp
+@@ -198,47 +198,45 @@ nsIFrame*
+ nsSubDocumentFrame::GetSubdocumentRootFrame()
+ {
+   if (!mInnerView)
+     return nullptr;
+   nsView* subdocView = mInnerView->GetFirstChild();
+   return subdocView ? subdocView->GetFrame() : nullptr;
+ }
+ 
+-nsIntSize
++LayoutDeviceIntSize
+ nsSubDocumentFrame::GetSubdocumentSize()
+ {
+   if (GetStateBits() & NS_FRAME_FIRST_REFLOW) {
+     nsRefPtr<nsFrameLoader> frameloader = FrameLoader();
+     if (frameloader) {
+       nsCOMPtr<nsIDocument> oldContainerDoc;
+       nsView* detachedViews =
+         frameloader->GetDetachedSubdocView(getter_AddRefs(oldContainerDoc));
+       if (detachedViews) {
+-        nsSize size = detachedViews->GetBounds().Size();
+-        nsPresContext* presContext = detachedViews->GetFrame()->PresContext();
+-        return nsIntSize(presContext->AppUnitsToDevPixels(size.width),
+-                         presContext->AppUnitsToDevPixels(size.height));
++        return LayoutDeviceIntSize::FromAppUnits(
++          detachedViews->GetBounds().Size(),
++          detachedViews->GetFrame()->PresContext()->AppUnitsPerDevPixel());
+       }
+     }
+     // Pick some default size for now.  Using 10x10 because that's what the
+     // code used to do.
+-    return nsIntSize(10, 10);
++    return LayoutDeviceIntSize(10, 10);
+   } else {
+     nsSize docSizeAppUnits;
+-    nsPresContext* presContext = PresContext();
+     nsCOMPtr<nsIDOMHTMLFrameElement> frameElem =
+       do_QueryInterface(GetContent());
+     if (frameElem) {
+       docSizeAppUnits = GetSize();
+     } else {
+       docSizeAppUnits = GetContentRect().Size();
+     }
+-    return nsIntSize(presContext->AppUnitsToDevPixels(docSizeAppUnits.width),
+-                     presContext->AppUnitsToDevPixels(docSizeAppUnits.height));
++    return LayoutDeviceIntSize::FromAppUnits(
++      docSizeAppUnits, PresContext()->AppUnitsPerDevPixel());
+   }
+ }
+ 
+ bool
+ nsSubDocumentFrame::PassPointerEventsToChildren()
+ {
+   if (StyleVisibility()->mPointerEvents != NS_STYLE_POINTER_EVENTS_NONE) {
+     return true;
+diff --git a/layout/generic/nsSubDocumentFrame.h b/layout/generic/nsSubDocumentFrame.h
+--- a/layout/generic/nsSubDocumentFrame.h
++++ b/layout/generic/nsSubDocumentFrame.h
+@@ -84,17 +84,17 @@ public:
+   virtual mozilla::a11y::AccType AccessibleType() MOZ_OVERRIDE;
+ #endif
+ 
+   nsresult GetDocShell(nsIDocShell **aDocShell);
+   nsresult BeginSwapDocShells(nsIFrame* aOther);
+   void EndSwapDocShells(nsIFrame* aOther);
+   nsView* EnsureInnerView();
+   nsIFrame* GetSubdocumentRootFrame();
+-  nsIntSize GetSubdocumentSize();
++  mozilla::LayoutDeviceIntSize GetSubdocumentSize();
+ 
+   // nsIReflowCallback
+   virtual bool ReflowFinished() MOZ_OVERRIDE;
+   virtual void ReflowCallbackCanceled() MOZ_OVERRIDE;
+ 
+   bool ShouldClipSubdocument()
+   {
+     nsFrameLoader* frameLoader = FrameLoader();

@@ -1,0 +1,98 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -4491,66 +4491,52 @@ nsHTMLEditor::IsLastEditableChild( nsIDO
+   *aOutIsLast = (lastChild.get() == aNode);
+   return res;
+ }
+ 
+ 
+ nsresult 
+ nsHTMLEditor::GetFirstEditableChild( nsIDOMNode *aNode, nsCOMPtr<nsIDOMNode> *aOutFirstChild)
+ {
+-  // check parms
+-  NS_ENSURE_TRUE(aOutFirstChild && aNode, NS_ERROR_NULL_POINTER);
+-  
+-  // init out parms
++  NS_ENSURE_TRUE(aOutFirstChild, NS_ERROR_NULL_POINTER);
++  // NOTE: GetLastEditableChild returns aNode
+   *aOutFirstChild = nsnull;
+-  
+-  // find first editable child
+-  nsCOMPtr<nsIDOMNode> child;
+-  nsresult res = aNode->GetFirstChild(getter_AddRefs(child));
+-  NS_ENSURE_SUCCESS(res, res);
+-  
+-  while (child && !IsEditable(child))
+-  {
+-    nsCOMPtr<nsIDOMNode> tmp;
+-    res = child->GetNextSibling(getter_AddRefs(tmp));
+-    NS_ENSURE_SUCCESS(res, res);
+-    NS_ENSURE_TRUE(tmp, NS_ERROR_FAILURE);
+-    child = tmp;
++
++  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
++  NS_ENSURE_TRUE(node, NS_ERROR_NULL_POINTER);
++
++  nsIContent* child = node->GetFirstChild();
++  while (child && !IsEditable(child)) {
++    child = child->GetNextSibling();
++    NS_ENSURE_TRUE(child, NS_ERROR_FAILURE);
+   }
+-  
+-  *aOutFirstChild = child;
+-  return res;
++
++  *aOutFirstChild = do_QueryInterface(child);
++  return NS_OK;
+ }
+ 
+ 
+ nsresult 
+ nsHTMLEditor::GetLastEditableChild( nsIDOMNode *aNode, nsCOMPtr<nsIDOMNode> *aOutLastChild)
+ {
+-  // check parms
+-  NS_ENSURE_TRUE(aOutLastChild && aNode, NS_ERROR_NULL_POINTER);
+-  
+-  // init out parms
++  NS_ENSURE_TRUE(aOutLastChild, NS_ERROR_NULL_POINTER);
++  // NOTE: GetFirstEditableChild returns null
+   *aOutLastChild = aNode;
+-  
+-  // find last editable child
+-  nsCOMPtr<nsIDOMNode> child;
+-  nsresult res = aNode->GetLastChild(getter_AddRefs(child));
+-  NS_ENSURE_SUCCESS(res, res);
+-  
+-  while (child && !IsEditable(child))
+-  {
+-    nsCOMPtr<nsIDOMNode> tmp;
+-    res = child->GetPreviousSibling(getter_AddRefs(tmp));
+-    NS_ENSURE_SUCCESS(res, res);
+-    NS_ENSURE_TRUE(tmp, NS_ERROR_FAILURE);
+-    child = tmp;
++
++  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
++  NS_ENSURE_TRUE(node, NS_ERROR_NULL_POINTER);
++
++  nsIContent* child = node->GetLastChild();
++  while (child && !IsEditable(child)) {
++    child = child->GetPreviousSibling();
++    NS_ENSURE_TRUE(child, NS_ERROR_FAILURE);
+   }
+-  
+-  *aOutLastChild = child;
+-  return res;
++
++  *aOutLastChild = do_QueryInterface(child);
++  return NS_OK;
+ }
+ 
+ nsresult 
+ nsHTMLEditor::GetFirstEditableLeaf( nsIDOMNode *aNode, nsCOMPtr<nsIDOMNode> *aOutFirstLeaf)
+ {
+   // check parms
+   NS_ENSURE_TRUE(aOutFirstLeaf && aNode, NS_ERROR_NULL_POINTER);
+   

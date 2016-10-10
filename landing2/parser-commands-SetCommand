@@ -1,0 +1,209 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/document/src/nsHTMLDocument.cpp b/content/html/document/src/nsHTMLDocument.cpp
+--- a/content/html/document/src/nsHTMLDocument.cpp
++++ b/content/html/document/src/nsHTMLDocument.cpp
+@@ -812,17 +812,17 @@ nsHTMLDocument::StartDocumentLoad(eParse
+   nsCOMPtr<nsIStreamListener> listener = mParser->GetStreamListener();
+   listener.forget(aDocListener);
+ 
+ #ifdef DEBUG_charset
+   printf(" charset = %s source %d\n",
+         charset.get(), charsetSource);
+ #endif
+   mParser->SetDocumentCharset(parserCharset, parserCharsetSource);
+-  mParser->SetCommand(NULL);
++  mParser->SetCommand(aCommand);
+ 
+   if (!IsHTML()) {
+     MOZ_ASSERT(!loadAsHtml5);
+     nsCOMPtr<nsIXMLContentSink> xmlsink;
+     NS_NewXMLContentSink(getter_AddRefs(xmlsink), this, uri,
+                          docShell, aChannel);
+     mParser->SetContentSink(xmlsink);
+   } else {
+diff --git a/content/xml/document/src/nsXMLDocument.cpp b/content/xml/document/src/nsXMLDocument.cpp
+--- a/content/xml/document/src/nsXMLDocument.cpp
++++ b/content/xml/document/src/nsXMLDocument.cpp
+@@ -536,17 +536,17 @@ nsXMLDocument::StartDocumentLoad(eParser
+   rv = CallQueryInterface(mParser, aDocListener);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   NS_ASSERTION(mChannel, "How can we not have a channel here?");
+   mChannelIsPending = true;
+   
+   SetDocumentCharacterSet(charset);
+   mParser->SetDocumentCharset(charset, charsetSource);
+-  mParser->SetCommand(NULL);
++  mParser->SetCommand(aCommand);
+   mParser->SetContentSink(sink);
+   mParser->Parse(aUrl, nsnull, (void *)this);
+ 
+   return NS_OK;
+ }
+ 
+ void
+ nsXMLDocument::EndLoad()
+diff --git a/content/xslt/src/xslt/txMozillaStylesheetCompiler.cpp b/content/xslt/src/xslt/txMozillaStylesheetCompiler.cpp
+--- a/content/xslt/src/xslt/txMozillaStylesheetCompiler.cpp
++++ b/content/xslt/src/xslt/txMozillaStylesheetCompiler.cpp
+@@ -469,29 +469,27 @@ txCompileObserver::startLoad(nsIURI* aUr
+             httpChannel->SetReferrer(referrerURI);
+         }
+     }
+ 
+     nsCOMPtr<nsIParser> parser = do_CreateInstance(kCParserCID, &rv);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     nsRefPtr<txStylesheetSink> sink = new txStylesheetSink(aCompiler, parser);
+-    NS_ENSURE_TRUE(sink, NS_ERROR_OUT_OF_MEMORY);
+ 
+     channel->SetNotificationCallbacks(sink);
+ 
+-    parser->SetCommand(kLoadAsData);
++    parser->SetCommand(eLoadAsData);
+     parser->SetContentSink(sink);
+     parser->Parse(aUri);
+ 
+     // Always install in case of redirects
+     nsCOMPtr<nsIStreamListener> listener =
+         new nsCORSListenerProxy(sink, aReferrerPrincipal, channel,
+                                 false, &rv);
+-    NS_ENSURE_TRUE(listener, NS_ERROR_OUT_OF_MEMORY);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     return channel->AsyncOpen(listener, parser);
+ }
+ 
+ nsresult
+ TX_LoadSheet(nsIURI* aUri, txMozillaXSLTProcessor* aProcessor,
+              nsILoadGroup* aLoadGroup, nsIPrincipal* aCallerPrincipal)
+diff --git a/parser/html/nsHtml5Parser.cpp b/parser/html/nsHtml5Parser.cpp
+--- a/parser/html/nsHtml5Parser.cpp
++++ b/parser/html/nsHtml5Parser.cpp
+@@ -120,29 +120,22 @@ nsHtml5Parser::GetContentSink()
+ 
+ NS_IMETHODIMP_(void)
+ nsHtml5Parser::GetCommand(nsCString& aCommand)
+ {
+   aCommand.Assign("view");
+ }
+ 
+ NS_IMETHODIMP_(void)
+-nsHtml5Parser::SetCommand(const char* aCommand)
+-{
+-  NS_ASSERTION(!strcmp(aCommand, "view") ||
+-               !strcmp(aCommand, "view-source") ||
+-               !strcmp(aCommand, "external-resource") ||
+-               !strcmp(aCommand, kLoadAsData),
+-               "Unsupported parser command");
+-}
+-
+-NS_IMETHODIMP_(void)
+ nsHtml5Parser::SetCommand(eParserCommands aParserCommand)
+ {
+-  NS_ASSERTION(aParserCommand == eViewNormal, 
++  NS_ASSERTION(aParserCommand == eViewNormal ||
++               aCommand == eViewSource ||
++               aCommand == eExternalResource ||
++               aCommand == eLoadAsData,
+                "Parser command was not eViewNormal.");
+ }
+ 
+ NS_IMETHODIMP_(void)
+ nsHtml5Parser::SetDocumentCharset(const nsACString& aCharset,
+                                   int32_t aCharsetSource)
+ {
+   NS_PRECONDITION(!mExecutor->HasStarted(),
+diff --git a/parser/html/nsHtml5Parser.h b/parser/html/nsHtml5Parser.h
+--- a/parser/html/nsHtml5Parser.h
++++ b/parser/html/nsHtml5Parser.h
+@@ -87,21 +87,16 @@ class nsHtml5Parser : public nsIParser,
+     /**
+      * Always returns "view" for backwards compat.
+      */
+     NS_IMETHOD_(void) GetCommand(nsCString& aCommand);
+ 
+     /**
+      * No-op for backwards compat.
+      */
+-    NS_IMETHOD_(void) SetCommand(const char* aCommand);
+-
+-    /**
+-     * No-op for backwards compat.
+-     */
+     NS_IMETHOD_(void) SetCommand(eParserCommands aParserCommand);
+ 
+     /**
+      *  Call this method once you've created a parser, and want to instruct it
+      *  about what charset to load
+      *
+      *  @param   aCharset the charset of a document
+      *  @param   aCharsetSource the source of the charset
+diff --git a/parser/htmlparser/public/nsIParser.h b/parser/htmlparser/public/nsIParser.h
+--- a/parser/htmlparser/public/nsIParser.h
++++ b/parser/htmlparser/public/nsIParser.h
+@@ -116,17 +116,16 @@ class nsIParser : public nsParserBase {
+ 	   *  about the command which caused the parser to be constructed. For example,
+      *  this allows us to select a DTD which can do, say, view-source.
+      *  
+      *  @update  gess 3/25/98
+      *  @param   aCommand -- ptrs to string that contains command
+      *  @return	 nada
+      */
+     NS_IMETHOD_(void) GetCommand(nsCString& aCommand)=0;
+-    NS_IMETHOD_(void) SetCommand(const char* aCommand)=0;
+     NS_IMETHOD_(void) SetCommand(eParserCommands aParserCommand)=0;
+ 
+     /**
+      *  Call this method once you've created a parser, and want to instruct it
+      *  about what charset to load
+      *  
+      *  @update  ftang 4/23/99
+      *  @param   aCharset- the charest of a document
+diff --git a/parser/htmlparser/src/nsParser.cpp b/parser/htmlparser/src/nsParser.cpp
+--- a/parser/htmlparser/src/nsParser.cpp
++++ b/parser/htmlparser/src/nsParser.cpp
+@@ -310,19 +310,19 @@ nsParser::GetCommand(nsCString& aCommand
+  *  this allows us to select a DTD which can do, say, view-source.
+  *
+  *  @param   aCommand the command string to set
+  */
+ NS_IMETHODIMP_(void)
+ nsParser::SetCommand(const char* aCommand)
+ {
+   mCommandStr.Assign(aCommand);
+-  if (mCommandStr.Equals("view-source")) {
++  if (aCommand == eViewSource) {
+     mCommand = eViewSource;
+-  } else if (mCommandStr.Equals("view-fragment")) {
++  } else if (aCommand == eViewFragment) {
+     mCommand = eViewFragment;
+   } else {
+     mCommand = eViewNormal;
+   }
+ }
+ 
+ /**
+  *  Call this method once you've created a parser, and want to instruct it
+diff --git a/parser/htmlparser/src/nsParser.h b/parser/htmlparser/src/nsParser.h
+--- a/parser/htmlparser/src/nsParser.h
++++ b/parser/htmlparser/src/nsParser.h
+@@ -117,17 +117,16 @@ class nsParser : public nsIParser,
+      *  about the command which caused the parser to be constructed. For example,
+      *  this allows us to select a DTD which can do, say, view-source.
+      *  
+      *  @update  gess 3/25/98
+      *  @param   aCommand -- ptrs to string that contains command
+      *  @return	 nada
+      */
+     NS_IMETHOD_(void) GetCommand(nsCString& aCommand);
+-    NS_IMETHOD_(void) SetCommand(const char* aCommand);
+     NS_IMETHOD_(void) SetCommand(eParserCommands aParserCommand);
+ 
+     /**
+      *  Call this method once you've created a parser, and want to instruct it
+      *  about what charset to load
+      *  
+      *  @update  ftang 4/23/99
+      *  @param   aCharset- the charset of a document

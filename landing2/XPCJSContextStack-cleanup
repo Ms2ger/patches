@@ -1,0 +1,920 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 715634 - Cleanup XPCJSContextStack; r=bholley
+
+diff --git a/js/xpconnect/src/XPCCallContext.cpp b/js/xpconnect/src/XPCCallContext.cpp
+--- a/js/xpconnect/src/XPCCallContext.cpp
++++ b/js/xpconnect/src/XPCCallContext.cpp
+@@ -35,18 +35,22 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* Call context. */
+ 
++#include "mozilla/Util.h"
++
+ #include "xpcprivate.h"
+ 
++using namespace mozilla;
++
+ XPCCallContext::XPCCallContext(XPCContext::LangType callerLanguage,
+                                JSContext* cx    /* = nsnull    */,
+                                JSObject* obj    /* = nsnull    */,
+                                JSObject* funobj /* = nsnull    */,
+                                jsid name        /* = JSID_VOID */,
+                                uintN argc       /* = NO_ARGS   */,
+                                jsval *argv      /* = nsnull    */,
+                                jsval *rval      /* = nsnull    */)
+@@ -102,42 +106,45 @@ XPCCallContext::Init(XPCContext::LangTyp
+         return;
+ 
+     mThreadData = XPCPerThreadData::GetData(mJSContext);
+ 
+     if (!mThreadData)
+         return;
+ 
+     XPCJSContextStack* stack = mThreadData->GetJSContextStack();
+-    JSContext* topJSContext;
+ 
+-    if (!stack || NS_FAILED(stack->Peek(&topJSContext))) {
++    if (!stack) {
+         // If we don't have a stack we're probably in shutdown.
+-        NS_ASSERTION(!stack, "Bad, Peek failed!");
+         mJSContext = nsnull;
+         return;
+     }
+ 
++    JSContext *topJSContext = stack->Peek();
++
+     if (!mJSContext) {
+         // This is slightly questionable. If called without an explicit
+         // JSContext (generally a call to a wrappedJS) we will use the JSContext
+         // on the top of the JSContext stack - if there is one - *before*
+         // falling back on the safe JSContext.
+         // This is good AND bad because it makes calls from JS -> native -> JS
+         // have JS stack 'continuity' for purposes of stack traces etc.
+         // Note: this *is* what the pre-XPCCallContext xpconnect did too.
+ 
+-        if (topJSContext)
++        if (topJSContext) {
+             mJSContext = topJSContext;
+-        else if (NS_FAILED(stack->GetSafeJSContext(&mJSContext)) || !mJSContext)
+-            return;
++        } else {
++            mJSContext = stack->GetSafeJSContext();
++            if (!mJSContext)
++                return;
++        }
+     }
+ 
+     if (topJSContext != mJSContext) {
+-        if (NS_FAILED(stack->Push(mJSContext))) {
++        if (!stack->Push(mJSContext)) {
+             NS_ERROR("bad!");
+             return;
+         }
+         mContextPopRequired = true;
+     }
+ 
+     // Get into the request as early as we can to avoid problems with scanning
+     // callcontexts on other threads from within the gc callbacks.
+@@ -341,23 +348,18 @@ XPCCallContext::~XPCCallContext()
+     // NB: Needs to happen before the context stack pop.
+     if (mJSContext && mCallerLanguage == NATIVE_CALLER)
+         JS_EndRequest(mJSContext);
+ 
+     if (mContextPopRequired) {
+         XPCJSContextStack* stack = mThreadData->GetJSContextStack();
+         NS_ASSERTION(stack, "bad!");
+         if (stack) {
+-#ifdef DEBUG
+-            JSContext* poppedCX;
+-            nsresult rv = stack->Pop(&poppedCX);
+-            NS_ASSERTION(NS_SUCCEEDED(rv) && poppedCX == mJSContext, "bad pop");
+-#else
+-            (void) stack->Pop(nsnull);
+-#endif
++            DebugOnly<JSContext*> poppedCX = stack->Pop();
++            NS_ASSERTION(poppedCX == mJSContext, "bad pop");
+         }
+     }
+ 
+     if (mJSContext) {
+         if (mDestroyJSContextInDestructor) {
+ #ifdef DEBUG_xpc_hacker
+             printf("!xpc - doing deferred destruction of JSContext @ %p\n",
+                    mJSContext);
+@@ -514,15 +516,12 @@ XPCCallContext::GetLanguage(uint16_t *aR
+ #ifdef DEBUG
+ // static
+ void
+ XPCLazyCallContext::AssertContextIsTopOfStack(JSContext* cx)
+ {
+     XPCPerThreadData* tls = XPCPerThreadData::GetData(cx);
+     XPCJSContextStack* stack = tls->GetJSContextStack();
+ 
+-    JSContext* topJSContext;
+-    nsresult rv = stack->Peek(&topJSContext);
+-    NS_ASSERTION(NS_SUCCEEDED(rv), "XPCJSContextStack::Peek failed");
+-
++    JSContext *topJSContext = stack->Peek();
+     NS_ASSERTION(cx == topJSContext, "wrong context on XPCJSContextStack!");
+ }
+ #endif
+diff --git a/js/xpconnect/src/XPCComponents.cpp b/js/xpconnect/src/XPCComponents.cpp
+--- a/js/xpconnect/src/XPCComponents.cpp
++++ b/js/xpconnect/src/XPCComponents.cpp
+@@ -37,16 +37,18 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* The "Components" xpcom objects for JavaScript. */
+ 
++#include "mozilla/unused.h"
++
+ #include "xpcprivate.h"
+ #include "nsReadableUtils.h"
+ #include "xpcIJSModuleLoader.h"
+ #include "nsIScriptObjectPrincipal.h"
+ #include "nsIDOMWindow.h"
+ #include "XPCJSWeakReference.h"
+ #include "XPCWrapper.h"
+ #include "jsproxy.h"
+@@ -54,16 +56,17 @@
+ #include "XrayWrapper.h"
+ #include "nsNullPrincipal.h"
+ #include "nsJSUtils.h"
+ #include "mozJSComponentLoader.h"
+ #include "nsContentUtils.h"
+ #include "jsgc.h"
+ #include "jsfriendapi.h"
+ 
++using namespace mozilla;
+ using namespace js;
+ /***************************************************************************/
+ // stuff used by all
+ 
+ static nsresult ThrowAndFail(uintN errNum, JSContext* cx, bool* retval)
+ {
+     XPCThrower::Throw(errNum, cx);
+     *retval = false;
+@@ -3439,17 +3442,17 @@ xpc_EvalInSandbox(JSContext *cx, JSObjec
+     }
+ 
+     if (jsVersion != JSVERSION_DEFAULT)
+         JS_SetVersion(sandcx->GetJSContext(), jsVersion);
+ 
+     XPCPerThreadData *data = XPCPerThreadData::GetData(cx);
+     XPCJSContextStack *stack = nsnull;
+     if (data && (stack = data->GetJSContextStack())) {
+-        if (NS_FAILED(stack->Push(sandcx->GetJSContext()))) {
++        if (!stack->Push(sandcx->GetJSContext())) {
+             JS_ReportError(cx,
+                            "Unable to initialize XPConnect with the sandbox context");
+             JSPRINCIPALS_DROP(cx, jsPrincipals);
+             return NS_ERROR_FAILURE;
+         }
+     }
+ 
+     if (!filename) {
+@@ -3462,19 +3465,18 @@ xpc_EvalInSandbox(JSContext *cx, JSObjec
+ 
+     {
+         JSAutoRequest req(sandcx->GetJSContext());
+         JSAutoEnterCompartment ac;
+         jsval v;
+         JSString *str = nsnull;
+ 
+         if (!ac.enter(sandcx->GetJSContext(), sandbox)) {
+-            if (stack) {
+-                stack->Pop(nsnull);
+-            }
++            if (stack)
++                unused << stack->Pop();
+             return NS_ERROR_FAILURE;
+         }
+ 
+         JSBool ok =
+             JS_EvaluateUCScriptForPrincipals(sandcx->GetJSContext(), sandbox,
+                                              jsPrincipals,
+                                              reinterpret_cast<const jschar *>
+                                                              (PromiseFlatString(source).get()),
+@@ -3540,19 +3542,18 @@ xpc_EvalInSandbox(JSContext *cx, JSObjec
+             }
+ 
+             if (NS_SUCCEEDED(rv)) {
+                 *rval = v;
+             }
+         }
+     }
+ 
+-    if (stack) {
+-        stack->Pop(nsnull);
+-    }
++    if (stack)
++        unused << stack->Pop();
+ 
+     JSPRINCIPALS_DROP(cx, jsPrincipals);
+ 
+     return rv;
+ }
+ 
+ /* JSObject import (in AUTF8String registryLocation,
+  *                  [optional] in JSObject targetObj);
+diff --git a/js/xpconnect/src/XPCQuickStubs.cpp b/js/xpconnect/src/XPCQuickStubs.cpp
+--- a/js/xpconnect/src/XPCQuickStubs.cpp
++++ b/js/xpconnect/src/XPCQuickStubs.cpp
+@@ -1120,19 +1120,17 @@ xpc_qsVariantToJsval(XPCLazyCallContext 
+ 
+ #ifdef DEBUG
+ void
+ xpc_qsAssertContextOK(JSContext *cx)
+ {
+     XPCPerThreadData *thread = XPCPerThreadData::GetData(cx);
+     XPCJSContextStack* stack = thread->GetJSContextStack();
+ 
+-    JSContext* topJSContext = nsnull;
+-    nsresult rv = stack->Peek(&topJSContext);
+-    NS_ASSERTION(NS_SUCCEEDED(rv), "XPCJSContextStack::Peek failed");
++    JSContext *topJSContext = stack->Peek();
+ 
+     // This is what we're actually trying to assert here.
+     NS_ASSERTION(cx == topJSContext, "wrong context on XPCJSContextStack!");
+ 
+     NS_ASSERTION(XPCPerThreadData::IsMainThread(cx),
+                  "XPConnect quick stub called on non-main thread");
+ }
+ #endif
+diff --git a/js/xpconnect/src/XPCThreadContext.cpp b/js/xpconnect/src/XPCThreadContext.cpp
+--- a/js/xpconnect/src/XPCThreadContext.cpp
++++ b/js/xpconnect/src/XPCThreadContext.cpp
+@@ -1,9 +1,9 @@
+-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
++/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+  * vim: set ts=8 sw=4 et tw=80:
+  *
+  * ***** BEGIN LICENSE BLOCK *****
+  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+  *
+  * The contents of this file are subject to the Mozilla Public License Version
+  * 1.1 (the "License"); you may not use this file except in compliance with
+  * the License. You may obtain a copy of the License at
+@@ -47,142 +47,118 @@
+ #include "nsDOMJSUtils.h"
+ #include "nsIScriptGlobalObject.h"
+ #include "nsNullPrincipal.h"
+ 
+ using namespace mozilla;
+ 
+ /***************************************************************************/
+ 
+-XPCJSContextStack::XPCJSContextStack()
+-    : mStack(),
+-      mSafeJSContext(nsnull),
+-      mOwnSafeJSContext(nsnull)
+-{
+-    // empty...
+-}
+-
+ XPCJSContextStack::~XPCJSContextStack()
+ {
+     if (mOwnSafeJSContext) {
+         JS_SetContextThread(mOwnSafeJSContext);
+         JS_DestroyContext(mOwnSafeJSContext);
+         mOwnSafeJSContext = nsnull;
+     }
+ }
+ 
+-/* readonly attribute int32_t count; */
+-NS_IMETHODIMP
+-XPCJSContextStack::GetCount(int32_t *aCount)
++JSContext*
++XPCJSContextStack::Pop()
+ {
+-    *aCount = mStack.Length();
+-    return NS_OK;
+-}
++    MOZ_ASSERT(!mStack.IsEmpty());
+ 
+-/* JSContext peek (); */
+-NS_IMETHODIMP
+-XPCJSContextStack::Peek(JSContext * *_retval)
+-{
+-    *_retval = mStack.IsEmpty() ? nsnull : mStack[mStack.Length() - 1].cx;
+-    return NS_OK;
+-}
++    uint32_t idx = mStack.Length() - 1; // The thing we're popping
+ 
+-/* JSContext pop (); */
+-NS_IMETHODIMP
+-XPCJSContextStack::Pop(JSContext * *_retval)
+-{
+-    NS_ASSERTION(!mStack.IsEmpty(), "ThreadJSContextStack underflow");
+-
+-    uint32_t idx = mStack.Length() - 1; // The thing we're popping
+-
+-    if (_retval)
+-        *_retval = mStack[idx].cx;
++    JSContext *cx = mStack[idx].cx;
+ 
+     mStack.RemoveElementAt(idx);
+-    if (idx > 0) {
+-        --idx; // Advance to new top of the stack
++    if (idx == 0)
++        return cx;
+ 
+-        XPCJSContextInfo & e = mStack[idx];
+-        NS_ASSERTION(!e.suspendDepth || e.cx, "Shouldn't have suspendDepth without a cx!");
+-        if (e.cx) {
+-            if (e.suspendDepth) {
+-                JS_ResumeRequest(e.cx, e.suspendDepth);
+-                e.suspendDepth = 0;
+-            }
++    --idx; // Advance to new top of the stack
+ 
+-            if (e.savedFrameChain) {
+-                // Pop() can be called outside any request for e.cx.
+-                JSAutoRequest ar(e.cx);
+-                JS_RestoreFrameChain(e.cx);
+-                e.savedFrameChain = false;
+-            }
++    XPCJSContextInfo &e = mStack[idx];
++    NS_ASSERTION(!e.suspendDepth || e.cx, "Shouldn't have suspendDepth without a cx!");
++    if (e.cx) {
++        if (e.suspendDepth) {
++            JS_ResumeRequest(e.cx, e.suspendDepth);
++            e.suspendDepth = 0;
++        }
++
++        if (e.savedFrameChain) {
++            // Pop() can be called outside any request for e.cx.
++            JSAutoRequest ar(e.cx);
++            JS_RestoreFrameChain(e.cx);
++            e.savedFrameChain = false;
+         }
+     }
+-    return NS_OK;
++    return cx;
+ }
+ 
+ static nsIPrincipal*
+ GetPrincipalFromCx(JSContext *cx)
+ {
+     nsIScriptContextPrincipal* scp = GetScriptContextPrincipalFromJSContext(cx);
+     if (scp) {
+         nsIScriptObjectPrincipal* globalData = scp->GetObjectPrincipal();
+         if (globalData)
+             return globalData->GetPrincipal();
+     }
+     return nsnull;
+ }
+ 
+-/* void push (in JSContext cx); */
+-NS_IMETHODIMP
+-XPCJSContextStack::Push(JSContext * cx)
++bool
++XPCJSContextStack::Push(JSContext *cx)
+ {
+-    JS_ASSERT_IF(cx, JS_GetContextThread(cx));
+-    if (mStack.Length() > 0) {
+-        XPCJSContextInfo & e = mStack[mStack.Length() - 1];
+-        if (e.cx) {
+-            if (e.cx == cx) {
+-                nsIScriptSecurityManager* ssm = XPCWrapper::GetSecurityManager();
+-                if (ssm) {
+-                    if (nsIPrincipal* globalObjectPrincipal = GetPrincipalFromCx(cx)) {
+-                        nsIPrincipal* subjectPrincipal = ssm->GetCxSubjectPrincipal(cx);
+-                        bool equals = false;
+-                        globalObjectPrincipal->Equals(subjectPrincipal, &equals);
+-                        if (equals) {
+-                            goto append;
+-                        }
++    MOZ_ASSERT_IF(cx, JS_GetContextThread(cx));
++    if (mStack.Length() == 0) {
++        mStack.AppendElement(cx);
++        return true;
++    }
++
++    XPCJSContextInfo &e = mStack[mStack.Length() - 1];
++    if (e.cx) {
++        if (e.cx == cx) {
++            nsIScriptSecurityManager* ssm = XPCWrapper::GetSecurityManager();
++            if (ssm) {
++                if (nsIPrincipal* globalObjectPrincipal = GetPrincipalFromCx(cx)) {
++                    nsIPrincipal* subjectPrincipal = ssm->GetCxSubjectPrincipal(cx);
++                    bool equals = false;
++                    globalObjectPrincipal->Equals(subjectPrincipal, &equals);
++                    if (equals) {
++                        mStack.AppendElement(cx);
++                        return true;
+                     }
+                 }
+             }
++        }
+ 
+-            {
+-                // Push() can be called outside any request for e.cx.
+-                JSAutoRequest ar(e.cx);
+-                if (!JS_SaveFrameChain(e.cx))
+-                    return NS_ERROR_OUT_OF_MEMORY;
+-                e.savedFrameChain = true;
+-            }
++        {
++            // Push() can be called outside any request for e.cx.
++            JSAutoRequest ar(e.cx);
++            if (!JS_SaveFrameChain(e.cx))
++                return false;
++            e.savedFrameChain = true;
++        }
+ 
+-            if (!cx)
+-                e.suspendDepth = JS_SuspendRequest(e.cx);
+-        }
++        if (!cx)
++            e.suspendDepth = JS_SuspendRequest(e.cx);
+     }
+ 
+-  append:
+-    if (!mStack.AppendElement(cx))
+-        return NS_ERROR_OUT_OF_MEMORY;
+-    return NS_OK;
++    mStack.AppendElement(cx);
++    return true;
+ }
+ 
+ #ifdef DEBUG
+-JSBool
+-XPCJSContextStack::DEBUG_StackHasJSContext(JSContext*  aJSContext)
++bool
++XPCJSContextStack::DEBUG_StackHasJSContext(JSContext *cx)
+ {
+     for (uint32_t i = 0; i < mStack.Length(); i++)
+-        if (aJSContext == mStack[i].cx)
++        if (cx == mStack[i].cx)
+             return true;
+     return false;
+ }
+ #endif
+ 
+ static JSBool
+ SafeGlobalResolve(JSContext *cx, JSObject *obj, jsid id)
+ {
+@@ -206,98 +182,99 @@ static JSClass global_class = {
+     JSCLASS_NO_OPTIONAL_MEMBERS
+ };
+ 
+ // We just use the same reporter as the component loader
+ // XXX #include angels cry.
+ extern void
+ mozJSLoaderErrorReporter(JSContext *cx, const char *message, JSErrorReport *rep);
+ 
+-/* attribute JSContext safeJSContext; */
+-NS_IMETHODIMP
+-XPCJSContextStack::GetSafeJSContext(JSContext * *aSafeJSContext)
++JSContext*
++XPCJSContextStack::GetSafeJSContext()
+ {
+-    if (!mSafeJSContext) {
+-        // Start by getting the principal holder and principal for this
+-        // context.  If we can't manage that, don't bother with the rest.
+-        nsRefPtr<nsNullPrincipal> principal = new nsNullPrincipal();
+-        nsCOMPtr<nsIScriptObjectPrincipal> sop;
+-        if (principal) {
+-            nsresult rv = principal->Init();
+-            if (NS_SUCCEEDED(rv))
+-              sop = new PrincipalHolder(principal);
+-        }
+-        if (!sop) {
+-            *aSafeJSContext = nsnull;
+-            return NS_ERROR_FAILURE;
++    if (mSafeJSContext)
++        return mSafeJSContext;
++
++    // Start by getting the principal holder and principal for this
++    // context.  If we can't manage that, don't bother with the rest.
++    nsRefPtr<nsNullPrincipal> principal = new nsNullPrincipal();
++    nsresult rv = principal->Init();
++    if (NS_FAILED(rv))
++        return NULL;
++
++    nsCOMPtr<nsIScriptObjectPrincipal> sop = new PrincipalHolder(principal);
++
++    nsRefPtr<nsXPConnect> xpc = nsXPConnect::GetXPConnect();
++    if (!xpc)
++        return NULL;
++
++    XPCJSRuntime* xpcrt = xpc->GetRuntime();
++    if (!xpcrt)
++        return NULL;
++
++    JSRuntime *rt = xpcrt->GetJSRuntime();
++    if (!rt)
++        return NULL;
++
++    mSafeJSContext = JS_NewContext(rt, 8192);
++    if (!mSafeJSContext)
++        return NULL;
++
++    JSObject *glob;
++    {
++        // scoped JS Request
++        JSAutoRequest req(mSafeJSContext);
++
++        JS_SetErrorReporter(mSafeJSContext, mozJSLoaderErrorReporter);
++
++        // Because we can run off the main thread, we create an MT
++        // global object. Our principal is the unique key.
++        JSCompartment *compartment;
++        nsresult rv = xpc_CreateMTGlobalObject(mSafeJSContext,
++                                               &global_class,
++                                               principal, &glob,
++                                               &compartment);
++        if (NS_FAILED(rv))
++            glob = nsnull;
++
++        if (glob) {
++            // Make sure the context is associated with a proper compartment
++            // and not the default compartment.
++            JS_SetGlobalObject(mSafeJSContext, glob);
++
++            // Note: make sure to set the private before calling
++            // InitClasses
++            nsIScriptObjectPrincipal* priv = nsnull;
++            sop.swap(priv);
++            if (!JS_SetPrivate(mSafeJSContext, glob, priv)) {
++                // Drop the whole thing
++                NS_RELEASE(priv);
++                glob = nsnull;
++            }
+         }
+ 
+-        JSRuntime *rt;
+-        XPCJSRuntime* xpcrt;
+-
+-        nsXPConnect* xpc = nsXPConnect::GetXPConnect();
+-        nsCOMPtr<nsIXPConnect> xpcholder(static_cast<nsIXPConnect*>(xpc));
+-
+-        if (xpc && (xpcrt = xpc->GetRuntime()) && (rt = xpcrt->GetJSRuntime())) {
+-            JSObject *glob;
+-            mSafeJSContext = JS_NewContext(rt, 8192);
+-            if (mSafeJSContext) {
+-                // scoped JS Request
+-                JSAutoRequest req(mSafeJSContext);
+-
+-                JS_SetErrorReporter(mSafeJSContext, mozJSLoaderErrorReporter);
+-
+-                // Because we can run off the main thread, we create an MT
+-                // global object. Our principal is the unique key.
+-                JSCompartment *compartment;
+-                nsresult rv = xpc_CreateMTGlobalObject(mSafeJSContext,
+-                                                       &global_class,
+-                                                       principal, &glob,
+-                                                       &compartment);
+-                if (NS_FAILED(rv))
+-                    glob = nsnull;
+-
+-                if (glob) {
+-                    // Make sure the context is associated with a proper compartment
+-                    // and not the default compartment.
+-                    JS_SetGlobalObject(mSafeJSContext, glob);
+-
+-                    // Note: make sure to set the private before calling
+-                    // InitClasses
+-                    nsIScriptObjectPrincipal* priv = nsnull;
+-                    sop.swap(priv);
+-                    if (!JS_SetPrivate(mSafeJSContext, glob, priv)) {
+-                        // Drop the whole thing
+-                        NS_RELEASE(priv);
+-                        glob = nsnull;
+-                    }
+-                }
+-
+-                // After this point either glob is null and the
+-                // nsIScriptObjectPrincipal ownership is either handled by the
+-                // nsCOMPtr or dealt with, or we'll release in the finalize
+-                // hook.
+-                if (glob && NS_FAILED(xpc->InitClasses(mSafeJSContext, glob))) {
+-                    glob = nsnull;
+-                }
+-
+-            }
+-            if (mSafeJSContext && !glob) {
+-                // Destroy the context outside the scope of JSAutoRequest that
+-                // uses the context in its destructor.
+-                JS_DestroyContext(mSafeJSContext);
+-                mSafeJSContext = nsnull;
+-            }
+-            // Save it off so we can destroy it later.
+-            mOwnSafeJSContext = mSafeJSContext;
++        // After this point either glob is null and the
++        // nsIScriptObjectPrincipal ownership is either handled by the
++        // nsCOMPtr or dealt with, or we'll release in the finalize
++        // hook.
++        if (glob && NS_FAILED(xpc->InitClasses(mSafeJSContext, glob))) {
++            glob = nsnull;
+         }
+     }
++    if (mSafeJSContext && !glob) {
++        // Destroy the context outside the scope of JSAutoRequest that
++        // uses the context in its destructor.
++        JS_DestroyContext(mSafeJSContext);
++        mSafeJSContext = nsnull;
++    }
+ 
+-    *aSafeJSContext = mSafeJSContext;
+-    return mSafeJSContext ? NS_OK : NS_ERROR_UNEXPECTED;
++    // Save it off so we can destroy it later.
++    mOwnSafeJSContext = mSafeJSContext;
++
++    return mSafeJSContext;
+ }
+ 
+ /***************************************************************************/
+ 
+ unsigned           XPCPerThreadData::gTLSIndex       = BAD_TLS_INDEX;
+ Mutex*            XPCPerThreadData::gLock           = nsnull;
+ XPCPerThreadData* XPCPerThreadData::gThreads        = nsnull;
+ XPCPerThreadData *XPCPerThreadData::sMainThreadData = nsnull;
+diff --git a/js/xpconnect/src/XPCWrappedJSClass.cpp b/js/xpconnect/src/XPCWrappedJSClass.cpp
+--- a/js/xpconnect/src/XPCWrappedJSClass.cpp
++++ b/js/xpconnect/src/XPCWrappedJSClass.cpp
+@@ -529,19 +529,18 @@ nsXPCWrappedJSClass::IsWrappedJS(nsISupp
+ }
+ 
+ static JSContext *
+ GetContextFromObject(JSObject *obj)
+ {
+     // Don't stomp over a running context.
+     XPCJSContextStack* stack =
+         XPCPerThreadData::GetData(nsnull)->GetJSContextStack();
+-    JSContext* topJSContext;
+ 
+-    if (stack && NS_SUCCEEDED(stack->Peek(&topJSContext)) && topJSContext)
++    if (stack && stack->Peek())
+         return nsnull;
+ 
+     // In order to get a context, we need a context.
+     XPCCallContext ccx(NATIVE_CALLER);
+     if (!ccx.IsValid())
+         return nsnull;
+ 
+     JSAutoEnterCompartment ac;
+diff --git a/js/xpconnect/src/XPCWrappedNativeJSOps.cpp b/js/xpconnect/src/XPCWrappedNativeJSOps.cpp
+--- a/js/xpconnect/src/XPCWrappedNativeJSOps.cpp
++++ b/js/xpconnect/src/XPCWrappedNativeJSOps.cpp
+@@ -1307,28 +1307,27 @@ public:
+   : mCx(nsnull), mStack(stack)
+   {
+       NS_ASSERTION(stack, "Null stack!");
+   }
+ 
+   ~AutoPopJSContext()
+   {
+       if (mCx)
+-          mStack->Pop(nsnull);
++          mStack->Pop();
+   }
+ 
+   void PushIfNotTop(JSContext *cx)
+   {
+       NS_ASSERTION(cx, "Null context!");
+       NS_ASSERTION(!mCx, "This class is only meant to be used once!");
+ 
+-      JSContext *cxTop = nsnull;
+-      mStack->Peek(&cxTop);
++      JSContext *cxTop = mStack->Peek();
+ 
+-      if (cxTop != cx && NS_SUCCEEDED(mStack->Push(cx)))
++      if (cxTop != cx && mStack->Push(cx))
+           mCx = cx;
+   }
+ 
+ private:
+   JSContext *mCx;
+   XPCJSContextStack *mStack;
+ };
+ 
+diff --git a/js/xpconnect/src/nsXPConnect.cpp b/js/xpconnect/src/nsXPConnect.cpp
+--- a/js/xpconnect/src/nsXPConnect.cpp
++++ b/js/xpconnect/src/nsXPConnect.cpp
+@@ -1,9 +1,9 @@
+-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
++/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+  *
+  * ***** BEGIN LICENSE BLOCK *****
+  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+  *
+  * The contents of this file are subject to the Mozilla Public License Version
+  * 1.1 (the "License"); you may not use this file except in compliance with
+  * the License. You may obtain a copy of the License at
+  * http://www.mozilla.org/MPL/
+@@ -2459,44 +2459,44 @@ nsXPConnect::UnregisterGCCallback(JSGCCa
+ }
+ 
+ //  nsIJSContextStack and nsIThreadJSContextStack implementations
+ 
+ /* readonly attribute int32_t Count; */
+ NS_IMETHODIMP
+ nsXPConnect::GetCount(int32_t *aCount)
+ {
+-    if (!aCount)
+-        return NS_ERROR_NULL_POINTER;
++    MOZ_ASSERT(aCount);
+ 
+     XPCPerThreadData* data = XPCPerThreadData::GetData(nsnull);
+ 
+     if (!data) {
+         *aCount = 0;
+         return NS_ERROR_FAILURE;
+     }
+ 
+-    return data->GetJSContextStack()->GetCount(aCount);
++    *aCount = data->GetJSContextStack()->Count();
++    return NS_OK;
+ }
+ 
+ /* JSContext Peek (); */
+ NS_IMETHODIMP
+ nsXPConnect::Peek(JSContext * *_retval)
+ {
+-    if (!_retval)
+-        return NS_ERROR_NULL_POINTER;
++    MOZ_ASSERT(_retval);
+ 
+     XPCPerThreadData* data = XPCPerThreadData::GetData(nsnull);
+ 
+     if (!data) {
+         *_retval = nsnull;
+         return NS_ERROR_FAILURE;
+     }
+ 
+-    return data->GetJSContextStack()->Peek(_retval);
++    *_retval = data->GetJSContextStack()->Peek();
++    return NS_OK;
+ }
+ 
+ void
+ nsXPConnect::CheckForDebugMode(JSRuntime *rt) {
+     JSContext *cx = NULL;
+ 
+     if (gDebugMode == gDesiredDebugMode) {
+         return;
+@@ -2577,34 +2577,37 @@ xpc_ActivateDebugMode()
+ /* JSContext Pop (); */
+ NS_IMETHODIMP
+ nsXPConnect::Pop(JSContext * *_retval)
+ {
+     XPCPerThreadData* data = XPCPerThreadData::GetData(nsnull);
+ 
+     if (!data) {
+         if (_retval)
+-            *_retval = nsnull;
++            *_retval = NULL;
+         return NS_ERROR_FAILURE;
+     }
+ 
+-    return data->GetJSContextStack()->Pop(_retval);
++    JSContext *cx = data->GetJSContextStack()->Pop();
++    if (_retval)
++        *_retval = cx;
++    return NS_OK;
+ }
+ 
+ /* void Push (in JSContext cx); */
+ NS_IMETHODIMP
+ nsXPConnect::Push(JSContext * cx)
+ {
+     XPCPerThreadData* data = XPCPerThreadData::GetData(cx);
+ 
+     if (!data)
+         return NS_ERROR_FAILURE;
+ 
+      if (gDebugMode != gDesiredDebugMode && NS_IsMainThread()) {
+-         const nsTArray<XPCJSContextInfo>* stack = data->GetJSContextStack()->GetStack();
++         const InfallibleTArray<XPCJSContextInfo>* stack = data->GetJSContextStack()->GetStack();
+          if (!gDesiredDebugMode) {
+              /* Turn off debug mode immediately, even if JS code is currently running */
+              CheckForDebugMode(mRuntime->GetJSRuntime());
+          } else {
+              bool runningJS = false;
+              for (uint32_t i = 0; i < stack->Length(); ++i) {
+                  JSContext *cx = (*stack)[i].cx;
+                  if (cx && !cx->stack.empty()) {
+@@ -2612,33 +2615,34 @@ nsXPConnect::Push(JSContext * cx)
+                      break;
+                  }
+              }
+              if (!runningJS)
+                  CheckForDebugMode(mRuntime->GetJSRuntime());
+          }
+      }
+ 
+-     return data->GetJSContextStack()->Push(cx);
++     return data->GetJSContextStack()->Push(cx) ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
+ }
+ 
+ /* attribute JSContext SafeJSContext; */
+ NS_IMETHODIMP
+ nsXPConnect::GetSafeJSContext(JSContext * *aSafeJSContext)
+ {
+     NS_ASSERTION(aSafeJSContext, "loser!");
+ 
+     XPCPerThreadData* data = XPCPerThreadData::GetData(nsnull);
+ 
+     if (!data) {
+         *aSafeJSContext = nsnull;
+         return NS_ERROR_FAILURE;
+     }
+ 
+-    return data->GetJSContextStack()->GetSafeJSContext(aSafeJSContext);
++    *aSafeJSContext = data->GetJSContextStack()->GetSafeJSContext();
++    return *aSafeJSContext ? NS_OK : NS_ERROR_FAILURE;
+ }
+ 
+ nsIPrincipal*
+ nsXPConnect::GetPrincipal(JSObject* obj, bool allowShortCircuit) const
+ {
+     NS_ASSERTION(IS_WRAPPER_CLASS(js::GetObjectClass(obj)),
+                  "What kind of wrapper is this?");
+ 
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -3580,31 +3580,46 @@ struct XPCJSContextInfo {
+ 
+     // Greater than 0 if a request was suspended.
+     jsrefcount suspendDepth;
+ };
+ 
+ class XPCJSContextStack
+ {
+ public:
+-    NS_DECL_NSIJSCONTEXTSTACK
+-    NS_DECL_NSITHREADJSCONTEXTSTACK
+-
+-    XPCJSContextStack();
++    XPCJSContextStack()
++      : mSafeJSContext(NULL)
++      , mOwnSafeJSContext(NULL)
++    { }
++
+     virtual ~XPCJSContextStack();
+ 
++    uint32_t Count()
++    {
++        return mStack.Length();
++    }
++
++    JSContext *Peek()
++    {
++        return mStack.IsEmpty() ? NULL : mStack[mStack.Length() - 1].cx;
++    }
++
++    JSContext *Pop();
++    bool Push(JSContext *cx);
++    JSContext *GetSafeJSContext();
++
+ #ifdef DEBUG
+-    JSBool DEBUG_StackHasJSContext(JSContext*  aJSContext);
++    bool DEBUG_StackHasJSContext(JSContext *cx);
+ #endif
+ 
+-    const nsTArray<XPCJSContextInfo>* GetStack()
++    const InfallibleTArray<XPCJSContextInfo>* GetStack()
+     { return &mStack; }
+ 
+ private:
+-    nsAutoTArray<XPCJSContextInfo, 16> mStack;
++    AutoInfallibleTArray<XPCJSContextInfo, 16> mStack;
+     JSContext*  mSafeJSContext;
+     JSContext*  mOwnSafeJSContext;
+ };
+ 
+ /***************************************************************************/
+ 
+ #define NS_XPC_JSCONTEXT_STACK_ITERATOR_CID                                   \
+ { 0x05bae29d, 0x8aef, 0x486d,                                                 \
+@@ -3612,17 +3627,17 @@ private:
+ 
+ class nsXPCJSContextStackIterator : public nsIJSContextStackIterator
+ {
+ public:
+     NS_DECL_ISUPPORTS
+     NS_DECL_NSIJSCONTEXTSTACKITERATOR
+ 
+ private:
+-    const nsTArray<XPCJSContextInfo> *mStack;
++    const InfallibleTArray<XPCJSContextInfo> *mStack;
+     uint32_t mPosition;
+ };
+ 
+ /**************************************************************/
+ // All of our thread local storage.
+ 
+ class XPCPerThreadData
+ {

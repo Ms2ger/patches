@@ -1,0 +1,87 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/document/src/HTMLAllCollection.cpp b/content/html/document/src/HTMLAllCollection.cpp
+--- a/content/html/document/src/HTMLAllCollection.cpp
++++ b/content/html/document/src/HTMLAllCollection.cpp
+@@ -80,16 +80,22 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(HTM
+ NS_IMPL_CYCLE_COLLECTION_TRACE_END
+ 
+ uint32_t
+ HTMLAllCollection::Length()
+ {
+   return Collection()->Length(true);
+ }
+ 
++nsIContent*
++HTMLAllCollection::Item(uint32_t aIndex)
++{
++  return Collection()->Item(aIndex);
++}
++
+ JSObject*
+ HTMLAllCollection::GetObject(JSContext* aCx, ErrorResult& aRv)
+ {
+   MOZ_ASSERT(aCx);
+ 
+   if (!mObject) {
+     JS::Rooted<JSObject*> wrapper(aCx, mDocument->GetWrapper());
+     MOZ_ASSERT(wrapper);
+@@ -214,19 +220,17 @@ nsHTMLDocumentSH::DocumentAllGetProperty
+     if (NS_FAILED(rv)) {
+       xpc::Throw(cx, rv);
+       return false;
+     }
+   } else if (JSID_IS_INT(id) && JSID_TO_INT(id) >= 0) {
+     // Map document.all[n] (where n is a number) to the n:th item in
+     // the document.all node list.
+ 
+-    nsRefPtr<nsContentList> nodeList = doc->All()->Collection();
+-
+-    nsIContent *node = nodeList->Item(JSID_TO_INT(id));
++    nsIContent* node = doc->All()->Item(SafeCast<uint32_t>(JSID_TO_INT(id)));
+ 
+     result = node;
+     cache = node;
+   } else {
+     result = nullptr;
+   }
+ 
+   if (result) {
+diff --git a/content/html/document/src/HTMLAllCollection.h b/content/html/document/src/HTMLAllCollection.h
+--- a/content/html/document/src/HTMLAllCollection.h
++++ b/content/html/document/src/HTMLAllCollection.h
+@@ -11,32 +11,34 @@
+ #include "nsAutoPtr.h"
+ #include "nsCycleCollectionParticipant.h"
+ #include "nsISupportsImpl.h"
+ 
+ #include <stdint.h>
+ 
+ class nsContentList;
+ class nsHTMLDocument;
++class nsIContent;
+ 
+ namespace mozilla {
+ class ErrorResult;
+ 
+ namespace dom {
+ 
+ class HTMLAllCollection
+ {
+ public:
+   HTMLAllCollection(nsHTMLDocument* aDocument);
+   ~HTMLAllCollection();
+ 
+   NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(HTMLAllCollection)
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(HTMLAllCollection)
+ 
+   uint32_t Length();
++  nsIContent* Item(uint32_t aIndex);
+ 
+   JSObject* GetObject(JSContext* aCx, ErrorResult& aRv);
+ 
+   nsContentList* Collection();
+ 
+ private:
+   JS::Heap<JSObject*> mObject;
+   nsRefPtr<nsHTMLDocument> mDocument;

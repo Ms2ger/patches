@@ -1,0 +1,509 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/activities/src/Activity.cpp b/dom/activities/src/Activity.cpp
+--- a/dom/activities/src/Activity.cpp
++++ b/dom/activities/src/Activity.cpp
+@@ -99,10 +99,11 @@ Activity::~Activity()
+ }
+ 
+ Activity::Activity()
+   : DOMRequest()
+ {
+   // Unfortunately we must explicitly declare the default constructor in order
+   // to prevent an implicitly deleted constructor in DOMRequest compile error
+   // in GCC 4.6.
++  ClearIsDOMBinding();
+ }
+ 
+diff --git a/dom/base/DOMRequest.cpp b/dom/base/DOMRequest.cpp
+--- a/dom/base/DOMRequest.cpp
++++ b/dom/base/DOMRequest.cpp
+@@ -17,26 +17,28 @@
+ using mozilla::dom::DOMRequest;
+ using mozilla::dom::DOMRequestService;
+ 
+ DOMRequest::DOMRequest(nsIDOMWindow* aWindow)
+   : mResult(JSVAL_VOID)
+   , mDone(false)
+   , mRooted(false)
+ {
++  SetIsDOMBinding();
+   Init(aWindow);
+ }
+ 
+ // We need this constructor for dom::Activity that inherits from DOMRequest
+ // but has no window available from the constructor.
+ DOMRequest::DOMRequest()
+   : mResult(JSVAL_VOID)
+   , mDone(false)
+   , mRooted(false)
+ {
++  SetIsDOMBinding();
+ }
+ 
+ void
+ DOMRequest::Init(nsIDOMWindow* aWindow)
+ {
+   nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aWindow);
+   BindToOwner(window->IsInnerWindow() ? window.get() :
+                                         window->GetCurrentInnerWindow());
+@@ -69,46 +71,54 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_END
+ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(DOMRequest)
+   NS_INTERFACE_MAP_ENTRY(nsIDOMDOMRequest)
+   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(DOMRequest)
+ NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
+ 
+ NS_IMPL_ADDREF_INHERITED(DOMRequest, nsDOMEventTargetHelper)
+ NS_IMPL_RELEASE_INHERITED(DOMRequest, nsDOMEventTargetHelper)
+ 
++/* virtual */ JSObject*
++DOMRequest::WrapObject(JSContext* aCx, JSObject* aScope, bool* aTriedToWrap)
++{
++  return DOMRequestBinding::Wrap(aCx, aScope, this, aTriedToWrap);
++}
++
+ NS_IMPL_EVENT_HANDLER(DOMRequest, success)
+ NS_IMPL_EVENT_HANDLER(DOMRequest, error)
+ 
+ NS_IMETHODIMP
+ DOMRequest::GetReadyState(nsAString& aReadyState)
+ {
+-  mDone ? aReadyState.AssignLiteral("done") :
+-          aReadyState.AssignLiteral("pending");
++  DOMRequestReadyState readyState = ReadyState();
++  switch (readyState) {
++  case DOMRequestReadyStateValues::Pending:
++    aReadyState.AssignLiteral("pending");
++    break;
++  case DOMRequestReadyStateValues::Done:
++    aReadyState.AssignLiteral("done");
++    break;
++  default:
++    MOZ_NOT_REACHED("Unrecognized readyState.");
++  }
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ DOMRequest::GetResult(jsval* aResult)
+ {
+-  NS_ASSERTION(mDone || mResult == JSVAL_VOID,
+-               "Result should be undefined when pending");
+-  *aResult = mResult;
+-
++  *aResult = Result();
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ DOMRequest::GetError(nsIDOMDOMError** aError)
+ {
+-  NS_ASSERTION(mDone || !mError,
+-               "Error should be null when pending");
+-
+-  NS_IF_ADDREF(*aError = mError);
+-
++  NS_IF_ADDREF(*aError = GetError());
+   return NS_OK;
+ }
+ 
+ void
+ DOMRequest::FireSuccess(jsval aResult)
+ {
+   NS_ASSERTION(!mDone, "mDone shouldn't have been set to true already!");
+   NS_ASSERTION(!mError, "mError shouldn't have been set!");
+diff --git a/dom/base/DOMRequest.h b/dom/base/DOMRequest.h
+--- a/dom/base/DOMRequest.h
++++ b/dom/base/DOMRequest.h
+@@ -6,16 +6,17 @@
+ 
+ #ifndef mozilla_dom_domrequest_h__
+ #define mozilla_dom_domrequest_h__
+ 
+ #include "nsIDOMDOMRequest.h"
+ #include "nsIDOMDOMError.h"
+ #include "nsDOMEventTargetHelper.h"
+ #include "mozilla/Attributes.h"
++#include "mozilla/dom/DOMRequestBinding.h"
+ 
+ #include "nsCOMPtr.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ class DOMRequest : public nsDOMEventTargetHelper,
+                    public nsIDOMDOMRequest
+@@ -29,16 +30,50 @@ protected:
+ public:
+   NS_DECL_ISUPPORTS_INHERITED
+   NS_DECL_NSIDOMDOMREQUEST
+   NS_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper::)
+ 
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(DOMRequest,
+                                                          nsDOMEventTargetHelper)
+ 
++
++  // WrapperCache
++  nsPIDOMWindow* GetParentObject() const
++  {
++    return GetOwner();
++  }
++  virtual JSObject*
++  WrapObject(JSContext* aCx, JSObject* aScope, bool* aTriedToWrap) MOZ_OVERRIDE;
++
++
++  // WebIDL Interface
++  DOMRequestReadyState ReadyState() const
++  {
++    return mDone ? DOMRequestReadyStateValues::Done
++                 : DOMRequestReadyStateValues::Pending;
++  }
++
++  JS::Value Result(JSContext* = nullptr) const
++  {
++    NS_ASSERTION(mDone || mResult == JSVAL_VOID,
++               "Result should be undefined when pending");
++    return mResult;
++  }
++  nsIDOMDOMError* GetError() const
++  {
++    NS_ASSERTION(mDone || !mError,
++                 "Error should be null when pending");
++    return mError;
++  }
++
++  IMPL_EVENT_HANDLER(success)
++  IMPL_EVENT_HANDLER(error)
++
++
+   void FireSuccess(jsval aResult);
+   void FireError(const nsAString& aError);
+   void FireError(nsresult aError);
+ 
+   DOMRequest(nsIDOMWindow* aWindow);
+   DOMRequest();
+ 
+   virtual ~DOMRequest()
+diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
+--- a/dom/bindings/Bindings.conf
++++ b/dom/bindings/Bindings.conf
+@@ -179,16 +179,21 @@ DOMInterfaces = {
+     'workers': True,
+     'skipGen': True
+ }],
+ 
+ 'DOMParser': {
+     'nativeType': 'nsDOMParser',
+ },
+ 
++'DOMRequest': {
++    'hasInstanceInterface': 'nsIDOMDOMRequest',
++    'hasXPConnectImpls': True,
++},
++
+ 'DOMSettableTokenList': {
+     'nativeType': 'nsDOMSettableTokenList',
+     'binaryNames': {
+         '__stringifier': 'Stringify'
+     }
+ },
+ 
+ 'DOMStringMap': {
+@@ -812,17 +817,17 @@ addExternalHTMLElement('HTMLOptGroupElem
+ addExternalHTMLElement('HTMLVideoElement')
+ addExternalIface('Attr')
+ addExternalIface('CanvasGradient', headerFile='nsIDOMCanvasRenderingContext2D.h')
+ addExternalIface('CanvasPattern', headerFile='nsIDOMCanvasRenderingContext2D.h')
+ addExternalIface('ClientRect')
+ addExternalIface("Counter")
+ addExternalIface('CSSRule')
+ addExternalIface('DocumentType', nativeType='nsIDOMDocumentType')
+-addExternalIface('DOMRequest')
++addExternalIface('DOMError')
+ addExternalIface('DOMStringList', nativeType='nsDOMStringList',
+                  headerFile='nsDOMLists.h')
+ addExternalIface('File')
+ addExternalIface('HitRegionOptions', nativeType='nsISupports')
+ addExternalIface('LockedFile')
+ addExternalIface('MediaStream')
+ addExternalIface('NamedNodeMap')
+ addExternalIface('OutputStream', nativeType='nsIOutputStream',
+diff --git a/dom/devicestorage/nsDeviceStorage.cpp b/dom/devicestorage/nsDeviceStorage.cpp
+--- a/dom/devicestorage/nsDeviceStorage.cpp
++++ b/dom/devicestorage/nsDeviceStorage.cpp
+@@ -1034,16 +1034,17 @@ nsDOMDeviceStorageCursor::nsDOMDeviceSto
+                                                    DeviceStorageFile* aFile,
+                                                    PRTime aSince)
+   : DOMRequest(aWindow)
+   , mOkToCallContinue(false)
+   , mSince(aSince)
+   , mFile(aFile)
+   , mPrincipal(aPrincipal)
+ {
++  ClearIsDOMBinding();
+ }
+ 
+ nsDOMDeviceStorageCursor::~nsDOMDeviceStorageCursor()
+ {
+ }
+ 
+ void
+ nsDOMDeviceStorageCursor::GetStorageType(nsAString & aType)
+diff --git a/dom/file/ArchiveRequest.cpp b/dom/file/ArchiveRequest.cpp
+--- a/dom/file/ArchiveRequest.cpp
++++ b/dom/file/ArchiveRequest.cpp
+@@ -49,16 +49,18 @@ ArchiveRequestEvent::Run()
+ ArchiveRequest::ArchiveRequest(nsIDOMWindow* aWindow,
+                                ArchiveReader* aReader)
+ : DOMRequest(aWindow),
+   mArchiveReader(aReader)
+ {
+   MOZ_COUNT_CTOR(ArchiveRequest);
+   nsLayoutStatics::AddRef();
+ 
++  ClearIsDOMBinding();
++
+   /* An event to make this request asynchronous: */
+   nsRefPtr<ArchiveRequestEvent> event = new ArchiveRequestEvent(this);
+   NS_DispatchToCurrentThread(event);
+ }
+ 
+ ArchiveRequest::~ArchiveRequest()
+ {
+   MOZ_COUNT_DTOR(ArchiveRequest);
+diff --git a/dom/file/FileHandle.cpp b/dom/file/FileHandle.cpp
+--- a/dom/file/FileHandle.cpp
++++ b/dom/file/FileHandle.cpp
+@@ -128,22 +128,22 @@ FileHandle::Open(FileMode aMode, ErrorRe
+ 
+   return lockedFile.forget();
+ }
+ 
+ NS_IMETHODIMP
+ FileHandle::GetFile(nsIDOMDOMRequest** _retval)
+ {
+   ErrorResult rv;
+-  nsCOMPtr<nsIDOMDOMRequest> request = GetFile(rv);
++  nsRefPtr<DOMRequest> request = GetFile(rv);
+   request.forget(_retval);
+   return rv.ErrorCode();
+ }
+ 
+-already_AddRefed<nsIDOMDOMRequest>
++already_AddRefed<DOMRequest>
+ FileHandle::GetFile(ErrorResult& aError)
+ {
+   MOZ_ASSERT(NS_IsMainThread());
+ 
+   // Do nothing if the window is closed
+   if (!GetOwner()) {
+     return nullptr;
+   }
+@@ -165,18 +165,17 @@ FileHandle::GetFile(ErrorResult& aError)
+     new GetFileHelper(lockedFile, request, params, this);
+ 
+   nsresult rv = helper->Enqueue();
+   if (NS_FAILED(rv)) {
+     aError.Throw(NS_ERROR_DOM_FILEHANDLE_UNKNOWN_ERR);
+     return nullptr;
+   }
+ 
+-  nsRefPtr<DOMRequest> domRequest = request.forget();
+-  return domRequest.forget();
++  return request.forget();
+ }
+ 
+ NS_IMETHODIMP_(int64_t)
+ FileHandle::GetFileId()
+ {
+   return -1;
+ }
+ 
+diff --git a/dom/file/FileHandle.h b/dom/file/FileHandle.h
+--- a/dom/file/FileHandle.h
++++ b/dom/file/FileHandle.h
+@@ -16,16 +16,22 @@
+ #include "nsDOMEventTargetHelper.h"
+ 
+ #include "mozilla/Attributes.h"
+ #include "mozilla/dom/FileHandleBinding.h"
+ 
+ class nsIDOMFile;
+ class nsIFileStorage;
+ 
++namespace mozilla {
++namespace dom {
++class DOMRequest;
++} // namespace dom
++} // namespace mozilla
++
+ BEGIN_FILE_NAMESPACE
+ 
+ class FileService;
+ class LockedFile;
+ class FinishHelper;
+ class FileHelper;
+ 
+ /**
+@@ -57,17 +63,17 @@ public:
+   {
+     aName = mName;
+   }
+   void GetType(nsString& aType) const
+   {
+     aType = mType;
+   }
+   already_AddRefed<nsIDOMLockedFile> Open(FileMode aMode, ErrorResult& aError);
+-  already_AddRefed<nsIDOMDOMRequest> GetFile(ErrorResult& aError);
++  already_AddRefed<DOMRequest> GetFile(ErrorResult& aError);
+   IMPL_EVENT_HANDLER(abort)
+   IMPL_EVENT_HANDLER(error)
+ 
+   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(FileHandle, nsDOMEventTargetHelper)
+ 
+   const nsAString&
+   Name() const
+   {
+diff --git a/dom/file/FileRequest.cpp b/dom/file/FileRequest.cpp
+--- a/dom/file/FileRequest.cpp
++++ b/dom/file/FileRequest.cpp
+@@ -17,16 +17,17 @@
+ #include "LockedFile.h"
+ 
+ USING_FILE_NAMESPACE
+ 
+ FileRequest::FileRequest(nsIDOMWindow* aWindow)
+ : DOMRequest(aWindow), mIsFileRequest(true)
+ {
+   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
++  ClearIsDOMBinding();
+ }
+ 
+ FileRequest::~FileRequest()
+ {
+   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+ }
+ 
+ // static
+diff --git a/dom/webidl/DOMRequest.webidl b/dom/webidl/DOMRequest.webidl
+new file mode 100644
+--- /dev/null
++++ b/dom/webidl/DOMRequest.webidl
+@@ -0,0 +1,21 @@
++/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++interface DOMError;
++interface Window;
++
++enum DOMRequestReadyState { "pending", "done" };
++
++interface DOMRequest : EventTarget {
++  readonly attribute DOMRequestReadyState readyState;
++
++  readonly attribute any result;
++  readonly attribute DOMError? error;
++
++  [SetterThrows]
++  attribute EventHandler onsuccess;
++  [SetterThrows]
++  attribute EventHandler onerror;
++};
+diff --git a/dom/webidl/WebIDL.mk b/dom/webidl/WebIDL.mk
+--- a/dom/webidl/WebIDL.mk
++++ b/dom/webidl/WebIDL.mk
+@@ -23,16 +23,17 @@ webidl_files = \
+   ClientRectList.webidl \
+   CSSPrimitiveValue.webidl \
+   CSSStyleDeclaration.webidl \
+   CSSValue.webidl \
+   CSSValueList.webidl \
+   DelayNode.webidl \
+   DOMImplementation.webidl \
+   DOMParser.webidl \
++  DOMRequest.webidl \
+   DOMSettableTokenList.webidl \
+   DOMStringMap.webidl \
+   DOMTokenList.webidl \
+   DynamicsCompressorNode.webidl \
+   Element.webidl \
+   EventHandler.webidl \
+   EventListener.webidl \
+   EventSource.webidl \
+diff --git a/js/xpconnect/src/nsDOMQS.h b/js/xpconnect/src/nsDOMQS.h
+--- a/js/xpconnect/src/nsDOMQS.h
++++ b/js/xpconnect/src/nsDOMQS.h
+@@ -16,16 +16,17 @@
+ #include "nsHTMLVideoElement.h"
+ #include "nsHTMLDocument.h"
+ #include "nsICSSDeclaration.h"
+ #include "nsSVGStylableElement.h"
+ #include "mozilla/dom/EventTargetBinding.h"
+ #include "mozilla/dom/NodeBinding.h"
+ #include "mozilla/dom/ElementBinding.h"
+ #include "mozilla/dom/HTMLElementBinding.h"
++#include "mozilla/dom/DOMRequestBinding.h"
+ 
+ template<class T>
+ struct ProtoIDAndDepth
+ {
+     enum {
+         PrototypeID = mozilla::dom::prototypes::id::_ID_Count,
+         Depth = -1
+     };
+@@ -41,16 +42,17 @@ struct ProtoIDAndDepth<_native>         
+             static_cast<mozilla::dom::prototypes::ID>(PrototypeID)>::Depth    \
+     };                                                                        \
+ }
+ 
+ NEW_BINDING(mozilla::dom::EventTarget, EventTarget);
+ NEW_BINDING(nsINode, Node);
+ NEW_BINDING(mozilla::dom::Element, Element);
+ NEW_BINDING(nsGenericHTMLElement, HTMLElement);
++NEW_BINDING(mozilla::dom::DOMRequest, DOMRequest);
+ 
+ #define DEFINE_UNWRAP_CAST(_interface, _base, _bit)                           \
+ template <>                                                                   \
+ MOZ_ALWAYS_INLINE JSBool                                                      \
+ xpc_qsUnwrapThis<_interface>(JSContext *cx,                                   \
+                              JSObject *obj,                                   \
+                              _interface **ppThis,                             \
+                              nsISupports **pThisRef,                          \
+@@ -167,16 +169,34 @@ xpc_qsUnwrapArg<_clazz>(JSContext *cx, j
+ DEFINE_UNWRAP_CAST_HTML(canvas, nsHTMLCanvasElement)
+ DEFINE_UNWRAP_CAST_HTML(div, nsHTMLDivElement)
+ DEFINE_UNWRAP_CAST_HTML(form, nsHTMLFormElement)
+ DEFINE_UNWRAP_CAST_HTML(img, nsHTMLImageElement)
+ DEFINE_UNWRAP_CAST_HTML(optgroup, nsHTMLOptGroupElement)
+ DEFINE_UNWRAP_CAST_HTML(option, nsHTMLOptionElement)
+ DEFINE_UNWRAP_CAST_HTML(video, nsHTMLVideoElement)
+ 
++		 
++template <>		
++inline nsresult		
++xpc_qsUnwrapArg<mozilla::dom::DOMRequest>(JSContext *cx, jsval v,
++                                          mozilla::dom::DOMRequest **ppArg,
++                                          mozilla::dom::DOMRequest **ppArgRef,
++                                          jsval *vp)
++{
++    nsIDOMDOMRequest* arg;		
++    nsIDOMDOMRequest* argRef;
++    nsresult rv = xpc_qsUnwrapArg<nsIDOMDOMRequest>(cx, v, &arg, &argRef, vp);
++    if (NS_SUCCEEDED(rv)) {
++        *ppArg = static_cast<mozilla::dom::DOMRequest*>(arg);
++        *ppArgRef = static_cast<mozilla::dom::DOMRequest*>(argRef);
++    }
++    return rv;
++}
++
+ inline nsISupports*
+ ToSupports(nsContentList *p)
+ {
+     return static_cast<nsINodeList*>(p);
+ }
+ 
+ inline nsISupports*
+ ToCanonicalSupports(nsINode* p)

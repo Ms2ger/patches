@@ -1,0 +1,257 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCNativeSet.h b/js/xpconnect/src/XPCNativeSet.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCNativeSet.h
+@@ -0,0 +1,103 @@
++#ifndef XPCNativeSet_h
++#define XPCNativeSet_h
++
++#include "prtypes.h"
++
++#include "nsDebug.h"
++#include "nsID.h"
++#include "nsTraceRefcnt.h"
++
++#include "jspubtd.h"
++
++class XPCCallContext;
++class XPCNativeInterface;
++class XPCNativeMember;
++class nsIClassInfo;
++
++// XPCNativeSet represents an ordered collection of XPCNativeInterface pointers.
++
++class XPCNativeSet
++{
++public:
++    static XPCNativeSet* GetNewOrUsed(XPCCallContext& ccx, const nsIID* iid);
++    static XPCNativeSet* GetNewOrUsed(XPCCallContext& ccx,
++                                      nsIClassInfo* classInfo);
++    static XPCNativeSet* GetNewOrUsed(XPCCallContext& ccx,
++                                      XPCNativeSet* otherSet,
++                                      XPCNativeInterface* newInterface,
++                                      uint16_t position);
++
++    static void ClearCacheEntryForClassInfo(nsIClassInfo* classInfo);
++
++    inline JSBool FindMember(jsid name, XPCNativeMember** pMember,
++                             uint16_t* pInterfaceIndex) const;
++
++    inline JSBool FindMember(jsid name, XPCNativeMember** pMember,
++                             XPCNativeInterface** pInterface) const;
++
++    inline JSBool FindMember(jsid name,
++                             XPCNativeMember** pMember,
++                             XPCNativeInterface** pInterface,
++                             XPCNativeSet* protoSet,
++                             JSBool* pIsLocal) const;
++
++    inline JSBool HasInterface(XPCNativeInterface* aInterface) const;
++    inline JSBool HasInterfaceWithAncestor(XPCNativeInterface* aInterface) const;
++    inline JSBool HasInterfaceWithAncestor(const nsIID* iid) const;
++
++    inline XPCNativeInterface* FindInterfaceWithIID(const nsIID& iid) const;
++
++    inline XPCNativeInterface* FindNamedInterface(jsid name) const;
++
++    uint16_t GetMemberCount() const {return mMemberCount;}
++    uint16_t GetInterfaceCount() const
++        {NS_ASSERTION(!IsMarked(), "bad"); return mInterfaceCount;}
++    XPCNativeInterface** GetInterfaceArray() {return mInterfaces;}
++
++    XPCNativeInterface* GetInterfaceAt(uint16_t i)
++        {NS_ASSERTION(i < mInterfaceCount, "bad index"); return mInterfaces[i];}
++
++    inline JSBool MatchesSetUpToInterface(const XPCNativeSet* other,
++                                          XPCNativeInterface* iface) const;
++
++#define XPC_NATIVE_SET_MARK_FLAG ((uint16_t)JS_BIT(15)) // only high bit of 16 is set
++
++    inline void Mark();
++
++    // NOP. This is just here to make the AutoMarkingPtr code compile.
++    inline void TraceJS(JSTracer* trc) {}
++    inline void AutoTrace(JSTracer* trc) {}
++
++private:
++    void MarkSelfOnly() {mInterfaceCount |= XPC_NATIVE_SET_MARK_FLAG;}
++public:
++    void Unmark()       {mInterfaceCount &= ~XPC_NATIVE_SET_MARK_FLAG;}
++    JSBool IsMarked() const
++                  {return 0 != (mInterfaceCount & XPC_NATIVE_SET_MARK_FLAG);}
++
++#ifdef DEBUG
++    inline void ASSERT_NotMarked();
++#endif
++
++    void DebugDump(int16_t depth);
++
++    static void DestroyInstance(XPCNativeSet* inst);
++
++protected:
++    static XPCNativeSet* NewInstance(XPCCallContext& ccx,
++                                     XPCNativeInterface** array,
++                                     uint16_t count);
++    static XPCNativeSet* NewInstanceMutate(XPCNativeSet*       otherSet,
++                                           XPCNativeInterface* newInterface,
++                                           uint16_t            position);
++    XPCNativeSet()  {MOZ_COUNT_CTOR(XPCNativeSet);}
++    ~XPCNativeSet() {MOZ_COUNT_DTOR(XPCNativeSet);}
++    void* operator new(size_t, void* p) CPP_THROW_NEW {return p;}
++
++private:
++    uint16_t                mMemberCount;
++    uint16_t                mInterfaceCount;
++    XPCNativeInterface*     mInterfaces[1];  // always last - object sized for array
++};
++
++#endif // XPCNativeSet_h
+diff --git a/js/xpconnect/src/XPCWrappedNativeInfo.cpp b/js/xpconnect/src/XPCWrappedNativeInfo.cpp
+--- a/js/xpconnect/src/XPCWrappedNativeInfo.cpp
++++ b/js/xpconnect/src/XPCWrappedNativeInfo.cpp
+@@ -36,16 +36,18 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* Manage the shared info about interfaces for use by wrappedNatives. */
+ 
++#include "XPCNativeSet.h"
++
+ #include "xpcprivate.h"
+ 
+ /***************************************************************************/
+ 
+ /*
+  * Helper that clones JS Function objects along with both of its
+  * reserved slots.
+  */
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -140,16 +140,17 @@
+ #undef GetClassInfo
+ #endif
+ #ifdef GetClassName
+ #undef GetClassName
+ #endif
+ #endif /* XP_WIN */
+ 
+ #include "nsINode.h"
++#include "XPCNativeSet.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -1778,103 +1779,16 @@ public:
+ private:
+     uint16_t                mIsAKey;    // must be first data member
+     uint16_t                mPosition;
+     XPCNativeSet*           mBaseSet;
+     XPCNativeInterface*     mAddition;
+ };
+ 
+ /***************************************************************************/
+-// XPCNativeSet represents an ordered collection of XPCNativeInterface pointers.
+-
+-class XPCNativeSet
+-{
+-public:
+-    static XPCNativeSet* GetNewOrUsed(XPCCallContext& ccx, const nsIID* iid);
+-    static XPCNativeSet* GetNewOrUsed(XPCCallContext& ccx,
+-                                      nsIClassInfo* classInfo);
+-    static XPCNativeSet* GetNewOrUsed(XPCCallContext& ccx,
+-                                      XPCNativeSet* otherSet,
+-                                      XPCNativeInterface* newInterface,
+-                                      uint16_t position);
+-
+-    static void ClearCacheEntryForClassInfo(nsIClassInfo* classInfo);
+-
+-    inline JSBool FindMember(jsid name, XPCNativeMember** pMember,
+-                             uint16_t* pInterfaceIndex) const;
+-
+-    inline JSBool FindMember(jsid name, XPCNativeMember** pMember,
+-                             XPCNativeInterface** pInterface) const;
+-
+-    inline JSBool FindMember(jsid name,
+-                             XPCNativeMember** pMember,
+-                             XPCNativeInterface** pInterface,
+-                             XPCNativeSet* protoSet,
+-                             JSBool* pIsLocal) const;
+-
+-    inline JSBool HasInterface(XPCNativeInterface* aInterface) const;
+-    inline JSBool HasInterfaceWithAncestor(XPCNativeInterface* aInterface) const;
+-    inline JSBool HasInterfaceWithAncestor(const nsIID* iid) const;
+-
+-    inline XPCNativeInterface* FindInterfaceWithIID(const nsIID& iid) const;
+-
+-    inline XPCNativeInterface* FindNamedInterface(jsid name) const;
+-
+-    uint16_t GetMemberCount() const {return mMemberCount;}
+-    uint16_t GetInterfaceCount() const
+-        {NS_ASSERTION(!IsMarked(), "bad"); return mInterfaceCount;}
+-    XPCNativeInterface** GetInterfaceArray() {return mInterfaces;}
+-
+-    XPCNativeInterface* GetInterfaceAt(uint16_t i)
+-        {NS_ASSERTION(i < mInterfaceCount, "bad index"); return mInterfaces[i];}
+-
+-    inline JSBool MatchesSetUpToInterface(const XPCNativeSet* other,
+-                                          XPCNativeInterface* iface) const;
+-
+-#define XPC_NATIVE_SET_MARK_FLAG ((uint16_t)JS_BIT(15)) // only high bit of 16 is set
+-
+-    inline void Mark();
+-
+-    // NOP. This is just here to make the AutoMarkingPtr code compile.
+-    inline void TraceJS(JSTracer* trc) {}
+-    inline void AutoTrace(JSTracer* trc) {}
+-
+-private:
+-    void MarkSelfOnly() {mInterfaceCount |= XPC_NATIVE_SET_MARK_FLAG;}
+-public:
+-    void Unmark()       {mInterfaceCount &= ~XPC_NATIVE_SET_MARK_FLAG;}
+-    JSBool IsMarked() const
+-                  {return 0 != (mInterfaceCount & XPC_NATIVE_SET_MARK_FLAG);}
+-
+-#ifdef DEBUG
+-    inline void ASSERT_NotMarked();
+-#endif
+-
+-    void DebugDump(int16_t depth);
+-
+-    static void DestroyInstance(XPCNativeSet* inst);
+-
+-protected:
+-    static XPCNativeSet* NewInstance(XPCCallContext& ccx,
+-                                     XPCNativeInterface** array,
+-                                     uint16_t count);
+-    static XPCNativeSet* NewInstanceMutate(XPCNativeSet*       otherSet,
+-                                           XPCNativeInterface* newInterface,
+-                                           uint16_t            position);
+-    XPCNativeSet()  {MOZ_COUNT_CTOR(XPCNativeSet);}
+-    ~XPCNativeSet() {MOZ_COUNT_DTOR(XPCNativeSet);}
+-    void* operator new(size_t, void* p) CPP_THROW_NEW {return p;}
+-
+-private:
+-    uint16_t                mMemberCount;
+-    uint16_t                mInterfaceCount;
+-    XPCNativeInterface*     mInterfaces[1];  // always last - object sized for array
+-};
+-
+-/***************************************************************************/
+ // XPCNativeScriptableFlags is a wrapper class that holds the flags returned
+ // from calls to nsIXPCScriptable::GetScriptableFlags(). It has convenience
+ // methods to check for particular bitflags. Since we also use this class as
+ // a member of the gc'd class XPCNativeScriptableShared, this class holds the
+ // bit and exposes the inlined methods to support marking.
+ 
+ #define XPC_WN_SJSFLAGS_MARK_FLAG JS_BIT(31) // only high bit of 32 is set
+ 

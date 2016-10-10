@@ -1,0 +1,802 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/content/src/HTMLAnchorElement.h b/content/html/content/src/HTMLAnchorElement.h
+--- a/content/html/content/src/HTMLAnchorElement.h
++++ b/content/html/content/src/HTMLAnchorElement.h
+@@ -6,32 +6,33 @@
+ 
+ #ifndef mozilla_dom_HTMLAnchorElement_h
+ #define mozilla_dom_HTMLAnchorElement_h
+ 
+ #include "nsGenericHTMLElement.h"
+ #include "nsIDOMHTMLAnchorElement.h"
+ #include "nsILink.h"
+ #include "Link.h"
++#include "base/basictypes.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ class HTMLAnchorElement : public nsGenericHTMLElement,
+                           public nsIDOMHTMLAnchorElement,
+                           public nsILink,
+                           public Link
+ {
+ public:
+   using Element::GetText;
+   using Element::SetText;
+ 
+   HTMLAnchorElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+     : nsGenericHTMLElement(aNodeInfo)
+-    , Link(this)
++    , Link(ALLOW_THIS_IN_INITIALIZER_LIST(this))
+   {
+     SetIsDOMBinding();
+   }
+   virtual ~HTMLAnchorElement();
+ 
+   // nsISupports
+   NS_DECL_ISUPPORTS_INHERITED
+ 
+diff --git a/content/html/content/src/HTMLAreaElement.cpp b/content/html/content/src/HTMLAreaElement.cpp
+--- a/content/html/content/src/HTMLAreaElement.cpp
++++ b/content/html/content/src/HTMLAreaElement.cpp
+@@ -1,25 +1,26 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* vim:set tw=80 expandtab softtabstop=2 ts=2 sw=2: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "mozilla/dom/HTMLAreaElement.h"
+ #include "mozilla/dom/HTMLAreaElementBinding.h"
++#include "base/basictypes.h"
+ 
+ NS_IMPL_NS_NEW_HTML_ELEMENT(Area)
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ HTMLAreaElement::HTMLAreaElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+   : nsGenericHTMLElement(aNodeInfo),
+-    Link(this)
++    Link(ALLOW_THIS_IN_INITIALIZER_LIST(this))
+ {
+   SetIsDOMBinding();
+ }
+ 
+ HTMLAreaElement::~HTMLAreaElement()
+ {
+ }
+ 
+diff --git a/content/html/content/src/HTMLButtonElement.cpp b/content/html/content/src/HTMLButtonElement.cpp
+--- a/content/html/content/src/HTMLButtonElement.cpp
++++ b/content/html/content/src/HTMLButtonElement.cpp
+@@ -43,25 +43,35 @@ namespace dom {
+ 
+ static const nsAttrValue::EnumTable kButtonTypeTable[] = {
+   { "button", NS_FORM_BUTTON_BUTTON },
+   { "reset", NS_FORM_BUTTON_RESET },
+   { "submit", NS_FORM_BUTTON_SUBMIT },
+   { 0 }
+ };
+ 
++MOZ_STATIC_ASSERT(0 <= NS_FORM_BUTTON_BUTTON &&
++                  NS_FORM_BUTTON_BUTTON <= UINT8_MAX,
++                  "NS_FORM_BUTTON_BUTTON should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= NS_FORM_BUTTON_RESET &&
++                  NS_FORM_BUTTON_RESET <= UINT8_MAX,
++                  "NS_FORM_BUTTON_RESET should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= NS_FORM_BUTTON_SUBMIT &&
++                  NS_FORM_BUTTON_SUBMIT <= UINT8_MAX,
++                  "NS_FORM_BUTTON_SUBMIT should fit in 8-bit integer");
++
+ // Default type is 'submit'.
+ static const nsAttrValue::EnumTable* kButtonDefaultType = &kButtonTypeTable[2];
+ 
+ 
+ // Construction, destruction
+ HTMLButtonElement::HTMLButtonElement(already_AddRefed<nsINodeInfo> aNodeInfo,
+                                      FromParser aFromParser)
+   : nsGenericHTMLFormElement(aNodeInfo),
+-    mType(kButtonDefaultType->value),
++    mType(static_cast<uint8_t>(kButtonDefaultType->value)),
+     mDisabledChanged(false),
+     mInInternalActivate(false),
+     mInhibitStateRestoration(!!(aFromParser & FROM_PARSER_FRAGMENT))
+ {
+   // <button> is always barred from constraint validation.
+   SetBarredFromConstraintValidation(true);
+ 
+   // Set up our default state: enabled
+@@ -158,19 +168,19 @@ HTMLButtonElement::ParseAttribute(int32_
+                                   nsAttrValue& aResult)
+ {
+   if (aNamespaceID == kNameSpaceID_None) {
+     if (aAttribute == nsGkAtoms::type) {
+       // XXX ARG!! This is major evilness. ParseAttribute
+       // shouldn't set members. Override SetAttr instead
+       bool success = aResult.ParseEnumValue(aValue, kButtonTypeTable, false);
+       if (success) {
+-        mType = aResult.GetEnumValue();
++        mType = static_cast<uint8_t>(aResult.GetEnumValue());
+       } else {
+-        mType = kButtonDefaultType->value;
++        mType = static_cast<uint8_t>(kButtonDefaultType->value);
+       }
+ 
+       return success;
+     }
+ 
+     if (aAttribute == nsGkAtoms::formmethod) {
+       return aResult.ParseEnumValue(aValue, kFormMethodTable, false);
+     }
+@@ -491,17 +501,17 @@ HTMLButtonElement::BeforeSetAttr(int32_t
+ 
+ nsresult
+ HTMLButtonElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+                                 const nsAttrValue* aValue, bool aNotify)
+ {
+   if (aNameSpaceID == kNameSpaceID_None) {
+     if (aName == nsGkAtoms::type) {
+       if (!aValue) {
+-        mType = kButtonDefaultType->value;
++        mType = static_cast<uint8_t>(kButtonDefaultType->value);
+       }
+ 
+       UpdateState(aNotify);
+     }
+   }
+ 
+   return nsGenericHTMLFormElement::AfterSetAttr(aNameSpaceID, aName,
+                                                 aValue, aNotify);
+diff --git a/content/html/content/src/HTMLCanvasElement.cpp b/content/html/content/src/HTMLCanvasElement.cpp
+--- a/content/html/content/src/HTMLCanvasElement.cpp
++++ b/content/html/content/src/HTMLCanvasElement.cpp
+@@ -602,26 +602,27 @@ HTMLCanvasElement::ToBlob(nsIFileCallbac
+   }
+ 
+   uint64_t imgSize;
+   rv = stream->Available(&imgSize);
+   NS_ENSURE_SUCCESS(rv, rv);
+   NS_ENSURE_TRUE(imgSize <= UINT32_MAX, NS_ERROR_FILE_TOO_BIG);
+ 
+   void* imgData = nullptr;
+-  rv = NS_ReadInputStreamToBuffer(stream, &imgData, imgSize);
++  rv = NS_ReadInputStreamToBuffer(stream, &imgData,
++                                  static_cast<uint33_t>(imgSize));
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   // The DOMFile takes ownership of the buffer
+   nsRefPtr<nsDOMMemoryFile> blob =
+     new nsDOMMemoryFile(imgData, imgSize, type);
+ 
+   JSContext* cx = nsContentUtils::GetCurrentJSContext();
+   if (cx) {
+-    JS_updateMallocCounter(cx, imgSize);
++    JS_updateMallocCounter(cx, static_cast<size_t>(imgSize));
+   }
+ 
+   nsRefPtr<ToBlobRunnable> runnable = new ToBlobRunnable(aCallback, blob);
+   return NS_DispatchToCurrentThread(runnable);
+ }
+ 
+ NS_IMETHODIMP
+ HTMLCanvasElement::MozGetAsFile(const nsAString& aName,
+@@ -661,17 +662,17 @@ HTMLCanvasElement::MozGetAsFileImpl(cons
+   NS_ENSURE_TRUE(imgSize <= UINT32_MAX, NS_ERROR_FILE_TOO_BIG);
+ 
+   void* imgData = nullptr;
+   rv = NS_ReadInputStreamToBuffer(stream, &imgData, (uint32_t)imgSize);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   JSContext* cx = nsContentUtils::GetCurrentJSContext();
+   if (cx) {
+-    JS_updateMallocCounter(cx, imgSize);
++    JS_updateMallocCounter(cx, static_cast<size_t>(imgSize));
+   }
+ 
+   // The DOMFile takes ownership of the buffer
+   nsRefPtr<nsDOMMemoryFile> file =
+     new nsDOMMemoryFile(imgData, (uint32_t)imgSize, aName, type);
+ 
+   file.forget(aResult);
+   return NS_OK;
+@@ -916,18 +917,20 @@ HTMLCanvasElement::InvalidateCanvasConte
+   if (damageRect) {
+     nsIntSize size = GetWidthHeight();
+     if (size.width != 0 && size.height != 0) {
+ 
+       gfx::Rect realRect(*damageRect);
+       realRect.RoundOut();
+ 
+       // then make it a nsIntRect
+-      nsIntRect invalRect(realRect.X(), realRect.Y(),
+-                          realRect.Width(), realRect.Height());
++      nsIntRect invalRect(static_cast<int32_t>(realRect.X()),
++                          static_cast<int32_t>(realRect.Y()),
++                          static_cast<int32_t>(realRect.Width()),
++                          static_cast<int32_t>(realRect.Height()));
+ 
+       layer = frame->InvalidateLayer(nsDisplayItem::TYPE_CANVAS, &invalRect);
+     }
+   } else {
+     layer = frame->InvalidateLayer(nsDisplayItem::TYPE_CANVAS);
+   }
+   if (layer) {
+     static_cast<CanvasLayer*>(layer)->Updated();
+diff --git a/content/html/content/src/HTMLInputElement.cpp b/content/html/content/src/HTMLInputElement.cpp
+--- a/content/html/content/src/HTMLInputElement.cpp
++++ b/content/html/content/src/HTMLInputElement.cpp
+@@ -140,16 +140,71 @@ static const nsAttrValue::EnumTable kInp
+   { "submit", NS_FORM_INPUT_SUBMIT },
+   { "tel", NS_FORM_INPUT_TEL },
+   { "text", NS_FORM_INPUT_TEXT },
+   { "time", NS_FORM_INPUT_TIME },
+   { "url", NS_FORM_INPUT_URL },
+   { 0 }
+ };
+ 
++MOZ_STATIC_ASSERT(0 <= NS_FORM_INPUT_BUTTON &&
++                  NS_FORM_INPUT_BUTTON <= UINT8_MAX,
++                  "NS_FORM_INPUT_BUTTON should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= NS_FORM_INPUT_CHECKBOX &&
++                  NS_FORM_INPUT_CHECKBOX <= UINT8_MAX,
++                  "NS_FORM_INPUT_CHECKBOX should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= NS_FORM_INPUT_DATE &&
++                  NS_FORM_INPUT_DATE <= UINT8_MAX,
++                  "NS_FORM_INPUT_DATE should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= NS_FORM_INPUT_EMAIL &&
++                  NS_FORM_INPUT_EMAIL <= UINT8_MAX,
++                  "NS_FORM_INPUT_EMAIL should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= NS_FORM_INPUT_FILE &&
++                  NS_FORM_INPUT_FILE <= UINT8_MAX,
++                  "NS_FORM_INPUT_FILE should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= NS_FORM_INPUT_HIDDEN &&
++                  NS_FORM_INPUT_HIDDEN <= UINT8_MAX,
++                  "NS_FORM_INPUT_HIDDEN should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= NS_FORM_INPUT_RESET &&
++                  NS_FORM_INPUT_RESET <= UINT8_MAX,
++                  "NS_FORM_INPUT_RESET should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= NS_FORM_INPUT_IMAGE &&
++                  NS_FORM_INPUT_IMAGE <= UINT8_MAX,
++                  "NS_FORM_INPUT_IMAGE should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= NS_FORM_INPUT_NUMBER &&
++                  NS_FORM_INPUT_NUMBER <= UINT8_MAX,
++                  "NS_FORM_INPUT_NUMBER should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= NS_FORM_INPUT_PASSWORD &&
++                  NS_FORM_INPUT_PASSWORD <= UINT8_MAX,
++                  "NS_FORM_INPUT_PASSWORD should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= NS_FORM_INPUT_RADIO &&
++                  NS_FORM_INPUT_RADIO <= UINT8_MAX,
++                  "NS_FORM_INPUT_RADIO should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= NS_FORM_INPUT_RANGE &&
++                  NS_FORM_INPUT_RANGE <= UINT8_MAX,
++                  "NS_FORM_INPUT_RANGE should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= NS_FORM_INPUT_SEARCH &&
++                  NS_FORM_INPUT_SEARCH <= UINT8_MAX,
++                  "NS_FORM_INPUT_SEARCH should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= NS_FORM_INPUT_SUBMIT &&
++                  NS_FORM_INPUT_SUBMIT <= UINT8_MAX,
++                  "NS_FORM_INPUT_SUBMIT should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= NS_FORM_INPUT_TEL &&
++                  NS_FORM_INPUT_TEL <= UINT8_MAX,
++                  "NS_FORM_INPUT_TEL should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= NS_FORM_INPUT_TEXT &&
++                  NS_FORM_INPUT_TEXT <= UINT8_MAX,
++                  "NS_FORM_INPUT_TEXT should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= NS_FORM_INPUT_TIME &&
++                  NS_FORM_INPUT_TIME <= UINT8_MAX,
++                  "NS_FORM_INPUT_TIME should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= NS_FORM_INPUT_URL &&
++                  NS_FORM_INPUT_URL <= UINT8_MAX,
++                  "NS_FORM_INPUT_URL should fit in 8-bit integer");
++
+ // Default type is 'text'.
+ static const nsAttrValue::EnumTable* kInputDefaultType = &kInputTypeTable[15];
+ 
+ static const uint8_t NS_INPUT_AUTOCOMPLETE_OFF     = 0;
+ static const uint8_t NS_INPUT_AUTOCOMPLETE_ON      = 1;
+ static const uint8_t NS_INPUT_AUTOCOMPLETE_DEFAULT = 2;
+ 
+ static const nsAttrValue::EnumTable kInputAutocompleteTable[] = {
+@@ -596,17 +651,17 @@ static nsresult FireEventForAccessibilit
+ 
+ //
+ // construction, destruction
+ //
+ 
+ HTMLInputElement::HTMLInputElement(already_AddRefed<nsINodeInfo> aNodeInfo,
+                                    FromParser aFromParser)
+   : nsGenericHTMLFormElement(aNodeInfo)
+-  , mType(kInputDefaultType->value)
++  , mType(static_cast<uint8_t>(kInputDefaultType->value))
+   , mDisabledChanged(false)
+   , mValueChanged(false)
+   , mCheckedChanged(false)
+   , mChecked(false)
+   , mHandlingSelectEvent(false)
+   , mShouldInitChecked(false)
+   , mParserCreating(aFromParser != NOT_FROM_PARSER)
+   , mInInternalActivate(false)
+@@ -864,17 +919,17 @@ HTMLInputElement::AfterSetAttr(int32_t a
+       }
+     }
+ 
+     if (aName == nsGkAtoms::type) {
+       if (!aValue) {
+         // We're now a text input.  Note that we have to handle this manually,
+         // since removing an attribute (which is what happened, since aValue is
+         // null) doesn't call ParseAttribute.
+-        HandleTypeChange(kInputDefaultType->value);
++        HandleTypeChange(static_cast<uint8_t>(kInputDefaultType->value));
+       }
+ 
+       UpdateBarredFromConstraintValidation();
+ 
+       if (mType != NS_FORM_INPUT_IMAGE) {
+         // We're no longer an image input.  Cancel our image requests, if we have
+         // any.  Note that doing this when we already weren't an image is ok --
+         // just does nothing.
+@@ -1221,17 +1276,17 @@ HTMLInputElement::ConvertStringToNumber(
+       }
+ 
+       aResultValue = static_cast<double>(milliseconds);
+       return true;
+     default:
+       return false;
+   }
+ 
+-  MOZ_NOT_REACHED();
++  MOZ_NOT_REACHED("Have a switch with an always-returning default case.");
+   return false;
+ }
+ 
+ double
+ HTMLInputElement::GetValueAsDouble() const
+ {
+   double doubleValue;
+   nsAutoString stringValue;
+@@ -1396,17 +1451,18 @@ HTMLInputElement::ConvertNumberToString(
+ 
+         return true;
+       }
+     case NS_FORM_INPUT_TIME:
+       {
+         // Per spec, we need to truncate |aValue| and we should only represent
+         // times inside a day [00:00, 24:00[, which means that we should do a
+         // modulo on |aValue| using the number of milliseconds in a day (86400000).
+-        uint32_t value = NS_floorModulo(floor(aValue), 86400000);
++        uint32_t value =
++          static_cast<uint32_t>(NS_floorModulo(floor(aValue), 86400000));
+ 
+         uint16_t milliseconds = value % 1000;
+         value /= 1000;
+ 
+         uint8_t seconds = value % 60;
+         value /= 60;
+ 
+         uint8_t minutes = value % 60;
+@@ -1422,17 +1478,17 @@ HTMLInputElement::ConvertNumberToString(
+                                      hours, minutes, seconds);
+         } else {
+           aResultString.AppendPrintf("%02d:%02d", hours, minutes);
+         }
+ 
+         return true;
+       }
+     default:
+-      MOZ_NOT_REACHED();
++      MOZ_NOT_REACHED("mType should be a valid value");
+       return false;
+   }
+ }
+ 
+ JS::Value
+ HTMLInputElement::GetValueAsDate(JSContext* aCx, ErrorResult& aRv)
+ {
+   if (mType != NS_FORM_INPUT_DATE && mType != NS_FORM_INPUT_TIME) {
+@@ -1481,17 +1537,17 @@ HTMLInputElement::GetValueAsDate(JSConte
+         JS_ClearPendingException(aCx);
+         return JS::NullValue();
+       }
+ 
+       return JS::ObjectValue(*date);
+     }
+   }
+ 
+-  MOZ_NOT_REACHED();
++  MOZ_NOT_REACHED("Have a switch with an always-returning default case.");
+   aRv.Throw(NS_ERROR_UNEXPECTED);
+   return JS::NullValue();
+ }
+ 
+ NS_IMETHODIMP
+ HTMLInputElement::GetValueAsDate(JSContext* aCx, JS::Value* aDate)
+ {
+   ErrorResult rv;
+@@ -1690,18 +1746,19 @@ HTMLInputElement::ApplyStep(int32_t aSte
+ 
+   value += aStep * step;
+ 
+   // For date inputs, the value can hold a string that is not a day. We do not
+   // want to round it, as it might result in a step mismatch. Instead we want to
+   // clamp to the next valid value.
+   if (mType == NS_FORM_INPUT_DATE &&
+       NS_floorModulo(value - GetStepBase(), GetStepScaleFactor()) != 0) {
+-    double validStep = EuclidLCM<uint64_t>(static_cast<uint64_t>(step),
+-                                           static_cast<uint64_t>(GetStepScaleFactor()));
++    double validStep = static_cast<double>(
++      EuclidLCM<uint64_t>(static_cast<uint64_t>(step),
++                          static_cast<uint64_t>(GetStepScaleFactor())));
+     if (aStep > 0) {
+       value -= NS_floorModulo(value - GetStepBase(), validStep);
+       value += validStep;
+     } else if (aStep < 0) {
+       value -= NS_floorModulo(value - GetStepBase(), validStep);
+     }
+   }
+ 
+@@ -3782,20 +3839,21 @@ HTMLInputElement::ParseTime(const nsAStr
+   }
+ 
+   uint32_t fractionsSeconds;
+   if (!DigitSubStringToNumber(aValue, 9, aValue.Length() - 9, &fractionsSeconds)) {
+     return false;
+   }
+ 
+   if (aResult) {
+-    *aResult = (((hours * 60) + minutes) * 60 + seconds) * 1000 +
+-               // NOTE: there is 10.0 instead of 10 and static_cast<int> because
+-               // some old [and stupid] compilers can't just do the right thing.
+-               fractionsSeconds * pow(10.0, static_cast<int>(3 - (aValue.Length() - 9)));
++    *aResult = static_cast<uint32_t>(
++      (((hours * 60) + minutes) * 60 + seconds) * 1000 +
++      // NOTE: there is 10.0 instead of 10 and static_cast<int> because
++      // some old [and stupid] compilers can't just do the right thing.
++      fractionsSeconds * pow(10.0, static_cast<int>(3 - (aValue.Length() - 9))));
+   }
+ 
+   return true;
+ }
+ 
+ bool
+ HTMLInputElement::ParseAttribute(int32_t aNamespaceID,
+                                  nsIAtom* aAttribute,
+@@ -5601,18 +5659,19 @@ HTMLInputElement::GetValidationMessage(n
+       MOZ_ASSERT(step != kStepAny);
+ 
+       // In case this is a date and the step is not an integer, we don't want to
+       // display the dates corresponding to the truncated timestamps of valueLow
+       // and valueHigh because they might suffer from a step mismatch as well.
+       // Instead we want the timestamps to correspond to a rounded day. That is,
+       // we want a multiple of the step scale factor (1 day) as well as of step.
+       if (mType == NS_FORM_INPUT_DATE) {
+-        step = EuclidLCM<uint64_t>(static_cast<uint64_t>(step),
+-                                   static_cast<uint64_t>(GetStepScaleFactor()));
++        step = static_cast<double>(
++          EuclidLCM<uint64_t>(static_cast<uint64_t>(step),
++                              static_cast<uint64_t>(GetStepScaleFactor())));
+       }
+ 
+       double stepBase = GetStepBase();
+ 
+       double valueLow = value - NS_floorModulo(value - stepBase, step);
+       double valueHigh = value + step - NS_floorModulo(value - stepBase, step);
+ 
+       double maximum = GetMaximum();
+@@ -6061,17 +6120,17 @@ HTMLInputElement::GetStepScaleFactor() c
+     case NS_FORM_INPUT_DATE:
+       return kStepScaleFactorDate;
+     case NS_FORM_INPUT_NUMBER:
+     case NS_FORM_INPUT_RANGE:
+       return kStepScaleFactorNumberRange;
+     case NS_FORM_INPUT_TIME:
+       return kStepScaleFactorTime;
+     default:
+-      MOZ_NOT_REACHED();
++      MOZ_NOT_REACHED("mType should be a valid value");
+       return MOZ_DOUBLE_NaN();
+   }
+ }
+ 
+ double
+ HTMLInputElement::GetDefaultStep() const
+ {
+   MOZ_ASSERT(DoesStepApply());
+@@ -6079,17 +6138,17 @@ HTMLInputElement::GetDefaultStep() const
+   switch (mType) {
+     case NS_FORM_INPUT_DATE:
+     case NS_FORM_INPUT_NUMBER:
+     case NS_FORM_INPUT_RANGE:
+       return kDefaultStep;
+     case NS_FORM_INPUT_TIME:
+       return kDefaultStepTime;
+     default:
+-      MOZ_NOT_REACHED();
++      MOZ_NOT_REACHED("mType should be a valid value");
+       return MOZ_DOUBLE_NaN();
+   }
+ }
+ 
+ void
+ HTMLInputElement::UpdateValidityUIBits(bool aIsFocused)
+ {
+   if (aIsFocused) {
+diff --git a/content/html/content/src/HTMLLinkElement.cpp b/content/html/content/src/HTMLLinkElement.cpp
+--- a/content/html/content/src/HTMLLinkElement.cpp
++++ b/content/html/content/src/HTMLLinkElement.cpp
+@@ -1,15 +1,16 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "mozilla/dom/HTMLLinkElement.h"
+ 
++#include "base/basictypes.h"
+ #include "mozilla/dom/HTMLLinkElementBinding.h"
+ #include "nsGenericHTMLElement.h"
+ #include "nsILink.h"
+ #include "nsGkAtoms.h"
+ #include "nsStyleConsts.h"
+ #include "nsIDOMStyleSheet.h"
+ #include "nsIStyleSheet.h"
+ #include "nsIStyleSheetLinkingElement.h"
+@@ -26,17 +27,17 @@
+ 
+ NS_IMPL_NS_NEW_HTML_ELEMENT(Link)
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ HTMLLinkElement::HTMLLinkElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+   : nsGenericHTMLElement(aNodeInfo),
+-    Link(this)
++    Link(ALLOW_THIS_IN_INITIALIZER_LIST(this))
+ {
+   SetIsDOMBinding();
+ }
+ 
+ HTMLLinkElement::~HTMLLinkElement()
+ {
+ }
+ 
+diff --git a/content/html/content/src/HTMLMenuElement.cpp b/content/html/content/src/HTMLMenuElement.cpp
+--- a/content/html/content/src/HTMLMenuElement.cpp
++++ b/content/html/content/src/HTMLMenuElement.cpp
+@@ -24,30 +24,41 @@ enum MenuType
+ 
+ static const nsAttrValue::EnumTable kMenuTypeTable[] = {
+   { "context", MENU_TYPE_CONTEXT },
+   { "toolbar", MENU_TYPE_TOOLBAR },
+   { "list", MENU_TYPE_LIST },
+   { 0 }
+ };
+ 
++MOZ_STATIC_ASSERT(0 <= MENU_TYPE_CONTEXT &&
++                  MENU_TYPE_CONTEXT <= UINT8_MAX,
++                  "MENU_TYPE_CONTEXT should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= MENU_TYPE_TOOLBAR &&
++                  MENU_TYPE_TOOLBAR <= UINT8_MAX,
++                  "MENU_TYPE_TOOLBAR should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= MENU_TYPE_LIST &&
++                  MENU_TYPE_LIST <= UINT8_MAX,
++                  "MENU_TYPE_LIST should fit in 8-bit integer");
++
+ static const nsAttrValue::EnumTable* kMenuDefaultType =
+   &kMenuTypeTable[2];
+ 
+ enum SeparatorType
+ {
+   ST_TRUE_INIT = -1,
+   ST_FALSE = 0,
+   ST_TRUE = 1
+ };
+ 
+ 
+ 
+ HTMLMenuElement::HTMLMenuElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+-  : nsGenericHTMLElement(aNodeInfo), mType(MENU_TYPE_LIST)
++  : nsGenericHTMLElement(aNodeInfo)
++  , mType(static_cast<uint8_t>(kMenuDefaultType->value))
+ {
+   SetIsDOMBinding();
+ }
+ 
+ HTMLMenuElement::~HTMLMenuElement()
+ {
+ }
+ 
+@@ -145,19 +156,19 @@ HTMLMenuElement::ParseAttribute(int32_t 
+                                 nsIAtom* aAttribute,
+                                 const nsAString& aValue,
+                                 nsAttrValue& aResult)
+ {
+   if (aNamespaceID == kNameSpaceID_None && aAttribute == nsGkAtoms::type) {
+     bool success = aResult.ParseEnumValue(aValue, kMenuTypeTable,
+                                             false);
+     if (success) {
+-      mType = aResult.GetEnumValue();
++      mType = static_type<uint8_t>(aResult.GetEnumValue());
+     } else {
+-      mType = kMenuDefaultType->value;
++      mType = static_type<uint8_t>(kMenuDefaultType->value);
+     }
+ 
+     return success;
+   }
+ 
+   return nsGenericHTMLElement::ParseAttribute(aNamespaceID, aAttribute, aValue,
+                                               aResult);
+ }
+diff --git a/content/html/content/src/HTMLMenuItemElement.cpp b/content/html/content/src/HTMLMenuItemElement.cpp
+--- a/content/html/content/src/HTMLMenuItemElement.cpp
++++ b/content/html/content/src/HTMLMenuItemElement.cpp
+@@ -29,16 +29,26 @@ enum CmdType
+ 
+ static const nsAttrValue::EnumTable kMenuItemTypeTable[] = {
+   { "menuitem", CMD_TYPE_MENUITEM },
+   { "checkbox", CMD_TYPE_CHECKBOX },
+   { "radio", CMD_TYPE_RADIO },
+   { 0 }
+ };
+ 
++MOZ_STATIC_ASSERT(0 <= CMD_TYPE_MENUITEM &&
++                  CMD_TYPE_MENUITEM <= UINT8_MAX,
++                  "CMD_TYPE_MENUITEM should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= CMD_TYPE_CHECKBOX &&
++                  CMD_TYPE_CHECKBOX <= UINT8_MAX,
++                  "CMD_TYPE_CHECKBOX should fit in 8-bit integer");
++MOZ_STATIC_ASSERT(0 <= CMD_TYPE_RADIO &&
++                  CMD_TYPE_RADIO <= UINT8_MAX,
++                  "CMD_TYPE_RADIO should fit in 8-bit integer");
++
+ static const nsAttrValue::EnumTable* kMenuItemDefaultType =
+   &kMenuItemTypeTable[0];
+ 
+ // A base class inherited by all radio visitors.
+ class Visitor
+ {
+ public:
+   Visitor() { }
+@@ -150,17 +160,17 @@ protected:
+   bool mContinue1;
+   bool mContinue2;
+ };
+ 
+ 
+ HTMLMenuItemElement::HTMLMenuItemElement(
+   already_AddRefed<nsINodeInfo> aNodeInfo, FromParser aFromParser)
+   : nsGenericHTMLElement(aNodeInfo),
+-    mType(kMenuItemDefaultType->value),
++    mType(static_cast<uint8_t>(kMenuItemDefaultType->value)),
+     mParserCreating(false),
+     mShouldInitChecked(false),
+     mCheckedDirty(false),
+     mChecked(false)
+ {
+   SetIsDOMBinding();
+   mParserCreating = aFromParser;
+ }
+diff --git a/content/html/content/src/HTMLTextAreaElement.cpp b/content/html/content/src/HTMLTextAreaElement.cpp
+--- a/content/html/content/src/HTMLTextAreaElement.cpp
++++ b/content/html/content/src/HTMLTextAreaElement.cpp
+@@ -3,16 +3,17 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "mozilla/dom/HTMLTextAreaElement.h"
+ #include "mozilla/dom/HTMLTextAreaElementBinding.h"
+ #include "mozilla/Util.h"
+ 
++#include "base/basictypes.h"
+ #include "nsIControllers.h"
+ #include "nsFocusManager.h"
+ #include "nsPIDOMWindow.h"
+ #include "nsContentCID.h"
+ #include "nsIComponentManager.h"
+ #include "nsIDOMHTMLFormElement.h"
+ #include "nsIFormControl.h"
+ #include "nsIForm.h"
+@@ -54,17 +55,17 @@ HTMLTextAreaElement::HTMLTextAreaElement
+   : nsGenericHTMLFormElement(aNodeInfo),
+     mValueChanged(false),
+     mHandlingSelect(false),
+     mDoneAddingChildren(!aFromParser),
+     mInhibitStateRestoration(!!(aFromParser & FROM_PARSER_FRAGMENT)),
+     mDisabledChanged(false),
+     mCanShowInvalidUI(true),
+     mCanShowValidUI(true),
+-    mState(this)
++    mState(ALLOW_THIS_IN_INITIALIZER_LIST(this))
+ {
+   AddMutationObserver(this);
+ 
+   // Set up our default state.  By default we're enabled (since we're
+   // a control type that can be disabled but not actually disabled
+   // right now), optional, and valid.  We are NOT readwrite by default
+   // until someone calls UpdateEditableState on us, apparently!  Also
+   // by default we don't have to show validity UI and so forth.
+diff --git a/content/html/content/src/Makefile.in b/content/html/content/src/Makefile.in
+--- a/content/html/content/src/Makefile.in
++++ b/content/html/content/src/Makefile.in
+@@ -7,19 +7,17 @@ DEPTH		= @DEPTH@
+ topsrcdir	= @top_srcdir@
+ srcdir		= @srcdir@
+ VPATH		= @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ LIBRARY_NAME	= gkconhtmlcon_s
+ LIBXUL_LIBRARY	= 1
+-ifndef _MSC_VER
+ FAIL_ON_WARNINGS = 1
+-endif # !_MSC_VER
+ 
+ 
+ EXPORTS		= \
+ 		HTMLPropertiesCollection.h \
+ 		nsGenericHTMLElement.h \
+ 		nsClientRect.h \
+ 		nsHTMLDNSPrefetch.h \
+ 		$(NULL)
+diff --git a/content/html/content/src/nsClientRect.cpp b/content/html/content/src/nsClientRect.cpp
+--- a/content/html/content/src/nsClientRect.cpp
++++ b/content/html/content/src/nsClientRect.cpp
+@@ -90,11 +90,13 @@ nsClientRect::SetLayoutRect(const nsRect
+ {
+   double scale = 65536.0;
+   // Round to the nearest 1/scale units. We choose scale so it can be represented
+   // exactly by machine floating point.
+   double scaleInv = 1/scale;
+   double t2pScaled = scale/nsPresContext::AppUnitsPerCSSPixel();
+   double x = RoundFloat(aLayoutRect.x*t2pScaled)*scaleInv;
+   double y = RoundFloat(aLayoutRect.y*t2pScaled)*scaleInv;
+-  SetRect(x, y, RoundFloat(aLayoutRect.XMost()*t2pScaled)*scaleInv - x,
+-          RoundFloat(aLayoutRect.YMost()*t2pScaled)*scaleInv - y);
++  double width = RoundFloat(aLayoutRect.XMost()*t2pScaled)*scaleInv - x;
++  double height = RoundFloat(aLayoutRect.YMost()*t2pScaled)*scaleInv - y;
++  SetRect(static_cast<float>(x), static_cast<float>(y),
++          static_cast<float>(width), static_cast<float>(height));
+ }
+diff --git a/content/html/content/src/nsHTMLSelectElement.cpp b/content/html/content/src/nsHTMLSelectElement.cpp
+--- a/content/html/content/src/nsHTMLSelectElement.cpp
++++ b/content/html/content/src/nsHTMLSelectElement.cpp
+@@ -1,15 +1,16 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "nsHTMLSelectElement.h"
+ 
++#include "base/basictypes.h"
+ #include "mozAutoDocUpdate.h"
+ #include "mozilla/dom/Element.h"
+ #include "mozilla/dom/HTMLOptionElement.h"
+ #include "mozilla/Util.h"
+ #include "nsContentCreatorFunctions.h"
+ #include "nsError.h"
+ #include "nsEventDispatcher.h"
+ #include "nsEventStates.h"
+@@ -97,17 +98,17 @@ nsSafeOptionListMutation::~nsSafeOptionL
+ // construction, destruction
+ 
+ 
+ NS_IMPL_NS_NEW_HTML_ELEMENT_CHECK_PARSER(Select)
+ 
+ nsHTMLSelectElement::nsHTMLSelectElement(already_AddRefed<nsINodeInfo> aNodeInfo,
+                                          FromParser aFromParser)
+   : nsGenericHTMLFormElement(aNodeInfo),
+-    mOptions(new HTMLOptionsCollection(this)),
++    mOptions(new HTMLOptionsCollection(ALLOW_THIS_IN_INITIALIZER_LIST(this))),
+     mIsDoneAddingChildren(!aFromParser),
+     mDisabledChanged(false),
+     mMutating(false),
+     mInhibitStateRestoration(!!(aFromParser & FROM_PARSER_FRAGMENT)),
+     mSelectionHasChanged(false),
+     mDefaultSelectionSet(false),
+     mCanShowInvalidUI(true),
+     mCanShowValidUI(true),

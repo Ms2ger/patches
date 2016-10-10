@@ -1,0 +1,256 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/public/Element.h b/content/base/public/Element.h
+--- a/content/base/public/Element.h
++++ b/content/base/public/Element.h
+@@ -403,18 +403,16 @@ public:
+                               bool aNullParent = true);
+   virtual already_AddRefed<nsINodeInfo> GetExistingAttrNameFromQName(const nsAString& aStr) const;
+   nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+                    const nsAString& aValue, bool aNotify)
+   {
+     return SetAttr(aNameSpaceID, aName, nullptr, aValue, aNotify);
+   }
+ 
+-  NS_IMETHOD GetAttributes(nsIDOMNamedNodeMap** aAttributes);
+-
+   /**
+    * Helper for SetAttr/SetParsedAttr. This method will return true if aNotify
+    * is true or there are mutation listeners that must be triggered, the
+    * attribute is currently set, and the new value that is about to be set is
+    * different to the current value. As a perf optimization the new and old
+    * values will not actually be compared if we aren't notifying and we don't
+    * have mutation listeners (in which case it's cheap to just return false
+    * and let the caller go ahead and set the value).
+@@ -518,19 +516,19 @@ public:
+     GetAttr(kNameSpaceID_None, nsGkAtoms::id, aId);
+   }
+   void SetId(const nsAString& aId)
+   {
+     SetAttr(kNameSpaceID_None, nsGkAtoms::id, aId, true);
+   }
+ 
+   nsDOMTokenList* ClassList();
+-  nsDOMAttributeMap* GetAttributes()
++  nsDOMAttributeMap* Attributes()
+   {
+-    nsDOMSlots *slots = DOMSlots();
++    nsDOMSlots* slots = DOMSlots();
+     if (!slots->mAttributeMap) {
+       slots->mAttributeMap = new nsDOMAttributeMap(this);
+     }
+ 
+     return slots->mAttributeMap;
+   }
+   virtual void GetAttribute(const nsAString& aName, nsString& aReturn);
+   void GetAttributeNS(const nsAString& aNamespaceURI,
+diff --git a/content/base/public/nsINode.h b/content/base/public/nsINode.h
+--- a/content/base/public/nsINode.h
++++ b/content/base/public/nsINode.h
+@@ -1555,17 +1555,16 @@ protected:
+   nsresult GetChildNodes(nsIDOMNodeList** aChildNodes);
+   nsresult GetFirstChild(nsIDOMNode** aFirstChild);
+   nsresult GetLastChild(nsIDOMNode** aLastChild);
+   nsresult GetPreviousSibling(nsIDOMNode** aPrevSibling);
+   nsresult GetNextSibling(nsIDOMNode** aNextSibling);
+   nsresult GetOwnerDocument(nsIDOMDocument** aOwnerDocument);
+   nsresult CompareDocumentPosition(nsIDOMNode* aOther,
+                                    uint16_t* aReturn);
+-  nsresult GetAttributes(nsIDOMNamedNodeMap** aAttributes);
+ 
+   nsresult ReplaceOrInsertBefore(bool aReplace, nsIDOMNode *aNewChild,
+                                  nsIDOMNode *aRefChild, nsIDOMNode **aReturn);
+   nsINode* ReplaceOrInsertBefore(bool aReplace, nsINode* aNewChild,
+                                  nsINode* aRefChild,
+                                  mozilla::ErrorResult& aError);
+   nsresult RemoveChild(nsIDOMNode* aOldChild, nsIDOMNode** aReturn);
+ 
+@@ -1859,17 +1858,19 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsINode, N
+     return nsINode::GetPreviousSibling(aPreviousSibling); \
+   } \
+   NS_IMETHOD GetNextSibling(nsIDOMNode** aNextSibling) _final \
+   { \
+     return nsINode::GetNextSibling(aNextSibling); \
+   } \
+   NS_IMETHOD GetAttributes(nsIDOMNamedNodeMap** aAttributes) _final \
+   { \
+-    return nsINode::GetAttributes(aAttributes); \
++    nsRefPtr<nsDOMAttributeMap> map = nsINode::GetAttributes(); \
++    map.forget(aAttributes); \
++    return NS_OK; \
+   } \
+   NS_IMETHOD GetOwnerDocument(nsIDOMDocument** aOwnerDocument) _final \
+   { \
+     return nsINode::GetOwnerDocument(aOwnerDocument); \
+   } \
+   NS_IMETHOD InsertBefore(nsIDOMNode* aNewChild, nsIDOMNode* aRefChild, nsIDOMNode** aResult) _final \
+   { \
+     return ReplaceOrInsertBefore(false, aNewChild, aRefChild, aResult); \
+diff --git a/content/base/src/Element.cpp b/content/base/src/Element.cpp
+--- a/content/base/src/Element.cpp
++++ b/content/base/src/Element.cpp
+@@ -769,66 +769,48 @@ Element::RemoveAttribute(const nsAString
+ 
+   aError = UnsetAttr(name->NamespaceID(), name->LocalName(), true);
+ }
+ 
+ nsIDOMAttr*
+ Element::GetAttributeNode(const nsAString& aName)
+ {
+   OwnerDoc()->WarnOnceAbout(nsIDocument::eGetAttributeNode);
+-
+-  nsDOMAttributeMap* map = GetAttributes();
+-  if (!map) {
+-    return nullptr;
+-  }
+-
+-  return map->GetNamedItem(aName);
++  return Attributes()->GetNamedItem(aName);
+ }
+ 
+ already_AddRefed<nsIDOMAttr>
+ Element::SetAttributeNode(nsIDOMAttr* aNewAttr, ErrorResult& aError)
+ {
+   OwnerDoc()->WarnOnceAbout(nsIDocument::eSetAttributeNode);
+ 
+-  nsDOMAttributeMap* map = GetAttributes();
+-  if (!map) {
+-    // XXX Throw?
+-    return nullptr;
+-  }
+-
+   nsCOMPtr<nsIDOMNode> returnNode;
+-  aError = map->SetNamedItem(aNewAttr, getter_AddRefs(returnNode));
++  aError = Attributes()->SetNamedItem(aNewAttr, getter_AddRefs(returnNode));
+   if (aError.Failed()) {
+     return nullptr;
+   }
+ 
+   return static_cast<nsIDOMAttr*>(returnNode.forget().get());
+ }
+ 
+ already_AddRefed<nsIDOMAttr>
+ Element::RemoveAttributeNode(nsIDOMAttr* aAttribute,
+                              ErrorResult& aError)
+ {
+   OwnerDoc()->WarnOnceAbout(nsIDocument::eRemoveAttributeNode);
+ 
+-  nsDOMAttributeMap* map = GetAttributes();
+-  if (!map) {
+-    // XXX Throw?
+-    return nullptr;
+-  }
+-
+   nsAutoString name;
+ 
+   aError = aAttribute->GetName(name);
+   if (aError.Failed()) {
+     return nullptr;
+   }
+ 
+   nsCOMPtr<nsIDOMNode> node;
+-  aError = map->RemoveNamedItem(name, getter_AddRefs(node));
++  aError = Attributes()->RemoveNamedItem(name, getter_AddRefs(node));
+   if (aError.Failed()) {
+     return nullptr;
+   }
+ 
+   return static_cast<nsIDOMAttr*>(node.forget().get());
+ }
+ 
+ void
+@@ -901,36 +883,25 @@ Element::GetAttributeNodeNS(const nsAStr
+   return GetAttributeNodeNSInternal(aNamespaceURI, aLocalName, aError);
+ }
+ 
+ nsIDOMAttr*
+ Element::GetAttributeNodeNSInternal(const nsAString& aNamespaceURI,
+                                     const nsAString& aLocalName,
+                                     ErrorResult& aError)
+ {
+-  nsDOMAttributeMap* map = GetAttributes();
+-  if (!map) {
+-    return nullptr;
+-  }
+-
+-  return map->GetNamedItemNS(aNamespaceURI, aLocalName, aError);
++  return Attributes()->GetNamedItemNS(aNamespaceURI, aLocalName, aError);
+ }
+ 
+ already_AddRefed<nsIDOMAttr>
+ Element::SetAttributeNodeNS(nsIDOMAttr* aNewAttr,
+                             ErrorResult& aError)
+ {
+   OwnerDoc()->WarnOnceAbout(nsIDocument::eSetAttributeNodeNS);
+-
+-  nsDOMAttributeMap* map = GetAttributes();
+-  if (!map) {
+-    return nullptr;
+-  }
+-
+-  return map->SetNamedItemNS(aNewAttr, aError);
++  return Attributes()->SetNamedItemNS(aNewAttr, aError);
+ }
+ 
+ already_AddRefed<nsIHTMLCollection>
+ Element::GetElementsByTagNameNS(const nsAString& aNamespaceURI,
+                                 const nsAString& aLocalName,
+                                 ErrorResult& aError)
+ {
+   int32_t nameSpaceId = kNameSpaceID_Wildcard;
+@@ -1491,30 +1462,16 @@ Element::GetExistingAttrNameFromQName(co
+   }
+   else {
+     NS_ADDREF(nodeInfo = name->NodeInfo());
+   }
+ 
+   return nodeInfo;
+ }
+ 
+-NS_IMETHODIMP
+-Element::GetAttributes(nsIDOMNamedNodeMap** aAttributes)
+-{
+-  nsDOMSlots *slots = DOMSlots();
+-
+-  if (!slots->mAttributeMap) {
+-    slots->mAttributeMap = new nsDOMAttributeMap(this);
+-  }
+-
+-  NS_ADDREF(*aAttributes = slots->mAttributeMap);
+-
+-  return NS_OK;
+-}
+-
+ // static
+ bool
+ Element::ShouldBlur(nsIContent *aContent)
+ {
+   // Determine if the current element is focused, if it is not focused
+   // then we should not try to blur
+   nsIDocument *document = aContent->GetDocument();
+   if (!document)
+diff --git a/content/base/src/nsINode.cpp b/content/base/src/nsINode.cpp
+--- a/content/base/src/nsINode.cpp
++++ b/content/base/src/nsINode.cpp
+@@ -2351,20 +2351,10 @@ nsINode::CloneNode(bool aDeep, ErrorResu
+ }
+ 
+ nsDOMAttributeMap*
+ nsINode::GetAttributes()
+ {
+   if (!IsElement()) {
+     return nullptr;
+   }
+-  return AsElement()->GetAttributes();
++  return AsElement()->Attributes();
+ }
+-
+-nsresult
+-nsINode::GetAttributes(nsIDOMNamedNodeMap** aAttributes)
+-{
+-  if (!IsElement()) {
+-    *aAttributes = nullptr;
+-    return NS_OK;
+-  }
+-  return CallQueryInterface(GetAttributes(), aAttributes);
+-}

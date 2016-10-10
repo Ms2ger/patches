@@ -1,0 +1,238 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsGkAtomList.h b/content/base/src/nsGkAtomList.h
+--- a/content/base/src/nsGkAtomList.h
++++ b/content/base/src/nsGkAtomList.h
+@@ -137,20 +137,22 @@ GK_ATOM(basefont, "basefont")
+ GK_ATOM(baseline, "baseline")
+ GK_ATOM(bdi, "bdi")
+ GK_ATOM(bdo, "bdo")
+ GK_ATOM(before, "before")
+ GK_ATOM(before_end, "before_end")
+ GK_ATOM(before_start, "before_start")
+ GK_ATOM(below, "below")
+ GK_ATOM(bgcolor, "bgcolor")
++GK_ATOM(bgsound, "bgsound")
+ GK_ATOM(big, "big")
+ GK_ATOM(binding, "binding")
+ GK_ATOM(bindings, "bindings")
+ GK_ATOM(blankrow, "blankrow")
++GK_ATOM(blink, "blink")
+ GK_ATOM(block, "block")
+ GK_ATOM(blockquote, "blockquote")
+ GK_ATOM(blur, "blur")
+ GK_ATOM(body, "body")
+ GK_ATOM(boolean, "boolean")
+ GK_ATOM(border, "border")
+ GK_ATOM(bordercolor, "bordercolor")
+ GK_ATOM(both, "both")
+diff --git a/editor/libeditor/base/nsEditor.cpp b/editor/libeditor/base/nsEditor.cpp
+--- a/editor/libeditor/base/nsEditor.cpp
++++ b/editor/libeditor/base/nsEditor.cpp
+@@ -3515,20 +3515,21 @@ nsEditor::IsDescendantOfBody(nsINode *in
+ {
+   NS_ENSURE_TRUE(inNode, false);
+   nsCOMPtr<nsIContent> root = GetRoot();
+   NS_ENSURE_TRUE(root, false);
+ 
+   return nsContentUtils::ContentIsDescendantOf(inNode, root);
+ }
+ 
+-bool 
+-nsEditor::IsContainer(nsIDOMNode *aNode)
+-{
+-  return aNode ? true : false;
++/* virtual */
++bool
++nsEditor::IsContainer(nsINode* aNode)
++{
++  return !!aNode;
+ }
+ 
+ bool
+ nsEditor::IsTextInDirtyFrameVisible(nsIContent *aNode)
+ {
+   // virtual method
+   //
+   // If this is a simple non-html editor,
+diff --git a/editor/libeditor/base/nsEditor.h b/editor/libeditor/base/nsEditor.h
+--- a/editor/libeditor/base/nsEditor.h
++++ b/editor/libeditor/base/nsEditor.h
+@@ -565,17 +565,22 @@ public:
+   bool IsRootNode(nsIDOMNode *inNode);
+   bool IsRootNode(nsINode *inNode);
+ 
+   /** returns true if aNode is a descendant of our root node */
+   bool IsDescendantOfBody(nsIDOMNode *inNode);
+   bool IsDescendantOfBody(nsINode *inNode);
+ 
+   /** returns true if aNode is a container */
+-  virtual bool IsContainer(nsIDOMNode *aNode);
++  virtual bool IsContainer(nsINode* aNode);
++  bool IsContainer(nsIDOMNode* aNode)
++  {
++    nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
++    return IsContainer(node);
++  }
+ 
+   /** returns true if aNode is an editable node */
+   bool IsEditable(nsIDOMNode *aNode);
+   bool IsEditable(nsIContent *aNode);
+ 
+   virtual bool IsTextInDirtyFrameVisible(nsIContent *aNode);
+ 
+   /** returns true if aNode is a MozEditorBogus node */
+diff --git a/editor/libeditor/html/nsHTMLEditUtils.cpp b/editor/libeditor/html/nsHTMLEditUtils.cpp
+--- a/editor/libeditor/html/nsHTMLEditUtils.cpp
++++ b/editor/libeditor/html/nsHTMLEditUtils.cpp
+@@ -832,18 +832,9 @@ nsHTMLEditUtils::CanContain(int32_t aPar
+ 
+   const nsElementInfo& parent = kElements[aParent - 1];
+   if (aParent == aChild) {
+     return parent.mCanContainSelf;
+   }
+ 
+   const nsElementInfo& child = kElements[aChild - 1];
+   return (parent.mCanContainGroups & child.mGroup) != 0;
+-} 
+-
+-bool
+-nsHTMLEditUtils::IsContainer(int32_t aTag)
+-{
+-  NS_ASSERTION(aTag > eHTMLTag_unknown && aTag <= eHTMLTag_userdefined,
+-               "aTag out of range!");
+-
+-  return kElements[aTag - 1].mIsContainer;
+ }
+diff --git a/editor/libeditor/html/nsHTMLEditUtils.h b/editor/libeditor/html/nsHTMLEditUtils.h
+--- a/editor/libeditor/html/nsHTMLEditUtils.h
++++ b/editor/libeditor/html/nsHTMLEditUtils.h
+@@ -85,13 +85,12 @@ public:
+   static bool IsNamedAnchor(nsIDOMNode *aNode);
+   static bool IsDiv(nsIDOMNode *aNode);
+   static bool IsMozDiv(nsIDOMNode *aNode);
+   static bool IsMailCite(nsIDOMNode *aNode);
+   static bool IsFormWidget(mozilla::dom::Element* aNode);
+   static bool IsFormWidget(nsIDOMNode *aNode);
+   static bool SupportsAlignAttr(nsIDOMNode *aNode);
+   static bool CanContain(int32_t aParent, int32_t aChild);
+-  static bool IsContainer(int32_t aTag);
+ };
+ 
+ #endif /* nsHTMLEditUtils_h__ */
+ 
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -3806,45 +3806,66 @@ nsHTMLEditor::TagCanContainTag(const nsA
+ 
+   int32_t parentTagEnum = parserService->HTMLStringTagToId(aParentTag);
+   NS_ASSERTION(parentTagEnum < NS_HTML_TAG_MAX,
+                "Fix the caller, this type of node can never contain children.");
+ 
+   return nsHTMLEditUtils::CanContain(parentTagEnum, childTagEnum);
+ }
+ 
++/* virtual */
+ bool
+ nsHTMLEditor::IsContainer(nsINode* aNode)
+ {
+-  nsCOMPtr<nsIDOMNode> node = do_QueryInterface(aNode);
+-  return IsContainer(node);
+-}
+-
+-bool
+-nsHTMLEditor::IsContainer(nsIDOMNode *aNode)
+-{
+-  if (!aNode) {
++  if (!aNode || !aNode->IsElement()) {
+     return false;
+   }
+ 
+-  nsAutoString stringTag;
+-
+-  nsresult rv = aNode->GetNodeName(stringTag);
+-  NS_ENSURE_SUCCESS(rv, false);
+-
+-  int32_t tagEnum;
+-  // XXX Should this handle #cdata-section too?
+-  if (stringTag.EqualsLiteral("#text")) {
+-    tagEnum = eHTMLTag_text;
++  dom::Element* element = aNode->AsElement();
++
++  // Unknown elements are considered to be containers.
++  if (!element->IsHTML()) {
++    return true;
+   }
+-  else {
+-    tagEnum = nsContentUtils::GetParserService()->HTMLStringTagToId(stringTag);
+-  }
+-
+-  return nsHTMLEditUtils::IsContainer(tagEnum);
++
++  nsIAtom* localName = aNode->AsElement()->Tag();
++
++  return
++    localName != nsGkAtoms::area &&
++#ifdef MOZ_MEDIA
++    localName != nsGkAtoms::audio &&
++#endif
++    localName != nsGkAtoms::base &&
++    localName != nsGkAtoms::basefont &&
++    localName != nsGkAtoms::bgsound &&
++    localName != nsGkAtoms::blink &&
++    localName != nsGkAtoms::br &&
++    localName != nsGkAtoms::canvas &&
++    localName != nsGkAtoms::col &&
++    localName != nsGkAtoms::embed &&
++    localName != nsGkAtoms::frame &&
++    localName != nsGkAtoms::hr &&
++    localName != nsGkAtoms::img &&
++    localName != nsGkAtoms::input &&
++    // XXX bug 101019 - localName != nsGkAtoms::keygen &&
++    localName != nsGkAtoms::link &&
++    localName != nsGkAtoms::listing &&
++    localName != nsGkAtoms::marquee &&
++    localName != nsGkAtoms::menuitem &&
++    localName != nsGkAtoms::meta &&
++    localName != nsGkAtoms::multicol &&
++    localName != nsGkAtoms::nobr &&
++    localName != nsGkAtoms::noembed &&
++    localName != nsGkAtoms::param &&
++    localName != nsGkAtoms::plaintext &&
++#ifdef MOZ_MEDIA
++    localName != nsGkAtoms::source &&
++    localName != nsGkAtoms::video &&
++#endif
++    localName != nsGkAtoms::wbr;
+ }
+ 
+ 
+ NS_IMETHODIMP 
+ nsHTMLEditor::SelectEntireDocument(nsISelection *aSelection)
+ {
+   if (!aSelection || !mRules) { return NS_ERROR_NULL_POINTER; }
+   
+diff --git a/editor/libeditor/html/nsHTMLEditor.h b/editor/libeditor/html/nsHTMLEditor.h
+--- a/editor/libeditor/html/nsHTMLEditor.h
++++ b/editor/libeditor/html/nsHTMLEditor.h
+@@ -321,18 +321,18 @@ public:
+   /** All editor operations which alter the doc should be followed
+    *  with a call to EndOperation */
+   NS_IMETHOD EndOperation();
+ 
+   /** returns true if aParentTag can contain a child of type aChildTag */
+   virtual bool TagCanContainTag(const nsAString& aParentTag, const nsAString& aChildTag);
+   
+   /** returns true if aNode is a container */
++  using nsEditor::IsContainer;
+   virtual bool IsContainer(nsINode* aNode);
+-  virtual bool IsContainer(nsIDOMNode *aNode);
+ 
+   /** make the given selection span the entire document */
+   NS_IMETHOD SelectEntireDocument(nsISelection *aSelection);
+ 
+   NS_IMETHOD SetAttributeOrEquivalent(nsIDOMElement * aElement,
+                                       const nsAString & aAttribute,
+                                       const nsAString & aValue,
+                                       bool aSuppressTransaction);

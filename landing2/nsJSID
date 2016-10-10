@@ -1,0 +1,154 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCJSID.cpp b/js/xpconnect/src/XPCJSID.cpp
+--- a/js/xpconnect/src/XPCJSID.cpp
++++ b/js/xpconnect/src/XPCJSID.cpp
+@@ -36,16 +36,18 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* An xpcom implementation of the JavaScript nsIID and nsCID objects. */
+ 
++#include "nsJSID.h"
++
+ #include "xpcprivate.h"
+ 
+ /***************************************************************************/
+ // nsJSID
+ 
+ NS_IMPL_THREADSAFE_ISUPPORTS1(nsJSID, nsIJSID)
+ 
+ char nsJSID::gNoString[] = "";
+diff --git a/js/xpconnect/src/nsJSID.h b/js/xpconnect/src/nsJSID.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/nsJSID.h
+@@ -0,0 +1,45 @@
++#ifndef nsJSID_h
++#define nsJSID_h
++
++#include "xpcjsid.h"
++
++#include "nsID.h"
++
++/**
++ * nsJSID implements nsIJSID. It is also used by nsJSIID and nsJSCID as a
++ * member (as a hidden implementaion detail) to which they delegate many calls.
++ */
++class nsJSID : public nsIJSID
++{
++public:
++    NS_DEFINE_STATIC_CID_ACCESSOR(NS_JS_ID_CID)
++
++    NS_DECL_ISUPPORTS
++    NS_DECL_NSIJSID
++
++    bool InitWithName(const nsID& id, const char *nameString);
++    bool SetName(const char* name);
++    void   SetNameToNoString()
++        {NS_ASSERTION(!mName, "name already set"); mName = gNoString;}
++    bool NameIsSet() const {return nsnull != mName;}
++    const nsID& ID() const {return mID;}
++    bool IsValid() const {return !mID.Equals(GetInvalidIID());}
++
++    static nsJSID* NewID(const char* str);
++    static nsJSID* NewID(const nsID& id);
++
++    nsJSID();
++    virtual ~nsJSID();
++protected:
++
++    void Reset();
++    const nsID& GetInvalidIID() const;
++
++protected:
++    static char gNoString[];
++    nsID    mID;
++    char*   mNumber;
++    char*   mName;
++};
++
++#endif // nsJSID_h
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -165,16 +165,17 @@
+ #include "XPCWrappedNative.h"
+ #include "nsXPCWrappedJSClass.h"
+ #include "xpcObjectHelper.h"
+ #include "XPCConvert.h"
+ #include "XPCStringConvert.h"
+ #include "XPCThrower.h"
+ #include "XPCJSStack.h"
+ #include "nsXPCException.h"
++#include "nsJSID.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -468,58 +469,20 @@ enum WrapperType {
+ ****************************************************************************
+ *
+ * All manner of utility classes follow...
+ *
+ ****************************************************************************
+ ***************************************************************************/
+ 
+ /***************************************************************************/
+-/*
+-* nsJSID implements nsIJSID. It is also used by nsJSIID and nsJSCID as a
+-* member (as a hidden implementaion detail) to which they delegate many calls.
+-*/
+ 
+ extern void xpc_InitJSxIDClassObjects();
+ extern void xpc_DestroyJSxIDClassObjects();
+ 
+-
+-class nsJSID : public nsIJSID
+-{
+-public:
+-    NS_DEFINE_STATIC_CID_ACCESSOR(NS_JS_ID_CID)
+-
+-    NS_DECL_ISUPPORTS
+-    NS_DECL_NSIJSID
+-
+-    bool InitWithName(const nsID& id, const char *nameString);
+-    bool SetName(const char* name);
+-    void   SetNameToNoString()
+-        {NS_ASSERTION(!mName, "name already set"); mName = gNoString;}
+-    bool NameIsSet() const {return nsnull != mName;}
+-    const nsID& ID() const {return mID;}
+-    bool IsValid() const {return !mID.Equals(GetInvalidIID());}
+-
+-    static nsJSID* NewID(const char* str);
+-    static nsJSID* NewID(const nsID& id);
+-
+-    nsJSID();
+-    virtual ~nsJSID();
+-protected:
+-
+-    void Reset();
+-    const nsID& GetInvalidIID() const;
+-
+-protected:
+-    static char gNoString[];
+-    nsID    mID;
+-    char*   mNumber;
+-    char*   mName;
+-};
+-
+ // nsJSIID
+ 
+ class nsJSIID : public nsIJSIID,
+                 public nsIXPCScriptable,
+                 public nsISecurityCheckedComponent
+ {
+ public:
+     NS_DECL_ISUPPORTS

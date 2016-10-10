@@ -1,0 +1,107 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCReadableJSStringWrapper.h b/js/xpconnect/src/XPCReadableJSStringWrapper.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCReadableJSStringWrapper.h
+@@ -0,0 +1,35 @@
++#ifndef XPCReadableJSStringWrapper_h
++#define XPCReadableJSStringWrapper_h
++
++#include "nsStringGlue.h"
++
++#include "jsapi.h"
++
++// class to export a JSString as an const nsAString, no refcounting :(
++class XPCReadableJSStringWrapper : public nsDependentString
++{
++public:
++    typedef nsDependentString::char_traits char_traits;
++
++    XPCReadableJSStringWrapper(const PRUnichar *chars, size_t length) :
++        nsDependentString(chars, length)
++    { }
++
++    XPCReadableJSStringWrapper() :
++        nsDependentString(char_traits::sEmptyBuffer, char_traits::sEmptyBuffer)
++    { SetIsVoid(true); }
++
++    JSBool init(JSContext* aContext, JSString* str)
++    {
++        size_t length;
++        const jschar* chars = JS_GetStringCharsZAndLength(aContext, str, &length);
++        if (!chars)
++            return false;
++
++        NS_ASSERTION(IsEmpty(), "init() on initialized string");
++        new(static_cast<nsDependentString *>(this)) nsDependentString(chars, length);
++        return true;
++    }
++};
++
++#endif // XPCReadableJSStringWrapper_h
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -145,16 +145,17 @@
+ #endif /* XP_WIN */
+ 
+ #include "nsINode.h"
+ #include "XPCNativeSet.h"
+ #include "XPCLock.h"
+ #include "nsXPConnect.h"
+ #include "XPCJSRuntime.h"
+ #include "XPCContext.h"
++#include "XPCReadableJSStringWrapper.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -291,43 +292,16 @@ AddToCCKind(JSGCTraceKind kind)
+ }
+ 
+ const bool OBJ_IS_GLOBAL = true;
+ const bool OBJ_IS_NOT_GLOBAL = false;
+ 
+ 
+ /***************************************************************************/
+ 
+-// class to export a JSString as an const nsAString, no refcounting :(
+-class XPCReadableJSStringWrapper : public nsDependentString
+-{
+-public:
+-    typedef nsDependentString::char_traits char_traits;
+-
+-    XPCReadableJSStringWrapper(const PRUnichar *chars, size_t length) :
+-        nsDependentString(chars, length)
+-    { }
+-
+-    XPCReadableJSStringWrapper() :
+-        nsDependentString(char_traits::sEmptyBuffer, char_traits::sEmptyBuffer)
+-    { SetIsVoid(true); }
+-
+-    JSBool init(JSContext* aContext, JSString* str)
+-    {
+-        size_t length;
+-        const jschar* chars = JS_GetStringCharsZAndLength(aContext, str, &length);
+-        if (!chars)
+-            return false;
+-
+-        NS_ASSERTION(IsEmpty(), "init() on initialized string");
+-        new(static_cast<nsDependentString *>(this)) nsDependentString(chars, length);
+-        return true;
+-    }
+-};
+-
+ // No virtuals
+ // XPCCallContext is ALWAYS declared as a local variable in some function;
+ // i.e. instance lifetime is always controled by some C++ function returning.
+ //
+ // These things are created frequently in many places. We *intentionally* do
+ // not inialialize all members in order to save on construction overhead.
+ // Some constructor pass more valid params than others. We init what must be
+ // init'd and leave other members undefined. In debug builds the accessors

@@ -1,0 +1,105 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 724259 - Add nsHTMLEditor::IsNodeInActiveEditor(nsINode* aNode); r=ehsan
+
+diff --git a/editor/libeditor/html/nsHTMLEditRules.cpp b/editor/libeditor/html/nsHTMLEditRules.cpp
+--- a/editor/libeditor/html/nsHTMLEditRules.cpp
++++ b/editor/libeditor/html/nsHTMLEditRules.cpp
+@@ -8930,20 +8930,20 @@ nsHTMLEditRules::RelativeChangeIndentati
+     }
+     else {
+       mHTMLEditor->mHTMLCSSUtils->RemoveCSSProperty(element, marginProperty, value, false);
+       // remove unnecessary DIV blocks:
+       // we could skip this section but that would cause a FAIL in
+       // editor/libeditor/html/tests/browserscope/richtext.html, which expects
+       // to unapply a CSS "indent" (<div style="margin-left: 40px;">) by
+       // removing the DIV container instead of just removing the CSS property.
+-      nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
+-      if (nsHTMLEditUtils::IsDiv(aNode)
+-          && (node != mHTMLEditor->GetActiveEditingHost())
+-          && mHTMLEditor->IsNodeInActiveEditor(aNode)) {
++      nsCOMPtr<dom::Element> node = do_QueryInterface(aNode);
++      if (node && node->IsHTML(nsGkAtoms::div) &&
++          node != mHTMLEditor->GetActiveEditingHost() &&
++          mHTMLEditor->IsNodeInActiveEditor(node)) {
+         // we deal with an editable DIV;
+         // let's see if it is useless and if we can remove it
+         nsCOMPtr<nsIDOMNamedNodeMap> attributeList;
+         res = element->GetAttributes(getter_AddRefs(attributeList));
+         NS_ENSURE_SUCCESS(res, res);
+         uint32_t count;
+         attributeList->GetLength(&count);
+         if (!count) {
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -3990,39 +3990,36 @@ void nsHTMLEditor::IsTextPropertySetByCo
+ // Note: Table Editing methods are implemented in nsTableEditor.cpp
+ //
+ 
+ 
+ bool
+ nsHTMLEditor::IsNodeInActiveEditor(nsIDOMNode* aNode)
+ {
+   nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
+-  if (!node) {
+-    return false;
+-  }
++  return node && IsNodeInActiveEditor(node);
++}
++
++bool
++nsHTMLEditor::IsNodeInActiveEditor(nsINode* aNode)
++{
+   nsIContent* activeEditingHost = GetActiveEditingHost();
+   if (!activeEditingHost) {
+     return false;
+   }
+-  return nsContentUtils::ContentIsDescendantOf(node, activeEditingHost);
++  return nsContentUtils::ContentIsDescendantOf(aNode, activeEditingHost);
+ }
+ 
+ bool
+ nsHTMLEditor::SetCaretInTableCell(nsIDOMElement* aElement)
+ {
+-  if (!aElement || !IsNodeInActiveEditor(aElement)) {
+-    return false;
+-  }
+-
+   nsCOMPtr<dom::Element> element = do_QueryInterface(aElement);
+-  if (!element || !element->IsHTML()) {
+-    return false;
+-  }
+-
+-  if (!nsHTMLEditUtils::IsTableElement(element)) {
++  if (!element || !element->IsHTML() ||
++      !nsHTMLEditUtils::IsTableElement(element) ||
++      !IsNodeInActiveEditor(element)) {
+     return false;
+   }
+ 
+   nsIContent* node = element;
+   while (node->HasChildren()) {
+     node = node->GetFirstChild();
+   }
+ 
+diff --git a/editor/libeditor/html/nsHTMLEditor.h b/editor/libeditor/html/nsHTMLEditor.h
+--- a/editor/libeditor/html/nsHTMLEditor.h
++++ b/editor/libeditor/html/nsHTMLEditor.h
+@@ -442,16 +442,17 @@ protected:
+   // Get the focused node of this editor.
+   // @return    If the editor has focus, this returns the focused node.
+   //            Otherwise, returns null.
+   already_AddRefed<nsINode> GetFocusedNode();
+ 
+   // Return TRUE if aElement is a table-related elemet and caret was set
+   bool SetCaretInTableCell(nsIDOMElement* aElement);
+   bool IsNodeInActiveEditor(nsIDOMNode* aNode);
++  bool IsNodeInActiveEditor(nsINode* aNode);
+ 
+   // key event helpers
+   NS_IMETHOD TabInTable(bool inIsShift, bool *outHandled);
+   NS_IMETHOD CreateBR(nsIDOMNode *aNode, int32_t aOffset, 
+                       nsCOMPtr<nsIDOMNode> *outBRNode, nsIEditor::EDirection aSelect = nsIEditor::eNone);
+ 
+ // Table Editing (implemented in nsTableEditor.cpp)
+ 

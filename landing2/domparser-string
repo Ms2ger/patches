@@ -1,0 +1,218 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/public/nsIDOMParser.idl b/content/base/public/nsIDOMParser.idl
+--- a/content/base/public/nsIDOMParser.idl
++++ b/content/base/public/nsIDOMParser.idl
+@@ -25,30 +25,30 @@ interface nsIDOMParser : nsISupports
+   /**
+    * The string passed in is parsed into a DOM document.
+    *
+    * @param str The UTF16 string to be parsed
+    * @param contentType The content type of the string (see parseFromStream)
+    * @returns The DOM document created as a result of parsing the 
+    *          string
+    */
+-  nsIDOMDocument parseFromString(in wstring str, in string contentType);
++  nsIDOMDocument parseFromString(in DOMString str, in DOMString contentType);
+ 
+   /**
+    * The buffer is parsed into a DOM document.
+    * The charset is determined from the xml entity decl.
+    *
+    * @param buf The octet array data to be parsed
+    * @param bufLen Length (in bytes) of the data
+    * @param contentType The content type of the data (see parseFromStream)
+    * @returns The DOM document created as a result of parsing the 
+    *          string
+    */
+   nsIDOMDocument parseFromBuffer([const,array,size_is(bufLen)] in octet buf,
+-                                 in uint32_t bufLen, in string contentType);
++                                 in uint32_t bufLen, in DOMString contentType);
+ 
+   /**
+    * The byte stream passed in is parsed into a DOM document.
+    *
+    * Not accessible from web content.
+    *
+    * @param stream The byte stream whose contents are parsed
+    * @param charset The character set that was used to encode the byte
+@@ -58,17 +58,17 @@ interface nsIDOMParser : nsISupports
+    *                    application/xml, or application/xhtml+xml.
+    *                    Must not be NULL.
+    * @returns The DOM document created as a result of parsing the 
+    *          stream
+    */
+   nsIDOMDocument parseFromStream(in nsIInputStream stream, 
+                                  in string charset,
+                                  in long contentLength,
+-                                 in string contentType);
++                                 in DOMString contentType);
+ 
+   /**
+    * Initialize the principal and document and base URIs that the parser should
+    * use for documents it creates.  If this is not called, then a null
+    * principal and its URI will be used.  When creating a DOMParser via the JS
+    * constructor, this will be called automatically.  This method may only be
+    * called once.  If this method fails, all following parse attempts will
+    * fail.
+diff --git a/content/base/src/nsDOMParser.cpp b/content/base/src/nsDOMParser.cpp
+--- a/content/base/src/nsDOMParser.cpp
++++ b/content/base/src/nsDOMParser.cpp
+@@ -11,17 +11,16 @@
+ #include "nsIInputStream.h"
+ #include "nsNetUtil.h"
+ #include "nsStringStream.h"
+ #include "nsIDOMDocument.h"
+ #include "nsIScriptSecurityManager.h"
+ #include "nsIPrincipal.h"
+ #include "nsDOMClassInfoID.h"
+ #include "nsReadableUtils.h"
+-#include "nsCRT.h"
+ #include "nsStreamUtils.h"
+ #include "nsThreadUtils.h"
+ #include "nsNetCID.h"
+ #include "nsContentUtils.h"
+ #include "nsDOMJSUtils.h"
+ #include "nsDOMError.h"
+ #include "nsIDOMWindow.h"
+ #include "nsPIDOMWindow.h"
+@@ -50,32 +49,30 @@ NS_INTERFACE_MAP_BEGIN(nsDOMParser)
+   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(DOMParser)
+ NS_INTERFACE_MAP_END
+ 
+ 
+ NS_IMPL_ADDREF(nsDOMParser)
+ NS_IMPL_RELEASE(nsDOMParser)
+ 
+ NS_IMETHODIMP 
+-nsDOMParser::ParseFromString(const PRUnichar *str, 
+-                             const char *contentType,
++nsDOMParser::ParseFromString(const nsAString& aString,
++                             const nsAString& aContentType,
+                              nsIDOMDocument **aResult)
+ {
+-  NS_ENSURE_ARG(str);
+   NS_ENSURE_ARG_POINTER(aResult);
+ 
+   nsresult rv;
+ 
+-  if (!nsCRT::strcmp(contentType, "text/html")) {
++  if (aContentType.EqualsLiteral("text/html")) {
+     nsCOMPtr<nsIDOMDocument> domDocument;
+     rv = SetUpDocument(DocumentFlavorHTML, getter_AddRefs(domDocument));
+     NS_ENSURE_SUCCESS(rv, rv);
+     nsCOMPtr<nsIDocument> document = do_QueryInterface(domDocument);
+-    nsDependentString sourceBuffer(str);
+-    rv = nsContentUtils::ParseDocumentHTML(sourceBuffer, document, false);
++    rv = nsContentUtils::ParseDocumentHTML(aString, document, false);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     // Keep the XULXBL state, base URL and principal setting in sync with the
+     // XML case
+ 
+     if (nsContentUtils::IsSystemPrincipal(mOriginalPrincipal)) {
+       document->ForceEnableXULXBL();
+     }
+@@ -84,72 +81,72 @@ nsDOMParser::ParseFromString(const PRUni
+     document->SetBaseURI(mBaseURI);
+     // And the right principal
+     document->SetPrincipal(mPrincipal);
+ 
+     domDocument.forget(aResult);
+     return rv;
+   }
+ 
+-  NS_ConvertUTF16toUTF8 data(str);
++  NS_ConvertUTF16toUTF8 data(aString);
+ 
+   // The new stream holds a reference to the buffer
+   nsCOMPtr<nsIInputStream> stream;
+   rv = NS_NewByteInputStream(getter_AddRefs(stream),
+                              data.get(), data.Length(),
+                              NS_ASSIGNMENT_DEPEND);
+   if (NS_FAILED(rv))
+     return rv;
+ 
+-  return ParseFromStream(stream, "UTF-8", data.Length(), contentType, aResult);
++  return ParseFromStream(stream, "UTF-8", data.Length(), aContentType, aResult);
+ }
+ 
+ NS_IMETHODIMP 
+ nsDOMParser::ParseFromBuffer(const uint8_t *buf,
+                              uint32_t bufLen,
+-                             const char *contentType,
++                             const nsAString& aContentType,
+                              nsIDOMDocument **aResult)
+ {
+   NS_ENSURE_ARG_POINTER(buf);
+   NS_ENSURE_ARG_POINTER(aResult);
+ 
+   // The new stream holds a reference to the buffer
+   nsCOMPtr<nsIInputStream> stream;
+   nsresult rv = NS_NewByteInputStream(getter_AddRefs(stream),
+                                       reinterpret_cast<const char *>(buf),
+                                       bufLen, NS_ASSIGNMENT_DEPEND);
+   if (NS_FAILED(rv))
+     return rv;
+ 
+-  return ParseFromStream(stream, nsnull, bufLen, contentType, aResult);
++  return ParseFromStream(stream, nsnull, bufLen, aContentType, aResult);
+ }
+ 
+ 
+ NS_IMETHODIMP 
+ nsDOMParser::ParseFromStream(nsIInputStream *stream, 
+                              const char *charset, 
+                              int32_t contentLength,
+-                             const char *contentType,
++                             const nsAString& aContentType,
+                              nsIDOMDocument **aResult)
+ {
+   NS_ENSURE_ARG(stream);
+-  NS_ENSURE_ARG(contentType);
+   NS_ENSURE_ARG_POINTER(aResult);
+   *aResult = nsnull;
+ 
+-  bool svg = nsCRT::strcmp(contentType, "image/svg+xml") == 0;
++  bool svg = aContentType.EqualsLiteral("image/svg+xml");
+ 
+   // For now, we can only create XML documents.
+   //XXXsmaug Should we create an HTMLDocument (in XHTML mode)
+   //         for "application/xhtml+xml"?
+-  if ((nsCRT::strcmp(contentType, "text/xml") != 0) &&
+-      (nsCRT::strcmp(contentType, "application/xml") != 0) &&
+-      (nsCRT::strcmp(contentType, "application/xhtml+xml") != 0) &&
+-      !svg)
++  if (!aContentType.EqualsLiteral("text/xml") &&
++      !aContentType.EqualsLiteral("application/xml") &&
++      !aContentType.EqualsLiteral("application/xhtml+xml") &&
++      !svg) {
+     return NS_ERROR_NOT_IMPLEMENTED;
++  }
+ 
+   nsresult rv;
+ 
+   // Put the nsCOMPtr out here so we hold a ref to the stream as needed
+   nsCOMPtr<nsIInputStream> bufferedStream;
+   if (!NS_InputStreamIsBuffered(stream)) {
+     rv = NS_NewBufferedInputStream(getter_AddRefs(bufferedStream), stream,
+                                    4096);
+@@ -161,17 +158,17 @@ nsDOMParser::ParseFromStream(nsIInputStr
+   nsCOMPtr<nsIDOMDocument> domDocument;
+   rv = SetUpDocument(svg ? DocumentFlavorSVG : DocumentFlavorLegacyGuess,
+                      getter_AddRefs(domDocument));
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   // Create a fake channel 
+   nsCOMPtr<nsIChannel> parserChannel;
+   NS_NewInputStreamChannel(getter_AddRefs(parserChannel), mDocumentURI, nsnull,
+-                           nsDependentCString(contentType), nsnull);
++                           NS_ConvertUTF16toUTF8(aContentType), nsnull);
+   NS_ENSURE_STATE(parserChannel);
+ 
+   // More principal-faking here 
+   parserChannel->SetOwner(mOriginalPrincipal);
+ 
+   if (charset) {
+     parserChannel->SetContentCharset(nsDependentCString(charset));
+   }

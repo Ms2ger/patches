@@ -1,0 +1,74 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/public/nsINode.h b/content/base/public/nsINode.h
+--- a/content/base/public/nsINode.h
++++ b/content/base/public/nsINode.h
+@@ -376,21 +376,17 @@ public:
+                                JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+ 
+ protected:
+   /**
+    * WrapNode is called from WrapObject to actually wrap this node, WrapObject
+    * does some additional checks and fix-up that's common to all nodes. WrapNode
+    * should just call the DOM binding's Wrap function.
+    */
+-  virtual JSObject* WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+-  {
+-    MOZ_ASSERT(!IsDOMBinding(), "Someone forgot to override WrapNode");
+-    return nullptr;
+-  }
++  virtual JSObject* WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope) = 0;
+ 
+ public:
+   nsIDocument* GetParentObject() const
+   {
+     // Make sure that we get the owner document of the content node, in case
+     // we're in document teardown.  If we are, it's important to *not* use
+     // globalObj as the node's parent since that would give the node the
+     // principal of globalObj (i.e. the principal of the document that's being
+diff --git a/content/base/src/Attr.cpp b/content/base/src/Attr.cpp
+--- a/content/base/src/Attr.cpp
++++ b/content/base/src/Attr.cpp
+@@ -393,17 +393,17 @@ Attr::Initialize()
+ 
+ void
+ Attr::Shutdown()
+ {
+   sInitialized = false;
+ }
+ 
+ JSObject*
+-Attr::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
++Attr::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+ {
+   return AttrBinding::Wrap(aCx, aScope, this);
+ }
+ 
+ Element*
+ Attr::GetContentInternal() const
+ {
+   return mAttrMap ? mAttrMap->GetContent() : nullptr;
+diff --git a/content/base/src/Attr.h b/content/base/src/Attr.h
+--- a/content/base/src/Attr.h
++++ b/content/base/src/Attr.h
+@@ -73,18 +73,18 @@ public:
+   static void Shutdown();
+ 
+   NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS_AMBIGUOUS(Attr,
+                                                                    nsIAttribute)
+ 
+   virtual nsIDOMNode* AsDOMNode() { return this; }
+ 
+   // WebIDL
+-  virtual JSObject* WrapObject(JSContext* aCx,
+-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
++  virtual JSObject* WrapNode(JSContext* aCx,
++                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+ 
+   // XPCOM GetName() is OK
+   // XPCOM GetValue() is OK
+ 
+   void SetValue(const nsAString& aValue, ErrorResult& aRv);
+ 
+   bool Specified() const;
+ 

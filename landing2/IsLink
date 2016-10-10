@@ -1,0 +1,64 @@
+diff --git a/editor/libeditor/html/nsHTMLEditUtils.cpp b/editor/libeditor/html/nsHTMLEditUtils.cpp
+--- a/editor/libeditor/html/nsHTMLEditUtils.cpp
++++ b/editor/libeditor/html/nsHTMLEditUtils.cpp
+@@ -377,25 +377,31 @@ bool
+ nsHTMLEditUtils::IsImage(nsIDOMNode *node)
+ {
+   return nsEditor::NodeIsType(node, nsEditProperty::img);
+ }
+ 
+ bool 
+ nsHTMLEditUtils::IsLink(nsIDOMNode *aNode)
+ {
+-  NS_ENSURE_TRUE(aNode, false);
+-  nsCOMPtr<nsIDOMHTMLAnchorElement> anchor = do_QueryInterface(aNode);
+-  if (anchor)
+-  {
+-    nsAutoString tmpText;
+-    if (NS_SUCCEEDED(anchor->GetHref(tmpText)) && !tmpText.IsEmpty())
+-      return true;
++  nsCOMPtr<dom::Element> element = do_QueryInterface(aNode);
++  return element && IsLink(element);
++}
++
++bool
++nsHTMLEditUtils::IsLink(dom::Element* aNode)
++{
++  MOZ_ASSERT(aNode);
++  if (!aNode->IsHTML(nsGkAtoms::a)) {
++    return false;
+   }
+-  return false;
++
++  nsAutoString text;
++  return aNode->GetAttr(kNameSpaceID_None, nsGkAtoms::href, text) &&
++         !text.IsEmpty();
+ }
+ 
+ bool 
+ nsHTMLEditUtils::IsNamedAnchor(nsIDOMNode *aNode)
+ {
+   nsCOMPtr<dom::Element> element = do_QueryInterface(aNode);
+   return element && IsNamedAnchor(element);
+ }
+diff --git a/editor/libeditor/html/nsHTMLEditUtils.h b/editor/libeditor/html/nsHTMLEditUtils.h
+--- a/editor/libeditor/html/nsHTMLEditUtils.h
++++ b/editor/libeditor/html/nsHTMLEditUtils.h
+@@ -77,16 +77,17 @@ public:
+   static bool IsList(mozilla::dom::Element* aNode);
+   static bool IsList(nsIDOMNode *aNode);
+   static bool IsOrderedList(nsIDOMNode *aNode);
+   static bool IsUnorderedList(nsIDOMNode *aNode);
+   static bool IsBlockquote(nsIDOMNode *aNode);
+   static bool IsPre(nsIDOMNode *aNode);
+   static bool IsAnchor(nsIDOMNode *aNode);
+   static bool IsImage(nsIDOMNode *aNode);
++  static bool IsLink(mozilla::dom::Element* aNode);
+   static bool IsLink(nsIDOMNode *aNode);
+   static bool IsNamedAnchor(mozilla::dom::Element* aNode);
+   static bool IsNamedAnchor(nsIDOMNode *aNode);
+   static bool IsDiv(nsIDOMNode *aNode);
+   static bool IsMozDiv(nsIDOMNode *aNode);
+   static bool IsMailCite(mozilla::dom::Element* aNode);
+   static bool IsMailCite(nsIDOMNode *aNode);
+   static bool IsFormWidget(mozilla::dom::Element* aNode);

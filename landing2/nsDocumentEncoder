@@ -1,0 +1,84 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 716208 - Simplify nsHTMLCopyEncoder::IsMozBR; r=peterv
+
+diff --git a/content/base/src/nsDocumentEncoder.cpp b/content/base/src/nsDocumentEncoder.cpp
+--- a/content/base/src/nsDocumentEncoder.cpp
++++ b/content/base/src/nsDocumentEncoder.cpp
+@@ -79,16 +79,19 @@
+ #include "nsContentUtils.h"
+ #include "nsUnicharUtils.h"
+ #include "nsReadableUtils.h"
+ #include "nsTArray.h"
+ #include "nsIFrame.h"
+ #include "nsStringBuffer.h"
+ #include "mozilla/dom/Element.h"
+ 
++using namespace mozilla;
++using namespace mozilla::dom;
++
+ nsresult NS_NewDomSelection(nsISelection **aDomSelection);
+ 
+ enum nsRangeIterationDirection {
+   kDirectionOut = -1,
+   kDirectionIn = 1
+ };
+ 
+ class nsDocumentEncoder : public nsIDocumentEncoder
+@@ -373,17 +376,17 @@ nsDocumentEncoder::SerializeNodeStart(ns
+   }
+ 
+   // Either there was no fixed-up node,
+   // or the caller did fixup themselves and aNode is already fixed
+   if (!node)
+     node = aNode;
+   
+   if (node->IsElement()) {
+-    mozilla::dom::Element* originalElement =
++    Element* originalElement =
+       aOriginalNode && aOriginalNode->IsElement() ?
+         aOriginalNode->AsElement() : nsnull;
+     mSerializer->AppendElementStart(node->AsElement(),
+                                     originalElement, aStr);
+     return NS_OK;
+   }
+ 
+   switch (node->NodeType()) {
+@@ -1790,32 +1793,22 @@ nsHTMLCopyEncoder::GetChildAt(nsIDOMNode
+   resultNode = do_QueryInterface(content->GetChildAt(aOffset));
+ 
+   return resultNode;
+ }
+ 
+ bool 
+ nsHTMLCopyEncoder::IsMozBR(nsIDOMNode* aNode)
+ {
+-  nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
+-  if (IsTag(content, nsGkAtoms::br))
+-  {
+-    nsCOMPtr<nsIDOMElement> elem = do_QueryInterface(aNode);
+-    if (elem)
+-    {
+-      nsAutoString typeAttrName(NS_LITERAL_STRING("type"));
+-      nsAutoString typeAttrVal;
+-      nsresult rv = elem->GetAttribute(typeAttrName, typeAttrVal);
+-      ToLowerCase(typeAttrVal);
+-      if (NS_SUCCEEDED(rv) && (typeAttrVal.EqualsLiteral("_moz")))
+-        return true;
+-    }
+-    return false;
+-  }
+-  return false;
++  MOZ_ASSERT(aNode);
++  nsCOMPtr<Element> element = do_QueryInterface(aNode);
++  return element &&
++         element->IsHTML(nsGkAtoms::br) &&
++         element->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
++                              NS_LITERAL_STRING("_moz"), eIgnoreCase);
+ }
+ 
+ nsresult 
+ nsHTMLCopyEncoder::GetNodeLocation(nsIDOMNode *inChild,
+                                    nsCOMPtr<nsIDOMNode> *outParent,
+                                    int32_t *outOffset)
+ {
+   NS_ASSERTION((inChild && outParent && outOffset), "bad args");

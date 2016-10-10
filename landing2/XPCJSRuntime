@@ -1,0 +1,542 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCJSRuntime.cpp b/js/xpconnect/src/XPCJSRuntime.cpp
+--- a/js/xpconnect/src/XPCJSRuntime.cpp
++++ b/js/xpconnect/src/XPCJSRuntime.cpp
+@@ -38,16 +38,18 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* Per JSRuntime object */
+ 
+ #include "mozilla/Util.h"
+ 
++#include "XPCJSRuntime.h"
++
+ #include "xpcprivate.h"
+ #include "xpcpublic.h"
+ #include "WrapperFactory.h"
+ #include "dom_quickstubs.h"
+ #include "XPCRootSetElem.h"
+ 
+ #include "jsgcchunk.h"
+ #include "jsscope.h"
+diff --git a/js/xpconnect/src/XPCJSRuntime.h b/js/xpconnect/src/XPCJSRuntime.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCJSRuntime.h
+@@ -0,0 +1,245 @@
++#ifndef XPCJSRuntime_h
++#define XPCJSRuntime_h
++
++#include "nsDataHashtable.h"
++#include "mozilla/xpc/PtrAndPrincipalHashKey.h"
++#include "prcvar.h"
++
++#include "jsapi.h"
++#include "jsdhash.h"
++
++class JSObject2WrappedJSMap;
++class nsXPConnect;
++class XPCRootSetElem;
++class IID2WrappedJSClassMap;
++class IID2NativeInterfaceMap;
++class ClassInfo2NativeSetMap;
++class NativeSetMap;
++class IID2ThisTranslatorMap;
++class XPCNativeScriptableSharedMap;
++class XPCWrappedNativeProtoMap;
++class XPCWrappedNative;
++class XPCNativeWrapperMap;
++class XPCTraceableVariant;
++class nsXPCWrappedJS;
++class XPCJSObjectHolder;
++class nsScriptObjectTracer;
++class XPCContext;
++
++namespace mozilla {
++class ReentrantMonitor;
++}
++typedef mozilla::ReentrantMonitor XPCLock;
++
++// NB: nsDataHashtableMT is usually not very useful as all it does is lock
++// around each individual operation performed on it. That would imply, that
++// the pattern: if (!map.Get(key)) map.Put(key, value); is not safe as another
++// thread could race to insert key into map. However, in our case, only one
++// thread at any time could attempt to insert |key| into |map|, so it works
++// well enough for our uses.
++typedef nsDataHashtableMT<nsISupportsHashKey, JSCompartment *> XPCMTCompartmentMap;
++
++// This map is only used on the main thread.
++typedef nsDataHashtable<xpc::PtrAndPrincipalHashKey, JSCompartment *> XPCCompartmentMap;
++
++// In the current xpconnect system there can only be one XPCJSRuntime.
++// So, xpconnect can only be used on one JSRuntime within the process.
++
++// no virtuals. no refcounting.
++class XPCJSRuntime
++{
++public:
++    static XPCJSRuntime* newXPCJSRuntime(nsXPConnect* aXPConnect);
++
++    JSRuntime*     GetJSRuntime() const {return mJSRuntime;}
++    nsXPConnect*   GetXPConnect() const {return mXPConnect;}
++    JSContext*     GetJSCycleCollectionContext();
++
++    JSObject2WrappedJSMap*     GetWrappedJSMap()        const
++        {return mWrappedJSMap;}
++
++    IID2WrappedJSClassMap*     GetWrappedJSClassMap()   const
++        {return mWrappedJSClassMap;}
++
++    IID2NativeInterfaceMap* GetIID2NativeInterfaceMap() const
++        {return mIID2NativeInterfaceMap;}
++
++    ClassInfo2NativeSetMap* GetClassInfo2NativeSetMap() const
++        {return mClassInfo2NativeSetMap;}
++
++    NativeSetMap* GetNativeSetMap() const
++        {return mNativeSetMap;}
++
++    IID2ThisTranslatorMap* GetThisTranslatorMap() const
++        {return mThisTranslatorMap;}
++
++    XPCNativeScriptableSharedMap* GetNativeScriptableSharedMap() const
++        {return mNativeScriptableSharedMap;}
++
++    XPCWrappedNativeProtoMap* GetDyingWrappedNativeProtoMap() const
++        {return mDyingWrappedNativeProtoMap;}
++
++    XPCWrappedNativeProtoMap* GetDetachedWrappedNativeProtoMap() const
++        {return mDetachedWrappedNativeProtoMap;}
++
++    XPCNativeWrapperMap* GetExplicitNativeWrapperMap() const
++        {return mExplicitNativeWrapperMap;}
++
++    XPCCompartmentMap& GetCompartmentMap()
++        {return mCompartmentMap;}
++    XPCMTCompartmentMap& GetMTCompartmentMap()
++        {return mMTCompartmentMap;}
++
++    XPCLock* GetMapLock() const {return mMapLock;}
++
++    JSBool OnJSContextNew(JSContext* cx);
++
++    JSBool DeferredRelease(nsISupports* obj);
++
++    JSBool GetDoingFinalization() const {return mDoingFinalization;}
++
++    // Mapping of often used strings to jsid atoms that live 'forever'.
++    //
++    // To add a new string: add to this list and to XPCJSRuntime::mStrings
++    // at the top of xpcjsruntime.cpp
++    enum {
++        IDX_CONSTRUCTOR             = 0 ,
++        IDX_TO_STRING               ,
++        IDX_TO_SOURCE               ,
++        IDX_LAST_RESULT             ,
++        IDX_RETURN_CODE             ,
++        IDX_VALUE                   ,
++        IDX_QUERY_INTERFACE         ,
++        IDX_COMPONENTS              ,
++        IDX_WRAPPED_JSOBJECT        ,
++        IDX_OBJECT                  ,
++        IDX_FUNCTION                ,
++        IDX_PROTOTYPE               ,
++        IDX_CREATE_INSTANCE         ,
++        IDX_ITEM                    ,
++        IDX_PROTO                   ,
++        IDX_ITERATOR                ,
++        IDX_EXPOSEDPROPS            ,
++        IDX_SCRIPTONLY              ,
++        IDX_BASEURIOBJECT           ,
++        IDX_NODEPRINCIPAL           ,
++        IDX_DOCUMENTURIOBJECT       ,
++        IDX_TOTAL_COUNT // just a count of the above
++    };
++
++    jsid GetStringID(uintN index) const
++    {
++        NS_ASSERTION(index < IDX_TOTAL_COUNT, "index out of range");
++        return mStrIDs[index];
++    }
++    JS::Value GetStringJSVal(uintN index) const
++    {
++        NS_ASSERTION(index < IDX_TOTAL_COUNT, "index out of range");
++        return mStrJSVals[index];
++    }
++    const char* GetStringName(uintN index) const
++    {
++        NS_ASSERTION(index < IDX_TOTAL_COUNT, "index out of range");
++        return mStrings[index];
++    }
++
++    static void TraceBlackJS(JSTracer* trc, void* data);
++    static void TraceGrayJS(JSTracer* trc, void* data);
++    void TraceXPConnectRoots(JSTracer *trc);
++    void AddXPConnectRoots(JSContext* cx,
++                           nsCycleCollectionTraversalCallback& cb);
++
++    static JSBool GCCallback(JSContext *cx, JSGCStatus status);
++
++    inline void AddVariantRoot(XPCTraceableVariant* variant);
++    inline void AddWrappedJSRoot(nsXPCWrappedJS* wrappedJS);
++    inline void AddObjectHolderRoot(XPCJSObjectHolder* holder);
++
++    nsresult AddJSHolder(void* aHolder, nsScriptObjectTracer* aTracer);
++    nsresult RemoveJSHolder(void* aHolder);
++
++    static void SuspectWrappedNative(JSContext *cx, XPCWrappedNative *wrapper,
++                                     nsCycleCollectionTraversalCallback &cb);
++
++    void DebugDump(int16_t depth);
++
++    void SystemIsBeingShutDown(JSContext* cx);
++
++    PRThread* GetThreadRunningGC() const {return mThreadRunningGC;}
++
++    ~XPCJSRuntime();
++
++#ifdef XPC_CHECK_WRAPPERS_AT_SHUTDOWN
++   void DEBUG_AddWrappedNative(nsIXPConnectWrappedNative* wrapper)
++        {XPCAutoLock lock(GetMapLock());
++         JSDHashEntryHdr *entry =
++            JS_DHashTableOperate(DEBUG_WrappedNativeHashtable,
++                                 wrapper, JS_DHASH_ADD);
++         if (entry) ((JSDHashEntryStub *)entry)->key = wrapper;}
++
++   void DEBUG_RemoveWrappedNative(nsIXPConnectWrappedNative* wrapper)
++        {XPCAutoLock lock(GetMapLock());
++         JS_DHashTableOperate(DEBUG_WrappedNativeHashtable,
++                              wrapper, JS_DHASH_REMOVE);}
++private:
++   JSDHashTable* DEBUG_WrappedNativeHashtable;
++public:
++#endif
++
++    void AddGCCallback(JSGCCallback cb);
++    void RemoveGCCallback(JSGCCallback cb);
++
++    static void ActivityCallback(void *arg, JSBool active);
++
++    bool NewDOMBindingsEnabled()
++    {
++        return gNewDOMBindingsEnabled;
++    }
++
++private:
++    XPCJSRuntime(); // no implementation
++    XPCJSRuntime(nsXPConnect* aXPConnect);
++
++    // The caller must be holding the GC lock
++    void RescheduleWatchdog(XPCContext* ccx);
++
++    static void WatchdogMain(void *arg);
++
++    static bool gNewDOMBindingsEnabled;
++
++    static const char* mStrings[IDX_TOTAL_COUNT];
++    jsid mStrIDs[IDX_TOTAL_COUNT];
++    JS::Value mStrJSVals[IDX_TOTAL_COUNT];
++
++    nsXPConnect*             mXPConnect;
++    JSRuntime*               mJSRuntime;
++    JSContext*               mJSCycleCollectionContext;
++    JSObject2WrappedJSMap*   mWrappedJSMap;
++    IID2WrappedJSClassMap*   mWrappedJSClassMap;
++    IID2NativeInterfaceMap*  mIID2NativeInterfaceMap;
++    ClassInfo2NativeSetMap*  mClassInfo2NativeSetMap;
++    NativeSetMap*            mNativeSetMap;
++    IID2ThisTranslatorMap*   mThisTranslatorMap;
++    XPCNativeScriptableSharedMap* mNativeScriptableSharedMap;
++    XPCWrappedNativeProtoMap* mDyingWrappedNativeProtoMap;
++    XPCWrappedNativeProtoMap* mDetachedWrappedNativeProtoMap;
++    XPCNativeWrapperMap*     mExplicitNativeWrapperMap;
++    XPCCompartmentMap        mCompartmentMap;
++    XPCMTCompartmentMap      mMTCompartmentMap;
++    XPCLock* mMapLock;
++    PRThread* mThreadRunningGC;
++    nsTArray<nsXPCWrappedJS*> mWrappedJSToReleaseArray;
++    nsTArray<nsISupports*> mNativesToReleaseArray;
++    JSBool mDoingFinalization;
++    XPCRootSetElem *mVariantRoots;
++    XPCRootSetElem *mWrappedJSRoots;
++    XPCRootSetElem *mObjectHolderRoots;
++    JSDHashTable mJSHolders;
++    PRCondVar *mWatchdogWakeup;
++    PRThread *mWatchdogThread;
++    nsTArray<JSGCCallback> extraGCCallbacks;
++    bool mWatchdogHibernating;
++    PRTime mLastActiveTime; // -1 if active NOW
++};
++
++#endif // XPCJSRuntime_h
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -143,16 +143,17 @@
+ #undef GetClassName
+ #endif
+ #endif /* XP_WIN */
+ 
+ #include "nsINode.h"
+ #include "XPCNativeSet.h"
+ #include "XPCLock.h"
+ #include "nsXPConnect.h"
++#include "XPCJSRuntime.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -235,27 +236,16 @@ extern const char XPC_CONTEXT_STACK_CONT
+ extern const char XPC_RUNTIME_CONTRACTID[];
+ extern const char XPC_EXCEPTION_CONTRACTID[];
+ extern const char XPC_CONSOLE_CONTRACTID[];
+ extern const char XPC_SCRIPT_ERROR_CONTRACTID[];
+ extern const char XPC_ID_CONTRACTID[];
+ extern const char XPC_XPCONNECT_CONTRACTID[];
+ 
+ 
+-// NB: nsDataHashtableMT is usually not very useful as all it does is lock
+-// around each individual operation performed on it. That would imply, that
+-// the pattern: if (!map.Get(key)) map.Put(key, value); is not safe as another
+-// thread could race to insert key into map. However, in our case, only one
+-// thread at any time could attempt to insert |key| into |map|, so it works
+-// well enough for our uses.
+-typedef nsDataHashtableMT<nsISupportsHashKey, JSCompartment *> XPCMTCompartmentMap;
+-
+-// This map is only used on the main thread.
+-typedef nsDataHashtable<xpc::PtrAndPrincipalHashKey, JSCompartment *> XPCCompartmentMap;
+-
+ /***************************************************************************/
+ // Useful macros...
+ 
+ #define XPC_STRING_GETTER_BODY(dest, src)                                     \
+     NS_ENSURE_ARG_POINTER(dest);                                              \
+     char* result;                                                             \
+     if (src)                                                                  \
+         result = (char*) nsMemory::Clone(src,                                 \
+@@ -300,218 +290,16 @@ AddToCCKind(JSGCTraceKind kind)
+ }
+ 
+ const bool OBJ_IS_GLOBAL = true;
+ const bool OBJ_IS_NOT_GLOBAL = false;
+ 
+ 
+ 
+ /***************************************************************************/
+-
+-// In the current xpconnect system there can only be one XPCJSRuntime.
+-// So, xpconnect can only be used on one JSRuntime within the process.
+-
+-// no virtuals. no refcounting.
+-class XPCJSRuntime
+-{
+-public:
+-    static XPCJSRuntime* newXPCJSRuntime(nsXPConnect* aXPConnect);
+-
+-    JSRuntime*     GetJSRuntime() const {return mJSRuntime;}
+-    nsXPConnect*   GetXPConnect() const {return mXPConnect;}
+-    JSContext*     GetJSCycleCollectionContext();
+-
+-    JSObject2WrappedJSMap*     GetWrappedJSMap()        const
+-        {return mWrappedJSMap;}
+-
+-    IID2WrappedJSClassMap*     GetWrappedJSClassMap()   const
+-        {return mWrappedJSClassMap;}
+-
+-    IID2NativeInterfaceMap* GetIID2NativeInterfaceMap() const
+-        {return mIID2NativeInterfaceMap;}
+-
+-    ClassInfo2NativeSetMap* GetClassInfo2NativeSetMap() const
+-        {return mClassInfo2NativeSetMap;}
+-
+-    NativeSetMap* GetNativeSetMap() const
+-        {return mNativeSetMap;}
+-
+-    IID2ThisTranslatorMap* GetThisTranslatorMap() const
+-        {return mThisTranslatorMap;}
+-
+-    XPCNativeScriptableSharedMap* GetNativeScriptableSharedMap() const
+-        {return mNativeScriptableSharedMap;}
+-
+-    XPCWrappedNativeProtoMap* GetDyingWrappedNativeProtoMap() const
+-        {return mDyingWrappedNativeProtoMap;}
+-
+-    XPCWrappedNativeProtoMap* GetDetachedWrappedNativeProtoMap() const
+-        {return mDetachedWrappedNativeProtoMap;}
+-
+-    XPCNativeWrapperMap* GetExplicitNativeWrapperMap() const
+-        {return mExplicitNativeWrapperMap;}
+-
+-    XPCCompartmentMap& GetCompartmentMap()
+-        {return mCompartmentMap;}
+-    XPCMTCompartmentMap& GetMTCompartmentMap()
+-        {return mMTCompartmentMap;}
+-
+-    XPCLock* GetMapLock() const {return mMapLock;}
+-
+-    JSBool OnJSContextNew(JSContext* cx);
+-
+-    JSBool DeferredRelease(nsISupports* obj);
+-
+-    JSBool GetDoingFinalization() const {return mDoingFinalization;}
+-
+-    // Mapping of often used strings to jsid atoms that live 'forever'.
+-    //
+-    // To add a new string: add to this list and to XPCJSRuntime::mStrings
+-    // at the top of xpcjsruntime.cpp
+-    enum {
+-        IDX_CONSTRUCTOR             = 0 ,
+-        IDX_TO_STRING               ,
+-        IDX_TO_SOURCE               ,
+-        IDX_LAST_RESULT             ,
+-        IDX_RETURN_CODE             ,
+-        IDX_VALUE                   ,
+-        IDX_QUERY_INTERFACE         ,
+-        IDX_COMPONENTS              ,
+-        IDX_WRAPPED_JSOBJECT        ,
+-        IDX_OBJECT                  ,
+-        IDX_FUNCTION                ,
+-        IDX_PROTOTYPE               ,
+-        IDX_CREATE_INSTANCE         ,
+-        IDX_ITEM                    ,
+-        IDX_PROTO                   ,
+-        IDX_ITERATOR                ,
+-        IDX_EXPOSEDPROPS            ,
+-        IDX_SCRIPTONLY              ,
+-        IDX_BASEURIOBJECT           ,
+-        IDX_NODEPRINCIPAL           ,
+-        IDX_DOCUMENTURIOBJECT       ,
+-        IDX_TOTAL_COUNT // just a count of the above
+-    };
+-
+-    jsid GetStringID(uintN index) const
+-    {
+-        NS_ASSERTION(index < IDX_TOTAL_COUNT, "index out of range");
+-        return mStrIDs[index];
+-    }
+-    jsval GetStringJSVal(uintN index) const
+-    {
+-        NS_ASSERTION(index < IDX_TOTAL_COUNT, "index out of range");
+-        return mStrJSVals[index];
+-    }
+-    const char* GetStringName(uintN index) const
+-    {
+-        NS_ASSERTION(index < IDX_TOTAL_COUNT, "index out of range");
+-        return mStrings[index];
+-    }
+-
+-    static void TraceBlackJS(JSTracer* trc, void* data);
+-    static void TraceGrayJS(JSTracer* trc, void* data);
+-    void TraceXPConnectRoots(JSTracer *trc);
+-    void AddXPConnectRoots(JSContext* cx,
+-                           nsCycleCollectionTraversalCallback& cb);
+-
+-    static JSBool GCCallback(JSContext *cx, JSGCStatus status);
+-
+-    inline void AddVariantRoot(XPCTraceableVariant* variant);
+-    inline void AddWrappedJSRoot(nsXPCWrappedJS* wrappedJS);
+-    inline void AddObjectHolderRoot(XPCJSObjectHolder* holder);
+-
+-    nsresult AddJSHolder(void* aHolder, nsScriptObjectTracer* aTracer);
+-    nsresult RemoveJSHolder(void* aHolder);
+-
+-    static void SuspectWrappedNative(JSContext *cx, XPCWrappedNative *wrapper,
+-                                     nsCycleCollectionTraversalCallback &cb);
+-
+-    void DebugDump(int16_t depth);
+-
+-    void SystemIsBeingShutDown(JSContext* cx);
+-
+-    PRThread* GetThreadRunningGC() const {return mThreadRunningGC;}
+-
+-    ~XPCJSRuntime();
+-
+-#ifdef XPC_CHECK_WRAPPERS_AT_SHUTDOWN
+-   void DEBUG_AddWrappedNative(nsIXPConnectWrappedNative* wrapper)
+-        {XPCAutoLock lock(GetMapLock());
+-         JSDHashEntryHdr *entry =
+-            JS_DHashTableOperate(DEBUG_WrappedNativeHashtable,
+-                                 wrapper, JS_DHASH_ADD);
+-         if (entry) ((JSDHashEntryStub *)entry)->key = wrapper;}
+-
+-   void DEBUG_RemoveWrappedNative(nsIXPConnectWrappedNative* wrapper)
+-        {XPCAutoLock lock(GetMapLock());
+-         JS_DHashTableOperate(DEBUG_WrappedNativeHashtable,
+-                              wrapper, JS_DHASH_REMOVE);}
+-private:
+-   JSDHashTable* DEBUG_WrappedNativeHashtable;
+-public:
+-#endif
+-
+-    void AddGCCallback(JSGCCallback cb);
+-    void RemoveGCCallback(JSGCCallback cb);
+-
+-    static void ActivityCallback(void *arg, JSBool active);
+-
+-    bool NewDOMBindingsEnabled()
+-    {
+-        return gNewDOMBindingsEnabled;
+-    }
+-
+-private:
+-    XPCJSRuntime(); // no implementation
+-    XPCJSRuntime(nsXPConnect* aXPConnect);
+-
+-    // The caller must be holding the GC lock
+-    void RescheduleWatchdog(XPCContext* ccx);
+-
+-    static void WatchdogMain(void *arg);
+-
+-    static bool gNewDOMBindingsEnabled;
+-
+-    static const char* mStrings[IDX_TOTAL_COUNT];
+-    jsid mStrIDs[IDX_TOTAL_COUNT];
+-    jsval mStrJSVals[IDX_TOTAL_COUNT];
+-
+-    nsXPConnect*             mXPConnect;
+-    JSRuntime*               mJSRuntime;
+-    JSContext*               mJSCycleCollectionContext;
+-    JSObject2WrappedJSMap*   mWrappedJSMap;
+-    IID2WrappedJSClassMap*   mWrappedJSClassMap;
+-    IID2NativeInterfaceMap*  mIID2NativeInterfaceMap;
+-    ClassInfo2NativeSetMap*  mClassInfo2NativeSetMap;
+-    NativeSetMap*            mNativeSetMap;
+-    IID2ThisTranslatorMap*   mThisTranslatorMap;
+-    XPCNativeScriptableSharedMap* mNativeScriptableSharedMap;
+-    XPCWrappedNativeProtoMap* mDyingWrappedNativeProtoMap;
+-    XPCWrappedNativeProtoMap* mDetachedWrappedNativeProtoMap;
+-    XPCNativeWrapperMap*     mExplicitNativeWrapperMap;
+-    XPCCompartmentMap        mCompartmentMap;
+-    XPCMTCompartmentMap      mMTCompartmentMap;
+-    XPCLock* mMapLock;
+-    PRThread* mThreadRunningGC;
+-    nsTArray<nsXPCWrappedJS*> mWrappedJSToReleaseArray;
+-    nsTArray<nsISupports*> mNativesToReleaseArray;
+-    JSBool mDoingFinalization;
+-    XPCRootSetElem *mVariantRoots;
+-    XPCRootSetElem *mWrappedJSRoots;
+-    XPCRootSetElem *mObjectHolderRoots;
+-    JSDHashTable mJSHolders;
+-    PRCondVar *mWatchdogWakeup;
+-    PRThread *mWatchdogThread;
+-    nsTArray<JSGCCallback> extraGCCallbacks;
+-    bool mWatchdogHibernating;
+-    PRTime mLastActiveTime; // -1 if active NOW
+-};
+-
+-/***************************************************************************/
+ /***************************************************************************/
+ // XPCContext is mostly a dumb class to hold JSContext specific data and
+ // maps that let us find wrappers created for the given JSContext.
+ 
+ // no virtuals
+ class XPCContext
+ {
+     friend class XPCJSRuntime;

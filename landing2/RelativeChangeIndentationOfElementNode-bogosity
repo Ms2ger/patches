@@ -1,0 +1,40 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 723232 - nsHTMLEditRules::RelativeChangeIndentationOfElementNode removes divs with any one attribute; r=ehsan
+
+diff --git a/editor/libeditor/html/nsHTMLEditRules.cpp b/editor/libeditor/html/nsHTMLEditRules.cpp
+--- a/editor/libeditor/html/nsHTMLEditRules.cpp
++++ b/editor/libeditor/html/nsHTMLEditRules.cpp
+@@ -8950,30 +8950,22 @@ nsHTMLEditRules::RelativeChangeIndentati
+           mHTMLEditor->IsNodeInActiveEditor(node)) {
+         // we deal with an editable DIV;
+         // let's see if it is useless and if we can remove it
+         nsCOMPtr<nsIDOMNamedNodeMap> attributeList;
+         res = element->GetAttributes(getter_AddRefs(attributeList));
+         NS_ENSURE_SUCCESS(res, res);
+         uint32_t count;
+         attributeList->GetLength(&count);
+-        if (!count) {
+-          // the DIV has no attribute at all, let's remove it
++        if (!count ||
++            (1 == count && node->HasAttr(kNameSpaceID_None, nsGkAtoms::mozdirty))) {
++          // the DIV has no attribute at all or just a _moz_dirty, let's remove it
+           res = mHTMLEditor->RemoveContainer(element);
+           NS_ENSURE_SUCCESS(res, res);
+         }
+-        else if (1 == count) {
+-          nsCOMPtr<nsIDOMNode> styleAttributeNode;
+-          res = attributeList->GetNamedItem(NS_LITERAL_STRING("style"), 
+-                                            getter_AddRefs(styleAttributeNode));
+-          if (!styleAttributeNode) {
+-            res = mHTMLEditor->RemoveContainer(element);
+-            NS_ENSURE_SUCCESS(res, res);
+-          }
+-        }
+       }
+     }
+   }
+   return NS_OK;
+ }
+ 
+ //
+ // Support for Absolute Positioning

@@ -1,0 +1,129 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/html/nsHTMLCSSUtils.cpp b/editor/libeditor/html/nsHTMLCSSUtils.cpp
+--- a/editor/libeditor/html/nsHTMLCSSUtils.cpp
++++ b/editor/libeditor/html/nsHTMLCSSUtils.cpp
+@@ -1322,18 +1322,18 @@ nsHTMLCSSUtils::ElementsSameStyle(dom::E
+   if (aFirstElement->HasAttr(kNameSpaceID_None, nsGkAtoms::id) ||
+       aSecondElement->HasAttr(kNameSpaceID_None, nsGkAtoms::id)) {
+     // at least one of the spans carries an ID ; suspect a CSS rule applies to it and
+     // refuse to merge the nodes
+     return false;
+   }
+ 
+   nsAutoString firstClass, secondClass;
+-  bool isFirstClassSet = aFirstElement->GetAttr(kNameSpaceID_None, nsGkAtoms::class_, firstClass);
+-  bool isSecondClassSet = aSecondElement->GetAttr(kNameSpaceID_None, nsGkAtoms::class_, secondClass);
++  bool isFirstClassSet = aFirstElement->GetAttr(kNameSpaceID_None, nsGkAtoms::_class, firstClass);
++  bool isSecondClassSet = aSecondElement->GetAttr(kNameSpaceID_None, nsGkAtoms::_class, secondClass);
+   if (isFirstClassSet && isSecondClassSet) {
+     // both spans carry a class, let's compare them
+     if (!firstClass.Equals(secondClass)) {
+       // WARNING : technically, the comparison just above is questionable :
+       // from a pure HTML/CSS point of view class="a b" is NOT the same than
+       // class="b a" because a CSS rule could test the exact value of the class
+       // attribute to be "a b" for instance ; from a user's point of view, a
+       // wysiwyg editor should probably NOT make any difference. CSS people
+@@ -1342,21 +1342,21 @@ nsHTMLCSSUtils::ElementsSameStyle(dom::E
+     }
+   } else if (isFirstClassSet || isSecondClassSet) {
+     // one span only carries a class, early way out
+     return false;
+   }
+ 
+   nsCOMPtr<nsIDOMCSSStyleDeclaration> firstCSSDecl, secondCSSDecl;
+   uint32_t firstLength, secondLength;
+-  nsresult rv = GetInlineStyles(firstElement,  getter_AddRefs(firstCSSDecl),  &firstLength);
++  nsresult rv = GetInlineStyles(aFirstElement,  getter_AddRefs(firstCSSDecl),  &firstLength);
+   if (NS_FAILED(rv) || !firstCSSDecl) {
+     return false;
+   }
+-  rv = GetInlineStyles(secondElement, getter_AddRefs(secondCSSDecl), &secondLength);
++  rv = GetInlineStyles(aSecondElement, getter_AddRefs(secondCSSDecl), &secondLength);
+   if (NS_FAILED(rv) || !secondCSSDecl) {
+     return false;
+   }
+ 
+   if (firstLength != secondLength) {
+     // early way out if we can
+     return false;
+   }
+diff --git a/js/src/jsarray.cpp b/js/src/jsarray.cpp
+--- a/js/src/jsarray.cpp
++++ b/js/src/jsarray.cpp
+@@ -1405,17 +1405,17 @@ array_toSource_impl(JSContext *cx, CallA
+     for (uint32_t index = 0; index < length; index++) {
+         JSBool hole;
+         if (!JS_CHECK_OPERATION_LIMIT(cx) ||
+             !GetElement(cx, obj, index, &hole, &elt)) {
+             return false;
+         }
+ 
+         /* Get element's character string. */
+-        JSString *str;
++        JSRootedString str(cx);
+         if (hole) {
+             str = cx->runtime->emptyString;
+         } else {
+             str = js_ValueToSource(cx, elt);
+             if (!str)
+                 return false;
+         }
+ 
+@@ -1431,17 +1431,17 @@ array_toSource_impl(JSContext *cx, CallA
+         }
+     }
+ 
+     /* Finalize the buffer. */
+     if (!sb.append(']'))
+         return false;
+ 
+   make_string:
+-    JSString *str = sb.finishString();
++    UnrootedString str = sb.finishString();
+     if (!str)
+         return false;
+ 
+     args.rval().setString(str);
+     return true;
+ }
+ 
+ JSBool
+@@ -1563,17 +1563,17 @@ array_join_sub(JSContext *cx, CallArgs &
+                 const jschar *sepchars = sep ? sep : sepstr->getChars(cx);
+                 if (!sepchars || !sb.append(sepchars, seplen))
+                     return false;
+             }
+         }
+     }
+ 
+     // Step 11
+-    JSString *str = sb.finishString();
++    UnrootedString str = sb.finishString();
+     if (!str)
+         return false;
+     args.rval().setString(str);
+     return true;
+ }
+ 
+ /* ES5 15.4.4.2. NB: The algorithm here differs from the one in ES3. */
+ static JSBool
+@@ -1586,17 +1586,17 @@ array_toString(JSContext *cx, unsigned a
+     if (!obj)
+         return false;
+ 
+     RootedValue join(cx, args.calleev());
+     if (!JSObject::getProperty(cx, obj, obj, cx->names().join, &join))
+         return false;
+ 
+     if (!js_IsCallable(join)) {
+-        JSString *str = obj_toStringHelper(cx, obj);
++        UnrootedString str = obj_toStringHelper(cx, obj);
+         if (!str)
+             return false;
+         args.rval().setString(str);
+         return true;
+     }
+ 
+     InvokeArgsGuard ag;
+     if (!cx->stack.pushInvokeArgs(cx, 0, &ag))

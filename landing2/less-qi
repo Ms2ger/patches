@@ -1,0 +1,63 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -5554,18 +5554,17 @@ nsHTMLEditor::ResetRootElementAndEventTa
+ 
+   rv = BeginningOfDocument();
+   if (NS_FAILED(rv)) {
+     return;
+   }
+ 
+   // When this editor has focus, we need to reset the selection limiter to
+   // new root.  Otherwise, that is going to be done when this gets focus.
+-  nsCOMPtr<nsINode> node = GetFocusedNode();
+-  nsCOMPtr<nsIDOMEventTarget> target = do_QueryInterface(node);
++  nsCOMPtr<nsIDOMEventTarget> target = GetFocusedNode();
+   if (target) {
+     InitializeSelection(target);
+   }
+ 
+   SyncRealTimeSpell();
+ }
+ 
+ nsresult
+@@ -5607,34 +5606,35 @@ nsHTMLEditor::OurWindowHasFocus()
+   nsIFocusManager* fm = nsFocusManager::GetFocusManager();
+   NS_ENSURE_TRUE(fm, false);
+   nsCOMPtr<nsIDOMWindow> focusedWindow;
+   fm->GetFocusedWindow(getter_AddRefs(focusedWindow));
+   if (!focusedWindow) {
+     return false;
+   }
+   nsCOMPtr<nsIDocument> doc = do_QueryReferent(mDocWeak);
+-  nsCOMPtr<nsIDOMWindow> ourWindow = do_QueryInterface(doc->GetWindow());
+-  return ourWindow == focusedWindow;
++  // XXX doc == null?
++  return doc->GetWindow() == focusedWindow;
+ }
+ 
+ bool
+ nsHTMLEditor::IsAcceptableInputEvent(nsIDOMEvent* aEvent)
+ {
+   if (!nsEditor::IsAcceptableInputEvent(aEvent)) {
+     return false;
+   }
+ 
+   NS_ENSURE_TRUE(mDocWeak, false);
+ 
+   nsCOMPtr<nsIDOMEventTarget> target;
+   aEvent->GetTarget(getter_AddRefs(target));
+   NS_ENSURE_TRUE(target, false);
+ 
+   nsCOMPtr<nsIDocument> document = do_QueryReferent(mDocWeak);
++  // XXX document == null?
+   if (document->HasFlag(NODE_IS_EDITABLE)) {
+     // If this editor is in designMode and the event target is the document,
+     // the event is for this editor.
+     nsCOMPtr<nsIDocument> targetDocument = do_QueryInterface(target);
+     if (targetDocument) {
+       return targetDocument == document;
+     }
+     // Otherwise, check whether the event target is in this document or not.

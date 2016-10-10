@@ -1,0 +1,191 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCForwards.h b/js/xpconnect/src/XPCForwards.h
+--- a/js/xpconnect/src/XPCForwards.h
++++ b/js/xpconnect/src/XPCForwards.h
+@@ -47,17 +47,16 @@
+ 
+ class nsXPConnect;
+ class XPCJSRuntime;
+ class XPCContext;
+ class XPCCallContext;
+ 
+ class XPCPerThreadData;
+ class XPCJSThrower;
+-class XPCJSStack;
+ 
+ class nsXPCWrappedJS;
+ class nsXPCWrappedJSClass;
+ 
+ class XPCNativeMember;
+ class XPCNativeInterface;
+ class XPCNativeSet;
+ 
+diff --git a/js/xpconnect/src/XPCJSStack.h b/js/xpconnect/src/XPCJSStack.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCJSStack.h
+@@ -0,0 +1,27 @@
++#ifndef XPCJSStack_h
++#define XPCJSStack_h
++
++#include "prtypes.h"
++
++#include "nscore.h"
++
++#include "jspubtd.h"
++
++class nsIStackFrame;
++
++namespace XPCJSStack {
++
++nsresult
++CreateStack(JSContext* cx, nsIStackFrame** stack);
++
++nsresult
++CreateStackFrameLocation(uint32_t aLanguage,
++                         const char* aFilename,
++                         const char* aFunctionName,
++                         int32_t aLineNumber,
++                         nsIStackFrame* aCaller,
++                         nsIStackFrame** stack);
++
++} // namespace XPCJSStack
++
++#endif // XPCJSStack_h
+diff --git a/js/xpconnect/src/XPCStack.cpp b/js/xpconnect/src/XPCStack.cpp
+--- a/js/xpconnect/src/XPCStack.cpp
++++ b/js/xpconnect/src/XPCStack.cpp
+@@ -35,16 +35,18 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* Implements nsIStackFrame. */
+ 
++#include "XPCJSStack.h"
++
+ #include "xpcprivate.h"
+ 
+ class XPCJSStackFrame : public nsIStackFrame
+ {
+ public:
+     NS_DECL_ISUPPORTS
+     NS_DECL_NSISTACKFRAME
+ 
+@@ -70,47 +72,47 @@ private:
+     char* mFilename;
+     char* mFunname;
+     int32_t mLineno;
+     uint32_t mLanguage;
+ };
+ 
+ /**********************************************/
+ 
+-// static
++namespace XPCJSStack {
+ 
+ nsresult
+-XPCJSStack::CreateStack(JSContext* cx, nsIStackFrame** stack)
++CreateStack(JSContext* cx, nsIStackFrame** stack)
+ {
+     if (!cx)
+         return NS_ERROR_FAILURE;
+ 
+     JSStackFrame *fp = NULL;
+     if (!JS_FrameIterator(cx, &fp))
+         return NS_ERROR_FAILURE;
+     return XPCJSStackFrame::CreateStack(cx, fp, (XPCJSStackFrame**) stack);
+ }
+ 
+-// static
+ nsresult
+-XPCJSStack::CreateStackFrameLocation(uint32_t aLanguage,
+-                                     const char* aFilename,
+-                                     const char* aFunctionName,
+-                                     int32_t aLineNumber,
+-                                     nsIStackFrame* aCaller,
+-                                     nsIStackFrame** stack)
++CreateStackFrameLocation(uint32_t aLanguage,
++                         const char* aFilename,
++                         const char* aFunctionName,
++                         int32_t aLineNumber,
++                         nsIStackFrame* aCaller,
++                         nsIStackFrame** stack)
+ {
+     return XPCJSStackFrame::CreateStackFrameLocation(aLanguage,
+                                                      aFilename,
+                                                      aFunctionName,
+                                                      aLineNumber,
+                                                      aCaller,
+                                                      (XPCJSStackFrame**) stack);
+ }
+ 
++} // namespace XPCJSStack
+ 
+ /**********************************************/
+ 
+ XPCJSStackFrame::XPCJSStackFrame()
+     :   mFilename(nsnull),
+         mFunname(nsnull),
+         mLineno(0),
+         mLanguage(nsIProgrammingLanguage::UNKNOWN)
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -163,16 +163,17 @@
+ #include "XPCNativeScriptableCreateInfo.h"
+ #include "XPCWrappedNativeProto.h"
+ #include "XPCWrappedNative.h"
+ #include "nsXPCWrappedJSClass.h"
+ #include "xpcObjectHelper.h"
+ #include "XPCConvert.h"
+ #include "XPCStringConvert.h"
+ #include "XPCThrower.h"
++#include "XPCJSStack.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -465,35 +466,16 @@ enum WrapperType {
+ /***************************************************************************
+ ****************************************************************************
+ *
+ * All manner of utility classes follow...
+ *
+ ****************************************************************************
+ ***************************************************************************/
+ 
+-class XPCJSStack
+-{
+-public:
+-    static nsresult
+-    CreateStack(JSContext* cx, nsIStackFrame** stack);
+-
+-    static nsresult
+-    CreateStackFrameLocation(uint32_t aLanguage,
+-                             const char* aFilename,
+-                             const char* aFunctionName,
+-                             int32_t aLineNumber,
+-                             nsIStackFrame* aCaller,
+-                             nsIStackFrame** stack);
+-private:
+-    XPCJSStack();   // not implemented
+-};
+-
+-/***************************************************************************/
+-
+ class nsXPCException :
+             public nsIXPCException
+ {
+ public:
+     NS_DEFINE_STATIC_CID_ACCESSOR(NS_XPCEXCEPTION_CID)
+ 
+     NS_DECL_ISUPPORTS
+     NS_DECL_NSIEXCEPTION

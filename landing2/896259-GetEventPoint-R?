@@ -1,0 +1,246 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/layout/xul/base/src/nsBoxFrame.cpp b/layout/xul/base/src/nsBoxFrame.cpp
+--- a/layout/xul/base/src/nsBoxFrame.cpp
++++ b/layout/xul/base/src/nsBoxFrame.cpp
+@@ -2053,38 +2053,39 @@ nsBoxFrame::WrapListsInRedirector(nsDisp
+                                   const nsDisplayListSet& aIn,
+                                   const nsDisplayListSet& aOut)
+ {
+   nsXULEventRedirectorWrapper wrapper(this);
+   wrapper.WrapLists(aBuilder, this, aIn, aOut);
+ }
+ 
+ bool
+-nsBoxFrame::GetEventPoint(nsGUIEvent* aEvent, nsPoint &aPoint) {
+-  nsIntPoint refPoint;
++nsBoxFrame::GetEventPoint(nsGUIEvent* aEvent, nsPoint& aPoint)
++{
++  LayoutDeviceIntPoint refPoint;
+   bool res = GetEventPoint(aEvent, refPoint);
+-  aPoint = nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent,
+-    LayoutDeviceIntPoint::FromUntyped(refPoint), this);
++  aPoint = nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, refPoint, this);
+   return res;
+ }
+ 
+ bool
+-nsBoxFrame::GetEventPoint(nsGUIEvent* aEvent, nsIntPoint &aPoint) {
++nsBoxFrame::GetEventPoint(nsGUIEvent* aEvent, LayoutDeviceIntPoint& aPoint)
++{
+   NS_ENSURE_TRUE(aEvent, false);
+ 
+   if (aEvent->eventStructType == NS_TOUCH_EVENT) {
+     nsTouchEvent* touchEvent = static_cast<nsTouchEvent*>(aEvent);
+     // return false if there is more than one touch on the page, or if
+     // we can't find a touch point
+     if (touchEvent->touches.Length() != 1) {
+       return false;
+     }
+ 
+     dom::Touch* touch = touchEvent->touches.SafeElementAt(0);
+     if (!touch) {
+       return false;
+     }
+-    aPoint = touch->mRefPoint;
++    aPoint = LayoutDeviceIntPoint::FromUntyped(touch->mRefPoint);
+   } else {
+-    aPoint = LayoutDeviceIntPoint::ToUntyped(aEvent->refPoint);
++    aPoint = aEvent->refPoint;
+   }
+   return true;
+ }
+diff --git a/layout/xul/base/src/nsBoxFrame.h b/layout/xul/base/src/nsBoxFrame.h
+--- a/layout/xul/base/src/nsBoxFrame.h
++++ b/layout/xul/base/src/nsBoxFrame.h
+@@ -13,16 +13,17 @@
+ 
+ #ifndef nsBoxFrame_h___
+ #define nsBoxFrame_h___
+ 
+ #include "mozilla/Attributes.h"
+ #include "nsCOMPtr.h"
+ #include "nsContainerFrame.h"
+ #include "nsBoxLayout.h"
++#include "Units.h"
+ 
+ class nsBoxLayoutState;
+ 
+ // flags from box
+ #define NS_STATE_BOX_CHILD_RESERVED      NS_FRAME_STATE_BIT(20)
+ #define NS_STATE_STACK_NOT_POSITIONED    NS_FRAME_STATE_BIT(21)
+ //#define NS_STATE_IS_HORIZONTAL           NS_FRAME_STATE_BIT(22)  moved to nsIFrame.h
+ #define NS_STATE_AUTO_STRETCH            NS_FRAME_STATE_BIT(23)
+@@ -210,17 +211,18 @@ protected:
+ 
+     nsCOMPtr<nsBoxLayout> mLayoutManager;
+ 
+     // Get the point associated with this event. Returns true if a single valid
+     // point was found. Otherwise false.
+     bool GetEventPoint(nsGUIEvent *aEvent, nsPoint &aPoint);
+     // Gets the event coordinates relative to the widget offset associated with
+     // this frame. Return true if a single valid point was found.
+-    bool GetEventPoint(nsGUIEvent *aEvent, nsIntPoint &aPoint);
++    bool GetEventPoint(nsGUIEvent *aEvent,
++                       mozilla::LayoutDeviceIntPoint& aPoint);
+ 
+ protected:
+     void RegUnregAccessKey(bool aDoReg);
+ 
+   NS_HIDDEN_(void) CheckBoxOrder();
+ 
+ private: 
+ 
+diff --git a/layout/xul/base/src/nsMenuPopupFrame.cpp b/layout/xul/base/src/nsMenuPopupFrame.cpp
+--- a/layout/xul/base/src/nsMenuPopupFrame.cpp
++++ b/layout/xul/base/src/nsMenuPopupFrame.cpp
+@@ -1419,17 +1419,19 @@ nsMenuPopupFrame::GetConstraintRect(cons
+   if (mInContentShell) {
+     // for content shells, clip to the client area rather than the screen area
+     screenRect.IntersectRect(screenRect, aRootScreenRect);
+   }
+ 
+   return screenRect;
+ }
+ 
+-void nsMenuPopupFrame::CanAdjustEdges(int8_t aHorizontalSide, int8_t aVerticalSide, nsIntPoint& aChange)
++void
++nsMenuPopupFrame::CanAdjustEdges(int8_t aHorizontalSide, int8_t aVerticalSide,
++                                 LayoutDeviceIntPoint& aChange)
+ {
+   int8_t popupAlign(mPopupAlignment);
+   if (IsDirectionRTL()) {
+     popupAlign = -popupAlign;
+   }
+ 
+   if (aHorizontalSide == (mHFlip ? NS_SIDE_RIGHT : NS_SIDE_LEFT)) {
+     if (popupAlign == POPUPALIGNMENT_TOPLEFT || popupAlign == POPUPALIGNMENT_BOTTOMLEFT) {
+diff --git a/layout/xul/base/src/nsMenuPopupFrame.h b/layout/xul/base/src/nsMenuPopupFrame.h
+--- a/layout/xul/base/src/nsMenuPopupFrame.h
++++ b/layout/xul/base/src/nsMenuPopupFrame.h
+@@ -15,16 +15,17 @@
+ #include "nsGkAtoms.h"
+ #include "nsCOMPtr.h"
+ #include "nsMenuFrame.h"
+ 
+ #include "nsBoxFrame.h"
+ #include "nsMenuParent.h"
+ 
+ #include "nsITimer.h"
++#include "Units.h"
+ 
+ class nsIWidget;
+ 
+ // XUL popups can be in several different states. When opening a popup, the
+ // state changes as follows:
+ //   ePopupClosed - initial state
+ //   ePopupShowing - during the period when the popupshowing event fires
+ //   ePopupOpen - between the popupshowing event and being visible. Creation
+@@ -308,17 +309,18 @@ public:
+   // 0 for no movement in that direction. aChange is the distance to move on
+   // those sides. If will be reset to 0 if the side cannot be adjusted at all
+   // in that direction. For example, a popup cannot be moved if it is anchored
+   // on a particular side.
+   //
+   // Later, when bug 357725 is implemented, we can make this adjust aChange by
+   // the amount that the side can be resized, so that minimums and maximums
+   // can be taken into account.
+-  void CanAdjustEdges(int8_t aHorizontalSide, int8_t aVerticalSide, nsIntPoint& aChange);
++  void CanAdjustEdges(int8_t aHorizontalSide, int8_t aVerticalSide,
++                      mozilla::LayoutDeviceIntPoint& aChange);
+ 
+   // Return true if the popup is positioned relative to an anchor.
+   bool IsAnchored() const { return mScreenXPos == -1 && mScreenYPos == -1; }
+ 
+   // Return the anchor if there is one.
+   nsIContent* GetAnchor() const { return mAnchorContent; }
+ 
+   // Return the screen coordinates of the popup, or (-1, -1) if anchored.
+diff --git a/layout/xul/base/src/nsResizerFrame.cpp b/layout/xul/base/src/nsResizerFrame.cpp
+--- a/layout/xul/base/src/nsResizerFrame.cpp
++++ b/layout/xul/base/src/nsResizerFrame.cpp
+@@ -111,20 +111,21 @@ nsResizerFrame::HandleEvent(nsPresContex
+              
+           // if there's no native resize support, we need to do window
+           // resizing ourselves
+           window->GetPositionAndSize(&mMouseDownRect.x, &mMouseDownRect.y,
+                                      &mMouseDownRect.width, &mMouseDownRect.height);
+         }
+ 
+         // remember current mouse coordinates
+-        nsIntPoint refPoint;
++        LayoutDeviceIntPoint refPoint;
+         if (!GetEventPoint(aEvent, refPoint))
+           return NS_OK;
+-        mMouseDownPoint = refPoint + aEvent->widget->WidgetToScreenOffset();
++        mMouseDownPoint = refPoint + LayoutDeviceIntPoint::FromUntyped(
++          aEvent->widget->WidgetToScreenOffset());
+ 
+         // we're tracking
+         mTrackingMouseMove = true;
+ 
+         nsIPresShell::SetCapturingContent(GetContent(), CAPTURE_IGNOREALLOWED);
+       }
+     }
+     break;
+@@ -161,21 +162,22 @@ nsResizerFrame::HandleEvent(nsPresContex
+         menuPopupFrame = do_QueryFrame(contentToResize->GetPrimaryFrame());
+       }
+ 
+       // both MouseMove and direction are negative when pointing to the
+       // top and left, and positive when pointing to the bottom and right
+ 
+       // retrieve the offset of the mousemove event relative to the mousedown.
+       // The difference is how much the resize needs to be
+-      nsIntPoint refPoint;
++      LayoutDeviceIntPoint refPoint;
+       if (!GetEventPoint(aEvent, refPoint))
+         return NS_OK;
+-      nsIntPoint screenPoint(refPoint + aEvent->widget->WidgetToScreenOffset());
+-      nsIntPoint mouseMove(screenPoint - mMouseDownPoint);
++      LayoutDeviceIntPoint mouseMove(refPoint +
++        LayoutDeviceIntPoint::FromUntyped(aEvent->widget->WidgetToScreenOffset()) -
++        mMouseDownPoint);
+ 
+       // Determine which direction to resize by checking the dir attribute.
+       // For windows and menus, ensure that it can be resized in that direction.
+       Direction direction = GetDirection();
+       if (window || menuPopupFrame) {
+         if (menuPopupFrame) {
+           menuPopupFrame->CanAdjustEdges(
+             (direction.mHorizontal == -1) ? NS_SIDE_LEFT : NS_SIDE_RIGHT,
+diff --git a/layout/xul/base/src/nsResizerFrame.h b/layout/xul/base/src/nsResizerFrame.h
+--- a/layout/xul/base/src/nsResizerFrame.h
++++ b/layout/xul/base/src/nsResizerFrame.h
+@@ -2,16 +2,17 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ #ifndef nsResizerFrame_h___
+ #define nsResizerFrame_h___
+ 
+ #include "mozilla/Attributes.h"
+ #include "nsTitleBarFrame.h"
++#include "Units.h"
+ 
+ class nsIBaseWindow;
+ class nsMenuPopupFrame;
+ 
+ class nsResizerFrame : public nsTitleBarFrame 
+ {
+ protected:
+   struct Direction {
+@@ -60,12 +61,12 @@ protected:
+                                void *aPropertyValue, void *aData);
+   static void ResizeContent(nsIContent* aContent, const Direction& aDirection,
+                             const SizeInfo& aSizeInfo, SizeInfo* aOriginalSizeInfo);
+   static void MaybePersistOriginalSize(nsIContent* aContent, const SizeInfo& aSizeInfo);
+   static void RestoreOriginalSize(nsIContent* aContent);
+ 
+ protected:
+ 	nsIntRect mMouseDownRect;
+-	nsIntPoint mMouseDownPoint;
++	mozilla::LayoutDeviceIntPoint mMouseDownPoint;
+ }; // class nsResizerFrame
+ 
+ #endif /* nsResizerFrame_h___ */

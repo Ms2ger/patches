@@ -1,0 +1,145 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/src/jsemit.cpp b/js/src/jsemit.cpp
+--- a/js/src/jsemit.cpp
++++ b/js/src/jsemit.cpp
+@@ -4930,26 +4930,24 @@ public:
+     EmitLevelManager(JSCodeGenerator *cg) : cg(cg) { cg->emitLevel++; }
+ 
+     ~EmitLevelManager() { cg->emitLevel--; }
+ };
+ 
+ static bool
+ EmitCatch(JSContext *cx, JSCodeGenerator *cg, JSParseNode *pn)
+ {
+-    ptrdiff_t catchStart, guardJump;
+-
+     /*
+      * Morph STMT_BLOCK to STMT_CATCH, note the block entry code offset,
+      * and save the block object atom.
+      */
+     JSStmtInfo *stmt = cg->topStmt;
+     JS_ASSERT(stmt->type == STMT_BLOCK && (stmt->flags & SIF_SCOPE));
+     stmt->type = STMT_CATCH;
+-    catchStart = stmt->update;
++    ptrdiff_t catchStart = stmt->update;
+ 
+     /* Go up one statement info record to the TRY or FINALLY record. */
+     stmt = stmt->down;
+     JS_ASSERT(stmt->type == STMT_TRY || stmt->type == STMT_FINALLY);
+ 
+     /* Pick up the pending exception and bind it to the catch variable. */
+     if (js_Emit1(cx, cg, JSOP_EXCEPTION) < 0)
+         return false;
+@@ -4987,17 +4985,17 @@ EmitCatch(JSContext *cx, JSCodeGenerator
+     if (pn->pn_kid2) {
+         if (!js_EmitTree(cx, cg, pn->pn_kid2))
+             return false;
+         if (!js_SetSrcNoteOffset(cx, cg, CATCHNOTE(*stmt), 0,
+                                  CG_OFFSET(cg) - catchStart)) {
+             return false;
+         }
+         /* ifeq <next block> */
+-        guardJump = EmitJump(cx, cg, JSOP_IFEQ, 0);
++        ptrdiff_t guardJump = EmitJump(cx, cg, JSOP_IFEQ, 0);
+         if (guardJump < 0)
+             return false;
+         GUARDJUMP(*stmt) = guardJump;
+ 
+         /* Pop duplicated exception object as we no longer need it. */
+         if (js_Emit1(cx, cg, JSOP_POP) < 0)
+             return false;
+     }
+@@ -5015,17 +5013,16 @@ EmitCatch(JSContext *cx, JSCodeGenerator
+         return false;
+     return true;
+ }
+ 
+ static bool
+ EmitTry(JSContext *cx, JSCodeGenerator *cg, JSParseNode *pn)
+ {
+     JSStmtInfo stmtInfo;
+-    ptrdiff_t catchJump = -1;
+ 
+     /*
+      * Push stmtInfo to track jumps-over-catches and gosubs-to-finally
+      * for later fixup.
+      *
+      * When a finally block is active (STMT_FINALLY in our tree context),
+      * non-local jumps (including jumps-over-catches) result in a GOSUB
+      * being written into the bytecode stream and fixed-up later (c.f.
+@@ -5055,16 +5052,17 @@ EmitTry(JSContext *cx, JSCodeGenerator *
+     /* GOSUB to finally, if present. */
+     if (pn->pn_kid3) {
+         if (js_NewSrcNote(cx, cg, SRC_HIDDEN) < 0)
+             return false;
+         if (EmitBackPatchOp(cx, cg, JSOP_BACKPATCH, &GOSUBS(stmtInfo)) < 0)
+             return false;
+     }
+ 
++    ptrdiff_t catchJump = -1;
+     /* Emit (hidden) jump over catch and/or finally. */
+     if (js_NewSrcNote(cx, cg, SRC_HIDDEN) < 0)
+         return false;
+     if (EmitBackPatchOp(cx, cg, JSOP_BACKPATCH, &catchJump) < 0)
+         return false;
+ 
+     ptrdiff_t tryEnd = CG_OFFSET(cg);
+ 
+@@ -5559,17 +5557,16 @@ EmitWith(JSContext *cx, JSCodeGenerator 
+         return false;
+     ok = js_PopStatementCG(cx, cg);
+     return true;
+ }
+ 
+ JSBool
+ js_EmitTree(JSContext *cx, JSCodeGenerator *cg, JSParseNode *pn)
+ {
+-    JSBool useful, wantval;
+     JSStmtInfo stmtInfo;
+     JSStmtInfo *stmt;
+     ptrdiff_t top, off, tmp, beq, jmp, tmp2, tmp3;
+     JSParseNode *pn2, *pn3;
+     JSAtom *atom;
+     jsatomid atomIndex;
+     uintN index;
+     ptrdiff_t noteIndex, noteIndex2;
+@@ -6371,17 +6368,18 @@ js_EmitTree(JSContext *cx, JSCodeGenerat
+              * Top-level or called-from-a-native JS_Execute/EvaluateScript,
+              * debugger, and eval frames may need the value of the ultimate
+              * expression statement as the script's result, despite the fact
+              * that it appears useless to the compiler.
+              *
+              * API users may also set the JSOPTION_NO_SCRIPT_RVAL option when
+              * calling JS_Compile* to suppress JSOP_POPV.
+              */
+-            useful = wantval = !(cg->flags & (TCF_IN_FUNCTION | TCF_NO_SCRIPT_RVAL));
++            JSBool useful = !(cg->flags & (TCF_IN_FUNCTION | TCF_NO_SCRIPT_RVAL));
++            JSBool wantval = useful;
+ 
+             /* Don't eliminate expressions with side effects. */
+             if (!useful) {
+                 if (!CheckSideEffects(cx, cg, pn2, &useful))
+                     return JS_FALSE;
+             }
+ 
+             /*
+@@ -6824,17 +6822,17 @@ js_EmitTree(JSContext *cx, JSCodeGenerat
+             if (!EmitElemOp(cx, pn2, JSOP_DELELEM, cg))
+                 return JS_FALSE;
+             break;
+           default:
+             /*
+              * If useless, just emit JSOP_TRUE; otherwise convert delete foo()
+              * to foo(), true (a comma expression, requiring SRC_PCDELTA).
+              */
+-            useful = JS_FALSE;
++            JSBool useful = JS_FALSE;
+             if (!CheckSideEffects(cx, cg, pn2, &useful))
+                 return JS_FALSE;
+             if (!useful) {
+                 off = noteIndex = -1;
+             } else {
+                 JS_ASSERT_IF(pn2->isKind(TOK_LP), !(pn2->pn_xflags & PNX_SETCALL));
+                 if (!js_EmitTree(cx, cg, pn2))
+                     return JS_FALSE;

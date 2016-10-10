@@ -1,0 +1,92 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/txmgr/tests/TestTXMgr.cpp b/editor/txmgr/tests/TestTXMgr.cpp
+--- a/editor/txmgr/tests/TestTXMgr.cpp
++++ b/editor/txmgr/tests/TestTXMgr.cpp
+@@ -4575,19 +4575,22 @@ aggregation_batch_stress_test()
+ #endif
+   ;
+   return stress_test(&factory, iterations);
+ }
+ 
+ int
+ main (int argc, char *argv[])
+ {
++  Test test("editor/txmgr/tests/TestTXMgr.cpp");
+   ScopedXPCOM xpcom("nsITransactionManager");
+-  if (xpcom.failed())
++  if (xpcom.failed()) {
++    test.failed("ScopedXPCOM failued to initialize.");
+     return 1;
++  }
+ 
+   nsresult result;
+ 
+   //
+   // quick_test() part:
+   //
+ 
+   result = simple_test();
+diff --git a/xpcom/tests/TestHarness.h b/xpcom/tests/TestHarness.h
+--- a/xpcom/tests/TestHarness.h
++++ b/xpcom/tests/TestHarness.h
+@@ -74,16 +74,59 @@ void passed(const char* msg, ...)
+ 
+   va_start(ap, msg);
+   vprintf(msg, ap);
+   va_end(ap);
+ 
+   putchar('\n');
+ }
+ 
++class Test
++{
++public:
++  Test(const char* aTestName)
++    : mTestName(aTestName)
++  {
++    printf("TEST-START | %s\n", mTestName);
++  }
++
++  ~Test
++  {
++    printf("TEST-END | %s\n", mTestName);
++  }
++
++  void passed(const char* msg, ...)
++  {
++    printf("TEST-PASS | %s | ", mTestName);
++
++    va_list ap;
++    va_start(ap, msg);
++    vprintf(msg, ap);
++    va_end(ap);
++
++    putchar('\n');
++  }
++
++  void fail(const char* msg, ...)
++  {
++    printf("TEST-UNEXPECTED-FAIL | %s | ", mTestName);
++
++    va_list ap;
++    va_start(ap, msg);
++    vprintf(msg, ap);
++    va_end(ap);
++
++    putchar('\n');
++    ++gFailCount;
++  }
++
++private:
++  const char* mTestName;
++}
++
+ //-----------------------------------------------------------------------------
+ // Code profiling
+ //
+ static const char* gCurrentProfile;
+ 
+ /**
+  * If the build has been configured properly, start the best code profiler
+  * available on this platform.

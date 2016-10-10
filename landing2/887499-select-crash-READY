@@ -1,0 +1,143 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 887499 - Make HTMLOptionsCollection hold a strong reference to its HTMLSelectElement; r=smaug
+
+diff --git a/content/html/content/src/HTMLOptionsCollection.cpp b/content/html/content/src/HTMLOptionsCollection.cpp
+--- a/content/html/content/src/HTMLOptionsCollection.cpp
++++ b/content/html/content/src/HTMLOptionsCollection.cpp
+@@ -32,34 +32,23 @@
+ #include "nsRuleData.h"
+ #include "nsServiceManagerUtils.h"
+ #include "nsStyleConsts.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ HTMLOptionsCollection::HTMLOptionsCollection(HTMLSelectElement* aSelect)
++  : mSelect(aSelect)
+ {
+   SetIsDOMBinding();
+-
+-  // Do not maintain a reference counted reference. When
+-  // the select goes away, it will let us know.
+-  mSelect = aSelect;
+ }
+ 
+ HTMLOptionsCollection::~HTMLOptionsCollection()
+ {
+-  DropReference();
+-}
+-
+-void
+-HTMLOptionsCollection::DropReference()
+-{
+-  // Drop our (non ref-counted) reference
+-  mSelect = nullptr;
+ }
+ 
+ nsresult
+ HTMLOptionsCollection::GetOptionIndex(Element* aOption,
+                                       int32_t aStartIndex,
+                                       bool aForward,
+                                       int32_t* aIndex)
+ {
+@@ -87,17 +76,19 @@ HTMLOptionsCollection::GetOptionIndex(El
+       return NS_OK;
+     }
+   }
+ 
+   return NS_ERROR_FAILURE;
+ }
+ 
+ 
+-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(HTMLOptionsCollection, mElements)
++NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_2(HTMLOptionsCollection,
++                                        mElements,
++                                        mSelect)
+ 
+ // nsISupports
+ 
+ // QueryInterface implementation for HTMLOptionsCollection
+ NS_INTERFACE_TABLE_HEAD(HTMLOptionsCollection)
+   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
+   NS_INTERFACE_TABLE3(HTMLOptionsCollection,
+                       nsIHTMLCollection,
+diff --git a/content/html/content/src/HTMLOptionsCollection.h b/content/html/content/src/HTMLOptionsCollection.h
+--- a/content/html/content/src/HTMLOptionsCollection.h
++++ b/content/html/content/src/HTMLOptionsCollection.h
+@@ -99,21 +99,16 @@ public:
+    * Append an option to end of array
+    */
+   void AppendOption(mozilla::dom::HTMLOptionElement* aOption)
+   {
+     mElements.AppendElement(aOption);
+   }
+ 
+   /**
+-   * Drop the reference to the select.  Called during select destruction.
+-   */
+-  void DropReference();
+-
+-  /**
+    * Finds the index of a given option element.
+    * If the option isn't part of the collection, return NS_ERROR_FAILURE
+    * without setting aIndex.
+    *
+    * @param aOption the option to get the index of
+    * @param aStartIndex the index to start looking at
+    * @param aForward TRUE to look forward, FALSE to look backward
+    * @return the option index
+@@ -139,15 +134,15 @@ public:
+   }
+   virtual void GetSupportedNames(nsTArray<nsString>& aNames) MOZ_OVERRIDE;
+ 
+ private:
+   /** The list of options (holds strong references).  This is infallible, so
+    * various members such as InsertOptionAt are also infallible. */
+   nsTArray<nsRefPtr<mozilla::dom::HTMLOptionElement> > mElements;
+   /** The select element that contains this array */
+-  HTMLSelectElement* mSelect;
++  nsRefPtr<HTMLSelectElement> mSelect;
+ };
+ 
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #endif // mozilla_dom_HTMLOptionsCollection_h
+diff --git a/content/html/content/src/HTMLSelectElement.cpp b/content/html/content/src/HTMLSelectElement.cpp
+--- a/content/html/content/src/HTMLSelectElement.cpp
++++ b/content/html/content/src/HTMLSelectElement.cpp
+@@ -125,30 +125,24 @@ HTMLSelectElement::HTMLSelectElement(alr
+                     NS_EVENT_STATE_OPTIONAL |
+                     NS_EVENT_STATE_VALID);
+ 
+   SetIsDOMBinding();
+ }
+ 
+ HTMLSelectElement::~HTMLSelectElement()
+ {
+-  mOptions->DropReference();
+ }
+ 
+ // ISupports
+ 
+-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLSelectElement,
+-                                                  nsGenericHTMLFormElement)
+-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mValidity)
+-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mOptions)
+-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLSelectElement,
+-                                                nsGenericHTMLFormElement)
+-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mValidity)
+-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
++NS_IMPL_CYCLE_COLLECTION_INHERITED_2(HTMLSelectElement,
++                                     nsGenericHTMLFormElement,
++                                     mValidity,
++                                     mOptions)
+ 
+ NS_IMPL_ADDREF_INHERITED(HTMLSelectElement, Element)
+ NS_IMPL_RELEASE_INHERITED(HTMLSelectElement, Element)
+ 
+ // QueryInterface implementation for HTMLSelectElement
+ NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLSelectElement)
+   NS_HTML_CONTENT_INTERFACES(nsGenericHTMLFormElement)
+   NS_INTERFACE_TABLE_INHERITED2(HTMLSelectElement,

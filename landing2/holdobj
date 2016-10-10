@@ -1,0 +1,117 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/canvas/src/ImageData.cpp b/content/canvas/src/ImageData.cpp
+--- a/content/canvas/src/ImageData.cpp
++++ b/content/canvas/src/ImageData.cpp
+@@ -2,16 +2,17 @@
+ /* vim:set ts=2 sw=2 et tw=78: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "mozilla/dom/ImageData.h"
+ 
+ #include "nsDOMClassInfoID.h"
++#include "nsContentUtils.h"
+ 
+ #include "jsapi.h"
+ 
+ DOMCI_DATA(ImageData, mozilla::dom::ImageData)
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+@@ -30,17 +31,17 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(Ima
+   NS_IMPL_CYCLE_COLLECTION_TRACE_JS_CALLBACK(tmp->mData, "mData")
+ NS_IMPL_CYCLE_COLLECTION_TRACE_END
+ 
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(ImageData)
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+ 
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(ImageData)
+-  tmp->mData = NULL;
++  tmp->DropData();
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+ 
+ /* readonly attribute unsigned long width; */
+ NS_IMETHODIMP
+ ImageData::GetWidth(uint32_t* aWidth)
+ {
+   *aWidth = Width();
+   return NS_OK;
+@@ -57,10 +58,25 @@ ImageData::GetHeight(uint32_t* aHeight)
+ /* readonly attribute jsval data; */
+ NS_IMETHODIMP
+ ImageData::GetData(JS::Value* aData)
+ {
+   *aData = Data();
+   return NS_OK;
+ }
+ 
++void
++ImageData::HoldData()
++{
++  NS_HOLD_JS_OBJECTS(this, ImageData);
++}
++
++void
++ImageData::DropData()
++{
++  if (mData) {
++    NS_DROP_JS_OBJECTS(this, ImageData);
++    mData = NULL;
++  }
++}
++
+ } // namespace dom
+ } // namespace mozilla
+diff --git a/content/canvas/src/ImageData.h b/content/canvas/src/ImageData.h
+--- a/content/canvas/src/ImageData.h
++++ b/content/canvas/src/ImageData.h
+@@ -24,21 +24,23 @@ class ImageData MOZ_FINAL : public nsIDO
+ {
+ public:
+   ImageData(uint32_t aWidth, uint32_t aHeight, JSObject& aData)
+     : mWidth(aWidth)
+     , mHeight(aHeight)
+     , mData(&aData)
+   {
+     MOZ_COUNT_CTOR(ImageData);
++    HoldData();
+   }
+ 
+   ~ImageData()
+   {
+     MOZ_COUNT_DTOR(ImageData);
++    DropData();
+   }
+ 
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+   NS_DECL_NSIDOMIMAGEDATA
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(ImageData)
+ 
+   uint32_t Width()
+   {
+@@ -50,16 +52,21 @@ public:
+   }
+   JS::Value Data()
+   {
+     xpc_UnmarkGrayObject(mData);
+     return JS::ObjectOrNullValue(mData);
+   }
+ 
+ private:
++  void HoldData();
++  void DropData();
++
++  ImageData() MOZ_DELETE;
++
+   uint32_t mWidth, mHeight;
+   JSObject* mData;
+ };
+ 
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #endif // mozilla_dom_ImageData_h

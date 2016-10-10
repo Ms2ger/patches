@@ -1,0 +1,587 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/html/nsHTMLEditRules.cpp b/editor/libeditor/html/nsHTMLEditRules.cpp
+--- a/editor/libeditor/html/nsHTMLEditRules.cpp
++++ b/editor/libeditor/html/nsHTMLEditRules.cpp
+@@ -2937,20 +2937,20 @@ nsHTMLEditRules::DidDeleteSelection(nsIS
+   NS_ENSURE_SUCCESS(res, res);
+   NS_ENSURE_TRUE(startNode, NS_ERROR_FAILURE);
+   
+   // find any enclosing mailcite
+   nsCOMPtr<nsIDOMNode> citeNode;
+   res = GetTopEnclosingMailCite(startNode, address_of(citeNode), 
+                                 IsPlaintextEditor());
+   NS_ENSURE_SUCCESS(res, res);
+-  if (citeNode)
+-  {
++  if (citeNode) {
++    nsCOMPtr<nsINode> cite = do_QueryInterface(citeNode);
+     bool isEmpty = true, seenBR = false;
+-    mHTMLEditor->IsEmptyNodeImpl(citeNode, &isEmpty, true, true, false, &seenBR);
++    mHTMLEditor->IsEmptyNodeImpl(cite, &isEmpty, true, true, false, &seenBR);
+     if (isEmpty)
+     {
+       nsCOMPtr<nsIDOMNode> parent, brNode;
+       int32_t offset;
+       nsEditor::GetNodeLocation(citeNode, address_of(parent), &offset);
+       res = mHTMLEditor->DeleteNode(citeNode);
+       NS_ENSURE_SUCCESS(res, res);
+       if (parent && seenBR)
+diff --git a/editor/libeditor/html/nsHTMLEditUtils.cpp b/editor/libeditor/html/nsHTMLEditUtils.cpp
+--- a/editor/libeditor/html/nsHTMLEditUtils.cpp
++++ b/editor/libeditor/html/nsHTMLEditUtils.cpp
+@@ -30,19 +30,22 @@
+  * use your version of this file under the terms of the MPL, indicate your
+  * decision by deleting the provisions above and replace them with the notice
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
++#include "nsHTMLEditUtils.h"
++
++#include "mozilla/Assertions.h"
+ #include "mozilla/Util.h"
++#include "mozilla/dom/Element.h"
+ 
+-#include "nsHTMLEditUtils.h"
+ #include "nsTextEditUtils.h"
+ 
+ #include "nsString.h"
+ #include "nsUnicharUtils.h"
+ #include "nsEditor.h"
+ #include "nsEditProperty.h"
+ #include "nsIAtom.h"
+ #include "nsIDOMNode.h"
+@@ -172,17 +175,25 @@ nsHTMLEditUtils::IsHR(nsIDOMNode *node)
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // IsListItem: true if node an html list item
+ //                  
+ bool 
+ nsHTMLEditUtils::IsListItem(nsIDOMNode *node)
+ {
+   NS_PRECONDITION(node, "null parent passed to nsHTMLEditUtils::IsListItem");
+-  nsCOMPtr<nsIAtom> nodeAtom = nsEditor::GetTag(node);
++  nsCOMPtr<dom::Element> element = do_QueryInterface(node);
++  return element && IsListItem(element);
++}
++
++bool
++nsHTMLEditUtils::IsListItem(dom::Element* node)
++{
++  MOZ_ASSERT(node);
++  nsCOMPtr<nsIAtom> nodeAtom = node->Tag();
+   return (nodeAtom == nsEditProperty::li)
+       || (nodeAtom == nsEditProperty::dd)
+       || (nodeAtom == nsEditProperty::dt);
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // IsTableElement: true if node an html table, td, tr, ...
+@@ -240,17 +251,25 @@ nsHTMLEditUtils::IsTableRow(nsIDOMNode *
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // IsTableCell: true if node an html td or th
+ //                  
+ bool 
+ nsHTMLEditUtils::IsTableCell(nsIDOMNode *node)
+ {
+   NS_PRECONDITION(node, "null parent passed to nsHTMLEditUtils::IsTableCell");
+-  nsCOMPtr<nsIAtom> nodeAtom = nsEditor::GetTag(node);
++  nsCOMPtr<dom::Element> element = do_QueryInterface(node);
++  return element && IsTableCell(element);
++}
++
++bool
++nsHTMLEditUtils::IsTableCell(dom::Element* node)
++{
++  MOZ_ASSERT(node);
++  nsCOMPtr<nsIAtom> nodeAtom = node->Tag();
+   return (nodeAtom == nsEditProperty::td)
+       || (nodeAtom == nsEditProperty::th);
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // IsTableCell: true if node an html td or th
+ //                  
+@@ -263,21 +282,29 @@ nsHTMLEditUtils::IsTableCellOrCaption(ns
+       || (nodeAtom == nsEditProperty::th)
+       || (nodeAtom == nsEditProperty::caption);
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // IsList: true if node an html list
+ //                  
+-bool 
++bool
+ nsHTMLEditUtils::IsList(nsIDOMNode *node)
+ {
+   NS_PRECONDITION(node, "null parent passed to nsHTMLEditUtils::IsList");
+-  nsCOMPtr<nsIAtom> nodeAtom = nsEditor::GetTag(node);
++  nsCOMPtr<dom::Element> element = do_QueryInterface(node);
++  return element && IsList(element);
++}
++
++bool
++nsHTMLEditUtils::IsList(dom::Element* node)
++{
++  MOZ_ASSERT(node);
++  nsCOMPtr<nsIAtom> nodeAtom = node->Tag();
+   return (nodeAtom == nsEditProperty::ul)
+       || (nodeAtom == nsEditProperty::ol)
+       || (nodeAtom == nsEditProperty::dl);
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // IsOrderedList: true if node an html ordered list
+@@ -340,25 +367,31 @@ nsHTMLEditUtils::IsLink(nsIDOMNode *aNod
+       return true;
+   }
+   return false;
+ }
+ 
+ bool 
+ nsHTMLEditUtils::IsNamedAnchor(nsIDOMNode *aNode)
+ {
+-  NS_ENSURE_TRUE(aNode, false);
+-  nsCOMPtr<nsIDOMHTMLAnchorElement> anchor = do_QueryInterface(aNode);
+-  if (anchor)
+-  {
+-    nsAutoString tmpText;
+-    if (NS_SUCCEEDED(anchor->GetName(tmpText)) && !tmpText.IsEmpty())
+-      return true;
++  nsCOMPtr<dom::Element> element = do_QueryInterface(aNode);
++  return element && IsNamedAnchor(element);
++}
++
++bool
++nsHTMLEditUtils::IsNamedAnchor(dom::Element* aNode)
++{
++  MOZ_ASSERT(aNode);
++  if (!aNode->IsHTML(nsGkAtoms::a)) {
++    return false;
+   }
+-  return false;
++
++  nsAutoString text;
++  return aNode->GetAttr(kNameSpaceID_None, nsGkAtoms::name, text) &&
++         !text.IsEmpty();
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // IsDiv: true if node an html div node
+ //                  
+ bool 
+ nsHTMLEditUtils::IsDiv(nsIDOMNode *node)
+@@ -414,21 +447,29 @@ nsHTMLEditUtils::IsMailCite(nsIDOMNode *
+ 
+   return false;
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // IsFormWidget: true if node is a form widget of some kind
+ //                  
+-bool 
++bool
+ nsHTMLEditUtils::IsFormWidget(nsIDOMNode *node)
+ {
+   NS_PRECONDITION(node, "null node passed to nsHTMLEditUtils::IsFormWidget");
+-  nsCOMPtr<nsIAtom> nodeAtom = nsEditor::GetTag(node);
++  nsCOMPtr<dom::Element> element = do_QueryInterface(node);
++  return element && IsFormWidget(element);
++}
++
++bool
++nsHTMLEditUtils::IsFormWidget(dom::Element* node)
++{
++  MOZ_ASSERT(node);
++  nsCOMPtr<nsIAtom> nodeAtom = node->Tag();
+   return (nodeAtom == nsEditProperty::textarea)
+       || (nodeAtom == nsEditProperty::select)
+       || (nodeAtom == nsEditProperty::button)
+       || (nodeAtom == nsEditProperty::output)
+       || (nodeAtom == nsEditProperty::keygen)
+       || (nodeAtom == nsEditProperty::progress)
+       || (nodeAtom == nsEditProperty::input);
+ }
+diff --git a/editor/libeditor/html/nsHTMLEditUtils.h b/editor/libeditor/html/nsHTMLEditUtils.h
+--- a/editor/libeditor/html/nsHTMLEditUtils.h
++++ b/editor/libeditor/html/nsHTMLEditUtils.h
+@@ -35,51 +35,62 @@
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #ifndef nsHTMLEditUtils_h__
+ #define nsHTMLEditUtils_h__
+ 
+ #include "prtypes.h"  // for int32_t
+ 
++namespace mozilla {
++namespace dom {
++class Element;
++} // namespace dom
++} // namespace mozilla
++
+ class nsIDOMNode;
+ 
+ class nsHTMLEditUtils
+ {
+ public:
+   // from nsTextEditRules:
+   static bool IsBig(nsIDOMNode *aNode);
+   static bool IsSmall(nsIDOMNode *aNode);
+ 
+   // from nsHTMLEditRules:
+   static bool IsInlineStyle(nsIDOMNode *aNode);
+   static bool IsFormatNode(nsIDOMNode *aNode);
+   static bool IsNodeThatCanOutdent(nsIDOMNode *aNode);
+   static bool IsHeader(nsIDOMNode *aNode);
+   static bool IsParagraph(nsIDOMNode *aNode);
+   static bool IsHR(nsIDOMNode *aNode);
++  static bool IsListItem(mozilla::dom::Element* aNode);
+   static bool IsListItem(nsIDOMNode *aNode);
+   static bool IsTable(nsIDOMNode *aNode);
+   static bool IsTableRow(nsIDOMNode *aNode);
+   static bool IsTableElement(nsIDOMNode *aNode);
+   static bool IsTableElementButNotTable(nsIDOMNode *aNode);
++  static bool IsTableCell(mozilla::dom::Element* node);
+   static bool IsTableCell(nsIDOMNode *aNode);
+   static bool IsTableCellOrCaption(nsIDOMNode *aNode);
++  static bool IsList(mozilla::dom::Element* aNode);
+   static bool IsList(nsIDOMNode *aNode);
+   static bool IsOrderedList(nsIDOMNode *aNode);
+   static bool IsUnorderedList(nsIDOMNode *aNode);
+   static bool IsBlockquote(nsIDOMNode *aNode);
+   static bool IsPre(nsIDOMNode *aNode);
+   static bool IsAnchor(nsIDOMNode *aNode);
+   static bool IsImage(nsIDOMNode *aNode);
+   static bool IsLink(nsIDOMNode *aNode);
++  static bool IsNamedAnchor(mozilla::dom::Element* aNode);
+   static bool IsNamedAnchor(nsIDOMNode *aNode);
+   static bool IsDiv(nsIDOMNode *aNode);
+   static bool IsMozDiv(nsIDOMNode *aNode);
+   static bool IsMailCite(nsIDOMNode *aNode);
++  static bool IsFormWidget(mozilla::dom::Element* aNode);
+   static bool IsFormWidget(nsIDOMNode *aNode);
+   static bool SupportsAlignAttr(nsIDOMNode *aNode);
+   static bool CanContain(int32_t aParent, int32_t aChild);
+   static bool IsContainer(int32_t aTag);
+ };
+ 
+ #endif /* nsHTMLEditUtils_h__ */
+ 
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -3948,17 +3948,24 @@ nsHTMLEditor::TagCanContainTag(const nsA
+ 
+   int32_t parentTagEnum = parserService->HTMLStringTagToId(aParentTag);
+   NS_ASSERTION(parentTagEnum < NS_HTML_TAG_MAX,
+                "Fix the caller, this type of node can never contain children.");
+ 
+   return nsHTMLEditUtils::CanContain(parentTagEnum, childTagEnum);
+ }
+ 
+-bool 
++bool
++nsHTMLEditor::IsContainer(nsINode* aNode)
++{
++  nsCOMPtr<nsIDOMNode> node = do_QueryInterface(aNode);
++  return IsContainer(node);
++}
++
++bool
+ nsHTMLEditor::IsContainer(nsIDOMNode *aNode)
+ {
+   if (!aNode) {
+     return false;
+   }
+ 
+   nsAutoString stringTag;
+ 
+@@ -4768,34 +4775,40 @@ nsHTMLEditor::GetLastEditableLeaf(nsIDOM
+   *aOutLastLeaf = child;
+   return res;
+ }
+ 
+ bool
+ nsHTMLEditor::IsTextInDirtyFrameVisible(nsIContent *aNode)
+ {
+   bool isEmptyTextNode;
+-  nsCOMPtr<nsIDOMNode> node = do_QueryInterface(aNode);
+-  nsresult res = IsVisTextNode(node, &isEmptyTextNode, false);
+-  if (NS_FAILED(res))
+-  {
++  nsresult rv = IsVisTextNode(aNode, &isEmptyTextNode, false);
++  if (NS_FAILED(rv)) {
+     // We are following the historical decision:
+     //   if we don't know, we say it's visible...
+-
+     return true;
+   }
+ 
+   return !isEmptyTextNode;
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // IsVisTextNode: figure out if textnode aTextNode has any visible content.
+ //                  
+ nsresult
++nsHTMLEditor::IsVisTextNode(nsIContent* aNode,
++                            bool* outIsEmptyNode,
++                            bool aSafeToAskFrames)
++{
++  nsCOMPtr<nsIDOMNode> node = do_QueryInterface(aNode);
++  return IsVisTextNode(node);
++}
++
++nsresult
+ nsHTMLEditor::IsVisTextNode( nsIDOMNode* aNode, 
+                              bool *outIsEmptyNode, 
+                              bool aSafeToAskFrames)
+ {
+   NS_ENSURE_TRUE(aNode && outIsEmptyNode, NS_ERROR_NULL_POINTER);
+   *outIsEmptyNode = true;
+   nsresult res = NS_OK;
+ 
+@@ -4856,125 +4869,120 @@ nsHTMLEditor::IsVisTextNode( nsIDOMNode*
+ //                  
+ nsresult
+ nsHTMLEditor::IsEmptyNode( nsIDOMNode *aNode, 
+                            bool *outIsEmptyNode, 
+                            bool aSingleBRDoesntCount,
+                            bool aListOrCellNotEmpty,
+                            bool aSafeToAskFrames)
+ {
+-  NS_ENSURE_TRUE(aNode && outIsEmptyNode, NS_ERROR_NULL_POINTER);
++  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
++  NS_ENSURE_TRUE(node && outIsEmptyNode, NS_ERROR_NULL_POINTER);
+   *outIsEmptyNode = true;
+   bool seenBR = false;
+-  return IsEmptyNodeImpl(aNode, outIsEmptyNode, aSingleBRDoesntCount,
++  return IsEmptyNodeImpl(node, outIsEmptyNode, aSingleBRDoesntCount,
+                          aListOrCellNotEmpty, aSafeToAskFrames, &seenBR);
+ }
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // IsEmptyNodeImpl: workhorse for IsEmptyNode.
+ //                  
+ nsresult
+-nsHTMLEditor::IsEmptyNodeImpl( nsIDOMNode *aNode, 
+-                               bool *outIsEmptyNode, 
+-                               bool aSingleBRDoesntCount,
+-                               bool aListOrCellNotEmpty,
+-                               bool aSafeToAskFrames,
+-                               bool *aSeenBR)
++nsHTMLEditor::IsEmptyNodeImpl(nsINode* aNode,
++                              bool *outIsEmptyNode,
++                              bool aSingleBRDoesntCount,
++                              bool aListOrCellNotEmpty,
++                              bool aSafeToAskFrames,
++                              bool *aSeenBR)
+ {
+   NS_ENSURE_TRUE(aNode && outIsEmptyNode && aSeenBR, NS_ERROR_NULL_POINTER);
+-  nsresult res = NS_OK;
+-
+-  if (nsEditor::IsTextNode(aNode))
+-  {
+-    res = IsVisTextNode(aNode, outIsEmptyNode, aSafeToAskFrames);
+-    return res;
++
++  if (aNode->NodeType() == nsIDOMNode::TEXT_NODE) {
++    return IsVisTextNode(static_cast<nsIContent*>(aNode), outIsEmptyNode, aSafeToAskFrames);
+   }
+ 
+   // if it's not a text node (handled above) and it's not a container,
+   // then we don't call it empty (it's an <hr>, or <br>, etc).
+   // Also, if it's an anchor then don't treat it as empty - even though
+   // anchors are containers, named anchors are "empty" but we don't
+   // want to treat them as such.  Also, don't call ListItems or table
+   // cells empty if caller desires.  Form Widgets not empty.
+-  if (!IsContainer(aNode) || nsHTMLEditUtils::IsNamedAnchor(aNode) ||
+-        nsHTMLEditUtils::IsFormWidget(aNode)                       ||
+-       (aListOrCellNotEmpty && nsHTMLEditUtils::IsListItem(aNode)) ||
+-       (aListOrCellNotEmpty && nsHTMLEditUtils::IsTableCell(aNode)) ) 
+-  {
++  if (!IsContainer(aNode)                                   ||
++      (aNode->IsElement() &&
++       (nsHTMLEditUtils::IsNamedAnchor(aNode->AsElement())  ||
++        nsHTMLEditUtils::IsFormWidget(aNode->AsElement())   ||
++        (aListOrCellNotEmpty &&
++         (nsHTMLEditUtils::IsListItem(aNode->AsElement())   ||
++          nsHTMLEditUtils::IsTableCell(aNode->AsElement()))))))  {
+     *outIsEmptyNode = false;
+     return NS_OK;
+   }
+     
+   // need this for later
+-  bool isListItemOrCell = 
+-       nsHTMLEditUtils::IsListItem(aNode) || nsHTMLEditUtils::IsTableCell(aNode);
++  bool isListItemOrCell = aNode->IsElement() &&
++       (nsHTMLEditUtils::IsListItem(aNode->AsElement()) ||
++        nsHTMLEditUtils::IsTableCell(aNode->AsElement()));
+        
+   // loop over children of node. if no children, or all children are either 
+   // empty text nodes or non-editable, then node qualifies as empty
+-  nsCOMPtr<nsIDOMNode> child;
+-  aNode->GetFirstChild(getter_AddRefs(child));
+-   
+-  while (child)
+-  {
+-    nsCOMPtr<nsIDOMNode> node = child;
+-    // is the node editable and non-empty?  if so, return false
+-    if (nsEditor::IsEditable(node))
+-    {
+-      if (nsEditor::IsTextNode(node))
+-      {
+-        res = IsVisTextNode(node, outIsEmptyNode, aSafeToAskFrames);
+-        NS_ENSURE_SUCCESS(res, res);
++  for (nsCOMPtr<nsIContent> child = aNode->GetFirstChild();
++       child;
++       child = child->GetNextSibling()) {
++    // Is the child editable and non-empty?  if so, return false
++    if (nsEditor::IsEditable(child)) {
++      if (child->NodeType() == nsIDOMNode::TEXT_NODE) {
++        nsresult rv = IsVisTextNode(child, outIsEmptyNode, aSafeToAskFrames);
++        NS_ENSURE_SUCCESS(rv, rv);
+         // break out if we find we aren't emtpy
+         if (!*outIsEmptyNode) {
+           return NS_OK;
+         }
+-      }
+-      else  // an editable, non-text node.  we need to check it's content.
+-      {
+-        // is it the node we are iterating over?
+-        if (node == aNode) break;
+-        else if (aSingleBRDoesntCount && !*aSeenBR && nsTextEditUtils::IsBreak(node))
+-        {
++      } else {
++        // An editable, non-text node. We need to check its content.
++        // Is it the node we are iterating over?
++        if (child == aNode) {
++          break;
++        }
++
++        if (aSingleBRDoesntCount && !*aSeenBR && child->IsHTML(nsGkAtoms::br)) {
+           // the first br in a block doesn't count if the caller so indicated
+           *aSeenBR = true;
+-        }
+-        else
+-        {
++        } else {
+           // is it an empty node of some sort?
+           // note: list items or table cells are not considered empty
+           // if they contain other lists or tables
+-          if (isListItemOrCell)
+-          {
+-            if (nsHTMLEditUtils::IsList(node) || nsHTMLEditUtils::IsTable(node))
+-            { // break out if we find we aren't empty
++          if (child->IsElement()) {
++            if (isListItemOrCell) {
++              if (nsHTMLEditUtils::IsList(child->AsElement()) || child->IsHTML(nsGkAtoms::table)) {
++                // break out if we find we aren't empty
++                *outIsEmptyNode = false;
++                return NS_OK;
++              }
++            } else if (nsHTMLEditUtils::IsFormWidget(child->AsElement())) {
++              // is it a form widget?
++              // break out if we find we aren't empty
+               *outIsEmptyNode = false;
+               return NS_OK;
+             }
+           }
+-          // is it a form widget?
+-          else if (nsHTMLEditUtils::IsFormWidget(node))
+-          { // break out if we find we aren't empty
+-            *outIsEmptyNode = false;
+-            return NS_OK;
+-          }
+-          
++
+           bool isEmptyNode = true;
+-          res = IsEmptyNodeImpl(node, &isEmptyNode, aSingleBRDoesntCount, 
+-                                aListOrCellNotEmpty, aSafeToAskFrames, aSeenBR);
+-          NS_ENSURE_SUCCESS(res, res);
+-          if (!isEmptyNode) 
+-          { 
++          nsresult rv = IsEmptyNodeImpl(child, &isEmptyNode,
++                                        aSingleBRDoesntCount,
++                                        aListOrCellNotEmpty, aSafeToAskFrames,
++                                        aSeenBR);
++          NS_ENSURE_SUCCESS(rv, rv);
++          if (!isEmptyNode) {
+             // otherwise it ain't empty
+             *outIsEmptyNode = false;
+             return NS_OK;
+           }
+         }
+       }
+     }
+-    node->GetNextSibling(getter_AddRefs(child));
+   }
+   
+   return NS_OK;
+ }
+ 
+ // add to aElement the CSS inline styles corresponding to the HTML attribute
+ // aAttribute with its value aValue
+ nsresult
+diff --git a/editor/libeditor/html/nsHTMLEditor.h b/editor/libeditor/html/nsHTMLEditor.h
+--- a/editor/libeditor/html/nsHTMLEditor.h
++++ b/editor/libeditor/html/nsHTMLEditor.h
+@@ -319,16 +319,17 @@ public:
+   /** All editor operations which alter the doc should be followed
+    *  with a call to EndOperation */
+   NS_IMETHOD EndOperation();
+ 
+   /** returns true if aParentTag can contain a child of type aChildTag */
+   virtual bool TagCanContainTag(const nsAString& aParentTag, const nsAString& aChildTag);
+   
+   /** returns true if aNode is a container */
++  virtual bool IsContainer(nsINode* aNode);
+   virtual bool IsContainer(nsIDOMNode *aNode);
+ 
+   /** make the given selection span the entire document */
+   NS_IMETHOD SelectEntireDocument(nsISelection *aSelection);
+ 
+   NS_IMETHOD SetAttributeOrEquivalent(nsIDOMElement * aElement,
+                                       const nsAString & aAttribute,
+                                       const nsAString & aValue,
+@@ -382,24 +383,27 @@ public:
+   //  e.g., when setting at beginning of a table cell
+   // This will stop at a table, however, since we don't want to
+   //  "drill down" into nested tables.
+   // aSelection is optional -- if null, we get current seletion
+   nsresult CollapseSelectionToDeepestNonTableFirstChild(nsISelection *aSelection, nsIDOMNode *aNode);
+ 
+   virtual bool IsTextInDirtyFrameVisible(nsIContent *aNode);
+ 
++  nsresult IsVisTextNode(nsIContent* aNode,
++                         bool* outIsEmptyNode,
++                         bool aSafeToAskFrames);
+   nsresult IsVisTextNode( nsIDOMNode *aNode, 
+                           bool *outIsEmptyNode, 
+                           bool aSafeToAskFrames);
+   nsresult IsEmptyNode(nsIDOMNode *aNode, bool *outIsEmptyBlock, 
+                        bool aMozBRDoesntCount = false,
+                        bool aListOrCellNotEmpty = false,
+                        bool aSafeToAskFrames = false);
+-  nsresult IsEmptyNodeImpl(nsIDOMNode *aNode,
++  nsresult IsEmptyNodeImpl(nsINode* aNode,
+                            bool *outIsEmptyBlock, 
+                            bool aMozBRDoesntCount,
+                            bool aListOrCellNotEmpty,
+                            bool aSafeToAskFrames,
+                            bool *aSeenBR);
+ 
+   // Returns TRUE if sheet was loaded, false if it wasn't
+   bool     EnableExistingStyleSheet(const nsAString& aURL);

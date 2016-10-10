@@ -1,0 +1,205 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsNodeUtils.cpp b/content/base/src/nsNodeUtils.cpp
+--- a/content/base/src/nsNodeUtils.cpp
++++ b/content/base/src/nsNodeUtils.cpp
+@@ -41,19 +41,17 @@ using mozilla::AutoJSContext;
+ #define IMPL_MUTATION_NOTIFICATION(func_, content_, params_)      \
+   PR_BEGIN_MACRO                                                  \
+   bool needsEnterLeave = doc->MayHaveDOMMutationObservers();      \
+   if (needsEnterLeave) {                                          \
+     nsDOMMutationObserver::EnterMutationHandling();               \
+   }                                                               \
+   nsINode* node = content_;                                       \
+   NS_ASSERTION(node->OwnerDoc() == doc, "Bogus document");        \
+-  if (doc) {                                                      \
+-    doc->BindingManager()->func_ params_;                         \
+-  }                                                               \
++  doc->BindingManager()->func_ params_;                           \
+   do {                                                            \
+     nsINode::nsSlots* slots = node->GetExistingSlots();           \
+     if (slots && !slots->mMutationObservers.IsEmpty()) {          \
+       /* No need to explicitly notify the first observer first    \
+          since that'll happen anyway. */                          \
+       NS_OBSERVER_ARRAY_NOTIFY_OBSERVERS(                         \
+         slots->mMutationObservers, nsIMutationObserver,           \
+         func_, params_);                                          \
+diff --git a/content/canvas/src/WebGLElementArrayCache.cpp b/content/canvas/src/WebGLElementArrayCache.cpp
+--- a/content/canvas/src/WebGLElementArrayCache.cpp
++++ b/content/canvas/src/WebGLElementArrayCache.cpp
+@@ -1,9 +1,10 @@
+-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "WebGLElementArrayCache.h"
+ 
+ #include "nsTArray.h"
+ #include "mozilla/Assertions.h"
+@@ -458,19 +459,23 @@ bool WebGLElementArrayCache::BufferData(
+     if (!mUint8Tree->ResizeToParentSize())
+       return false;
+   if (mUint16Tree)
+     if (!mUint16Tree->ResizeToParentSize())
+       return false;
+   if (mUint32Tree)
+     if (!mUint32Tree->ResizeToParentSize())
+       return false;
+-  mUntypedData = realloc(mUntypedData, byteSize);
+-  if (!mUntypedData)
++  void* untypedData = realloc(mUntypedData, byteSize);
++  if (!untypedData) {
++    free(mUntypedData);
++    mUntypedData = nullptr;
+     return false;
++  }
++  mUntypedData = untypedData;
+   BufferSubData(0, ptr, byteSize);
+   return true;
+ }
+ 
+ void WebGLElementArrayCache::BufferSubData(size_t pos, const void* ptr, size_t updateByteSize) {
+   if (!updateByteSize) return;
+   if (ptr)
+       memcpy(static_cast<uint8_t*>(mUntypedData) + pos, ptr, updateByteSize);
+diff --git a/dom/base/nsDOMWindowUtils.cpp b/dom/base/nsDOMWindowUtils.cpp
+--- a/dom/base/nsDOMWindowUtils.cpp
++++ b/dom/base/nsDOMWindowUtils.cpp
+@@ -310,17 +310,17 @@ static void DestroyNsRect(void* aObject,
+ static void
+ MaybeReflowForInflationScreenWidthChange(nsPresContext *aPresContext)
+ {
+   if (aPresContext) {
+     nsIPresShell* presShell = aPresContext->GetPresShell();
+     bool fontInflationWasEnabled = presShell->FontSizeInflationEnabled();
+     presShell->NotifyFontSizeInflationEnabledIsDirty();
+     bool changed = false;
+-    if (presShell && presShell->FontSizeInflationEnabled() &&
++    if (presShell->FontSizeInflationEnabled() &&
+         presShell->FontSizeInflationMinTwips() != 0) {
+       aPresContext->ScreenWidthInchesForFontInflation(&changed);
+     }
+ 
+     changed = changed ||
+       (fontInflationWasEnabled != presShell->FontSizeInflationEnabled());
+     if (changed) {
+       nsCOMPtr<nsISupports> container = aPresContext->GetContainer();
+diff --git a/dom/plugins/base/android/ANPAudio.cpp b/dom/plugins/base/android/ANPAudio.cpp
+--- a/dom/plugins/base/android/ANPAudio.cpp
++++ b/dom/plugins/base/android/ANPAudio.cpp
+@@ -259,25 +259,25 @@ anp_audio_newTrack(uint32_t sampleRate, 
+                                 s->rate,
+                                 jChannels,
+                                 jformat,
+                                 s->bufferSize,
+                                 MODE_STREAM);
+ 
+   if (autoFrame.CheckForException() || obj == NULL) {
+     jenv->DeleteGlobalRef(s->at_class);
+-    free(s);
++    delete s;
+     return NULL;
+   }
+ 
+   jint state = jenv->CallIntMethod(obj, at.getstate);
+ 
+   if (autoFrame.CheckForException() || state == STATE_UNINITIALIZED) {
+     jenv->DeleteGlobalRef(s->at_class);
+-    free(s);
++    delete s;
+     return NULL;
+   }
+ 
+   s->output_unit = jenv->NewGlobalRef(obj);
+   return s;
+ }
+ 
+ void
+diff --git a/dom/plugins/base/nsPluginManifestLineReader.h b/dom/plugins/base/nsPluginManifestLineReader.h
+--- a/dom/plugins/base/nsPluginManifestLineReader.h
++++ b/dom/plugins/base/nsPluginManifestLineReader.h
+@@ -41,17 +41,17 @@ class nsPluginManifestLineReader
+       
+       mCur = mNext;
+       mLength = 0;
+       
+       char *lastDelimiter = 0;
+       while(mNext < mLimit) {
+         if (IsEOL(*mNext)) {
+           if (lastDelimiter) {
+-            if (lastDelimiter && *(mNext - 1) != PLUGIN_REGISTRY_END_OF_LINE_MARKER)
++            if (*(mNext - 1) != PLUGIN_REGISTRY_END_OF_LINE_MARKER)
+               return false;
+             *lastDelimiter = '\0';
+           } else {
+             *mNext = '\0';
+           }
+ 
+           for (++mNext; mNext < mLimit; ++mNext) {
+             if (!IsEOL(*mNext))
+diff --git a/dom/plugins/test/testplugin/nptest.cpp b/dom/plugins/test/testplugin/nptest.cpp
+--- a/dom/plugins/test/testplugin/nptest.cpp
++++ b/dom/plugins/test/testplugin/nptest.cpp
+@@ -826,17 +826,17 @@ NPP_New(NPMIMEType pluginType, NPP insta
+   instanceData->backBuffer = NULL;
+   instanceData->mouseUpEventCount = 0;
+   instanceData->bugMode = -1;
+   instance->pdata = instanceData;
+ 
+   TestNPObject* scriptableObject = (TestNPObject*)NPN_CreateObject(instance, &sNPClass);
+   if (!scriptableObject) {
+     printf("NPN_CreateObject failed to create an object, can't create a plugin instance\n");
+-    free(instanceData);
++    delete instanceData;
+     return NPERR_GENERIC_ERROR;
+   }
+   scriptableObject->npp = instance;
+   scriptableObject->drawMode = DM_DEFAULT;
+   scriptableObject->drawColor = 0;
+   instanceData->scriptableObject = scriptableObject;
+ 
+   instanceData->instanceCountWatchGeneration = sCurrentInstanceCountWatchGeneration;
+@@ -1004,17 +1004,17 @@ NPP_New(NPMIMEType pluginType, NPP insta
+   instanceData->lastMouseX = instanceData->lastMouseY = -1;
+   instanceData->widthAtLastPaint = -1;
+   instanceData->paintCount = 0;
+ 
+   // do platform-specific initialization
+   NPError err = pluginInstanceInit(instanceData);
+   if (err != NPERR_NO_ERROR) {
+     NPN_ReleaseObject(scriptableObject);
+-    free(instanceData);
++    delete instanceData;
+     return err;
+   }
+ 
+   NPVariant variantTrue;
+   BOOLEAN_TO_NPVARIANT(true, variantTrue);
+ 
+   // Set a property on NPNVPluginElementNPObject
+   NPObject* o = NULL;
+diff --git a/dom/plugins/test/testplugin/nptest_windows.cpp b/dom/plugins/test/testplugin/nptest_windows.cpp
+--- a/dom/plugins/test/testplugin/nptest_windows.cpp
++++ b/dom/plugins/test/testplugin/nptest_windows.cpp
+@@ -118,17 +118,17 @@ pluginInstanceShutdown(InstanceData* ins
+   }
+   NPN_MemFree(instanceData->platformData);
+   instanceData->platformData = 0;
+ }
+ 
+ static ID3D10Device1*
+ getD3D10Device()
+ {
+-  ID3D10Device1 *device;
++  ID3D10Device1 *device = nullptr;
+     
+   HMODULE d3d10module = LoadLibraryA("d3d10_1.dll");
+   D3D10CreateDevice1Func createD3DDevice = (D3D10CreateDevice1Func)
+       GetProcAddress(d3d10module, "D3D10CreateDevice1");
+ 
+   if (createD3DDevice) {
+     HMODULE dxgiModule = LoadLibraryA("dxgi.dll");
+     CreateDXGIFactory1Func createDXGIFactory1 = (CreateDXGIFactory1Func)

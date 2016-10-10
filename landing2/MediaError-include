@@ -1,0 +1,128 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/content/src/MediaError.cpp b/content/html/content/src/MediaError.cpp
+--- a/content/html/content/src/MediaError.cpp
++++ b/content/html/content/src/MediaError.cpp
+@@ -1,15 +1,17 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* vim:set ts=2 sw=2 sts=2 et cindent: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "mozilla/dom/MediaError.h"
++
++#include "mozilla/dom/HTMLMediaElement.h"
+ #include "nsDOMClassInfoID.h"
+ #include "mozilla/dom/MediaErrorBinding.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(MediaError, mParent)
+ NS_IMPL_CYCLE_COLLECTING_ADDREF(MediaError)
+@@ -31,16 +33,22 @@ MediaError::MediaError(HTMLMediaElement*
+ NS_IMETHODIMP MediaError::GetCode(uint16_t* aCode)
+ {
+   if (aCode)
+     *aCode = Code();
+ 
+   return NS_OK;
+ }
+ 
++ParentObject
++MediaError::GetParentObject() const
++{
++  return ParentObject(mParent);
++}
++
+ JSObject*
+ MediaError::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+ {
+   return MediaErrorBinding::Wrap(aCx, aScope, this);
+ }
+ 
+ } // namespace dom
+ } // namespace mozilla
+diff --git a/content/html/content/src/MediaError.h b/content/html/content/src/MediaError.h
+--- a/content/html/content/src/MediaError.h
++++ b/content/html/content/src/MediaError.h
+@@ -2,42 +2,42 @@
+ /* vim:set ts=2 sw=2 sts=2 et cindent: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_MediaError_h
+ #define mozilla_dom_MediaError_h
+ 
++#include "mozilla/Attributes.h"
++#include "nsAutoPtr.h"
+ #include "nsIDOMMediaError.h"
+-#include "mozilla/dom/HTMLMediaElement.h"
++#include "nsISupports.h"
+ #include "nsWrapperCache.h"
+-#include "nsISupports.h"
+-#include "mozilla/Attributes.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ 
++class HTMLMediaElement;
++class ParentObject;
++
+ class MediaError MOZ_FINAL : public nsIDOMMediaError,
+                              public nsWrapperCache
+ {
+ public:
+   MediaError(HTMLMediaElement* aParent, uint16_t aCode);
+ 
+   // nsISupports
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(MediaError)
+ 
+   // nsIDOMMediaError
+   NS_DECL_NSIDOMMEDIAERROR
+ 
+-  HTMLMediaElement* GetParentObject() const
+-  {
+-    return mParent;
+-  }
++  ParentObject GetParentObject() const;
+ 
+   virtual JSObject* WrapObject(JSContext* aCx,
+                                JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+ 
+   uint16_t Code() const
+   {
+     return mCode;
+   }
+diff --git a/dom/bindings/BindingDeclarations.h b/dom/bindings/BindingDeclarations.h
+--- a/dom/bindings/BindingDeclarations.h
++++ b/dom/bindings/BindingDeclarations.h
+@@ -589,23 +589,23 @@ inline nsWrapperCache*
+ GetWrapperCache(const SmartPtr<T>& aObject)
+ {
+   return GetWrapperCache(aObject.get());
+ }
+ 
+ struct ParentObject {
+   template<class T>
+   ParentObject(T* aObject) :
+-    mObject(aObject),
++    mObject(ToSupports(aObject)),
+     mWrapperCache(GetWrapperCache(aObject))
+   {}
+ 
+   template<class T, template<typename> class SmartPtr>
+   ParentObject(const SmartPtr<T>& aObject) :
+-    mObject(aObject.get()),
++    mObject(ToSupports(aObject.get())),
+     mWrapperCache(GetWrapperCache(aObject.get()))
+   {}
+ 
+   ParentObject(nsISupports* aObject, nsWrapperCache* aCache) :
+     mObject(aObject),
+     mWrapperCache(aCache)
+   {}
+ 

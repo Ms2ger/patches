@@ -1,0 +1,85 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsDOMException.cpp b/dom/base/nsDOMException.cpp
+--- a/dom/base/nsDOMException.cpp
++++ b/dom/base/nsDOMException.cpp
+@@ -124,24 +124,29 @@ NS_GetNameAndMessageForDOMNSResult(nsres
+   return NS_ERROR_NOT_AVAILABLE;
+ }
+ 
+ 
+ class nsDOMException : public nsIException,
+                        public nsIDOMDOMException
+ {
+ public:
+-  nsDOMException() {}
++  nsDOMException(nsresult aNSResult, const char* aName,
++                 const char* aMessage, uint16_t aCode,
++                 nsIException* aDefaultException)
++    : mResult(aNSResult)
++    , mName(aName)
++    , mMessage(aMessage)
++    , mCode(aCode)
++    , mInner(aDefaultException)
++  {}
+   virtual ~nsDOMException() {}
+ 
+   NS_DECL_ISUPPORTS
+   NS_DECL_NSIEXCEPTION
+-  NS_IMETHOD Init(nsresult aNSResult, const char* aName,
+-                  const char* aMessage, uint16_t aCode,
+-                  nsIException* aDefaultException);
+   NS_DECL_NSIDOMDOMEXCEPTION
+ 
+ protected:
+   const char* mName;
+   const char* mMessage;
+   nsCOMPtr<nsIException> mInner;
+   nsresult mResult;
+   uint16_t mCode;
+@@ -161,20 +166,19 @@ NS_INTERFACE_MAP_END
+ nsresult
+ NS_NewDOMException(nsresult aNSResult, nsIException* aDefaultException,
+                    nsIException** aException)
+ {
+   const char* name;
+   const char* message;
+   uint16_t code;
+   NSResultToNameAndMessage(aNSResult, &name, &message, &code);
+-  nsDOMException* inst = new nsDOMException();
+-  inst->Init(aNSResult, name, message, code, aDefaultException);
+-  *aException = inst;
+-  NS_ADDREF(*aException);
++  nsRefPtr<nsDOMException> inst =
++    new nsDOMException(aNSResult, name, message, code, aDefaultException);
++  inst.forget(aException);
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsDOMException::GetCode(uint16_t* aCode)
+ {
+   NS_ENSURE_ARG_POINTER(aCode);
+   *aCode = mCode;
+@@ -346,21 +350,8 @@ nsDOMException::ToString(char **aReturn)
+   const char* msg = mMessage ? mMessage : defaultMsg;
+   const char* resultName = mName ? mName : defaultName;
+ 
+   *aReturn = PR_smprintf(format, msg, mCode, mResult, resultName,
+                          location.get());
+ 
+   return *aReturn ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
+ }
+-
+-NS_IMETHODIMP
+-nsDOMException::Init(nsresult aNSResult, const char* aName,
+-                     const char* aMessage, uint16_t aCode,
+-                     nsIException* aDefaultException)
+-{
+-  mResult = aNSResult;
+-  mName = aName;
+-  mMessage = aMessage;
+-  mCode = aCode;
+-  mInner = aDefaultException;
+-  return NS_OK;
+-}

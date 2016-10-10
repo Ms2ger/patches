@@ -1,0 +1,528 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/src/jsfriendapi.h b/js/src/jsfriendapi.h
+--- a/js/src/jsfriendapi.h
++++ b/js/src/jsfriendapi.h
+@@ -365,11 +365,20 @@ StringIsArrayIndex(JSLinearString *str, 
+ #define JSITER_KEYVALUE   0x4   /* destructuring for-in wants [key, value] */
+ #define JSITER_OWNONLY    0x8   /* iterate over obj's own properties only */
+ #define JSITER_HIDDEN     0x10  /* also enumerate non-enumerable properties */
+ 
+ /* When defining functions, JSFunctionSpec::call points to a JSNativeTraceInfo. */
+ #define JSFUN_TRCINFO     0x2000
+ 
+ } /* namespace js */
++
++/*
++ * If protoKey is not JSProto_Null, then clasp is ignored. If protoKey is
++ * JSProto_Null, clasp must non-null.
++ */
++extern JS_FRIEND_API(JSBool)
++js_GetClassPrototype(JSContext *cx, JSObject *scope, JSProtoKey protoKey,
++                     JSObject **protop, js::Class *clasp = NULL);
++
+ #endif
+ 
+ #endif /* jsfriendapi_h___ */
+diff --git a/js/src/jsobj.h b/js/src/jsobj.h
+--- a/js/src/jsobj.h
++++ b/js/src/jsobj.h
+@@ -1982,24 +1982,16 @@ CheckAccess(JSContext *cx, JSObject *obj
+             js::Value *vp, uintN *attrsp);
+ 
+ } /* namespace js */
+ 
+ extern bool
+ js_IsDelegate(JSContext *cx, JSObject *obj, const js::Value &v);
+ 
+ /*
+- * If protoKey is not JSProto_Null, then clasp is ignored. If protoKey is
+- * JSProto_Null, clasp must non-null.
+- */
+-extern JS_FRIEND_API(JSBool)
+-js_GetClassPrototype(JSContext *cx, JSObject *scope, JSProtoKey protoKey,
+-                     JSObject **protop, js::Class *clasp = NULL);
+-
+-/*
+  * Wrap boolean, number or string as Boolean, Number or String object.
+  * *vp must not be an object, null or undefined.
+  */
+ extern JSBool
+ js_PrimitiveToObject(JSContext *cx, js::Value *vp);
+ 
+ /*
+  * v and vp may alias. On successful return, vp->isObjectOrNull(). If vp is not
+diff --git a/js/xpconnect/src/XPCJSRuntime.cpp b/js/xpconnect/src/XPCJSRuntime.cpp
+--- a/js/xpconnect/src/XPCJSRuntime.cpp
++++ b/js/xpconnect/src/XPCJSRuntime.cpp
+@@ -526,17 +526,19 @@ SuspectExpandos(XPCWrappedNative *wrappe
+ 
+     return PL_DHASH_NEXT;
+ }
+ 
+ static PLDHashOperator
+ SuspectDOMExpandos(nsPtrHashKey<JSObject> *expando, void *arg)
+ {
+     Closure *closure = static_cast<Closure*>(arg);
+-    closure->cb->NoteXPCOMRoot(static_cast<nsISupports*>(expando->GetKey()->getPrivate()));
++    closure->cb->NoteXPCOMRoot(
++        static_cast<nsISupports*>(
++                js::GetObjectPrivate(expando->GetKey())));
+     return PL_DHASH_NEXT;
+ }
+ 
+ static PLDHashOperator
+ SuspectCompartment(xpc::PtrAndPrincipalHashKey *key, JSCompartment *compartment, void *arg)
+ {
+     Closure* closure = static_cast<Closure*>(arg);
+     xpc::CompartmentPrivate *priv = (xpc::CompartmentPrivate *)
+diff --git a/js/xpconnect/src/dombindings.cpp b/js/xpconnect/src/dombindings.cpp
+--- a/js/xpconnect/src/dombindings.cpp
++++ b/js/xpconnect/src/dombindings.cpp
+@@ -41,20 +41,24 @@
+ 
+ #include "dombindings.h"
+ #include "xpcprivate.h"
+ #include "XPCQuickStubs.h"
+ #include "XPCWrapper.h"
+ #include "WrapperFactory.h"
+ #include "nsDOMClassInfo.h"
+ #include "nsGlobalWindow.h"
+-#include "jsiter.h"
+ #include "nsWrapperCacheInlines.h"
+ 
+-using namespace js;
++#include "jsapi.h"
++
++#include "jscntxt.h" // js::AutoIdVector
++
++using namespace JS;
++using js::AutoIdVector;
+ 
+ namespace mozilla {
+ namespace dom {
+ namespace binding {
+ 
+ 
+ static jsid s_constructor_id = JSID_VOID;
+ static jsid s_prototype_id = JSID_VOID;
+@@ -346,17 +350,17 @@ ListBase<LC>::namedItem(JSContext *cx, J
+                                xpc_qsDOMString::eDefaultUndefinedBehavior);
+     if (!nameString.IsValid())
+         return false;
+     *hasResult = getNamedItem(getListObject(obj), nameString, result);
+     return true;
+ }
+ 
+ JSBool
+-interface_hasInstance(JSContext *cx, JSObject *obj, const js::Value *vp, JSBool *bp)
++interface_hasInstance(JSContext *cx, JSObject *obj, const JS::Value *vp, JSBool *bp)
+ {
+     if (vp->isObject()) {
+         jsval prototype;
+         if (!JS_GetPropertyById(cx, obj, s_prototype_id, &prototype) ||
+             JSVAL_IS_PRIMITIVE(prototype)) {
+             JS_ReportErrorFlagsAndNumber(cx, JSREPORT_ERROR, js_GetErrorMessage, NULL,
+                                          JSMSG_THROW_TYPE_ERROR);
+             return false;
+@@ -545,30 +549,30 @@ GetArrayIndexFromId(JSContext *cx, jsid 
+ 
+         jsuint i;
+         return js::StringIsArrayIndex(JSID_TO_ATOM(id), &i) ? i : -1;
+     }
+     return IdToInt32(cx, id);
+ }
+ 
+ static void
+-FillPropertyDescriptor(PropertyDescriptor *desc, JSObject *obj, jsval v, bool readonly)
++FillPropertyDescriptor(JSPropertyDescriptor *desc, JSObject *obj, jsval v, bool readonly)
+ {
+     desc->obj = obj;
+     desc->value = v;
+     desc->attrs = (readonly ? JSPROP_READONLY : 0) | JSPROP_ENUMERATE;
+     desc->getter = NULL;
+     desc->setter = NULL;
+     desc->shortid = 0;
+ }
+ 
+ template<class LC>
+ bool
+ ListBase<LC>::getOwnPropertyDescriptor(JSContext *cx, JSObject *proxy, jsid id, bool set,
+-                                       PropertyDescriptor *desc)
++                                       JSPropertyDescriptor *desc)
+ {
+     if (set) {
+         if (hasIndexSetter) {
+             int32 index = GetArrayIndexFromId(cx, id);
+             if (index >= 0) {
+                 FillPropertyDescriptor(desc, proxy, JSVAL_VOID, false);
+                 return true;
+             }
+@@ -624,17 +628,17 @@ ListBase<LC>::getOwnPropertyDescriptor(J
+ 
+     desc->obj = NULL;
+     return true;
+ }
+ 
+ template<class LC>
+ bool
+ ListBase<LC>::getPropertyDescriptor(JSContext *cx, JSObject *proxy, jsid id, bool set,
+-                                    PropertyDescriptor *desc)
++                                    JSPropertyDescriptor *desc)
+ {
+     if (!getOwnPropertyDescriptor(cx, proxy, id, set, desc))
+         return false;
+     if (desc->obj)
+         return true;
+     if (xpc::WrapperFactory::IsXrayWrapper(proxy))
+         return resolveNativeName(cx, proxy, id, desc);
+     JSObject *proto = js::GetObjectProto(proxy);
+@@ -678,17 +682,17 @@ ListBase<LC>::ensureExpandoObject(JSCont
+         js::SetProxyExtra(obj, JSPROXYSLOT_EXPANDO, ObjectValue(*expando));
+         JS_SetPrivate(cx, expando, js::GetProxyPrivate(obj).toPrivate());
+     }
+     return expando;
+ }
+ 
+ template<class LC>
+ bool
+-ListBase<LC>::defineProperty(JSContext *cx, JSObject *proxy, jsid id, PropertyDescriptor *desc)
++ListBase<LC>::defineProperty(JSContext *cx, JSObject *proxy, jsid id, JSPropertyDescriptor *desc)
+ {
+     if (hasIndexSetter) {
+         int32 index = GetArrayIndexFromId(cx, id);
+         if (index >= 0) {
+             nsCOMPtr<nsISupports> ref;
+             IndexSetterType value;
+             jsval v;
+             return Unwrap(cx, desc->value, &value, getter_AddRefs(ref), &v) &&
+@@ -868,17 +872,17 @@ ListBase<LC>::shouldCacheProtoShape(JSCo
+         return true;
+     }
+ 
+     return Base::shouldCacheProtoShape(cx, protoProto, shouldCache);
+ }
+ 
+ template<class LC>
+ bool
+-ListBase<LC>::resolveNativeName(JSContext *cx, JSObject *proxy, jsid id, PropertyDescriptor *desc)
++ListBase<LC>::resolveNativeName(JSContext *cx, JSObject *proxy, jsid id, JSPropertyDescriptor *desc)
+ {
+     JS_ASSERT(xpc::WrapperFactory::IsXrayWrapper(proxy));
+ 
+     for (size_t n = 0; n < ArrayLength(sProtoProperties); ++n) {
+         if (id == sProtoProperties[n].id) {
+             desc->attrs = JSPROP_ENUMERATE | JSPROP_SHARED;
+             if (!sProtoProperties[n].setter)
+                 desc->attrs |= JSPROP_READONLY;
+@@ -945,17 +949,17 @@ ListBase<LC>::nativeGet(JSContext *cx, J
+     }
+ 
+     return Base::nativeGet(cx, proxy, protoProto, id, found, vp);
+ }
+ 
+ template<class LC>
+ bool
+ ListBase<LC>::getPropertyOnPrototype(JSContext *cx, JSObject *proxy, jsid id, bool *found,
+-                                     js::Value *vp)
++                                     JS::Value *vp)
+ {
+     JSObject *proto = js::GetObjectProto(proxy);
+     if (!proto)
+         return true;
+ 
+     bool hit;
+     if (getProtoShape(proxy) != js::GetObjectShape(proto)) {
+         if (!shouldCacheProtoShape(cx, proto, &hit))
+diff --git a/js/xpconnect/src/dombindings.h b/js/xpconnect/src/dombindings.h
+--- a/js/xpconnect/src/dombindings.h
++++ b/js/xpconnect/src/dombindings.h
+@@ -127,22 +127,22 @@ public:
+ class NoBase {
+ public:
+     static JSObject *getPrototype(JSContext *cx, XPCWrappedNativeScope *scope);
+     static bool shouldCacheProtoShape(JSContext *cx, JSObject *proto, bool *shouldCache)
+     {
+         *shouldCache = true;
+         return true;
+     }
+-    static bool resolveNativeName(JSContext *cx, JSObject *proxy, jsid id, js::PropertyDescriptor *desc)
++    static bool resolveNativeName(JSContext *cx, JSObject *proxy, jsid id, JSPropertyDescriptor *desc)
+     {
+         return true;
+     }
+     static bool nativeGet(JSContext *cx, JSObject *proxy, JSObject *proto, jsid id, bool *found,
+-                          js::Value *vp)
++                          JS::Value *vp)
+     {
+         *found = false;
+         return true;
+     }
+ };
+ 
+ template<class ListType, class IndexOps, class NameOps=NoOps>
+ class ListClass : public DerivedListClass<ListType, NoBase, IndexOps, NameOps> {
+@@ -198,48 +198,48 @@ private:
+     static inline bool namedItem(JSContext *cx, JSObject *obj, jsval *name, NameGetterType &result,
+                                  bool *hasResult);
+ 
+     static inline bool getNamedItem(ListType *list, const nsAString& aName, NameGetterType &item);
+     static inline bool setNamedItem(JSContext *cx, ListType *list, const nsAString& aName,
+                                     NameSetterType item);
+ 
+     static bool getPropertyOnPrototype(JSContext *cx, JSObject *proxy, jsid id, bool *found,
+-                                       js::Value *vp);
++                                       JS::Value *vp);
+     static bool hasPropertyOnPrototype(JSContext *cx, JSObject *proxy, jsid id);
+ 
+ public:
+     static JSObject *create(JSContext *cx, XPCWrappedNativeScope *scope, ListType *list,
+                             nsWrapperCache* cache, bool *triedToWrap);
+ 
+     static JSObject *getPrototype(JSContext *cx, XPCWrappedNativeScope *scope, bool *enabled);
+ 
+     bool getPropertyDescriptor(JSContext *cx, JSObject *proxy, jsid id, bool set,
+-                               js::PropertyDescriptor *desc);
++                               JSPropertyDescriptor *desc);
+     bool getOwnPropertyDescriptor(JSContext *cx, JSObject *proxy, jsid id, bool set,
+-                                  js::PropertyDescriptor *desc);
++                                  JSPropertyDescriptor *desc);
+     bool defineProperty(JSContext *cx, JSObject *proxy, jsid id,
+-                        js::PropertyDescriptor *desc);
++                        JSPropertyDescriptor *desc);
+     bool getOwnPropertyNames(JSContext *cx, JSObject *proxy, js::AutoIdVector &props);
+     bool delete_(JSContext *cx, JSObject *proxy, jsid id, bool *bp);
+     bool enumerate(JSContext *cx, JSObject *proxy, js::AutoIdVector &props);
+-    bool fix(JSContext *cx, JSObject *proxy, js::Value *vp);
++    bool fix(JSContext *cx, JSObject *proxy, JS::Value *vp);
+ 
+     bool has(JSContext *cx, JSObject *proxy, jsid id, bool *bp);
+     bool hasOwn(JSContext *cx, JSObject *proxy, jsid id, bool *bp);
+-    bool get(JSContext *cx, JSObject *proxy, JSObject *receiver, jsid id, js::Value *vp);
++    bool get(JSContext *cx, JSObject *proxy, JSObject *receiver, jsid id, JS::Value *vp);
+     bool getElementIfPresent(JSContext *cx, JSObject *proxy, JSObject *receiver,
+-                             uint32 index, js::Value *vp, bool *present);
++                             uint32 index, JS::Value *vp, bool *present);
+     bool set(JSContext *cx, JSObject *proxy, JSObject *receiver, jsid id, bool strict,
+-             js::Value *vp);
++             JS::Value *vp);
+     bool keys(JSContext *cx, JSObject *proxy, js::AutoIdVector &props);
+-    bool iterate(JSContext *cx, JSObject *proxy, uintN flags, js::Value *vp);
++    bool iterate(JSContext *cx, JSObject *proxy, uintN flags, JS::Value *vp);
+ 
+     /* Spidermonkey extensions. */
+-    bool hasInstance(JSContext *cx, JSObject *proxy, const js::Value *vp, bool *bp);
++    bool hasInstance(JSContext *cx, JSObject *proxy, const JS::Value *vp, bool *bp);
+     JSString *obj_toString(JSContext *cx, JSObject *proxy);
+     void finalize(JSContext *cx, JSObject *proxy);
+ 
+     static bool proxyHandlerIsList(js::ProxyHandler *handler) {
+         return handler == &instance;
+     }
+     static bool objIsList(JSObject *obj) {
+         return js::IsProxy(obj) && proxyHandlerIsList(js::GetProxyHandler(obj));
+@@ -249,19 +249,19 @@ public:
+     {
+         return js::GetObjectClass(prototype) == &sInterfaceClass;
+     }
+     static ListType *getListObject(JSObject *obj);
+ 
+     static JSObject *getPrototype(JSContext *cx, XPCWrappedNativeScope *scope);
+     static bool shouldCacheProtoShape(JSContext *cx, JSObject *proto, bool *shouldCache);
+     static bool resolveNativeName(JSContext *cx, JSObject *proxy, jsid id,
+-                                  js::PropertyDescriptor *desc);
++                                  JSPropertyDescriptor *desc);
+     static bool nativeGet(JSContext *cx, JSObject *proxy, JSObject *proto, jsid id, bool *found,
+-                          js::Value *vp);
++                          JS::Value *vp);
+     static ListType *getNative(JSObject *proxy);
+ };
+ 
+ struct nsISupportsResult
+ {
+     nsISupportsResult()
+     {
+     }
+diff --git a/js/xpconnect/src/nsXPConnect.cpp b/js/xpconnect/src/nsXPConnect.cpp
+--- a/js/xpconnect/src/nsXPConnect.cpp
++++ b/js/xpconnect/src/nsXPConnect.cpp
+@@ -744,21 +744,22 @@ nsXPConnect::Traverse(void *p, nsCycleCo
+     // able to deal with objects that might be used off of the main thread. We
+     // do want to explicitly mark them for cycle collection if the wrapper has
+     // an external reference, because the wrapper would mark the JS object if
+     // we did add the wrapper to the cycle collector.
+     JSBool dontTraverse = false;
+     JSBool markJSObject = false;
+     if (traceKind == JSTRACE_OBJECT) {
+         obj = static_cast<JSObject*>(p);
+-        clazz = obj->getClass();
++        clazz = js::GetObjectClass(obj);
+ 
+         if (clazz == &XPC_WN_Tearoff_JSClass) {
+             XPCWrappedNative *wrapper =
+-                (XPCWrappedNative*)xpc_GetJSPrivate(obj->getParent());
++                static_cast<XPCWrappedNative*>(xpc_GetJSPrivate(
++                    js::GetObjectParent(obj)));
+             dontTraverse = WrapperIsNotMainThreadOnly(wrapper);
+         } else if (IS_WRAPPER_CLASS(clazz) && IS_WN_WRAPPER_OBJECT(obj)) {
+             XPCWrappedNative *wrapper = (XPCWrappedNative*)xpc_GetJSPrivate(obj);
+             dontTraverse = WrapperIsNotMainThreadOnly(wrapper);
+             markJSObject = dontTraverse && wrapper->HasExternalReference();
+         }
+     }
+ 
+@@ -822,18 +823,18 @@ nsXPConnect::Traverse(void *p, nsCycleCo
+                 "Shape",
+                 "TypeObject",
+             };
+             JS_STATIC_ASSERT(NS_ARRAY_LENGTH(trace_types) == JSTRACE_LAST + 1);
+             JS_snprintf(name, sizeof(name), "JS %s", trace_types[traceKind]);
+         }
+ 
+         if (traceKind == JSTRACE_OBJECT) {
+-            JSObject *global = static_cast<JSObject*>(p), *parent;
+-            while ((parent = global->getParent()))
++            JSObject *global = static_cast<JSObject*>(p);
++            while (JSObject *parent = js::GetObjectParent(global))
+                 global = parent;
+             char fullname[100];
+             JS_snprintf(fullname, sizeof(fullname),
+                         "%s (global=%p)", name, global);
+             cb.DescribeGCedNode(isMarked, sizeof(JSObject), fullname);
+         } else {
+             cb.DescribeGCedNode(isMarked, sizeof(JSObject), name);
+         }
+@@ -1030,17 +1031,17 @@ CreateNewCompartment(JSContext *cx, JSCl
+     JSObject *tempGlobal = JS_NewCompartmentAndGlobalObject(cx, clasp, principals);
+     if (principals)
+         JSPRINCIPALS_DROP(cx, principals);
+ 
+     if (!tempGlobal)
+         return false;
+ 
+     *global = tempGlobal;
+-    *compartment = tempGlobal->compartment();
++    *compartment = js::GetObjectCompartment(tempGlobal);
+ 
+     js::AutoSwitchCompartment sc(cx, *compartment);
+     JS_SetCompartmentPrivate(cx, *compartment, priv_holder.forget());
+     return true;
+ }
+ 
+ #ifdef DEBUG
+ struct VerifyTraceXPCGlobalCalledTracer
+@@ -1219,17 +1220,17 @@ nsXPConnect::InitClassesWithNewWrappedGl
+     if (!globalJSObj)
+         return UnexpectedFailure(NS_ERROR_FAILURE);
+ 
+     if (aFlags & nsIXPConnect::FLAG_SYSTEM_GLOBAL_OBJECT)
+         NS_ASSERTION(JS_IsSystemObject(aJSContext, globalJSObj), "huh?!");
+ 
+     // voodoo to fixup scoping and parenting...
+ 
+-    JS_ASSERT(!globalJSObj->getParent());
++    JS_ASSERT(!js::GetObjectParent(globalJSObj));
+ 
+     JSObject* oldGlobal = JS_GetGlobalObject(aJSContext);
+     if (!oldGlobal || oldGlobal == tempGlobal)
+         JS_SetGlobalObject(aJSContext, globalJSObj);
+ 
+     if ((aFlags & nsIXPConnect::INIT_JS_STANDARD_CLASSES) &&
+         !JS_InitStandardClasses(aJSContext, globalJSObj))
+         return UnexpectedFailure(NS_ERROR_FAILURE);
+@@ -1995,17 +1996,17 @@ nsXPConnect::RestoreWrappedNativePrototy
+     if (!aClassInfo || !aPrototype)
+         return UnexpectedFailure(NS_ERROR_INVALID_ARG);
+ 
+     JSObject *protoJSObject;
+     nsresult rv = aPrototype->GetJSObject(&protoJSObject);
+     if (NS_FAILED(rv))
+         return UnexpectedFailure(rv);
+ 
+-    if (!IS_PROTO_CLASS(protoJSObject->getClass()))
++    if (!IS_PROTO_CLASS(js::GetObjectClass(protoJSObject)))
+         return UnexpectedFailure(NS_ERROR_INVALID_ARG);
+ 
+     XPCWrappedNativeScope* scope =
+         XPCWrappedNativeScope::FindInJSObjectScope(ccx, aScope);
+     if (!scope)
+         return UnexpectedFailure(NS_ERROR_FAILURE);
+ 
+     XPCWrappedNativeProto *proto =
+@@ -2638,17 +2639,17 @@ nsXPConnect::GetSafeJSContext(JSContext 
+     }
+ 
+     return data->GetJSContextStack()->GetSafeJSContext(aSafeJSContext);
+ }
+ 
+ nsIPrincipal*
+ nsXPConnect::GetPrincipal(JSObject* obj, bool allowShortCircuit) const
+ {
+-    NS_ASSERTION(IS_WRAPPER_CLASS(obj->getClass()),
++    NS_ASSERTION(IS_WRAPPER_CLASS(js::GetObjectClass(obj)),
+                  "What kind of wrapper is this?");
+ 
+     if (IS_WN_WRAPPER_OBJECT(obj)) {
+         XPCWrappedNative *xpcWrapper =
+             (XPCWrappedNative *)xpc_GetJSPrivate(obj);
+         if (xpcWrapper) {
+             if (allowShortCircuit) {
+                 nsIPrincipal *result = xpcWrapper->GetObjectPrincipal();
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -1480,21 +1480,23 @@ XPC_WN_JSOp_ThisObject(JSContext *cx, JS
+         nsnull, /* fix            */                                          \
+         XPC_WN_JSOp_ThisObject,                                               \
+         XPC_WN_JSOp_Clear                                                     \
+     }
+ 
+ // Maybe this macro should check for class->enumerate ==
+ // XPC_WN_Shared_Proto_Enumerate or something rather than checking for
+ // 4 classes?
+-#define IS_PROTO_CLASS(clazz)                                                 \
+-    ((clazz) == &XPC_WN_NoMods_WithCall_Proto_JSClass ||                      \
+-     (clazz) == &XPC_WN_NoMods_NoCall_Proto_JSClass ||                        \
+-     (clazz) == &XPC_WN_ModsAllowed_WithCall_Proto_JSClass ||                 \
+-     (clazz) == &XPC_WN_ModsAllowed_NoCall_Proto_JSClass)
++static inline bool IS_PROTO_CLASS(js::Class *clazz)
++{
++    return clazz == &XPC_WN_NoMods_WithCall_Proto_JSClass ||
++           clazz == &XPC_WN_NoMods_NoCall_Proto_JSClass ||
++           clazz == &XPC_WN_ModsAllowed_WithCall_Proto_JSClass ||
++           clazz == &XPC_WN_ModsAllowed_NoCall_Proto_JSClass;
++}
+ 
+ /***************************************************************************/
+ 
+ namespace XPCWrapper {
+ 
+ enum WrapperType {
+     UNKNOWN         = 0,
+     NONE            = 0,
+diff --git a/js/xpconnect/src/xpcpublic.h b/js/xpconnect/src/xpcpublic.h
+--- a/js/xpconnect/src/xpcpublic.h
++++ b/js/xpconnect/src/xpcpublic.h
+@@ -76,18 +76,20 @@ TraceXPCGlobal(JSTracer *trc, JSObject *
+ 
+ // XXX where should this live?
+ NS_EXPORT_(void)
+ xpc_LocalizeContext(JSContext *cx);
+ 
+ nsresult
+ xpc_MorphSlimWrapper(JSContext *cx, nsISupports *tomorph);
+ 
+-#define IS_WRAPPER_CLASS(clazz)                                               \
+-    ((clazz)->ext.isWrappedNative)
++static inline bool IS_WRAPPER_CLASS(js::Class* clazz)
++{
++    return clazz->ext.isWrappedNative;
++}
+ 
+ inline JSBool
+ DebugCheckWrapperClass(JSObject* obj)
+ {
+     NS_ASSERTION(IS_WRAPPER_CLASS(js::GetObjectClass(obj)),
+                  "Forgot to check if this is a wrapper?");
+     return true;
+ }

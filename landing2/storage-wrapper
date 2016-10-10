@@ -1,0 +1,110 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/interfaces/storage/nsIDOMStorage.idl b/dom/interfaces/storage/nsIDOMStorage.idl
+--- a/dom/interfaces/storage/nsIDOMStorage.idl
++++ b/dom/interfaces/storage/nsIDOMStorage.idl
+@@ -69,17 +69,19 @@ interface nsIDOMStorage : nsISupports
+   DOMString key(in unsigned long index);
+ 
+   /**
+    * Retrieve an item with a given key
+    *
+    * @param key key to retrieve
+    * @returns found data or empty string if the key was not found
+    */
+-  DOMString getItem([Null(Stringify)] in DOMString key);
++  [getter,forward(getNamedItem)] DOMString getItem([Null(Stringify)] in DOMString key);
++  [noscript,notxpcom,nostdcall] DOMString getNamedItem(in DOMString key,
++                                                       out nsWrapperCachePtr cache);
+ 
+   /**
+    * Assign a value with a key. If the key does not exist already, a new
+    * key is added associated with that value. If the key already exists,
+    * then the existing value is replaced with a new value.
+    *
+    * @param key key to set
+    * @param data data to associate with the key
+diff --git a/dom/src/storage/nsDOMStorage.cpp b/dom/src/storage/nsDOMStorage.cpp
+--- a/dom/src/storage/nsDOMStorage.cpp
++++ b/dom/src/storage/nsDOMStorage.cpp
+@@ -1771,26 +1771,23 @@ NS_IMPL_CYCLE_COLLECTING_ADDREF(nsDOMSto
+ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsDOMStorage2)
+ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDOMStorage2)
+   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMStorage)
+   NS_INTERFACE_MAP_ENTRY(nsIDOMStorage)
+   NS_INTERFACE_MAP_ENTRY(nsPIDOMStorage)
+   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(Storage)
+ NS_INTERFACE_MAP_END
+ 
+-nsDOMStorage2::nsDOMStorage2()
++nsDOMStorage2::nsDOMStorage2(nsDOMStorage2& aThat)
++  : nsDOMStorage2()
++  , mStorage(new nsDOMStorage(*aThat.mStorage.get()))
++  , mPrincipal(aThat.mPrincipal)
+ {
+ }
+ 
+-nsDOMStorage2::nsDOMStorage2(nsDOMStorage2& aThat)
+-{
+-  mStorage = new nsDOMStorage(*aThat.mStorage.get());
+-  mPrincipal = aThat.mPrincipal;
+-}
+-
+ nsresult
+ nsDOMStorage2::InitAsSessionStorage(nsIPrincipal *aPrincipal, const nsSubstring &aDocumentURI)
+ {
+   mStorage = new nsDOMStorage();
+   if (!mStorage)
+     return NS_ERROR_OUT_OF_MEMORY;
+ 
+   mPrincipal = aPrincipal;
+diff --git a/dom/src/storage/nsDOMStorage.h b/dom/src/storage/nsDOMStorage.h
+--- a/dom/src/storage/nsDOMStorage.h
++++ b/dom/src/storage/nsDOMStorage.h
+@@ -420,24 +420,45 @@ public:
+ 
+   friend class nsIDOMStorage2;
+   nsCOMPtr<nsIPrincipal> mPrincipal;
+   nsPIDOMStorage* mEventBroadcaster;
+ };
+ 
+ class nsDOMStorage2 : public nsIDOMStorage,
+                       public nsPIDOMStorage
++                    , public nsWrapperCache
+ {
+ public:
+   // nsISupports
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+   NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(nsDOMStorage2, nsIDOMStorage)
+ 
+   nsDOMStorage2(nsDOMStorage2& aThat);
+-  nsDOMStorage2();
++  nsDOMStorage2()
++    , mParent(NULL)
++  {
++    SetIsDOMBinding();
++  }
++
++  virtual JSObject* WrapObject(JSContext* cx, JSObject* scope,
++                               bool* triedToWrap);
++
++  nsISupports* mParent;
++
++  nsISupports* GetParentObject()
++  {
++    return mParent;
++  }
++
++  void Disconnect()
++  {
++    mParent = nsnull;
++  }
++
+ 
+   NS_DECL_NSIDOMSTORAGE
+ 
+   // nsPIDOMStorage
+   virtual nsresult InitAsSessionStorage(nsIPrincipal *aPrincipal, const nsSubstring &aDocumentURI);
+   virtual nsresult InitAsLocalStorage(nsIPrincipal *aPrincipal, const nsSubstring &aDocumentURI);
+   virtual already_AddRefed<nsIDOMStorage> Clone();
+   virtual already_AddRefed<nsIDOMStorage> Fork(const nsSubstring &aDocumentURI);

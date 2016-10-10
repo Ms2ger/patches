@@ -1,0 +1,423 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCWrappedNativeProto.cpp b/js/xpconnect/src/XPCWrappedNativeProto.cpp
+--- a/js/xpconnect/src/XPCWrappedNativeProto.cpp
++++ b/js/xpconnect/src/XPCWrappedNativeProto.cpp
+@@ -35,16 +35,18 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* Possibly shared proto object for XPCWrappedNative. */
+ 
++#include "XPCWrappedNativeProto.h"
++
+ #include "xpcprivate.h"
+ 
+ #if defined(DEBUG_xpc_hacker) || defined(DEBUG)
+ int32_t XPCWrappedNativeProto::gDEBUG_LiveProtoCount = 0;
+ #endif
+ 
+ XPCWrappedNativeProto::XPCWrappedNativeProto(XPCWrappedNativeScope* Scope,
+                                              nsIClassInfo* ClassInfo,
+diff --git a/js/xpconnect/src/XPCWrappedNativeProto.h b/js/xpconnect/src/XPCWrappedNativeProto.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCWrappedNativeProto.h
+@@ -0,0 +1,190 @@
++#ifndef XPCWrappedNativeProto_h
++#define XPCWrappedNativeProto_h
++
++#include "XPCNativeScriptableInfo.h"
++#include "XPCNativeSet.h"
++#include "XPCWrappedNativeScope.h"
++
++#include "jspubtd.h"
++#include "jsapi.h"
++
++#include "nsCOMPtr.h"
++#include "nsIClassInfo.h"
++#include "nsISupportsImpl.h"
++
++class XPCCallContext;
++class XPCNativeScriptableCreateInfo;
++class XPCJSRuntime;
++
++namespace mozilla {
++class ReentrantMonitor;
++}
++typedef mozilla::ReentrantMonitor XPCLock;
++
++// XPCWrappedNativeProto hold the additional (potentially shared) wrapper data
++// for XPCWrappedNative whose native objects expose nsIClassInfo.
++
++#define UNKNOWN_OFFSETS ((QITableEntry*)1)
++
++class XPCWrappedNativeProto
++{
++public:
++    static XPCWrappedNativeProto*
++    GetNewOrUsed(XPCCallContext& ccx,
++                 XPCWrappedNativeScope* Scope,
++                 nsIClassInfo* ClassInfo,
++                 const XPCNativeScriptableCreateInfo* ScriptableCreateInfo,
++                 JSBool ForceNoSharing,
++                 JSBool isGlobal,
++                 QITableEntry* offsets = UNKNOWN_OFFSETS);
++
++    XPCWrappedNativeScope*
++    GetScope()   const {return mScope;}
++
++    XPCJSRuntime*
++    GetRuntime() const {return mScope->GetRuntime();}
++
++    JSObject*
++    GetJSProtoObject() const {return mJSProtoObject;}
++
++    nsIClassInfo*
++    GetClassInfo()     const {return mClassInfo;}
++
++    XPCNativeSet*
++    GetSet()           const {return mSet;}
++
++    XPCNativeScriptableInfo*
++    GetScriptableInfo()   {return mScriptableInfo;}
++
++    void**
++    GetSecurityInfoAddr() {return &mSecurityInfo;}
++
++    JSUint32
++    GetClassInfoFlags() const {return mClassInfoFlags;}
++
++    QITableEntry*
++    GetOffsets()
++    {
++        return InitedOffsets() ? mOffsets : nsnull;
++    }
++    QITableEntry*
++    GetOffsetsMasked()
++    {
++        return mOffsets;
++    }
++    void
++    CacheOffsets(nsISupports* identity)
++    {
++        static NS_DEFINE_IID(kThisPtrOffsetsSID, NS_THISPTROFFSETS_SID);
++
++#ifdef DEBUG
++        if (InitedOffsets() && mOffsets) {
++            QITableEntry* offsets;
++            identity->QueryInterface(kThisPtrOffsetsSID, (void**)&offsets);
++            NS_ASSERTION(offsets == mOffsets,
++                         "We can't deal with objects that have the same "
++                         "classinfo but different offset tables.");
++        }
++#endif
++
++        if (!InitedOffsets()) {
++            if (mClassInfoFlags & nsIClassInfo::CONTENT_NODE) {
++                identity->QueryInterface(kThisPtrOffsetsSID, (void**)&mOffsets);
++            } else {
++                mOffsets = nsnull;
++            }
++        }
++    }
++
++#ifdef GET_IT
++#undef GET_IT
++#endif
++#define GET_IT(f_) const {return !!(mClassInfoFlags & nsIClassInfo:: f_ );}
++
++    JSBool ClassIsSingleton()           GET_IT(SINGLETON)
++    JSBool ClassIsThreadSafe()          GET_IT(THREADSAFE)
++    JSBool ClassIsMainThreadOnly()      GET_IT(MAIN_THREAD_ONLY)
++    JSBool ClassIsDOMObject()           GET_IT(DOM_OBJECT)
++    JSBool ClassIsPluginObject()        GET_IT(PLUGIN_OBJECT)
++
++#undef GET_IT
++
++#define XPC_PROTO_DONT_SHARE JS_BIT(31) // only high bit of 32 is set
++
++    JSBool
++    IsShared() const {return !(mClassInfoFlags & XPC_PROTO_DONT_SHARE);}
++
++    XPCLock* GetLock() const
++        {return ClassIsThreadSafe() ? GetRuntime()->GetMapLock() : nsnull;}
++
++    void SetScriptableInfo(XPCNativeScriptableInfo* si)
++        {NS_ASSERTION(!mScriptableInfo, "leak here!"); mScriptableInfo = si;}
++
++    void JSProtoObjectFinalized(JSContext *cx, JSObject *obj);
++
++    void SystemIsBeingShutDown(JSContext* cx);
++
++    void DebugDump(int16_t depth);
++
++    void TraceJS(JSTracer* trc)
++    {
++        if (mJSProtoObject) {
++            JS_CALL_OBJECT_TRACER(trc, mJSProtoObject,
++                                  "XPCWrappedNativeProto::mJSProtoObject");
++        }
++        if (mScriptableInfo && JS_IsGCMarkingTracer(trc))
++            mScriptableInfo->Mark();
++    }
++
++    // NOP. This is just here to make the AutoMarkingPtr code compile.
++    inline void AutoTrace(JSTracer* trc) {}
++
++    // Yes, we *do* need to mark the mScriptableInfo in both cases.
++    void Mark() const
++        {mSet->Mark();
++         if (mScriptableInfo) mScriptableInfo->Mark();}
++
++#ifdef DEBUG
++    void ASSERT_SetNotMarked() const {mSet->ASSERT_NotMarked();}
++#endif
++
++    ~XPCWrappedNativeProto();
++
++protected:
++    // disable copy ctor and assignment
++    XPCWrappedNativeProto(const XPCWrappedNativeProto& r); // not implemented
++    XPCWrappedNativeProto& operator= (const XPCWrappedNativeProto& r); // not implemented
++
++    // hide ctor
++    XPCWrappedNativeProto(XPCWrappedNativeScope* Scope,
++                          nsIClassInfo* ClassInfo,
++                          uint32_t ClassInfoFlags,
++                          XPCNativeSet* Set,
++                          QITableEntry* offsets);
++
++    JSBool Init(XPCCallContext& ccx, JSBool isGlobal,
++                const XPCNativeScriptableCreateInfo* scriptableCreateInfo);
++
++private:
++#if defined(DEBUG_xpc_hacker) || defined(DEBUG)
++    static int32_t gDEBUG_LiveProtoCount;
++#endif
++
++private:
++    bool
++    InitedOffsets()
++    {
++        return mOffsets != UNKNOWN_OFFSETS;
++    }
++
++    XPCWrappedNativeScope*   mScope;
++    JS::HeapPtrObject        mJSProtoObject;
++    nsCOMPtr<nsIClassInfo>   mClassInfo;
++    uint32_t                 mClassInfoFlags;
++    XPCNativeSet*            mSet;
++    void*                    mSecurityInfo;
++    XPCNativeScriptableInfo* mScriptableInfo;
++    QITableEntry*            mOffsets;
++};
++
++#endif // XPCWrappedNativeProto_h
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -156,16 +156,17 @@
+ #include "XPCWrappedNativeScope.h"
+ #include "XPCNativeMember.h"
+ #include "XPCNativeInterface.h"
+ #include "XPCNativeSetKey.h"
+ #include "XPCNativeScriptableFlags.h"
+ #include "XPCNativeScriptableShared.h"
+ #include "XPCNativeScriptableInfo.h"
+ #include "XPCNativeScriptableCreateInfo.h"
++#include "XPCWrappedNativeProto.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -455,182 +456,16 @@ enum WrapperType {
+     SOW             = 1 << 5
+ };
+ 
+ }
+ 
+ /***************************************************************************/
+ 
+ /***********************************************/
+-// XPCWrappedNativeProto hold the additional (potentially shared) wrapper data
+-// for XPCWrappedNative whose native objects expose nsIClassInfo.
+-
+-#define UNKNOWN_OFFSETS ((QITableEntry*)1)
+-
+-class XPCWrappedNativeProto
+-{
+-public:
+-    static XPCWrappedNativeProto*
+-    GetNewOrUsed(XPCCallContext& ccx,
+-                 XPCWrappedNativeScope* Scope,
+-                 nsIClassInfo* ClassInfo,
+-                 const XPCNativeScriptableCreateInfo* ScriptableCreateInfo,
+-                 JSBool ForceNoSharing,
+-                 JSBool isGlobal,
+-                 QITableEntry* offsets = UNKNOWN_OFFSETS);
+-
+-    XPCWrappedNativeScope*
+-    GetScope()   const {return mScope;}
+-
+-    XPCJSRuntime*
+-    GetRuntime() const {return mScope->GetRuntime();}
+-
+-    JSObject*
+-    GetJSProtoObject() const {return mJSProtoObject;}
+-
+-    nsIClassInfo*
+-    GetClassInfo()     const {return mClassInfo;}
+-
+-    XPCNativeSet*
+-    GetSet()           const {return mSet;}
+-
+-    XPCNativeScriptableInfo*
+-    GetScriptableInfo()   {return mScriptableInfo;}
+-
+-    void**
+-    GetSecurityInfoAddr() {return &mSecurityInfo;}
+-
+-    JSUint32
+-    GetClassInfoFlags() const {return mClassInfoFlags;}
+-
+-    QITableEntry*
+-    GetOffsets()
+-    {
+-        return InitedOffsets() ? mOffsets : nsnull;
+-    }
+-    QITableEntry*
+-    GetOffsetsMasked()
+-    {
+-        return mOffsets;
+-    }
+-    void
+-    CacheOffsets(nsISupports* identity)
+-    {
+-        static NS_DEFINE_IID(kThisPtrOffsetsSID, NS_THISPTROFFSETS_SID);
+-
+-#ifdef DEBUG
+-        if (InitedOffsets() && mOffsets) {
+-            QITableEntry* offsets;
+-            identity->QueryInterface(kThisPtrOffsetsSID, (void**)&offsets);
+-            NS_ASSERTION(offsets == mOffsets,
+-                         "We can't deal with objects that have the same "
+-                         "classinfo but different offset tables.");
+-        }
+-#endif
+-
+-        if (!InitedOffsets()) {
+-            if (mClassInfoFlags & nsIClassInfo::CONTENT_NODE) {
+-                identity->QueryInterface(kThisPtrOffsetsSID, (void**)&mOffsets);
+-            } else {
+-                mOffsets = nsnull;
+-            }
+-        }
+-    }
+-
+-#ifdef GET_IT
+-#undef GET_IT
+-#endif
+-#define GET_IT(f_) const {return !!(mClassInfoFlags & nsIClassInfo:: f_ );}
+-
+-    JSBool ClassIsSingleton()           GET_IT(SINGLETON)
+-    JSBool ClassIsThreadSafe()          GET_IT(THREADSAFE)
+-    JSBool ClassIsMainThreadOnly()      GET_IT(MAIN_THREAD_ONLY)
+-    JSBool ClassIsDOMObject()           GET_IT(DOM_OBJECT)
+-    JSBool ClassIsPluginObject()        GET_IT(PLUGIN_OBJECT)
+-
+-#undef GET_IT
+-
+-#define XPC_PROTO_DONT_SHARE JS_BIT(31) // only high bit of 32 is set
+-
+-    JSBool
+-    IsShared() const {return !(mClassInfoFlags & XPC_PROTO_DONT_SHARE);}
+-
+-    XPCLock* GetLock() const
+-        {return ClassIsThreadSafe() ? GetRuntime()->GetMapLock() : nsnull;}
+-
+-    void SetScriptableInfo(XPCNativeScriptableInfo* si)
+-        {NS_ASSERTION(!mScriptableInfo, "leak here!"); mScriptableInfo = si;}
+-
+-    void JSProtoObjectFinalized(JSContext *cx, JSObject *obj);
+-
+-    void SystemIsBeingShutDown(JSContext* cx);
+-
+-    void DebugDump(int16_t depth);
+-
+-    void TraceJS(JSTracer* trc)
+-    {
+-        if (mJSProtoObject) {
+-            JS_CALL_OBJECT_TRACER(trc, mJSProtoObject,
+-                                  "XPCWrappedNativeProto::mJSProtoObject");
+-        }
+-        if (mScriptableInfo && JS_IsGCMarkingTracer(trc))
+-            mScriptableInfo->Mark();
+-    }
+-
+-    // NOP. This is just here to make the AutoMarkingPtr code compile.
+-    inline void AutoTrace(JSTracer* trc) {}
+-
+-    // Yes, we *do* need to mark the mScriptableInfo in both cases.
+-    void Mark() const
+-        {mSet->Mark();
+-         if (mScriptableInfo) mScriptableInfo->Mark();}
+-
+-#ifdef DEBUG
+-    void ASSERT_SetNotMarked() const {mSet->ASSERT_NotMarked();}
+-#endif
+-
+-    ~XPCWrappedNativeProto();
+-
+-protected:
+-    // disable copy ctor and assignment
+-    XPCWrappedNativeProto(const XPCWrappedNativeProto& r); // not implemented
+-    XPCWrappedNativeProto& operator= (const XPCWrappedNativeProto& r); // not implemented
+-
+-    // hide ctor
+-    XPCWrappedNativeProto(XPCWrappedNativeScope* Scope,
+-                          nsIClassInfo* ClassInfo,
+-                          uint32_t ClassInfoFlags,
+-                          XPCNativeSet* Set,
+-                          QITableEntry* offsets);
+-
+-    JSBool Init(XPCCallContext& ccx, JSBool isGlobal,
+-                const XPCNativeScriptableCreateInfo* scriptableCreateInfo);
+-
+-private:
+-#if defined(DEBUG_xpc_hacker) || defined(DEBUG)
+-    static int32_t gDEBUG_LiveProtoCount;
+-#endif
+-
+-private:
+-    bool
+-    InitedOffsets()
+-    {
+-        return mOffsets != UNKNOWN_OFFSETS;
+-    }
+-
+-    XPCWrappedNativeScope*   mScope;
+-    JS::HeapPtrObject        mJSProtoObject;
+-    nsCOMPtr<nsIClassInfo>   mClassInfo;
+-    uint32_t                 mClassInfoFlags;
+-    XPCNativeSet*            mSet;
+-    void*                    mSecurityInfo;
+-    XPCNativeScriptableInfo* mScriptableInfo;
+-    QITableEntry*            mOffsets;
+-};
+-
+ class xpcObjectHelper;
+ extern JSBool ConstructSlimWrapper(XPCCallContext &ccx,
+                                    xpcObjectHelper &aHelper,
+                                    XPCWrappedNativeScope* xpcScope,
+                                    jsval *rval);
+ extern JSBool MorphSlimWrapper(JSContext *cx, JSObject *obj);
+ 
+ static inline XPCWrappedNativeProto*

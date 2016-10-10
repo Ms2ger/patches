@@ -1,0 +1,100 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/base/nsEditorUtils.cpp b/editor/libeditor/base/nsEditorUtils.cpp
+--- a/editor/libeditor/base/nsEditorUtils.cpp
++++ b/editor/libeditor/base/nsEditorUtils.cpp
+@@ -45,16 +45,17 @@
+ // hooks
+ #include "nsIClipboardDragDropHooks.h"
+ #include "nsIClipboardDragDropHookList.h"
+ #include "nsISimpleEnumerator.h"
+ #include "nsIDocShell.h"
+ #include "nsIDocument.h"
+ #include "nsIInterfaceRequestorUtils.h"
+ 
++#include "nsContentUtils.h"
+ 
+ /******************************************************************************
+  * nsAutoSelectionReset
+  *****************************************************************************/
+ 
+ nsAutoSelectionReset::nsAutoSelectionReset(nsISelection *aSel, nsEditor *aEd) : 
+ mSel(nsnull)
+ ,mEd(nsnull)
+@@ -159,20 +160,29 @@ nsDOMSubtreeIterator::Init(nsIDOMRange* 
+   NS_ENSURE_TRUE(mIter, NS_ERROR_FAILURE);
+   return mIter->Init(aRange);
+ }
+ 
+ /******************************************************************************
+  * some general purpose editor utils
+  *****************************************************************************/
+ 
++bool
++nsEditorUtils::IsDescendantOf(nsIDOMNode* aNode, nsIDOMNode* aParent)
++{
++  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
++  nsCOMPtr<nsINode> parent = do_QueryInterface(aParent);
++  NS_ENSURE_TRUE(node && parent, false);
++  return nsContentUtils::ContentIsDescendantOf(node, parent);
++}
++
+ bool 
+ nsEditorUtils::IsDescendantOf(nsIDOMNode *aNode, nsIDOMNode *aParent, int32_t *aOffset) 
+ {
+-  NS_ENSURE_TRUE(aNode || aParent, false);
++  NS_ENSURE_TRUE(aNode && aParent, false);
+   if (aNode == aParent) return false;
+   
+   nsCOMPtr<nsIDOMNode> parent, node = do_QueryInterface(aNode);
+   nsresult res;
+   
+   do
+   {
+     res = node->GetParentNode(getter_AddRefs(parent));
+diff --git a/editor/libeditor/base/nsEditorUtils.h b/editor/libeditor/base/nsEditorUtils.h
+--- a/editor/libeditor/base/nsEditorUtils.h
++++ b/editor/libeditor/base/nsEditorUtils.h
+@@ -247,17 +247,18 @@ struct NS_STACK_CLASS DOMPoint
+     aNode = node; aOffset = offset;
+   }
+ };
+ 
+ 
+ class nsEditorUtils
+ {
+   public:
+-    static bool IsDescendantOf(nsIDOMNode *aNode, nsIDOMNode *aParent, int32_t *aOffset = 0);
++    static bool IsDescendantOf(nsIDOMNode* aNode, nsIDOMNode* aParent);
++    static bool IsDescendantOf(nsIDOMNode* aNode, nsIDOMNode* aParent, int32_t* aOffset);
+     static bool IsLeafNode(nsIDOMNode *aNode);
+ };
+ 
+ 
+ class nsITransferable;
+ class nsIDOMEvent;
+ class nsISimpleEnumerator;
+ 
+diff --git a/editor/libeditor/html/nsHTMLEditRules.cpp b/editor/libeditor/html/nsHTMLEditRules.cpp
+--- a/editor/libeditor/html/nsHTMLEditRules.cpp
++++ b/editor/libeditor/html/nsHTMLEditRules.cpp
+@@ -1759,18 +1759,17 @@ nsHTMLEditRules::SplitMailCites(nsISelec
+     nsCOMPtr<nsIDOMNode> visNode;
+     int32_t visOffset=0;
+     int16_t wsType;
+     res = wsObj.NextVisibleNode(selNode, selOffset, address_of(visNode), &visOffset, &wsType);
+     NS_ENSURE_SUCCESS(res, res);
+     if (wsType==nsWSRunObject::eBreak)
+     {
+       // ok, we are just before a break.  is it inside the mailquote?
+-      int32_t unused;
+-      if (nsEditorUtils::IsDescendantOf(visNode, citeNode, &unused))
++      if (nsEditorUtils::IsDescendantOf(visNode, citeNode))
+       {
+         // it is.  so lets reset our selection to be just after it.
+         res = mHTMLEditor->GetNodeLocation(visNode, address_of(selNode), &selOffset);
+         NS_ENSURE_SUCCESS(res, res);
+         ++selOffset;
+       }
+     }
+      

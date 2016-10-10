@@ -1,0 +1,62 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/tests/mochitest/w3c/testharnessreport.js.in b/dom/tests/mochitest/w3c/testharnessreport.js.in
+--- a/dom/tests/mochitest/w3c/testharnessreport.js.in
++++ b/dom/tests/mochitest/w3c/testharnessreport.js.in
+@@ -8,16 +8,17 @@ var W3CTest = {
+    * all tests in this file are expected to fail, or a dictionary mapping test
+    * names to either the boolean |true|, or the string "debug". The former
+    * means that this test is expected to fail in all builds, and the latter
+    * that it is only expected to fail in debug builds.
+    *
+    * This is filled in by the writeReporter.py script.
+    */
+   "expectedFailures": ${expectations},
++  "failures": {},
+ 
+   /**
+    * List of test results, needed by TestRunner to update the UI.
+    */
+   "tests": [],
+ 
+   /**
+    * Reference to the TestRunner object in the parent frame.
+@@ -85,31 +86,38 @@ var W3CTest = {
+    */
+   "result": function(test) {
+     var url = this.getURL();
+     this.report({
+       "message": test.message || test.name,
+       "result": test.status === test.PASS,
+       "todo": this._todo(url, test)
+     });
++    if (test.status !== test.PASS) {
++      if (!(url in this.failures)) {
++        this.failures[url] = {}
++      }
++      this.failures[url][test.name] = true;
++    }
+   },
+ 
+   /**
+    * Callback function for testharness.js. Called when the entire test file
+    * finishes.
+    */
+   "finish": function(tests, status) {
+     var url = this.getURL();
+     this.report({
+       "message": "Finished test",
+       "result": status.status === status.OK,
+       "todo":
+         url in this.expectedFailures &&
+         this.expectedFailures[url] === "error"
+     });
++    this.runner.error(JSON.stringify(this.failures[url]));
+     this.runner.testFinished(this.tests);
+   }
+ };
+ (function() {
+   if (!W3CTest.runner) {
+     return;
+   }
+   add_result_callback(W3CTest.result.bind(W3CTest));

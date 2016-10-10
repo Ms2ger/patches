@@ -1,0 +1,62 @@
+Bug 724270 - Part a: Add an nsINode overload of GetCSSInlinePropertyBase; r=ehsan
+
+diff --git a/editor/libeditor/html/nsHTMLCSSUtils.cpp b/editor/libeditor/html/nsHTMLCSSUtils.cpp
+--- a/editor/libeditor/html/nsHTMLCSSUtils.cpp
++++ b/editor/libeditor/html/nsHTMLCSSUtils.cpp
+@@ -538,16 +538,26 @@ nsHTMLCSSUtils::GetComputedProperty(nsID
+   nsCOMPtr<nsIDOMWindow> window;
+   nsresult res = GetDefaultViewCSS(aNode, getter_AddRefs(window));
+   NS_ENSURE_SUCCESS(res, res);
+ 
+   return GetCSSInlinePropertyBase(aNode, aProperty, aValue, window, COMPUTED_STYLE_TYPE);
+ }
+ 
+ nsresult
++nsHTMLCSSUtils::GetCSSInlinePropertyBase(nsINode* aNode, nsIAtom* aProperty,
++                                         nsAString& aValue,
++                                         nsIDOMWindow* aWindow,
++                                         uint8_t aStyleType)
++{
++  nsCOMPtr<nsIDOMNode> node = do_QueryInterface(aNode);
++  return GetCSSInlinePropertyBase(node, aProperty, aValue, aWindow, aStyleType);
++}
++
++nsresult
+ nsHTMLCSSUtils::GetCSSInlinePropertyBase(nsIDOMNode *aNode, nsIAtom *aProperty,
+                                          nsAString& aValue,
+                                          nsIDOMWindow* aWindow,
+                                          uint8_t aStyleType)
+ {
+   aValue.Truncate();
+   NS_ENSURE_TRUE(aProperty, NS_ERROR_NULL_POINTER);
+ 
+diff --git a/editor/libeditor/html/nsHTMLCSSUtils.h b/editor/libeditor/html/nsHTMLCSSUtils.h
+--- a/editor/libeditor/html/nsHTMLCSSUtils.h
++++ b/editor/libeditor/html/nsHTMLCSSUtils.h
+@@ -379,20 +379,22 @@ private:
+    *
+    * @param aNode               [IN] a DOM node
+    * @param aProperty           [IN] a CSS property
+    * @param aValue              [OUT] the retrieved value for this property
+    * @param aWindow             [IN] the window we need in case we query computed styles
+    * @param aStyleType          [IN] SPECIFIED_STYLE_TYPE to query the specified style values
+    *                                 COMPUTED_STYLE_TYPE  to query the computed style values
+    */
+-  nsresult    GetCSSInlinePropertyBase(nsIDOMNode * aNode, nsIAtom * aProperty,
+-                                       nsAString & aValue,
+-                                       nsIDOMWindow* aWindow,
+-                                       uint8_t aStyleType);
++  nsresult GetCSSInlinePropertyBase(nsINode* aNode, nsIAtom* aProperty,
++                                    nsAString& aValue, nsIDOMWindow* aWindow,
++                                    uint8_t aStyleType);
++  nsresult GetCSSInlinePropertyBase(nsIDOMNode* aNode, nsIAtom* aProperty,
++                                    nsAString& aValue, nsIDOMWindow* aWindow,
++                                    uint8_t aStyleType);
+ 
+ 
+ private:
+   nsHTMLEditor            *mHTMLEditor;
+   bool                    mIsCSSPrefChecked; 
+ };
+ 
+ #define NS_EDITOR_INDENT_INCREMENT_IN        0.4134f

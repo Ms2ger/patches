@@ -1,0 +1,195 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/idl/nsIJSContextStack.idl b/js/xpconnect/idl/nsIJSContextStack.idl
+--- a/js/xpconnect/idl/nsIJSContextStack.idl
++++ b/js/xpconnect/idl/nsIJSContextStack.idl
+@@ -1,11 +1,10 @@
+-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+- *
+- * ***** BEGIN LICENSE BLOCK *****
++/* -*- Mode: IDL; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
++/* ***** BEGIN LICENSE BLOCK *****
+  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+  *
+  * The contents of this file are subject to the Mozilla Public License Version
+  * 1.1 (the "License"); you may not use this file except in compliance with
+  * the License. You may obtain a copy of the License at
+  * http://www.mozilla.org/MPL/
+  *
+  * Software distributed under the License is distributed on an "AS IS" basis,
+@@ -35,16 +34,22 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsISupports.idl"
+ 
++%{C++
++
++#include "jspubtd.h"
++
++%}
++
+ [ptr] native JSContext(JSContext);
+ 
+ [uuid(c67d8270-3189-11d3-9885-006008962422)]
+ interface nsIJSContextStack : nsISupports
+ {
+     readonly attribute int32_t  count;
+     JSContext                   peek();
+     JSContext                   pop();
+diff --git a/js/xpconnect/src/XPCJSContextStack.h b/js/xpconnect/src/XPCJSContextStack.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCJSContextStack.h
+@@ -0,0 +1,48 @@
++#ifndef XPCJSContextStack_h
++#define XPCJSContextStack_h
++
++#include "nsIJSContextStack.h"
++#include "nsTArray.h"
++
++#include "jspubtd.h"
++
++// XPCJSContextStack is not actually an xpcom object, but xpcom calls are
++// delegated to it as an implementation detail.
++struct XPCJSContextInfo {
++    XPCJSContextInfo(JSContext* aCx) :
++        cx(aCx),
++        savedFrameChain(false),
++        suspendDepth(0)
++    {}
++    JSContext* cx;
++
++    // Whether the frame chain was saved
++    bool savedFrameChain;
++
++    // Greater than 0 if a request was suspended.
++    jsrefcount suspendDepth;
++};
++
++class XPCJSContextStack
++{
++public:
++    NS_DECL_NSIJSCONTEXTSTACK
++    NS_DECL_NSITHREADJSCONTEXTSTACK
++
++    XPCJSContextStack();
++    virtual ~XPCJSContextStack();
++
++#ifdef DEBUG
++    JSBool DEBUG_StackHasJSContext(JSContext*  aJSContext);
++#endif
++
++    const nsTArray<XPCJSContextInfo>* GetStack()
++    { return &mStack; }
++
++private:
++    nsAutoTArray<XPCJSContextInfo, 16> mStack;
++    JSContext*  mSafeJSContext;
++    JSContext*  mOwnSafeJSContext;
++};
++
++#endif // XPCJSContextStack_h
+diff --git a/js/xpconnect/src/XPCThreadContext.cpp b/js/xpconnect/src/XPCThreadContext.cpp
+--- a/js/xpconnect/src/XPCThreadContext.cpp
++++ b/js/xpconnect/src/XPCThreadContext.cpp
+@@ -36,16 +36,18 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* Implement global service to track stack of JSContext per thread. */
+ 
++#include "XPCJSContextStack.h"
++
+ #include "xpcprivate.h"
+ #include "XPCWrapper.h"
+ #include "mozilla/Mutex.h"
+ #include "nsDOMJSUtils.h"
+ #include "nsIScriptGlobalObject.h"
+ #include "nsNullPrincipal.h"
+ #include "PrincipalHolder.h"
+ 
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -168,16 +168,17 @@
+ #include "XPCConvert.h"
+ #include "XPCStringConvert.h"
+ #include "XPCThrower.h"
+ #include "XPCJSStack.h"
+ #include "nsXPCException.h"
+ #include "nsJSID.h"
+ #include "nsJSIID.h"
+ #include "nsJSCID.h"
++#include "XPCJSContextStack.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -476,56 +477,16 @@ enum WrapperType {
+ ***************************************************************************/
+ 
+ /***************************************************************************/
+ 
+ extern void xpc_InitJSxIDClassObjects();
+ extern void xpc_DestroyJSxIDClassObjects();
+ 
+ /***************************************************************************/
+-// XPCJSContextStack is not actually an xpcom object, but xpcom calls are
+-// delegated to it as an implementation detail.
+-struct XPCJSContextInfo {
+-    XPCJSContextInfo(JSContext* aCx) :
+-        cx(aCx),
+-        savedFrameChain(false),
+-        suspendDepth(0)
+-    {}
+-    JSContext* cx;
+-
+-    // Whether the frame chain was saved
+-    bool savedFrameChain;
+-
+-    // Greater than 0 if a request was suspended.
+-    jsrefcount suspendDepth;
+-};
+-
+-class XPCJSContextStack
+-{
+-public:
+-    NS_DECL_NSIJSCONTEXTSTACK
+-    NS_DECL_NSITHREADJSCONTEXTSTACK
+-
+-    XPCJSContextStack();
+-    virtual ~XPCJSContextStack();
+-
+-#ifdef DEBUG
+-    JSBool DEBUG_StackHasJSContext(JSContext*  aJSContext);
+-#endif
+-
+-    const nsTArray<XPCJSContextInfo>* GetStack()
+-    { return &mStack; }
+-
+-private:
+-    nsAutoTArray<XPCJSContextInfo, 16> mStack;
+-    JSContext*  mSafeJSContext;
+-    JSContext*  mOwnSafeJSContext;
+-};
+-
+-/***************************************************************************/
+ 
+ #define NS_XPC_JSCONTEXT_STACK_ITERATOR_CID                                   \
+ { 0x05bae29d, 0x8aef, 0x486d,                                                 \
+   { 0x84, 0xaa, 0x53, 0xf4, 0x8f, 0x14, 0x68, 0x11 } }
+ 
+ class nsXPCJSContextStackIterator : public nsIJSContextStackIterator
+ {
+ public:

@@ -1,0 +1,2411 @@
+diff --git a/accessible/src/base/AccIterator.cpp b/accessible/src/base/AccIterator.cpp
+--- a/accessible/src/base/AccIterator.cpp
++++ b/accessible/src/base/AccIterator.cpp
+@@ -80,17 +80,17 @@ AccIterator::IteratorState::IteratorStat
+ RelatedAccIterator::
+   RelatedAccIterator(DocAccessible* aDocument, nsIContent* aDependentContent,
+                      nsIAtom* aRelAttr) :
+   mDocument(aDocument), mRelAttr(aRelAttr), mProviders(nullptr),
+   mBindingParent(nullptr), mIndex(0)
+ {
+   mBindingParent = aDependentContent->GetBindingParent();
+   nsIAtom* IDAttr = mBindingParent ?
+-    nsGkAtoms::anonid : aDependentContent->GetIDAttributeName();
++    nsGkAtoms::anonid : nsGkAtoms::id;
+ 
+   nsAutoString id;
+   if (aDependentContent->GetAttr(kNameSpaceID_None, IDAttr, id))
+     mProviders = mDocument->mDependentIDsHash.Get(id);
+ }
+ 
+ Accessible*
+ RelatedAccIterator::Next()
+diff --git a/accessible/src/base/nsCoreUtils.cpp b/accessible/src/base/nsCoreUtils.cpp
+--- a/accessible/src/base/nsCoreUtils.cpp
++++ b/accessible/src/base/nsCoreUtils.cpp
+@@ -470,18 +470,17 @@ nsCoreUtils::IsErrorPage(nsIDocument *aD
+   NS_NAMED_LITERAL_CSTRING(certerror, "certerror");
+ 
+   return StringBeginsWith(path, neterror) || StringBeginsWith(path, certerror);
+ }
+ 
+ bool
+ nsCoreUtils::GetID(nsIContent *aContent, nsAString& aID)
+ {
+-  nsIAtom *idAttribute = aContent->GetIDAttributeName();
+-  return idAttribute ? aContent->GetAttr(kNameSpaceID_None, idAttribute, aID) : false;
++  return aContent->GetAttr(kNameSpaceID_None, nsGkAtoms::id, aID);
+ }
+ 
+ bool
+ nsCoreUtils::GetUIntAttr(nsIContent *aContent, nsIAtom *aAttr, int32_t *aUInt)
+ {
+   nsAutoString value;
+   aContent->GetAttr(kNameSpaceID_None, aAttr, value);
+   if (!value.IsEmpty()) {
+diff --git a/accessible/src/generic/Accessible.cpp b/accessible/src/generic/Accessible.cpp
+--- a/accessible/src/generic/Accessible.cpp
++++ b/accessible/src/generic/Accessible.cpp
+@@ -1591,17 +1591,17 @@ Accessible::ApplyARIAState(uint64_t* aSt
+   if (mRoleMapEntry) {
+ 
+     // We only force the readonly bit off if we have a real mapping for the aria
+     // role. This preserves the ability for screen readers to use readonly
+     // (primarily on the document) as the hint for creating a virtual buffer.
+     if (mRoleMapEntry->role != roles::NOTHING)
+       *aState &= ~states::READONLY;
+ 
+-    if (mContent->HasAttr(kNameSpaceID_None, mContent->GetIDAttributeName())) {
++    if (mContent->HasID()) {
+       // If has a role & ID and aria-activedescendant on the container, assume focusable
+       nsIContent *ancestorContent = mContent;
+       while ((ancestorContent = ancestorContent->GetParent()) != nullptr) {
+         if (ancestorContent->HasAttr(kNameSpaceID_None, nsGkAtoms::aria_activedescendant)) {
+             // ancestor has activedescendant property, this content could be active
+           *aState |= states::FOCUSABLE;
+           break;
+         }
+diff --git a/content/base/public/Element.h b/content/base/public/Element.h
+--- a/content/base/public/Element.h
++++ b/content/base/public/Element.h
+@@ -267,23 +267,16 @@ public:
+    * Get a hint that tells the style system what to do when
+    * an attribute on this node changes, if something needs to happen
+    * in response to the change *other* than the result of what is
+    * mapped into style data via any type of style rule.
+    */
+   virtual nsChangeHint GetAttributeChangeHint(const nsIAtom* aAttribute,
+                                               int32_t aModType) const;
+ 
+-  /**
+-   * Returns an atom holding the name of the "class" attribute on this
+-   * content node (if applicable).  Returns null if there is no
+-   * "class" attribute for this type of content node.
+-   */
+-  virtual nsIAtom *GetClassAttributeName() const;
+-
+   inline Directionality GetDirectionality() const {
+     if (HasFlag(NODE_HAS_DIRECTION_RTL)) {
+       return eDir_RTL;
+     }
+ 
+     if (HasFlag(NODE_HAS_DIRECTION_LTR)) {
+       return eDir_LTR;
+     }
+@@ -560,18 +553,23 @@ public:
+   void GetId(DOMString& aId) const
+   {
+     GetAttr(kNameSpaceID_None, nsGkAtoms::id, aId);
+   }
+   void SetId(const nsAString& aId)
+   {
+     SetAttr(kNameSpaceID_None, nsGkAtoms::id, aId, true);
+   }
++  void GetClassName(nsAString& aClassName) const;
++  void SetClassName(const nsAString& aClassName)
++  {
++    SetAttr(kNameSpaceID_None, nsGkAtoms::_class, aClassName, true);
++  }
+ 
+-  nsDOMTokenList* GetClassList();
++  nsDOMTokenList* ClassList();
+   nsDOMAttributeMap* Attributes()
+   {
+     nsDOMSlots* slots = DOMSlots();
+     if (!slots->mAttributeMap) {
+       slots->mAttributeMap = new nsDOMAttributeMap(this);
+     }
+ 
+     return slots->mAttributeMap;
+@@ -799,18 +797,16 @@ public:
+       mName(aName), mValue(aValue) {}
+     nsAttrInfo(const nsAttrInfo& aOther) :
+       mName(aOther.mName), mValue(aOther.mValue) {}
+ 
+     const nsAttrName* mName;
+     const nsAttrValue* mValue;
+   };
+ 
+-  // Be careful when using this method. This does *NOT* handle
+-  // XUL prototypes. You may want to use GetAttrInfo.
+   const nsAttrValue* GetParsedAttr(nsIAtom* aAttr) const
+   {
+     return mAttrsAndChildren.GetAttr(aAttr);
+   }
+ 
+   /**
+    * Returns the attribute map, if there is one.
+    *
+@@ -832,20 +828,16 @@ public:
+    * namespace ID must not be kNameSpaceID_Unknown and the name must not be
+    * null.  Note that this can only return info on attributes that actually
+    * live on this element (and is only virtual to handle XUL prototypes).  That
+    * is, this should only be called from methods that only care about attrs
+    * that effectively live in mAttrsAndChildren.
+    */
+   virtual nsAttrInfo GetAttrInfo(int32_t aNamespaceID, nsIAtom* aName) const;
+ 
+-  virtual void NodeInfoChanged(nsINodeInfo* aOldNodeInfo)
+-  {
+-  }
+-
+   /**
+    * Parse a string into an nsAttrValue for a CORS attribute.  This
+    * never fails.  The resulting value is an enumerated value whose
+    * GetEnumValue() returns one of the above constants.
+    */
+   static void ParseCORSValue(const nsAString& aValue, nsAttrValue& aResult);
+ 
+   /**
+@@ -1076,27 +1068,19 @@ protected:
+   void AddToIdTable(nsIAtom* aId) {
+     NS_ASSERTION(HasID(), "Node doesn't have an ID?");
+     nsIDocument* doc = GetCurrentDoc();
+     if (doc && (!IsInAnonymousSubtree() || doc->IsXUL())) {
+       doc->AddToIdTable(this, aId);
+     }
+   }
+   void RemoveFromIdTable() {
+-    if (HasID()) {
+-      nsIDocument* doc = GetCurrentDoc();
+-      if (doc) {
+-        nsIAtom* id = DoGetID();
+-        // id can be null during mutation events evilness. Also, XUL elements
+-        // loose their proto attributes during cc-unlink, so this can happen
+-        // during cc-unlink too.
+-        if (id) {
+-          doc->RemoveFromIdTable(this, DoGetID());
+-        }
+-      }
++    nsIDocument* doc;
++    if (HasID() && (doc = GetCurrentDoc())) {
++      doc->RemoveFromIdTable(this, DoGetID());
+     }
+   }
+ 
+   /**
+    * Functions to carry out event default actions for links of all types
+    * (HTML links, XLinks, SVG "XLinks", etc.)
+    */
+ 
+@@ -1295,16 +1279,36 @@ nsresult                                
+ 
+ #define NS_FORWARD_NSIDOMELEMENT_TO_GENERIC                                   \
+ typedef mozilla::dom::Element Element;                                        \
+ NS_IMETHOD GetTagName(nsAString& aTagName) MOZ_FINAL                          \
+ {                                                                             \
+   Element::GetTagName(aTagName);                                              \
+   return NS_OK;                                                               \
+ }                                                                             \
++NS_IMETHOD GetId(nsAString& aId) MOZ_FINAL                                    \
++{                                                                             \
++  Element::GetId(aId);                                                        \
++  return NS_OK;                                                               \
++}                                                                             \
++NS_IMETHOD SetId(const nsAString& aId) MOZ_FINAL                              \
++{                                                                             \
++  Element::SetId(aId);                                                        \
++  return NS_OK;                                                               \
++}                                                                             \
++NS_IMETHOD GetClassName(nsAString& aClassName) MOZ_FINAL                      \
++{                                                                             \
++  Element::GetClassName(aClassName);                                          \
++  return NS_OK;                                                               \
++}                                                                             \
++NS_IMETHOD SetClassName(const nsAString& aClassName) MOZ_FINAL                \
++{                                                                             \
++  Element::SetClassName(aClassName);                                          \
++  return NS_OK;                                                               \
++}                                                                             \
+ NS_IMETHOD GetClassList(nsISupports** aClassList) MOZ_FINAL                   \
+ {                                                                             \
+   Element::GetClassList(aClassList);                                          \
+   return NS_OK;                                                               \
+ }                                                                             \
+ NS_IMETHOD GetAttributes(nsIDOMMozNamedAttrMap** aAttributes) MOZ_FINAL       \
+ {                                                                             \
+   NS_ADDREF(*aAttributes = Attributes());                                     \
+diff --git a/content/base/public/FragmentOrElement.h b/content/base/public/FragmentOrElement.h
+--- a/content/base/public/FragmentOrElement.h
++++ b/content/base/public/FragmentOrElement.h
+@@ -220,17 +220,16 @@ public:
+                              nsBindingManager* aOldBindingManager = nullptr) MOZ_OVERRIDE;
+   virtual nsIContent *GetXBLInsertionParent() const;
+   virtual void SetXBLInsertionParent(nsIContent* aContent);
+   virtual bool IsLink(nsIURI** aURI) const MOZ_OVERRIDE;
+ 
+   virtual void DestroyContent() MOZ_OVERRIDE;
+   virtual void SaveSubtreeState() MOZ_OVERRIDE;
+ 
+-  virtual const nsAttrValue* DoGetClasses() const MOZ_OVERRIDE;
+   NS_IMETHOD WalkContentStyleRules(nsRuleWalker* aRuleWalker) MOZ_OVERRIDE;
+ 
+   nsIHTMLCollection* Children();
+   uint32_t ChildElementCount()
+   {
+     return Children()->Length();
+   }
+ 
+diff --git a/content/base/public/nsIContent.h b/content/base/public/nsIContent.h
+--- a/content/base/public/nsIContent.h
++++ b/content/base/public/nsIContent.h
+@@ -308,23 +308,16 @@ public:
+ 
+   inline bool IsActiveChildrenElement() const
+   {
+     return mNodeInfo->Equals(nsGkAtoms::children, kNameSpaceID_XBL) &&
+            GetBindingParent();
+   }
+ 
+   /**
+-   * Returns an atom holding the name of the attribute of type ID on
+-   * this content node (if applicable).  Returns null for non-element
+-   * content nodes.
+-   */
+-  virtual nsIAtom *GetIDAttributeName() const = 0;
+-
+-  /**
+    * Set attribute values. All attribute values are assumed to have a
+    * canonical string representation that can be used for these
+    * methods. The SetAttr method is assumed to perform a translation
+    * of the canonical form into the underlying content specific
+    * form.
+    *
+    * @param aNameSpaceID the namespace of the attribute
+    * @param aName the name of the attribute
+@@ -753,30 +746,28 @@ public:
+    */
+   virtual bool IsDoneAddingChildren()
+   {
+     return true;
+   }
+ 
+   /**
+    * Get the ID of this content node (the atom corresponding to the
+-   * value of the null-namespace attribute whose name is given by
+-   * GetIDAttributeName().  This may be null if there is no ID.
++   * value of the id attribute).  This may be null if there is no ID.
+    */
+   nsIAtom* GetID() const {
+     if (HasID()) {
+       return DoGetID();
+     }
+     return nullptr;
+   }
+ 
+   /**
+    * Get the class list of this content node (this corresponds to the
+-   * value of the null-namespace attribute whose name is given by
+-   * GetClassAttributeName()).  This may be null if there are no
++   * value of the class attribute).  This may be null if there are no
+    * classes, but that's not guaranteed.
+    */
+   const nsAttrValue* GetClasses() const {
+     if (HasFlag(NODE_MAY_HAVE_CLASS)) {
+       return DoGetClasses();
+     }
+     return nullptr;
+   }
+@@ -878,24 +869,24 @@ public:
+   virtual void RemovePurple() = 0;
+ 
+   virtual bool OwnedOnlyByTheDOMTree() { return false; }
+ protected:
+   /**
+    * Hook for implementing GetID.  This is guaranteed to only be
+    * called if HasID() is true.
+    */
+-  virtual nsIAtom* DoGetID() const = 0;
++  nsIAtom* DoGetID() const;
+ 
+ private:
+   /**
+    * Hook for implementing GetClasses.  This is guaranteed to only be
+    * called if the NODE_MAY_HAVE_CLASS flag is set.
+    */
+-  virtual const nsAttrValue* DoGetClasses() const = 0;
++  const nsAttrValue* DoGetClasses() const;
+ 
+ public:
+ #ifdef DEBUG
+   /**
+    * List the content (and anything it contains) out to the given
+    * file stream. Use aIndent as the base indent during formatting.
+    */
+   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const = 0;
+diff --git a/content/base/public/nsINodeInfo.h b/content/base/public/nsINodeInfo.h
+--- a/content/base/public/nsINodeInfo.h
++++ b/content/base/public/nsINodeInfo.h
+@@ -156,32 +156,16 @@ public:
+   /*
+    * Get the extra name, used by PIs and DocTypes, for the node.
+    */
+   nsIAtom* GetExtraName() const
+   {
+     return mInner.mExtraName;
+   }
+ 
+-  /*
+-   * Get and set the ID attribute atom for this node.
+-   * See http://www.w3.org/TR/1998/REC-xml-19980210#sec-attribute-types
+-   * for the definition of an ID attribute.
+-   *
+-   */
+-  nsIAtom* GetIDAttributeAtom() const
+-  {
+-    return mIDAttributeAtom;
+-  }
+-
+-  void SetIDAttributeAtom(nsIAtom* aID)
+-  {
+-    mIDAttributeAtom = aID;
+-  }
+-
+   /**
+    * Get the owning node info manager. Only to be used inside Gecko, you can't
+    * really do anything with the pointer outside Gecko anyway.
+    */
+   nsNodeInfoManager *NodeInfoManager() const
+   {
+     return mOwnerManager;
+   }
+@@ -326,17 +310,16 @@ protected:
+ 
+   // nsNodeInfoManager needs to pass mInner to the hash table.
+   friend class nsNodeInfoManager;
+ 
+   nsIDocument* mDocument; // Weak. Cache of mOwnerManager->mDocument
+ 
+   nsNodeInfoInner mInner;
+ 
+-  nsCOMPtr<nsIAtom> mIDAttributeAtom;
+   nsNodeInfoManager* mOwnerManager; // Strong reference!
+ 
+   /*
+    * Members for various functions of mName+mPrefix that we can be
+    * asked to compute.
+    */
+ 
+   // Qualified name
+diff --git a/content/base/src/Attr.cpp b/content/base/src/Attr.cpp
+--- a/content/base/src/Attr.cpp
++++ b/content/base/src/Attr.cpp
+@@ -316,24 +316,17 @@ Attr::GetIsId(bool* aReturn)
+ {
+   nsIContent* content = GetContentInternal();
+   if (!content)
+   {
+     *aReturn = false;
+     return NS_OK;
+   }
+ 
+-  nsIAtom* idAtom = content->GetIDAttributeName();
+-  if (!idAtom)
+-  {
+-    *aReturn = false;
+-    return NS_OK;
+-  }
+-
+-  *aReturn = mNodeInfo->Equals(idAtom, kNameSpaceID_None);
++  *aReturn = mNodeInfo->Equals(nsGkAtoms::id, kNameSpaceID_None);
+   return NS_OK;
+ }
+ 
+ bool
+ Attr::IsNodeOfType(uint32_t aFlags) const
+ {
+     return !(aFlags & ~eATTRIBUTE);
+ }
+diff --git a/content/base/src/DocumentFragment.cpp b/content/base/src/DocumentFragment.cpp
+--- a/content/base/src/DocumentFragment.cpp
++++ b/content/base/src/DocumentFragment.cpp
+@@ -28,28 +28,16 @@ DocumentFragment::WrapNode(JSContext *aC
+ }
+ 
+ bool
+ DocumentFragment::IsNodeOfType(uint32_t aFlags) const
+ {
+   return !(aFlags & ~(eCONTENT | eDOCUMENT_FRAGMENT));
+ }
+ 
+-nsIAtom*
+-DocumentFragment::DoGetID() const
+-{
+-  return nullptr;  
+-}
+-
+-nsIAtom*
+-DocumentFragment::GetIDAttributeName() const
+-{
+-  return nullptr;
+-}
+-
+ NS_IMETHODIMP
+ DocumentFragment::QuerySelector(const nsAString& aSelector,
+                                 nsIDOMElement **aReturn)
+ {
+   return nsINode::QuerySelector(aSelector, aReturn);
+ }
+ 
+ NS_IMETHODIMP
+diff --git a/content/base/src/DocumentFragment.h b/content/base/src/DocumentFragment.h
+--- a/content/base/src/DocumentFragment.h
++++ b/content/base/src/DocumentFragment.h
+@@ -98,19 +98,16 @@ public:
+   {
+     return 0;
+   }
+ 
+   virtual bool IsNodeOfType(uint32_t aFlags) const MOZ_OVERRIDE;
+ 
+   virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
+ 
+-  virtual nsIAtom* DoGetID() const MOZ_OVERRIDE;
+-  virtual nsIAtom *GetIDAttributeName() const MOZ_OVERRIDE;
+-
+   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
+                               nsIContent* aBindingParent,
+                               bool aCompileEventHandlers) MOZ_OVERRIDE
+   {
+     NS_ASSERTION(false, "Trying to bind a fragment to a tree");
+     return NS_ERROR_NOT_IMPLEMENTED;
+   }
+ 
+diff --git a/content/base/src/Element.cpp b/content/base/src/Element.cpp
+--- a/content/base/src/Element.cpp
++++ b/content/base/src/Element.cpp
+@@ -53,16 +53,17 @@
+ #include "nsNodeUtils.h"
+ #include "mozilla/dom/DirectionalityUtils.h"
+ #include "nsDocument.h"
+ #include "nsAttrValueOrString.h"
+ #include "nsAttrValueInlines.h"
+ #ifdef MOZ_XUL
+ #include "nsXULElement.h"
+ #endif /* MOZ_XUL */
++#include "nsSVGElement.h"
+ #include "nsFrameManager.h"
+ #include "nsFrameSelection.h"
+ #ifdef DEBUG
+ #include "nsRange.h"
+ #endif
+ 
+ #include "nsBindingManager.h"
+ #include "nsXBLBinding.h"
+@@ -127,16 +128,42 @@
+ #include "nsXBLService.h"
+ #include "nsContentCID.h"
+ #include "nsITextControlElement.h"
+ #include "mozilla/dom/DocumentFragment.h"
+ 
+ using namespace mozilla;
+ using namespace mozilla::dom;
+ 
++nsIAtom*
++nsIContent::DoGetID() const
++{
++  MOZ_ASSERT(HasID(), "Unexpected call");
++  MOZ_ASSERT(IsElement(), "Only elements can have IDs");
++
++  return AsElement()->GetParsedAttr(nsGkAtoms::id)->GetAtomValue();
++}
++
++const nsAttrValue*
++nsIContent::DoGetClasses() const
++{
++  MOZ_ASSERT(HasFlag(NODE_MAY_HAVE_CLASS), "Unexpected call");
++  MOZ_ASSERT(IsElement(), "Only elements can have classes");
++
++  if (IsSVG()) {
++    const nsAttrValue* animClass =
++      static_cast<const nsSVGElement*>(this)->GetAnimatedClassName();
++    if (animClass) {
++      return animClass;
++    }
++  }
++
++  return AsElement()->GetParsedAttr(nsGkAtoms::_class);
++}
++
+ nsEventStates
+ Element::IntrinsicState() const
+ {
+   return IsEditable() ? NS_EVENT_STATE_MOZ_READWRITE :
+                         NS_EVENT_STATE_MOZ_READONLY;
+ }
+ 
+ void
+@@ -411,35 +438,43 @@ Element::WrapObject(JSContext *aCx, JS::
+       nsContentUtils::AddScriptRunner(
+         NS_NewRunnableMethod(binding, &nsXBLBinding::ExecuteAttachedHandler));
+     }
+   }
+ 
+   return obj;
+ }
+ 
++void
++Element::GetClassName(nsAString& aClassName) const
++{
++  const nsAttrValue* classes = GetClasses();
++  if (classes) {
++    classes->ToString(aClassName);
++  } else {
++    aClassName.Truncate();
++  }
++}
++
+ nsDOMTokenList*
+-Element::GetClassList()
++Element::ClassList()
+ {
+-  Element::nsDOMSlots *slots = DOMSlots();
++  Element::nsDOMSlots* slots = DOMSlots();
+ 
+   if (!slots->mClassList) {
+-    nsIAtom* classAttr = GetClassAttributeName();
+-    if (classAttr) {
+-      slots->mClassList = new nsDOMTokenList(this, classAttr);
+-    }
++    slots->mClassList = new nsDOMTokenList(this, nsGkAtoms::_class);
+   }
+ 
+   return slots->mClassList;
+ }
+ 
+ void
+ Element::GetClassList(nsISupports** aClassList)
+ {
+-  NS_IF_ADDREF(*aClassList = GetClassList());
++  NS_ADDREF(*aClassList = ClassList());
+ }
+ 
+ already_AddRefed<nsIHTMLCollection>
+ Element::GetElementsByTagName(const nsAString& aLocalName)
+ {
+   return NS_GetContentList(this, kNameSpaceID_Unknown, aLocalName);
+ }
+ 
+@@ -1032,16 +1067,20 @@ Element::BindToTree(nsIDocument* aDocume
+         rv = child->BindToTree(aDocument, this, this, allowScripts);
+         NS_ENSURE_SUCCESS(rv, rv);
+       }
+     }
+   }
+ 
+   UpdateEditableState(false);
+ 
++  if (aDocument && HasID() && !aBindingParent) {
++    aDocument->AddToIdTable(this, DoGetID());
++  }
++
+   // Now recurse into our kids
+   for (nsIContent* child = GetFirstChild(); child;
+        child = child->GetNextSibling()) {
+     rv = child->BindToTree(aDocument, this, aBindingParent,
+                            aCompileEventHandlers);
+     NS_ENSURE_SUCCESS(rv, rv);
+   }
+ 
+@@ -1277,22 +1316,16 @@ Element::IsAttributeMapped(const nsIAtom
+ 
+ nsChangeHint
+ Element::GetAttributeChangeHint(const nsIAtom* aAttribute,
+                                 int32_t aModType) const
+ {
+   return nsChangeHint(0);
+ }
+ 
+-nsIAtom *
+-Element::GetClassAttributeName() const
+-{
+-  return nullptr;
+-}
+-
+ bool
+ Element::FindAttributeDependence(const nsIAtom* aAttribute,
+                                  const MappedAttributeEntry* const aMaps[],
+                                  uint32_t aMapCount)
+ {
+   for (uint32_t mapindex = 0; mapindex < aMapCount; ++mapindex) {
+     for (const MappedAttributeEntry* map = aMaps[mapindex];
+          map->attribute; ++map) {
+@@ -1740,16 +1773,37 @@ Element::SetAttrAndNotify(int32_t aNames
+ }
+ 
+ bool
+ Element::ParseAttribute(int32_t aNamespaceID,
+                         nsIAtom* aAttribute,
+                         const nsAString& aValue,
+                         nsAttrValue& aResult)
+ {
++  if (aNamespaceID == kNameSpaceID_None) {
++    if (aAttribute == nsGkAtoms::_class) {
++      SetFlags(NODE_MAY_HAVE_CLASS);
++      aResult.ParseAtomArray(aValue);
++      return true;
++    }
++    if (aAttribute == nsGkAtoms::id) {
++      // Store id as an atom.  id="" means that the element has no id,
++      // not that it has an emptystring as the id.
++      RemoveFromIdTable();
++      if (aValue.IsEmpty()) {
++        ClearHasID();
++        return false;
++      }
++      aResult.ParseAtom(aValue);
++      SetHasID();
++      AddToIdTable(aResult.GetAtomValue());
++      return true;
++    }
++  }
++
+   return false;
+ }
+ 
+ bool
+ Element::SetMappedAttribute(nsIDocument* aDocument,
+                             nsIAtom* aName,
+                             nsAttrValue& aValue,
+                             nsresult* aRetval)
+@@ -1855,16 +1909,22 @@ Element::UnsetAttr(int32_t aNameSpaceID,
+   if (slots && slots->mAttributeMap) {
+     slots->mAttributeMap->DropAttribute(aNameSpaceID, aName);
+   }
+ 
+   // The id-handling code, and in the future possibly other code, need to
+   // react to unexpected attribute changes.
+   nsMutationGuard::DidMutate();
+ 
++  if (aName == nsGkAtoms::id && aNameSpaceID == kNameSpaceID_None) {
++    // Have to do this before clearing flag. See RemoveFromIdTable
++    RemoveFromIdTable();
++    ClearHasID();
++  }
++
+   bool hadValidDir = false;
+   bool hadDirAuto = false;
+ 
+   if (aNameSpaceID == kNameSpaceID_None && aName == nsGkAtoms::dir) {
+     hadValidDir = HasValidDir() || IsHTML(nsGkAtoms::bdi);
+     hadDirAuto = HasDirAuto(); // already takes bdi into account
+   }
+ 
+diff --git a/content/base/src/FragmentOrElement.cpp b/content/base/src/FragmentOrElement.cpp
+--- a/content/base/src/FragmentOrElement.cpp
++++ b/content/base/src/FragmentOrElement.cpp
+@@ -858,23 +858,16 @@ nsIContent::AttrValueIs(int32_t aNameSpa
+                         nsIAtom* aName,
+                         nsIAtom* aValue,
+                         nsCaseTreatment aCaseSensitive) const
+ {
+   return IsElement() &&
+     AsElement()->AttrValueIs(aNameSpaceID, aName, aValue, aCaseSensitive);
+ }
+ 
+-const nsAttrValue*
+-FragmentOrElement::DoGetClasses() const
+-{
+-  NS_NOTREACHED("Shouldn't ever be called");
+-  return nullptr;
+-}
+-
+ NS_IMETHODIMP
+ FragmentOrElement::WalkContentStyleRules(nsRuleWalker* aRuleWalker)
+ {
+   return NS_OK;
+ }
+ 
+ bool
+ FragmentOrElement::IsLink(nsIURI** aURI) const
+diff --git a/content/base/src/Makefile.in b/content/base/src/Makefile.in
+--- a/content/base/src/Makefile.in
++++ b/content/base/src/Makefile.in
+@@ -34,16 +34,17 @@ include $(topsrcdir)/config/config.mk
+ include $(topsrcdir)/config/rules.mk
+ include $(topsrcdir)/ipc/chromium/chromium-config.mk
+ 
+ LOCAL_INCLUDES += \
+   -I$(topsrcdir)/caps/include \
+   -I$(topsrcdir)/content/events/src \
+   -I$(topsrcdir)/content/html/content/src \
+   -I$(topsrcdir)/content/html/document/src \
++  -I$(topsrcdir)/content/svg/content/src \
+   -I$(topsrcdir)/content/xbl/src \
+   -I$(topsrcdir)/content/xml/content/src \
+   -I$(topsrcdir)/content/xml/document/src \
+   -I$(topsrcdir)/content/xul/content/src \
+   -I$(topsrcdir)/content/xul/document/src \
+   -I$(topsrcdir)/dom/base \
+   -I$(topsrcdir)/dom/ipc \
+   -I$(topsrcdir)/js/ipc \
+diff --git a/content/base/src/nsGenericDOMDataNode.cpp b/content/base/src/nsGenericDOMDataNode.cpp
+--- a/content/base/src/nsGenericDOMDataNode.cpp
++++ b/content/base/src/nsGenericDOMDataNode.cpp
+@@ -561,22 +561,16 @@ nsGenericDOMDataNode::UnbindFromTree(boo
+ }
+ 
+ already_AddRefed<nsINodeList>
+ nsGenericDOMDataNode::GetChildren(uint32_t aFilter)
+ {
+   return nullptr;
+ }
+ 
+-nsIAtom *
+-nsGenericDOMDataNode::GetIDAttributeName() const
+-{
+-  return nullptr;
+-}
+-
+ nsresult
+ nsGenericDOMDataNode::SetAttr(int32_t aNameSpaceID, nsIAtom* aAttr,
+                               nsIAtom* aPrefix, const nsAString& aValue,
+                               bool aNotify)
+ {
+   return NS_OK;
+ }
+ 
+@@ -935,29 +929,16 @@ nsGenericDOMDataNode::AppendTextTo(nsASt
+ already_AddRefed<nsIAtom>
+ nsGenericDOMDataNode::GetCurrentValueAtom()
+ {
+   nsAutoString val;
+   GetData(val);
+   return NS_NewAtom(val);
+ }
+ 
+-nsIAtom*
+-nsGenericDOMDataNode::DoGetID() const
+-{
+-  return nullptr;
+-}
+-
+-const nsAttrValue*
+-nsGenericDOMDataNode::DoGetClasses() const
+-{
+-  NS_NOTREACHED("Shouldn't ever be called");
+-  return nullptr;
+-}
+-
+ NS_IMETHODIMP
+ nsGenericDOMDataNode::WalkContentStyleRules(nsRuleWalker* aRuleWalker)
+ {
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP_(bool)
+ nsGenericDOMDataNode::IsAttributeMapped(const nsIAtom* aAttribute) const
+@@ -968,22 +949,16 @@ nsGenericDOMDataNode::IsAttributeMapped(
+ nsChangeHint
+ nsGenericDOMDataNode::GetAttributeChangeHint(const nsIAtom* aAttribute,
+                                              int32_t aModType) const
+ {
+   NS_NOTREACHED("Shouldn't be calling this!");
+   return nsChangeHint(0);
+ }
+ 
+-nsIAtom*
+-nsGenericDOMDataNode::GetClassAttributeName() const
+-{
+-  return nullptr;
+-}
+-
+ size_t
+ nsGenericDOMDataNode::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
+ {
+   size_t n = nsIContent::SizeOfExcludingThis(aMallocSizeOf);
+   n += mText.SizeOfExcludingThis(aMallocSizeOf);
+   return n;
+ }
+ 
+diff --git a/content/base/src/nsGenericDOMDataNode.h b/content/base/src/nsGenericDOMDataNode.h
+--- a/content/base/src/nsGenericDOMDataNode.h
++++ b/content/base/src/nsGenericDOMDataNode.h
+@@ -109,17 +109,16 @@ public:
+   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
+                               nsIContent* aBindingParent,
+                               bool aCompileEventHandlers) MOZ_OVERRIDE;
+   virtual void UnbindFromTree(bool aDeep = true,
+                               bool aNullParent = true) MOZ_OVERRIDE;
+ 
+   virtual already_AddRefed<nsINodeList> GetChildren(uint32_t aFilter) MOZ_OVERRIDE;
+ 
+-  virtual nsIAtom *GetIDAttributeName() const MOZ_OVERRIDE;
+ 
+   nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+                    const nsAString& aValue, bool aNotify)
+   {
+     return SetAttr(aNameSpaceID, aName, nullptr, aValue, aNotify);
+   }
+   virtual nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
+                            nsIAtom* aPrefix, const nsAString& aValue,
+@@ -153,23 +152,20 @@ public:
+   virtual nsXBLBinding *GetXBLBinding() const MOZ_OVERRIDE;
+   virtual void SetXBLBinding(nsXBLBinding* aBinding,
+                              nsBindingManager* aOldBindingManager = nullptr) MOZ_OVERRIDE;
+   virtual nsIContent *GetXBLInsertionParent() const;
+   virtual void SetXBLInsertionParent(nsIContent* aContent);
+   virtual bool IsNodeOfType(uint32_t aFlags) const MOZ_OVERRIDE;
+   virtual bool IsLink(nsIURI** aURI) const MOZ_OVERRIDE;
+ 
+-  virtual nsIAtom* DoGetID() const MOZ_OVERRIDE;
+-  virtual const nsAttrValue* DoGetClasses() const MOZ_OVERRIDE;
+   NS_IMETHOD WalkContentStyleRules(nsRuleWalker* aRuleWalker) MOZ_OVERRIDE;
+   NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const;
+   virtual nsChangeHint GetAttributeChangeHint(const nsIAtom* aAttribute,
+                                               int32_t aModType) const;
+-  virtual nsIAtom *GetClassAttributeName() const;
+ 
+   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE
+   {
+     *aResult = CloneDataNode(aNodeInfo, true);
+     if (!*aResult) {
+       return NS_ERROR_OUT_OF_MEMORY;
+     }
+ 
+diff --git a/content/base/src/nsNodeUtils.cpp b/content/base/src/nsNodeUtils.cpp
+--- a/content/base/src/nsNodeUtils.cpp
++++ b/content/base/src/nsNodeUtils.cpp
+@@ -461,19 +461,16 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNod
+     bool wasRegistered = false;
+     if (aNode->IsElement()) {
+       Element* element = aNode->AsElement();
+       oldDoc->ClearBoxObjectFor(element);
+       wasRegistered = oldDoc->UnregisterFreezableElement(element);
+     }
+ 
+     aNode->mNodeInfo.swap(newNodeInfo);
+-    if (elem) {
+-      elem->NodeInfoChanged(newNodeInfo);
+-    }
+ 
+     nsIDocument* newDoc = aNode->OwnerDoc();
+     if (newDoc) {
+       // XXX what if oldDoc is null, we don't know if this should be
+       // registered or not! Can that really happen?
+       if (wasRegistered) {
+         newDoc->RegisterFreezableElement(aNode->AsElement());
+       }
+diff --git a/content/base/src/nsStyledElement.cpp b/content/base/src/nsStyledElement.cpp
+--- a/content/base/src/nsStyledElement.cpp
++++ b/content/base/src/nsStyledElement.cpp
+@@ -23,117 +23,33 @@
+ #include "nsStyleUtil.h"
+ 
+ namespace css = mozilla::css;
+ using namespace mozilla::dom;
+ 
+ //----------------------------------------------------------------------
+ // nsIContent methods
+ 
+-nsIAtom*
+-nsStyledElementNotElementCSSInlineStyle::GetClassAttributeName() const
+-{
+-  return nsGkAtoms::_class;
+-}
+-
+-nsIAtom*
+-nsStyledElementNotElementCSSInlineStyle::GetIDAttributeName() const
+-{
+-  return nsGkAtoms::id;
+-}
+-
+-nsIAtom*
+-nsStyledElementNotElementCSSInlineStyle::DoGetID() const
+-{
+-  NS_ASSERTION(HasID(), "Unexpected call");
+-
+-  // The nullcheck here is needed because Element::UnsetAttr calls
+-  // out to various code between removing the attribute and we get a chance to
+-  // ClearHasID().
+-
+-  const nsAttrValue* attr = mAttrsAndChildren.GetAttr(nsGkAtoms::id);
+-
+-  return attr ? attr->GetAtomValue() : nullptr;
+-}
+-
+-const nsAttrValue*
+-nsStyledElementNotElementCSSInlineStyle::DoGetClasses() const
+-{
+-  NS_ASSERTION(HasFlag(NODE_MAY_HAVE_CLASS), "Unexpected call");
+-  return mAttrsAndChildren.GetAttr(nsGkAtoms::_class);
+-}
+-
+ bool
+ nsStyledElementNotElementCSSInlineStyle::ParseAttribute(int32_t aNamespaceID,
+                                                         nsIAtom* aAttribute,
+                                                         const nsAString& aValue,
+                                                         nsAttrValue& aResult)
+ {
+-  if (aNamespaceID == kNameSpaceID_None) {
+-    if (aAttribute == nsGkAtoms::style) {
+-      SetMayHaveStyle();
+-      ParseStyleAttribute(aValue, aResult, false);
+-      return true;
+-    }
+-    if (aAttribute == nsGkAtoms::_class) {
+-      SetFlags(NODE_MAY_HAVE_CLASS);
+-      aResult.ParseAtomArray(aValue);
+-      return true;
+-    }
+-    if (aAttribute == nsGkAtoms::id) {
+-      // Store id as an atom.  id="" means that the element has no id,
+-      // not that it has an emptystring as the id.
+-      RemoveFromIdTable();
+-      if (aValue.IsEmpty()) {
+-        ClearHasID();
+-        return false;
+-      }
+-      aResult.ParseAtom(aValue);
+-      SetHasID();
+-      AddToIdTable(aResult.GetAtomValue());
+-      return true;
+-    }
++  if (aAttribute == nsGkAtoms::style && aNamespaceID == kNameSpaceID_None) {
++    SetMayHaveStyle();
++    ParseStyleAttribute(aValue, aResult, false);
++    return true;
+   }
+ 
+   return nsStyledElementBase::ParseAttribute(aNamespaceID, aAttribute, aValue,
+                                              aResult);
+ }
+ 
+ nsresult
+-nsStyledElementNotElementCSSInlineStyle::UnsetAttr(int32_t aNameSpaceID,
+-                                                   nsIAtom* aAttribute,
+-                                                   bool aNotify)
+-{
+-  nsAutoScriptBlocker scriptBlocker;
+-  if (aAttribute == nsGkAtoms::id && aNameSpaceID == kNameSpaceID_None) {
+-    // Have to do this before clearing flag. See RemoveFromIdTable
+-    RemoveFromIdTable();
+-  }
+-
+-  return Element::UnsetAttr(aNameSpaceID, aAttribute, aNotify);
+-}
+-
+-nsresult
+-nsStyledElementNotElementCSSInlineStyle::AfterSetAttr(int32_t aNamespaceID,
+-                                                      nsIAtom* aAttribute,
+-                                                      const nsAttrValue* aValue,
+-                                                      bool aNotify)
+-{
+-  if (aNamespaceID == kNameSpaceID_None && !aValue &&
+-      aAttribute == nsGkAtoms::id) {
+-    // The id has been removed when calling UnsetAttr but we kept it because
+-    // the id is used for some layout stuff between UnsetAttr and AfterSetAttr.
+-    // Now. the id is really removed so it would not be safe to keep this flag.
+-    ClearHasID();
+-  }
+-
+-  return Element::AfterSetAttr(aNamespaceID, aAttribute, aValue, aNotify);
+-}
+-
+-nsresult
+ nsStyledElementNotElementCSSInlineStyle::SetInlineStyleRule(css::StyleRule* aStyleRule,
+                                                             const nsAString* aSerialized,
+                                                             bool aNotify)
+ {
+   SetMayHaveStyle();
+   bool modification = false;
+   nsAttrValue oldValue;
+ 
+diff --git a/content/base/src/nsStyledElement.h b/content/base/src/nsStyledElement.h
+--- a/content/base/src/nsStyledElement.h
++++ b/content/base/src/nsStyledElement.h
+@@ -31,31 +31,21 @@ class nsStyledElementNotElementCSSInline
+ protected:
+ 
+   inline nsStyledElementNotElementCSSInlineStyle(already_AddRefed<nsINodeInfo> aNodeInfo)
+     : nsStyledElementBase(aNodeInfo)
+   {}
+ 
+ public:
+   // nsIContent interface methods
+-  virtual nsIAtom* GetClassAttributeName() const MOZ_OVERRIDE;
+-  virtual nsIAtom* GetIDAttributeName() const MOZ_OVERRIDE;
+-  virtual nsIAtom* DoGetID() const MOZ_OVERRIDE;
+-  virtual const nsAttrValue* DoGetClasses() const MOZ_OVERRIDE;
+-
+   virtual mozilla::css::StyleRule* GetInlineStyleRule();
+   virtual nsresult SetInlineStyleRule(mozilla::css::StyleRule* aStyleRule,
+                                       const nsAString* aSerialized,
+                                       bool aNotify) MOZ_OVERRIDE;
+ 
+-  virtual nsresult UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
+-                             bool aNotify) MOZ_OVERRIDE;
+-  virtual nsresult AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
+-                                const nsAttrValue* aValue, bool aNotify) MOZ_OVERRIDE;
+-
+   nsICSSDeclaration* Style();
+ 
+ protected:
+ 
+   /**
+    * Parse a style attr value into a CSS rulestruct (or, if there is no
+    * document, leave it as a string) and return as nsAttrValue.
+    *
+diff --git a/content/base/test/test_classList.html b/content/base/test/test_classList.html
+--- a/content/base/test/test_classList.html
++++ b/content/base/test/test_classList.html
+@@ -383,23 +383,20 @@ testClassList(xhtmlNode);
+ var xulNode = document.createElementNS(XUL_NS, "box");
+ content.appendChild(xulNode);
+ testClassList(xulNode);
+ 
+ var mathMLNode = document.createElementNS(MATHML_NS, "math");
+ content.appendChild(mathMLNode);
+ testClassList(mathMLNode);
+ 
+-// Nodes not meant to be styled have a null classList property.
+-
+ var xmlNode = document.createElementNS(null, "foo");
+ content.appendChild(xmlNode);
+-is(xmlNode.classList, null, "classList is not null for plain XML nodes");
++testClassList(xmlNode);
+ 
+ var fooNode = document.createElementNS("http://example.org/foo", "foo");
+ content.appendChild(fooNode);
+-is(fooNode.classList, null, "classList is not null for nodes in " +
+-                            " http://example.org/foo namespace");
++testClassList(fooNode);
+ 
+ </script>
+ </pre>
+ </body>
+ </html>
+diff --git a/content/html/content/src/nsGenericHTMLElement.h b/content/html/content/src/nsGenericHTMLElement.h
+--- a/content/html/content/src/nsGenericHTMLElement.h
++++ b/content/html/content/src/nsGenericHTMLElement.h
+@@ -252,24 +252,16 @@ public:
+   using nsINode::SetOn##name_;                                                \
+   already_AddRefed<mozilla::dom::EventHandlerNonNull> GetOn##name_();         \
+   void SetOn##name_(mozilla::dom::EventHandlerNonNull* handler,               \
+                     mozilla::ErrorResult& error);
+ #include "nsEventNameList.h"
+ #undef ERROR_EVENT
+ #undef FORWARDED_EVENT
+ #undef EVENT
+-  void GetClassName(nsAString& aClassName)
+-  {
+-    GetAttr(kNameSpaceID_None, nsGkAtoms::_class, aClassName);
+-  }
+-  void SetClassName(const nsAString& aClassName)
+-  {
+-    SetAttr(kNameSpaceID_None, nsGkAtoms::_class, aClassName, true);
+-  }
+   mozilla::dom::Element* GetOffsetParent()
+   {
+     mozilla::CSSIntRect rcFrame;
+     return GetOffsetRect(rcFrame);
+   }
+   int32_t OffsetTop()
+   {
+     mozilla::CSSIntRect rcFrame;
+@@ -1464,24 +1456,16 @@ protected:
+   NS_HTML_CONTENT_INTERFACES_AMBIGUOUS(_base, nsIDOMHTMLElement)
+ 
+ #define NS_INTERFACE_MAP_ENTRY_IF_TAG(_interface, _tag)                       \
+   NS_INTERFACE_MAP_ENTRY_CONDITIONAL(_interface,                              \
+                                      mNodeInfo->Equals(nsGkAtoms::_tag))
+ 
+ 
+ #define NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC                                \
+-  NS_IMETHOD GetId(nsAString& aId) MOZ_FINAL {                                 \
+-    mozilla::dom::Element::GetId(aId);                                         \
+-    return NS_OK;                                                              \
+-  }                                                                            \
+-  NS_IMETHOD SetId(const nsAString& aId) MOZ_FINAL {                           \
+-    mozilla::dom::Element::SetId(aId);                                         \
+-    return NS_OK;                                                              \
+-  }                                                                            \
+   NS_IMETHOD GetTitle(nsAString& aTitle) MOZ_FINAL {                           \
+     nsGenericHTMLElement::GetTitle(aTitle);                                    \
+     return NS_OK;                                                              \
+   }                                                                            \
+   NS_IMETHOD SetTitle(const nsAString& aTitle) MOZ_FINAL {                     \
+     nsGenericHTMLElement::SetTitle(aTitle);                                    \
+     return NS_OK;                                                              \
+   }                                                                            \
+@@ -1497,24 +1481,16 @@ protected:
+     nsGenericHTMLElement::GetDir(aDir);                                        \
+     return NS_OK;                                                              \
+   }                                                                            \
+   NS_IMETHOD SetDir(const nsAString& aDir) MOZ_FINAL {                         \
+     mozilla::ErrorResult rv;                                                   \
+     nsGenericHTMLElement::SetDir(aDir, rv);                                    \
+     return rv.ErrorCode();                                                     \
+   }                                                                            \
+-  NS_IMETHOD GetClassName(nsAString& aClassName) MOZ_FINAL {                   \
+-    nsGenericHTMLElement::GetClassName(aClassName);                            \
+-    return NS_OK;                                                              \
+-  }                                                                            \
+-  NS_IMETHOD SetClassName(const nsAString& aClassName) MOZ_FINAL {             \
+-    nsGenericHTMLElement::SetClassName(aClassName);                            \
+-    return NS_OK;                                                              \
+-  }                                                                            \
+   NS_IMETHOD GetDataset(nsISupports** aDataset) MOZ_FINAL {                    \
+     return nsGenericHTMLElement::GetDataset(aDataset);                         \
+   }                                                                            \
+   NS_IMETHOD GetHidden(bool* aHidden) MOZ_FINAL {                              \
+     *aHidden = nsGenericHTMLElement::Hidden();                                 \
+     return NS_OK;                                                              \
+   }                                                                            \
+   NS_IMETHOD SetHidden(bool aHidden) MOZ_FINAL {                               \
+diff --git a/content/html/document/src/ImageDocument.cpp b/content/html/document/src/ImageDocument.cpp
+--- a/content/html/document/src/ImageDocument.cpp
++++ b/content/html/document/src/ImageDocument.cpp
+@@ -436,17 +436,17 @@ NS_IMETHODIMP
+ ImageDocument::Notify(imgIRequest* aRequest, int32_t aType, const nsIntRect* aData)
+ {
+   if (aType == imgINotificationObserver::SIZE_AVAILABLE) {
+     nsCOMPtr<imgIContainer> image;
+     aRequest->GetImage(getter_AddRefs(image));
+     return OnStartContainer(aRequest, image);
+   }
+ 
+-  nsDOMTokenList* classList = mImageContent->AsElement()->GetClassList();
++  nsDOMTokenList* classList = mImageContent->AsElement()->ClassList();
+   mozilla::ErrorResult rv;
+   if (aType == imgINotificationObserver::DECODE_COMPLETE) {
+     if (mImageContent && !nsContentUtils::IsChildOfSameType(this)) {
+       // Update the background-color of the image only after the
+       // image has been decoded to prevent flashes of just the
+       // background-color.
+       classList->Add(NS_LITERAL_STRING("decoded"), rv);
+       NS_ENSURE_SUCCESS(rv.ErrorCode(), rv.ErrorCode());
+@@ -471,17 +471,17 @@ ImageDocument::Notify(imgIRequest* aRequ
+   }
+ 
+   return NS_OK;
+ }
+ 
+ void
+ ImageDocument::SetModeClass(eModeClasses mode)
+ {
+-  nsDOMTokenList* classList = mImageContent->AsElement()->GetClassList();
++  nsDOMTokenList* classList = mImageContent->AsElement()->ClassList();
+   mozilla::ErrorResult rv;
+ 
+   if (mode == eShrinkToFit) {
+     classList->Add(NS_LITERAL_STRING("shrinkToFit"), rv);
+   } else {
+     classList->Remove(NS_LITERAL_STRING("shrinkToFit"), rv);
+   }
+ 
+diff --git a/content/mathml/content/src/nsMathMLElementFactory.cpp b/content/mathml/content/src/nsMathMLElementFactory.cpp
+--- a/content/mathml/content/src/nsMathMLElementFactory.cpp
++++ b/content/mathml/content/src/nsMathMLElementFactory.cpp
+@@ -6,16 +6,11 @@
+ #include "nsContentCreatorFunctions.h"
+ #include "nsGkAtoms.h"
+ #include "nsMathMLElement.h"
+ 
+ // MathML Element Factory (declared in nsContentCreatorFunctions.h)
+ nsresult
+ NS_NewMathMLElement(nsIContent** aResult, already_AddRefed<nsINodeInfo> aNodeInfo)
+ {
+-  aNodeInfo.get()->SetIDAttributeAtom(nsGkAtoms::id);
+-
+-  nsMathMLElement* it = new nsMathMLElement(aNodeInfo);
+-  NS_ENSURE_TRUE(it, NS_ERROR_OUT_OF_MEMORY);
+-
+-  NS_ADDREF(*aResult = it);
++  NS_ADDREF(*aResult = new nsMathMLElement(aNodeInfo));
+   return NS_OK;
+ }
+diff --git a/content/smil/test/test_smilValues.xhtml b/content/smil/test/test_smilValues.xhtml
+--- a/content/smil/test/test_smilValues.xhtml
++++ b/content/smil/test/test_smilValues.xhtml
+@@ -154,16 +154,17 @@ function createAnim(attr)
+ }
+ 
+ function checkSample(anim, expectedValue, sampleTime, caseNum)
+ {
+   var msg = "Test case " + caseNum +
+     " (values: '" + anim.getAttribute('values') + "')," +
+     "t=" + sampleTime +
+     ": Unexpected sample value:";
++  is(typeof anim.targetElement.className, "object");
+   is(anim.targetElement.className.animVal, expectedValue, msg);
+ }
+ 
+ window.addEventListener("load", main, false);
+ ]]>
+ </script>
+ </pre>
+ </body>
+diff --git a/content/svg/content/src/nsSVGElement.cpp b/content/svg/content/src/nsSVGElement.cpp
+--- a/content/svg/content/src/nsSVGElement.cpp
++++ b/content/svg/content/src/nsSVGElement.cpp
+@@ -90,17 +90,17 @@ nsSVGElement::WrapNode(JSContext *aCx, J
+ {
+   return SVGElementBinding::Wrap(aCx, aScope, this);
+ }
+ 
+ //----------------------------------------------------------------------
+ 
+ /* readonly attribute SVGAnimatedString className; */
+ NS_IMETHODIMP
+-nsSVGElement::GetClassName(nsISupports** aClassName)
++nsSVGElement::GetSVGClassName(nsISupports** aClassName)
+ {
+   *aClassName = ClassName().get();
+   return NS_OK;
+ }
+ 
+ /* readonly attribute nsIDOMCSSStyleDeclaration style; */
+ NS_IMETHODIMP
+ nsSVGElement::GetStyle(nsIDOMCSSStyleDeclaration** aStyle)
+@@ -231,25 +231,16 @@ NS_IMPL_ISUPPORTS_INHERITED3(nsSVGElemen
+                              nsIDOMSVGElement)
+ 
+ //----------------------------------------------------------------------
+ // Implementation
+ 
+ //----------------------------------------------------------------------
+ // nsIContent methods
+ 
+-const nsAttrValue*
+-nsSVGElement::DoGetClasses() const
+-{
+-  if (mClassAttribute.IsAnimated()) {
+-    return mClassAnimAttr;
+-  }
+-  return nsSVGElementBase::DoGetClasses();
+-}
+-
+ nsresult
+ nsSVGElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
+                          nsIContent* aBindingParent,
+                          bool aCompileEventHandlers)
+ {
+   nsresult rv = nsSVGElementBase::BindToTree(aDocument, aParent,
+                                              aBindingParent,
+                                              aCompileEventHandlers);
+@@ -1086,29 +1077,16 @@ nsSVGElement::sMaskMap[] = {
+ // nsIDOMElement methods
+ 
+ // forwarded to Element implementations
+ 
+ 
+ //----------------------------------------------------------------------
+ // nsIDOMSVGElement methods
+ 
+-/* attribute DOMString id; */
+-NS_IMETHODIMP nsSVGElement::GetId(nsAString & aId)
+-{
+-  GetAttr(kNameSpaceID_None, nsGkAtoms::id, aId);
+-
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP nsSVGElement::SetId(const nsAString & aId)
+-{
+-  return SetAttr(kNameSpaceID_None, nsGkAtoms::id, aId, true);
+-}
+-
+ /* readonly attribute nsIDOMSVGSVGElement ownerSVGElement; */
+ NS_IMETHODIMP
+ nsSVGElement::GetOwnerSVGElement(nsIDOMSVGElement * *aOwnerSVGElement)
+ {
+   ErrorResult rv;
+   NS_IF_ADDREF(*aOwnerSVGElement = GetOwnerSVGElement(rv));
+   return rv.ErrorCode();
+ }
+diff --git a/content/svg/content/src/nsSVGElement.h b/content/svg/content/src/nsSVGElement.h
+--- a/content/svg/content/src/nsSVGElement.h
++++ b/content/svg/content/src/nsSVGElement.h
+@@ -85,17 +85,16 @@ public:
+   typedef mozilla::SVGAnimatedPathSegList SVGAnimatedPathSegList;
+   typedef mozilla::SVGAnimatedPreserveAspectRatio SVGAnimatedPreserveAspectRatio;
+   typedef mozilla::nsSVGAnimatedTransformList nsSVGAnimatedTransformList;
+   typedef mozilla::SVGStringList SVGStringList;
+ 
+   // nsISupports
+   NS_DECL_ISUPPORTS_INHERITED
+ 
+-  virtual const nsAttrValue* DoGetClasses() const MOZ_OVERRIDE;
+   void DidAnimateClass();
+ 
+   // nsIContent interface methods
+ 
+   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
+                               nsIContent* aBindingParent,
+                               bool aCompileEventHandlers) MOZ_OVERRIDE;
+ 
+@@ -294,16 +293,22 @@ public:
+     return nullptr;
+   }
+   virtual nsIAtom* GetPathDataAttrName() const {
+     return nullptr;
+   }
+   virtual nsIAtom* GetTransformListAttrName() const {
+     return nullptr;
+   }
++  virtual const nsAttrValue* GetAnimatedClassName() const {
++    if (!mClassAttribute.IsAnimated()) {
++      return nullptr;
++    }
++    return mClassAnimAttr;
++  }
+ 
+   virtual nsIDOMNode* AsDOMNode() MOZ_FINAL MOZ_OVERRIDE { return this; }
+   virtual bool IsTransformable() { return false; }
+ 
+   // WebIDL
+   mozilla::dom::SVGSVGElement* GetOwnerSVGElement(mozilla::ErrorResult& rv);
+   nsSVGElement* GetViewportElement();
+   already_AddRefed<mozilla::dom::SVGAnimatedString> ClassName();
+diff --git a/content/xbl/src/nsXBLContentSink.cpp b/content/xbl/src/nsXBLContentSink.cpp
+--- a/content/xbl/src/nsXBLContentSink.cpp
++++ b/content/xbl/src/nsXBLContentSink.cpp
+@@ -247,20 +247,20 @@ nsXBLContentSink::AddField(nsXBLProtoImp
+ 
+   mImplField = aField; // Adjust our pointer to point to the new last field in the chain.
+ }
+ 
+ NS_IMETHODIMP 
+ nsXBLContentSink::HandleStartElement(const PRUnichar *aName, 
+                                      const PRUnichar **aAtts, 
+                                      uint32_t aAttsCount, 
+-                                     int32_t aIndex, 
+                                      uint32_t aLineNumber)
+ {
+-  nsresult rv = nsXMLContentSink::HandleStartElement(aName,aAtts,aAttsCount,aIndex,aLineNumber);
++  nsresult rv = nsXMLContentSink::HandleStartElement(aName, aAtts, aAttsCount,
++                                                     aLineNumber);
+   if (NS_FAILED(rv))
+     return rv;
+ 
+   if (mState == eXBL_InBinding && !mBinding) {
+     rv = ConstructBinding(aLineNumber);
+     if (NS_FAILED(rv))
+       return rv;
+     
+diff --git a/content/xbl/src/nsXBLContentSink.h b/content/xbl/src/nsXBLContentSink.h
+--- a/content/xbl/src/nsXBLContentSink.h
++++ b/content/xbl/src/nsXBLContentSink.h
+@@ -64,17 +64,16 @@ public:
+   nsresult Init(nsIDocument* aDoc,
+                 nsIURI* aURL,
+                 nsISupports* aContainer);
+ 
+   // nsIContentSink overrides
+   NS_IMETHOD HandleStartElement(const PRUnichar *aName, 
+                                 const PRUnichar **aAtts, 
+                                 uint32_t aAttsCount, 
+-                                int32_t aIndex, 
+                                 uint32_t aLineNumber) MOZ_OVERRIDE;
+ 
+   NS_IMETHOD HandleEndElement(const PRUnichar *aName) MOZ_OVERRIDE;
+   
+   NS_IMETHOD HandleCDataSection(const PRUnichar *aData, 
+                                 uint32_t aLength) MOZ_OVERRIDE;
+ 
+ protected:
+diff --git a/content/xml/content/src/nsXMLElement.cpp b/content/xml/content/src/nsXMLElement.cpp
+--- a/content/xml/content/src/nsXMLElement.cpp
++++ b/content/xml/content/src/nsXMLElement.cpp
+@@ -28,137 +28,8 @@ NS_IMPL_RELEASE_INHERITED(nsXMLElement, 
+ 
+ JSObject*
+ nsXMLElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+ {
+   return ElementBinding::Wrap(aCx, aScope, this);
+ }
+ 
+ NS_IMPL_ELEMENT_CLONE(nsXMLElement)
+-
+-nsresult
+-nsXMLElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
+-                        bool aNotify)
+-{
+-  nsAutoScriptBlocker scriptBlocker;
+-  bool isId = false;
+-  if (aAttribute == GetIDAttributeName() &&
+-      aNameSpaceID == kNameSpaceID_None) {
+-    // Have to do this before clearing flag. See RemoveFromIdTable
+-    RemoveFromIdTable();
+-    isId = true;
+-  }
+-
+-  nsMutationGuard guard;
+-
+-  nsresult rv = Element::UnsetAttr(aNameSpaceID, aAttribute, aNotify);
+-
+-  if (isId &&
+-      (!guard.Mutated(0) ||
+-       !mNodeInfo->GetIDAttributeAtom() ||
+-       !HasAttr(kNameSpaceID_None, GetIDAttributeName()))) {
+-    ClearHasID();
+-  }
+-  
+-  return rv;
+-}
+-
+-nsIAtom *
+-nsXMLElement::GetIDAttributeName() const
+-{
+-  return mNodeInfo->GetIDAttributeAtom();
+-}
+-
+-nsIAtom*
+-nsXMLElement::DoGetID() const
+-{
+-  NS_ASSERTION(HasID(), "Unexpected call");
+-
+-  const nsAttrValue* attrVal = mAttrsAndChildren.GetAttr(GetIDAttributeName());
+-  return attrVal ? attrVal->GetAtomValue() : nullptr;
+-}
+-
+-void
+-nsXMLElement::NodeInfoChanged(nsINodeInfo* aOldNodeInfo)
+-{
+-  NS_ASSERTION(!IsInDoc() ||
+-               aOldNodeInfo->GetDocument() == mNodeInfo->GetDocument(),
+-               "Can only change document if we're not inside one");
+-  nsIDocument* doc = GetCurrentDoc();
+-
+-  if (HasID() && doc) {
+-    const nsAttrValue* attrVal =
+-      mAttrsAndChildren.GetAttr(aOldNodeInfo->GetIDAttributeAtom());
+-    if (attrVal) {
+-      doc->RemoveFromIdTable(this, attrVal->GetAtomValue());
+-    }
+-  }
+-  
+-  ClearHasID();
+-
+-  nsIAtom* IDName = GetIDAttributeName();
+-  if (IDName) {
+-    const nsAttrValue* attrVal = mAttrsAndChildren.GetAttr(IDName);
+-    if (attrVal) {
+-      SetHasID();
+-      if (attrVal->Type() == nsAttrValue::eString) {
+-        nsString idVal(attrVal->GetStringValue());
+-
+-        // Create an atom from the value and set it into the attribute list. 
+-        const_cast<nsAttrValue*>(attrVal)->ParseAtom(idVal);
+-      }
+-      NS_ASSERTION(attrVal->Type() == nsAttrValue::eAtom,
+-                   "Should be atom by now");
+-      if (doc) {
+-        doc->AddToIdTable(this, attrVal->GetAtomValue());
+-      }
+-    }
+-  }
+-}
+-
+-bool
+-nsXMLElement::ParseAttribute(int32_t aNamespaceID,
+-                             nsIAtom* aAttribute,
+-                             const nsAString& aValue,
+-                             nsAttrValue& aResult)
+-{
+-  if (aAttribute == GetIDAttributeName() &&
+-      aNamespaceID == kNameSpaceID_None) {
+-    // Store id as an atom.  id="" means that the element has no id,
+-    // not that it has an emptystring as the id.
+-    RemoveFromIdTable();
+-    if (aValue.IsEmpty()) {
+-      ClearHasID();
+-      return false;
+-    }
+-    aResult.ParseAtom(aValue);
+-    SetHasID();
+-    AddToIdTable(aResult.GetAtomValue());
+-    return true;
+-  }
+-
+-  return false;
+-}
+-
+-nsresult
+-nsXMLElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
+-                         nsIContent* aBindingParent,
+-                         bool aCompileEventHandlers)
+-{
+-  nsresult rv = Element::BindToTree(aDocument, aParent,
+-                                    aBindingParent,
+-                                    aCompileEventHandlers);
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  if (aDocument && HasID() && !GetBindingParent()) {
+-    aDocument->AddToIdTable(this, DoGetID());
+-  }
+-
+-  return NS_OK;
+-}
+-
+-void
+-nsXMLElement::UnbindFromTree(bool aDeep, bool aNullParent)
+-{
+-  RemoveFromIdTable();
+-
+-  return Element::UnbindFromTree(aDeep, aNullParent);
+-}
+diff --git a/content/xml/content/src/nsXMLElement.h b/content/xml/content/src/nsXMLElement.h
+--- a/content/xml/content/src/nsXMLElement.h
++++ b/content/xml/content/src/nsXMLElement.h
+@@ -28,31 +28,14 @@ public:
+   // nsIDOMElement
+   NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
+ 
+   // nsINode interface methods
+   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
+ 
+   virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
+ 
+-  // nsIContent interface methods
+-  virtual nsIAtom *GetIDAttributeName() const MOZ_OVERRIDE;
+-  virtual nsIAtom* DoGetID() const MOZ_OVERRIDE;
+-  virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
+-                              nsIContent* aBindingParent,
+-                              bool aCompileEventHandlers) MOZ_OVERRIDE;
+-  virtual void UnbindFromTree(bool aDeep, bool aNullParent) MOZ_OVERRIDE;
+-  virtual nsresult UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
+-                             bool aNotify) MOZ_OVERRIDE;
+-  virtual bool ParseAttribute(int32_t aNamespaceID,
+-                                nsIAtom* aAttribute,
+-                                const nsAString& aValue,
+-                                nsAttrValue& aResult) MOZ_OVERRIDE;
+-
+-  // Element overrides
+-  virtual void NodeInfoChanged(nsINodeInfo* aOldNodeInfo) MOZ_OVERRIDE;
+-
+ protected:
+   virtual JSObject* WrapNode(JSContext *aCx,
+                              JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+ };
+ 
+ #endif // nsXMLElement_h___
+diff --git a/content/xml/document/src/nsXMLContentSink.cpp b/content/xml/document/src/nsXMLContentSink.cpp
+--- a/content/xml/document/src/nsXMLContentSink.cpp
++++ b/content/xml/document/src/nsXMLContentSink.cpp
+@@ -932,32 +932,29 @@ nsXMLContentSink::SetDocElement(int32_t 
+ 
+   return true;
+ }
+ 
+ NS_IMETHODIMP
+ nsXMLContentSink::HandleStartElement(const PRUnichar *aName,
+                                      const PRUnichar **aAtts,
+                                      uint32_t aAttsCount,
+-                                     int32_t aIndex,
+                                      uint32_t aLineNumber)
+ {
+-  return HandleStartElement(aName, aAtts, aAttsCount, aIndex, aLineNumber,
++  return HandleStartElement(aName, aAtts, aAttsCount, aLineNumber,
+                             true);
+ }
+ 
+ nsresult
+ nsXMLContentSink::HandleStartElement(const PRUnichar *aName,
+                                      const PRUnichar **aAtts,
+                                      uint32_t aAttsCount,
+-                                     int32_t aIndex,
+                                      uint32_t aLineNumber,
+                                      bool aInterruptable)
+ {
+-  NS_PRECONDITION(aIndex >= -1, "Bogus aIndex");
+   NS_PRECONDITION(aAttsCount % 2 == 0, "incorrect aAttsCount");
+   // Adjust aAttsCount so it's the actual number of attributes
+   aAttsCount /= 2;
+ 
+   nsresult result = NS_OK;
+   bool appendContent = true;
+   nsCOMPtr<nsIContent> content;
+ 
+@@ -993,27 +990,16 @@ nsXMLContentSink::HandleStartElement(con
+   // do that before we set attributes, call BindToTree, etc.  Ideally we'd push
+   // on the stack inside CreateElement (which is effectively what the HTML sink
+   // does), but that's hard with all the subclass overrides going on.
+   nsCOMPtr<nsIContent> parent = GetCurrentContent();
+   
+   result = PushContent(content);
+   NS_ENSURE_SUCCESS(result, result);
+ 
+-  // Set the ID attribute atom on the node info object for this node
+-  // This must occur before the attributes are added so the name
+-  // of the id attribute is known.
+-  if (aIndex != -1 && NS_SUCCEEDED(result)) {
+-    nsCOMPtr<nsIAtom> IDAttr = do_GetAtom(aAtts[aIndex]);
+-
+-    if (IDAttr) {
+-      nodeInfo->SetIDAttributeAtom(IDAttr);
+-    }
+-  }
+-
+   // Set the attributes on the new content element
+   result = AddAttributes(aAtts, content);
+ 
+   if (NS_OK == result) {
+     // Store the element 
+     if (!SetDocElement(nameSpaceID, localName, content) && appendContent) {
+       NS_ENSURE_TRUE(parent, NS_ERROR_UNEXPECTED);
+ 
+@@ -1397,28 +1383,28 @@ nsXMLContentSink::ReportError(const PRUn
+ 
+   NS_NAMED_LITERAL_STRING(errorNs,
+                           "http://www.mozilla.org/newlayout/xml/parsererror.xml");
+ 
+   nsAutoString parsererror(errorNs);
+   parsererror.Append((PRUnichar)0xFFFF);
+   parsererror.AppendLiteral("parsererror");
+   
+-  rv = HandleStartElement(parsererror.get(), noAtts, 0, -1, (uint32_t)-1,
++  rv = HandleStartElement(parsererror.get(), noAtts, 0, (uint32_t)-1,
+                           false);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   rv = HandleCharacterData(aErrorText, NS_strlen(aErrorText), false);
+   NS_ENSURE_SUCCESS(rv, rv);  
+   
+   nsAutoString sourcetext(errorNs);
+   sourcetext.Append((PRUnichar)0xFFFF);
+   sourcetext.AppendLiteral("sourcetext");
+ 
+-  rv = HandleStartElement(sourcetext.get(), noAtts, 0, -1, (uint32_t)-1,
++  rv = HandleStartElement(sourcetext.get(), noAtts, 0, (uint32_t)-1,
+                           false);
+   NS_ENSURE_SUCCESS(rv, rv);
+   
+   rv = HandleCharacterData(aSourceText, NS_strlen(aSourceText), false);
+   NS_ENSURE_SUCCESS(rv, rv);
+   
+   rv = HandleEndElement(sourcetext.get(), false);
+   NS_ENSURE_SUCCESS(rv, rv); 
+diff --git a/content/xml/document/src/nsXMLContentSink.h b/content/xml/document/src/nsXMLContentSink.h
+--- a/content/xml/document/src/nsXMLContentSink.h
++++ b/content/xml/document/src/nsXMLContentSink.h
+@@ -152,18 +152,17 @@ protected:
+ 
+   bool CanStillPrettyPrint();
+ 
+   nsresult MaybePrettyPrint();
+   
+   bool IsMonolithicContainer(nsINodeInfo* aNodeInfo);
+ 
+   nsresult HandleStartElement(const PRUnichar *aName, const PRUnichar **aAtts, 
+-                              uint32_t aAttsCount, int32_t aIndex, 
+-                              uint32_t aLineNumber,
++                              uint32_t aAttsCount, uint32_t aLineNumber,
+                               bool aInterruptable);
+   nsresult HandleEndElement(const PRUnichar *aName, bool aInterruptable);
+   nsresult HandleCharacterData(const PRUnichar *aData, uint32_t aLength,
+                                bool aInterruptable);
+ 
+   nsCOMPtr<nsIContent> mDocElement;
+   nsCOMPtr<nsIContent> mCurrentHead;  // When set, we're in an XHTML <haed>
+   PRUnichar*       mText;
+diff --git a/content/xslt/src/xslt/txMozillaStylesheetCompiler.cpp b/content/xslt/src/xslt/txMozillaStylesheetCompiler.cpp
+--- a/content/xslt/src/xslt/txMozillaStylesheetCompiler.cpp
++++ b/content/xslt/src/xslt/txMozillaStylesheetCompiler.cpp
+@@ -114,23 +114,22 @@ NS_IMPL_ISUPPORTS6(txStylesheetSink,
+                    nsIStreamListener,
+                    nsIRequestObserver,
+                    nsIInterfaceRequestor)
+ 
+ NS_IMETHODIMP
+ txStylesheetSink::HandleStartElement(const PRUnichar *aName,
+                                      const PRUnichar **aAtts,
+                                      uint32_t aAttsCount,
+-                                     int32_t aIndex,
+                                      uint32_t aLineNumber)
+ {
+     NS_PRECONDITION(aAttsCount % 2 == 0, "incorrect aAttsCount");
+ 
+     nsresult rv =
+-        mCompiler->startElement(aName, aAtts, aAttsCount / 2, aIndex);
++        mCompiler->startElement(aName, aAtts, aAttsCount / 2);
+     if (NS_FAILED(rv)) {
+         mCompiler->cancel(rv);
+ 
+         return rv;
+     }
+     
+     return NS_OK;
+ }
+diff --git a/content/xslt/src/xslt/txStylesheetCompiler.cpp b/content/xslt/src/xslt/txStylesheetCompiler.cpp
+--- a/content/xslt/src/xslt/txStylesheetCompiler.cpp
++++ b/content/xslt/src/xslt/txStylesheetCompiler.cpp
+@@ -97,17 +97,17 @@ txStylesheetCompiler::startElement(int32
+ 
+     return startElementInternal(aNamespaceID, aLocalName, aPrefix,
+                                 aAttributes, aAttrCount);
+ }
+ 
+ nsresult
+ txStylesheetCompiler::startElement(const PRUnichar *aName,
+                                    const PRUnichar **aAttrs,
+-                                   int32_t aAttrCount, int32_t aIDOffset)
++                                   int32_t aAttrCount)
+ {
+     if (NS_FAILED(mStatus)) {
+         // ignore content after failure
+         // XXX reevaluate once expat stops on failure
+         return NS_OK;
+     }
+ 
+     nsresult rv = flushCharacters();
+@@ -156,42 +156,47 @@ txStylesheetCompiler::startElement(const
+     }
+ 
+     nsCOMPtr<nsIAtom> prefix, localname;
+     int32_t namespaceID;
+     rv = XMLUtils::splitExpatName(aName, getter_AddRefs(prefix),
+                                   getter_AddRefs(localname), &namespaceID);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+-    int32_t idOffset = aIDOffset;
+-    if (idOffset > 0) {
+-        idOffset /= 2;
+-    }
+     return startElementInternal(namespaceID, localname, prefix, atts,
+-                                aAttrCount, idOffset);
++                                aAttrCount);
+ }
+ 
+ nsresult
+ txStylesheetCompiler::startElementInternal(int32_t aNamespaceID,
+                                            nsIAtom* aLocalName,
+                                            nsIAtom* aPrefix,
+                                            txStylesheetAttr* aAttributes,
+-                                           int32_t aAttrCount,
+-                                           int32_t aIDOffset)
++                                           int32_t aAttrCount)
+ {
+     nsresult rv = NS_OK;
+     int32_t i;
+     for (i = mInScopeVariables.Length() - 1; i >= 0; --i) {
+         ++mInScopeVariables[i]->mLevel;
+     }
+ 
+     // Update the elementcontext if we have special attributes
+     for (i = 0; i < aAttrCount; ++i) {
+         txStylesheetAttr* attr = aAttributes + i;
+ 
++        // id
++        if (mEmbedStatus == eNeedEmbed &&
++            attr->mLocalName == nsGkAtoms::id &&
++            attr->mNamespaceID == kNameSpaceID_None &&
++            attr->mValue.Equals(mTarget)) {
++            // We found the right ID, signal to compile the
++            // embedded stylesheet.
++            mEmbedStatus = eInEmbed;
++        }
++
+         // xml:space
+         if (attr->mNamespaceID == kNameSpaceID_XML &&
+             attr->mLocalName == nsGkAtoms::space) {
+             rv = ensureNewElementContext();
+             NS_ENSURE_SUCCESS(rv, rv);
+ 
+             if (TX_StringEqualsAtom(attr->mValue, nsGkAtoms::preserve)) {
+                 mElementContext->mPreserveWhitespace = true;
+@@ -271,24 +276,16 @@ txStylesheetCompiler::startElementIntern
+     int32_t count = mElementContext->mInstructionNamespaces.Length();
+     for (i = 0; i < count; ++i) {
+         if (mElementContext->mInstructionNamespaces[i] == aNamespaceID) {
+             isInstruction = true;
+             break;
+         }
+     }
+ 
+-    if (mEmbedStatus == eNeedEmbed) {
+-        // handle embedded stylesheets
+-        if (aIDOffset >= 0 && aAttributes[aIDOffset].mValue.Equals(mTarget)) {
+-            // We found the right ID, signal to compile the 
+-            // embedded stylesheet.
+-            mEmbedStatus = eInEmbed;
+-        }
+-    }
+     const txElementHandler* handler;
+     do {
+         handler = isInstruction ?
+                   mHandlerTable->find(aNamespaceID, aLocalName) :
+                   mHandlerTable->mLREHandler;
+ 
+         rv = (handler->mStartFunction)(aNamespaceID, aLocalName, aPrefix,
+                                        aAttributes, aAttrCount, *this);
+diff --git a/content/xslt/src/xslt/txStylesheetCompiler.h b/content/xslt/src/xslt/txStylesheetCompiler.h
+--- a/content/xslt/src/xslt/txStylesheetCompiler.h
++++ b/content/xslt/src/xslt/txStylesheetCompiler.h
+@@ -197,35 +197,34 @@ public:
+ 
+     void setBaseURI(const nsString& aBaseURI);
+ 
+     nsresult startElement(int32_t aNamespaceID, nsIAtom* aLocalName,
+                           nsIAtom* aPrefix, txStylesheetAttr* aAttributes,
+                           int32_t aAttrCount);
+     nsresult startElement(const PRUnichar *aName,
+                           const PRUnichar **aAtts,
+-                          int32_t aAttrCount, int32_t aIDOffset);
++                          int32_t aAttrCount);
+     nsresult endElement();
+     nsresult characters(const nsAString& aStr);
+     nsresult doneLoading();
+ 
+     void cancel(nsresult aError, const PRUnichar *aErrorText = nullptr,
+                 const PRUnichar *aParam = nullptr);
+ 
+     txStylesheet* getStylesheet();
+ 
+     TX_DECL_ACOMPILEOBSERVER
+     NS_INLINE_DECL_REFCOUNTING(txStylesheetCompiler)
+ 
+ private:
+     nsresult startElementInternal(int32_t aNamespaceID, nsIAtom* aLocalName,
+                                   nsIAtom* aPrefix,
+                                   txStylesheetAttr* aAttributes,
+-                                  int32_t aAttrCount,
+-                                  int32_t aIDOffset = -1);
++                                  int32_t aAttrCount);
+ 
+     nsresult flushCharacters();
+     nsresult ensureNewElementContext();
+     nsresult maybeDoneCompiling();
+ 
+     nsString mCharacters;
+     nsresult mStatus;
+ };
+diff --git a/content/xul/content/src/nsXULElement.cpp b/content/xul/content/src/nsXULElement.cpp
+--- a/content/xul/content/src/nsXULElement.cpp
++++ b/content/xul/content/src/nsXULElement.cpp
+@@ -328,16 +328,22 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_
+     {
+         nsXULSlots* slots = static_cast<nsXULSlots*>(tmp->GetExistingSlots());
+         if (slots) {
+             slots->Traverse(cb);
+         }
+     }
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+ 
++NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsXULElement,
++                                                nsStyledElement)
++    // Why aren't we unlinking the prototype?
++    tmp->ClearHasID();
++NS_IMPL_CYCLE_COLLECTION_UNLINK_END
++
+ NS_IMPL_ADDREF_INHERITED(nsXULElement, nsStyledElement)
+ NS_IMPL_RELEASE_INHERITED(nsXULElement, nsStyledElement)
+ 
+ NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(nsXULElement)
+     NS_INTERFACE_TABLE_INHERITED3(nsXULElement, nsIDOMNode, nsIDOMElement,
+                                   nsIDOMXULElement)
+     NS_ELEMENT_INTERFACE_TABLE_TO_MAP_SEGUE
+     NS_INTERFACE_MAP_ENTRY_TEAROFF(nsIDOMElementCSSInlineStyle,
+@@ -1388,17 +1394,16 @@ nsXULElement::GetBoxObject(ErrorResult& 
+   NS_IMETHODIMP                                                     \
+   nsXULElement::Set##_method(bool aValue)                           \
+   {                                                                 \
+       SetXULBoolAttr(nsGkAtoms::_atom, aValue);                     \
+       return NS_OK;                                                 \
+   }
+ 
+ 
+-NS_IMPL_XUL_STRING_ATTR(ClassName, _class)
+ NS_IMPL_XUL_STRING_ATTR(Align, align)
+ NS_IMPL_XUL_STRING_ATTR(Dir, dir)
+ NS_IMPL_XUL_STRING_ATTR(Flex, flex)
+ NS_IMPL_XUL_STRING_ATTR(FlexGroup, flexgroup)
+ NS_IMPL_XUL_STRING_ATTR(Ordinal, ordinal)
+ NS_IMPL_XUL_STRING_ATTR(Orient, orient)
+ NS_IMPL_XUL_STRING_ATTR(Pack, pack)
+ NS_IMPL_XUL_BOOL_ATTR(Hidden, hidden)
+diff --git a/content/xul/content/src/nsXULElement.h b/content/xul/content/src/nsXULElement.h
+--- a/content/xul/content/src/nsXULElement.h
++++ b/content/xul/content/src/nsXULElement.h
+@@ -362,18 +362,19 @@ public:
+     static nsresult
+     Create(nsXULPrototypeElement* aPrototype, nsIDocument* aDocument,
+            bool aIsScriptable, bool aIsRoot, mozilla::dom::Element** aResult);
+ 
+     NS_IMPL_FROMCONTENT(nsXULElement, kNameSpaceID_XUL)
+ 
+     // nsISupports
+     NS_DECL_ISUPPORTS_INHERITED
+-    NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED_NO_UNLINK(nsXULElement,
+-                                                       mozilla::dom::Element)
++    // XXX: In the .cpp, we inherit from nsStyledElement.
++    NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsXULElement,
++                                             mozilla::dom::Element)
+ 
+     // nsINode
+     virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor);
+ 
+     // nsIContent
+     virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
+                                 nsIContent* aBindingParent,
+                                 bool aCompileEventHandlers) MOZ_OVERRIDE;
+diff --git a/content/xul/document/src/XULDocument.cpp b/content/xul/document/src/XULDocument.cpp
+--- a/content/xul/document/src/XULDocument.cpp
++++ b/content/xul/document/src/XULDocument.cpp
+@@ -958,18 +958,17 @@ XULDocument::AttributeWillChange(nsIDocu
+                                  Element* aElement, int32_t aNameSpaceID,
+                                  nsIAtom* aAttribute, int32_t aModType)
+ {
+     NS_ABORT_IF_FALSE(aElement, "Null content!");
+     NS_PRECONDITION(aAttribute, "Must have an attribute that's changing!");
+ 
+     // XXXbz check aNameSpaceID, dammit!
+     // See if we need to update our ref map.
+-    if (aAttribute == nsGkAtoms::ref ||
+-        (aAttribute == nsGkAtoms::id && !aElement->GetIDAttributeName())) {
++    if (aAttribute == nsGkAtoms::ref && aNameSpaceID == kNameSpaceID_None) {
+         // Might not need this, but be safe for now.
+         nsCOMPtr<nsIMutationObserver> kungFuDeathGrip(this);
+         RemoveElementFromRefMap(aElement);
+     }
+ }
+ 
+ void
+ XULDocument::AttributeChanged(nsIDocument* aDocument,
+@@ -978,18 +977,17 @@ XULDocument::AttributeChanged(nsIDocumen
+ {
+     NS_ASSERTION(aDocument == this, "unexpected doc");
+ 
+     // Might not need this, but be safe for now.
+     nsCOMPtr<nsIMutationObserver> kungFuDeathGrip(this);
+ 
+     // XXXbz check aNameSpaceID, dammit!
+     // See if we need to update our ref map.
+-    if (aAttribute == nsGkAtoms::ref ||
+-        (aAttribute == nsGkAtoms::id && !aElement->GetIDAttributeName())) {
++    if (aAttribute == nsGkAtoms::ref && aNameSpaceID == kNameSpaceID_None) {
+         AddElementToRefMap(aElement);
+     }
+     
+     nsresult rv;
+ 
+     // Synchronize broadcast listeners
+     if (mBroadcasterMap &&
+         CanBroadcast(aNameSpaceID, aAttribute)) {
+@@ -1918,19 +1916,16 @@ XULDocument::GetTemplateBuilderFor(nsICo
+ 
+     return NS_OK;
+ }
+ 
+ static void
+ GetRefMapAttribute(Element* aElement, nsAutoString* aValue)
+ {
+     aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::ref, *aValue);
+-    if (aValue->IsEmpty() && !aElement->GetIDAttributeName()) {
+-        aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::id, *aValue);
+-    }
+ }
+ 
+ nsresult
+ XULDocument::AddElementToRefMap(Element* aElement)
+ {
+     // Look at the element's 'ref' attribute, and if set,
+     // add an entry in the resource-to-element map to the element.
+     nsAutoString value;
+diff --git a/content/xul/document/src/nsXULContentSink.cpp b/content/xul/document/src/nsXULContentSink.cpp
+--- a/content/xul/document/src/nsXULContentSink.cpp
++++ b/content/xul/document/src/nsXULContentSink.cpp
+@@ -450,23 +450,21 @@ XULContentSinkImpl::CreateElement(nsINod
+ 
+ /**** BEGIN NEW APIs ****/
+ 
+ 
+ NS_IMETHODIMP 
+ XULContentSinkImpl::HandleStartElement(const PRUnichar *aName, 
+                                        const PRUnichar **aAtts,
+                                        uint32_t aAttsCount, 
+-                                       int32_t aIndex, 
+                                        uint32_t aLineNumber)
+ { 
+   // XXX Hopefully the parser will flag this before we get here. If
+   // we're in the epilog, there should be no new elements
+   NS_PRECONDITION(mState != eInEpilog, "tag in XUL doc epilog");
+-  NS_PRECONDITION(aIndex >= -1, "Bogus aIndex");
+   NS_PRECONDITION(aAttsCount % 2 == 0, "incorrect aAttsCount");
+   // Adjust aAttsCount so it's the actual number of attributes
+   aAttsCount /= 2;
+   
+   if (mState == eInEpilog)
+       return NS_ERROR_UNEXPECTED;
+ 
+   if (mState != eInScript) {
+@@ -497,25 +495,16 @@ XULContentSinkImpl::HandleStartElement(c
+   case eInScript:
+       PR_LOG(gLog, PR_LOG_WARNING,
+              ("xul: warning: unexpected tags in epilog at line %d",
+              aLineNumber));
+       rv = NS_ERROR_UNEXPECTED; // XXX
+       break;
+   }
+ 
+-  // Set the ID attribute atom on the node info object for this node
+-  if (aIndex != -1 && NS_SUCCEEDED(rv)) {
+-    nsCOMPtr<nsIAtom> IDAttr = do_GetAtom(aAtts[aIndex]);
+-
+-    if (IDAttr) {
+-      nodeInfo->SetIDAttributeAtom(IDAttr);
+-    }
+-  }
+-
+   return rv;
+ }
+ 
+ NS_IMETHODIMP 
+ XULContentSinkImpl::HandleEndElement(const PRUnichar *aName)
+ {
+     // Never EVER return anything but NS_OK or
+     // NS_ERROR_HTMLPARSER_BLOCK from this method. Doing so will blow
+@@ -716,27 +705,27 @@ XULContentSinkImpl::ReportError(const PR
+ 
+   NS_NAMED_LITERAL_STRING(errorNs,
+                           "http://www.mozilla.org/newlayout/xml/parsererror.xml");
+ 
+   nsAutoString parsererror(errorNs);
+   parsererror.Append((PRUnichar)0xFFFF);
+   parsererror.AppendLiteral("parsererror");
+   
+-  rv = HandleStartElement(parsererror.get(), noAtts, 0, -1, 0);
++  rv = HandleStartElement(parsererror.get(), noAtts, 0, 0);
+   NS_ENSURE_SUCCESS(rv,rv);
+ 
+   rv = HandleCharacterData(aErrorText, NS_strlen(aErrorText));
+   NS_ENSURE_SUCCESS(rv,rv);  
+   
+   nsAutoString sourcetext(errorNs);
+   sourcetext.Append((PRUnichar)0xFFFF);
+   sourcetext.AppendLiteral("sourcetext");
+ 
+-  rv = HandleStartElement(sourcetext.get(), noAtts, 0, -1, 0);
++  rv = HandleStartElement(sourcetext.get(), noAtts, 0, 0);
+   NS_ENSURE_SUCCESS(rv,rv);
+   
+   rv = HandleCharacterData(aSourceText, NS_strlen(aSourceText));
+   NS_ENSURE_SUCCESS(rv,rv);
+   
+   rv = HandleEndElement(sourcetext.get());
+   NS_ENSURE_SUCCESS(rv,rv); 
+   
+diff --git a/dom/imptests/failures/webapps/DOMCore/tests/approved/test_Node-properties.html.json b/dom/imptests/failures/webapps/DOMCore/tests/approved/test_Node-properties.html.json
+--- a/dom/imptests/failures/webapps/DOMCore/tests/approved/test_Node-properties.html.json
++++ b/dom/imptests/failures/webapps/DOMCore/tests/approved/test_Node-properties.html.json
+@@ -1,9 +1,7 @@
+ {
+   "document.characterSet": true,
+   "foreignDoc.characterSet": true,
+   "xmlDoc.characterSet": true,
+   "xmlElement.namespaceURI": true,
+-  "xmlElement.className": true,
+-  "detachedXmlElement.namespaceURI": true,
+-  "detachedXmlElement.className": true
++  "detachedXmlElement.namespaceURI": true
+ }
+diff --git a/dom/imptests/failures/webapps/DOMCore/tests/approved/test_interfaces.html.json b/dom/imptests/failures/webapps/DOMCore/tests/approved/test_interfaces.html.json
+--- a/dom/imptests/failures/webapps/DOMCore/tests/approved/test_interfaces.html.json
++++ b/dom/imptests/failures/webapps/DOMCore/tests/approved/test_interfaces.html.json
+@@ -76,23 +76,21 @@
+   "DocumentType interface: calling before(union) on document.doctype with too few arguments must throw TypeError": true,
+   "DocumentType interface: document.doctype must inherit property \"after\" with the proper type (6)": true,
+   "DocumentType interface: calling after(union) on document.doctype with too few arguments must throw TypeError": true,
+   "DocumentType interface: document.doctype must inherit property \"replace\" with the proper type (7)": true,
+   "DocumentType interface: calling replace(union) on document.doctype with too few arguments must throw TypeError": true,
+   "Element interface: attribute namespaceURI": true,
+   "Element interface: attribute prefix": true,
+   "Element interface: attribute localName": true,
+-  "Element interface: attribute className": true,
+   "Element interface: operation prepend(union)": true,
+   "Element interface: operation append(union)": true,
+   "Element interface: operation before(union)": true,
+   "Element interface: operation after(union)": true,
+   "Element interface: operation replace(union)": true,
+-  "Element interface: element must inherit property \"className\" with the proper type (5)": true,
+   "Element interface: element must inherit property \"prepend\" with the proper type (23)": true,
+   "Element interface: calling prepend(union) on element with too few arguments must throw TypeError": true,
+   "Element interface: element must inherit property \"append\" with the proper type (24)": true,
+   "Element interface: calling append(union) on element with too few arguments must throw TypeError": true,
+   "Element interface: element must inherit property \"before\" with the proper type (27)": true,
+   "Element interface: calling before(union) on element with too few arguments must throw TypeError": true,
+   "Element interface: element must inherit property \"after\" with the proper type (28)": true,
+   "Element interface: calling after(union) on element with too few arguments must throw TypeError": true,
+diff --git a/dom/interfaces/core/nsIDOMElement.idl b/dom/interfaces/core/nsIDOMElement.idl
+--- a/dom/interfaces/core/nsIDOMElement.idl
++++ b/dom/interfaces/core/nsIDOMElement.idl
+@@ -15,16 +15,18 @@ interface nsIDOMMozNamedAttrMap;
+  * http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#interface-element
+  */
+ 
+ [scriptable, uuid(c3646b5d-a07d-470a-8e40-784459833c9f)]
+ interface nsIDOMElement : nsIDOMNode
+ {
+   readonly attribute DOMString        tagName;
+ 
++           attribute DOMString        id;
++           attribute DOMString        className;
+   /**
+    * Returns a DOMTokenList object reflecting the class attribute.
+    */
+   readonly attribute nsISupports classList;
+ 
+   readonly attribute nsIDOMMozNamedAttrMap attributes;
+   DOMString          getAttribute(in DOMString name);
+   DOMString          getAttributeNS(in DOMString namespaceURI, 
+diff --git a/dom/interfaces/html/nsIDOMHTMLElement.idl b/dom/interfaces/html/nsIDOMHTMLElement.idl
+--- a/dom/interfaces/html/nsIDOMHTMLElement.idl
++++ b/dom/interfaces/html/nsIDOMHTMLElement.idl
+@@ -18,21 +18,19 @@ interface nsIDOMHTMLMenuElement;
+  *
+  * with changes from the work-in-progress WHATWG HTML specification:
+  * http://www.whatwg.org/specs/web-apps/current-work/
+  */
+ [scriptable, uuid(e29ddc73-ac40-40fe-8bbd-14bf2d52c53a)]
+ interface nsIDOMHTMLElement : nsIDOMElement
+ {
+   // metadata attributes
+-           attribute DOMString        id;
+            attribute DOMString        title;
+            attribute DOMString        lang;
+            attribute DOMString        dir;
+-           attribute DOMString        className;
+   readonly attribute nsISupports      dataset;
+ 
+            attribute boolean                        itemScope;
+            attribute nsIVariant                     itemType;
+            attribute DOMString                      itemId;
+   readonly attribute nsISupports                    properties;
+   // The following attributes are really nsDOMSettableTokenList, which has
+   // PutForwards, so we express them as nsIVariants to deal with this.
+diff --git a/dom/interfaces/svg/nsIDOMSVGElement.idl b/dom/interfaces/svg/nsIDOMSVGElement.idl
+--- a/dom/interfaces/svg/nsIDOMSVGElement.idl
++++ b/dom/interfaces/svg/nsIDOMSVGElement.idl
+@@ -7,19 +7,19 @@
+ 
+ interface nsIDOMCSSStyleDeclaration;
+ interface nsIDOMCSSValue;
+ 
+ 
+ [scriptable, uuid(12488d4f-1ee5-40bf-9c5d-3a285d4170ab)]
+ interface nsIDOMSVGElement : nsIDOMElement
+ {
+-  attribute DOMString id;
+             // raises DOMException on setting
+   readonly attribute nsIDOMSVGElement    ownerSVGElement;
+   readonly attribute nsIDOMSVGElement    viewportElement;
+ 
++  [binaryname(SVGClassName)]
+   readonly attribute nsISupports   className;
+   readonly attribute nsIDOMCSSStyleDeclaration style;
+ 
+   // Not implemented
+   // nsIDOMCSSValue getPresentationAttribute(in DOMString name);
+ };
+diff --git a/dom/interfaces/xul/nsIDOMXULElement.idl b/dom/interfaces/xul/nsIDOMXULElement.idl
+--- a/dom/interfaces/xul/nsIDOMXULElement.idl
++++ b/dom/interfaces/xul/nsIDOMXULElement.idl
+@@ -10,18 +10,16 @@ interface nsIXULTemplateBuilder;
+ interface nsIRDFResource;
+ interface nsIControllers;
+ interface nsIBoxObject;
+ 
+ 
+ [scriptable, uuid(e89578c8-64ec-4047-984a-cce1b1735543)]
+ interface nsIDOMXULElement : nsIDOMElement
+ {
+-  attribute DOMString                 className;
+-
+   // Layout properties
+   attribute DOMString align;
+   attribute DOMString dir;
+   attribute DOMString flex;
+   attribute DOMString flexGroup;
+   attribute DOMString ordinal;
+   attribute DOMString orient;
+   attribute DOMString pack;
+diff --git a/dom/webidl/Element.webidl b/dom/webidl/Element.webidl
+--- a/dom/webidl/Element.webidl
++++ b/dom/webidl/Element.webidl
+@@ -23,22 +23,20 @@ interface Element : Node {
+   readonly attribute DOMString localName;
+ */
+   // Not [Constant] because it depends on which document we're in
+   [Pure]
+   readonly attribute DOMString tagName;
+ 
+   [Pure]
+            attribute DOMString id;
+-/*
+-  FIXME Bug 810677 Move className from HTMLElement to Element
++  [Pure]
+            attribute DOMString className;
+-*/
+   [Constant]
+-  readonly attribute DOMTokenList? classList;
++  readonly attribute DOMTokenList classList;
+ 
+   [Constant]
+   readonly attribute MozNamedAttrMap attributes;
+   DOMString? getAttribute(DOMString name);
+   DOMString? getAttributeNS(DOMString? namespace, DOMString localName);
+   [Throws]
+   void setAttribute(DOMString name, DOMString value);
+   [Throws]
+diff --git a/layout/reftests/bugs/495354-1a.xhtml b/layout/reftests/bugs/495354-1a.xhtml
+--- a/layout/reftests/bugs/495354-1a.xhtml
++++ b/layout/reftests/bugs/495354-1a.xhtml
+@@ -1,8 +1,8 @@
+ <html xmlns="http://www.w3.org/1999/xhtml">
+ <head>
+-<bindings xmlns="http://www.mozilla.org/xbl"><binding id="x"><content><caption xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"><children xmlns="http://www.mozilla.org/xbl"/></caption></content></binding></bindings>
++<bindings xmlns="http://www.mozilla.org/xbl"><binding id="y"><content><caption xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"><children xmlns="http://www.mozilla.org/xbl"/></caption></content></binding></bindings>
+ </head>
+ <body onload="document.getElementById('x').innerHTML = '9';">
+-<span id="x" style="-moz-binding: url(#x)"><div>123</div></span>
++<span id="x" style="-moz-binding: url(#y)"><div>123</div></span>
+ </body>
+ </html>
+diff --git a/layout/reftests/bugs/495354-1b.xhtml b/layout/reftests/bugs/495354-1b.xhtml
+--- a/layout/reftests/bugs/495354-1b.xhtml
++++ b/layout/reftests/bugs/495354-1b.xhtml
+@@ -1,8 +1,8 @@
+ <html xmlns="http://www.w3.org/1999/xhtml">
+ <head>
+-<bindings xmlns="http://www.mozilla.org/xbl"><binding id="x"><content><caption xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"><children xmlns="http://www.mozilla.org/xbl"/></caption></content></binding></bindings>
++<bindings xmlns="http://www.mozilla.org/xbl"><binding id="y"><content><caption xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"><children xmlns="http://www.mozilla.org/xbl"/></caption></content></binding></bindings>
+ </head>
+ <body onload="document.getElementById('x').innerHTML = '9';">
+-<span id="x" style="-moz-binding: url(#x)"><div style="border: 5px solid green">123</div></span>
++<span id="x" style="-moz-binding: url(#y)"><div style="border: 5px solid green">123</div></span>
+ </body>
+ </html>
+diff --git a/layout/style/nsCSSRuleProcessor.cpp b/layout/style/nsCSSRuleProcessor.cpp
+--- a/layout/style/nsCSSRuleProcessor.cpp
++++ b/layout/style/nsCSSRuleProcessor.cpp
+@@ -2652,17 +2652,17 @@ nsCSSRuleProcessor::HasAttributeDependen
+ 
+   // Since we get both before and after notifications for attributes, we
+   // don't have to ignore aData->mAttribute while matching.  Just check
+   // whether we have selectors relevant to aData->mAttribute that we
+   // match.  If this is the before change notification, that will catch
+   // rules we might stop matching; if the after change notification, the
+   // ones we might have started matching.
+   if (cascade) {
+-    if (aData->mAttribute == aData->mElement->GetIDAttributeName()) {
++    if (aData->mAttribute == nsGkAtoms::id) {
+       nsIAtom* id = aData->mElement->GetID();
+       if (id) {
+         AtomSelectorEntry *entry =
+           static_cast<AtomSelectorEntry*>
+                      (PL_DHashTableOperate(&cascade->mIdSelectors,
+                                            id, PL_DHASH_LOOKUP));
+         if (PL_DHASH_ENTRY_IS_BUSY(entry)) {
+           nsCSSSelector **iter = entry->mSelectors.Elements(),
+@@ -2675,17 +2675,17 @@ nsCSSRuleProcessor::HasAttributeDependen
+ 
+       nsCSSSelector **iter = cascade->mPossiblyNegatedIDSelectors.Elements(),
+                     **end = iter + cascade->mPossiblyNegatedIDSelectors.Length();
+       for(; iter != end; ++iter) {
+         AttributeEnumFunc(*iter, &data);
+       }
+     }
+     
+-    if (aData->mAttribute == aData->mElement->GetClassAttributeName()) {
++    if (aData->mAttribute == nsGkAtoms::_class) {
+       const nsAttrValue* elementClasses = aData->mElement->GetClasses();
+       if (elementClasses) {
+         int32_t atomCount = elementClasses->GetAtomCount();
+         for (int32_t i = 0; i < atomCount; ++i) {
+           nsIAtom* curClass = elementClasses->AtomAt(i);
+           AtomSelectorEntry *entry =
+             static_cast<AtomSelectorEntry*>
+                        (PL_DHashTableOperate(&cascade->mClassSelectors,
+diff --git a/parser/htmlparser/public/nsIExpatSink.idl b/parser/htmlparser/public/nsIExpatSink.idl
+--- a/parser/htmlparser/public/nsIExpatSink.idl
++++ b/parser/htmlparser/public/nsIExpatSink.idl
+@@ -22,25 +22,21 @@ interface nsIExpatSink : nsISupports
+    *        aAttsCount/2 names and aAttsCount/2 values, so the total number of
+    *        elements in the array is aAttsCount.  The names and values
+    *        alternate.  Thus, if we number attributes starting with 0,
+    *        aAtts[2*k] is the name of the k-th attribute and aAtts[2*k+1] is
+    *        the value of that attribute  Both explicitly specified attributes
+    *        and attributes that are defined to have default values in a DTD are
+    *        present in aAtts.
+    * @param aAttsCount the number of elements in aAtts.
+-   * @param aIndex If the element has an attribute of type ID, then
+-   *        aAtts[aIndex] is the name of that attribute.  Otherwise, aIndex
+-   *        is -1
+    * @param aLineNumber the line number of the start tag in the data stream.
+    */
+   void HandleStartElement(in wstring aName,
+                           [array, size_is(aAttsCount)] in wstring aAtts,
+                           in unsigned long aAttsCount,
+-                          in long aIndex,
+                           in unsigned long aLineNumber);
+ 
+   /**
+    * Called to handle the closing tag of an element.
+    * @param aName the fully qualified tagname of the element
+    */
+   void HandleEndElement(in wstring aName);
+ 
+diff --git a/parser/htmlparser/src/nsExpatDriver.cpp b/parser/htmlparser/src/nsExpatDriver.cpp
+--- a/parser/htmlparser/src/nsExpatDriver.cpp
++++ b/parser/htmlparser/src/nsExpatDriver.cpp
+@@ -376,17 +376,16 @@ nsExpatDriver::HandleStartElement(const 
+        aAtts[attrArrayLength];
+        attrArrayLength += 2) {
+     // Just looping till we find out what the length is
+   }
+ 
+   if (mSink) {
+     nsresult rv = mSink->
+       HandleStartElement(aValue, aAtts, attrArrayLength,
+-                         XML_GetIdAttributeIndex(mExpatParser),
+                          XML_GetCurrentLineNumber(mExpatParser));
+     MaybeStopParser(rv);
+   }
+ 
+   return NS_OK;
+ }
+ 
+ nsresult
+diff --git a/parser/xml/src/nsSAXXMLReader.cpp b/parser/xml/src/nsSAXXMLReader.cpp
+--- a/parser/xml/src/nsSAXXMLReader.cpp
++++ b/parser/xml/src/nsSAXXMLReader.cpp
+@@ -76,17 +76,16 @@ nsSAXXMLReader::SetParser(nsParserBase *
+   return NS_OK;
+ }
+ 
+ // nsIExtendedExpatSink
+ NS_IMETHODIMP
+ nsSAXXMLReader::HandleStartElement(const PRUnichar *aName,
+                                    const PRUnichar **aAtts,
+                                    uint32_t aAttsCount,
+-                                   int32_t aIndex,
+                                    uint32_t aLineNumber)
+ {
+   if (!mContentHandler)
+     return NS_OK;
+ 
+   nsCOMPtr<nsSAXAttributes> atts = new nsSAXAttributes();
+   if (!atts)
+     return NS_ERROR_OUT_OF_MEMORY;
+diff --git a/rdf/base/src/nsRDFContentSink.cpp b/rdf/base/src/nsRDFContentSink.cpp
+--- a/rdf/base/src/nsRDFContentSink.cpp
++++ b/rdf/base/src/nsRDFContentSink.cpp
+@@ -399,17 +399,16 @@ RDFContentSinkImpl::QueryInterface(REFNS
+     }
+     return NS_NOINTERFACE;
+ }
+ 
+ NS_IMETHODIMP 
+ RDFContentSinkImpl::HandleStartElement(const PRUnichar *aName, 
+                                        const PRUnichar **aAtts, 
+                                        uint32_t aAttsCount, 
+-                                       int32_t aIndex, 
+                                        uint32_t aLineNumber)
+ {
+   FlushText();
+ 
+   nsresult rv = NS_ERROR_UNEXPECTED; // XXX
+ 
+   RegisterNamespaces(aAtts);
+ 

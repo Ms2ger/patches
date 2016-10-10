@@ -1,0 +1,381 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/Makefile.in b/js/xpconnect/src/Makefile.in
+--- a/js/xpconnect/src/Makefile.in
++++ b/js/xpconnect/src/Makefile.in
+@@ -71,16 +71,17 @@ CPPSRCS		= \
+ 		XPCComponents.cpp \
+ 		XPCContext.cpp \
+ 		XPCConvert.cpp \
+ 		XPCDebug.cpp \
+ 		XPCException.cpp \
+ 		XPCJSID.cpp \
+ 		XPCJSObjectHolder.cpp \
+ 		XPCJSRuntime.cpp \
++		XPCLazyCallContext.cpp \
+ 		XPCLocale.cpp \
+ 		XPCLog.cpp \
+ 		XPCMaps.cpp \
+ 		XPCModule.cpp \
+ 		XPCRootSetElem.cpp \
+ 		XPCRuntimeService.cpp \
+ 		XPCStack.cpp \
+ 		XPCString.cpp \
+diff --git a/js/xpconnect/src/XPCCallContext.cpp b/js/xpconnect/src/XPCCallContext.cpp
+--- a/js/xpconnect/src/XPCCallContext.cpp
++++ b/js/xpconnect/src/XPCCallContext.cpp
+@@ -530,24 +530,8 @@ XPCCallContext::GetPreviousCallContext(n
+ 
+ NS_IMETHODIMP
+ XPCCallContext::GetLanguage(uint16_t *aResult)
+ {
+   NS_ENSURE_ARG_POINTER(aResult);
+   *aResult = GetCallerLanguage();
+   return NS_OK;
+ }
+-
+-#ifdef DEBUG
+-// static
+-void
+-XPCLazyCallContext::AssertContextIsTopOfStack(JSContext* cx)
+-{
+-    XPCPerThreadData* tls = XPCPerThreadData::GetData(cx);
+-    XPCJSContextStack* stack = tls->GetJSContextStack();
+-
+-    JSContext* topJSContext;
+-    nsresult rv = stack->Peek(&topJSContext);
+-    NS_ASSERTION(NS_SUCCEEDED(rv), "XPCJSContextStack::Peek failed");
+-
+-    NS_ASSERTION(cx == topJSContext, "wrong context on XPCJSContextStack!");
+-}
+-#endif
+diff --git a/js/xpconnect/src/XPCLazyCallContext.cpp b/js/xpconnect/src/XPCLazyCallContext.cpp
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCLazyCallContext.cpp
+@@ -0,0 +1,19 @@
++#include "XPCLazyCallContext.h"
++
++#include "xpcprivate.h"
++
++#ifdef DEBUG
++// static
++void
++XPCLazyCallContext::AssertContextIsTopOfStack(JSContext* cx)
++{
++    XPCPerThreadData* tls = XPCPerThreadData::GetData(cx);
++    XPCJSContextStack* stack = tls->GetJSContextStack();
++
++    JSContext* topJSContext;
++    nsresult rv = stack->Peek(&topJSContext);
++    NS_ASSERTION(NS_SUCCEEDED(rv), "XPCJSContextStack::Peek failed");
++
++    NS_ASSERTION(cx == topJSContext, "wrong context on XPCJSContextStack!");
++}
++#endif
+diff --git a/js/xpconnect/src/XPCLazyCallContext.h b/js/xpconnect/src/XPCLazyCallContext.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCLazyCallContext.h
+@@ -0,0 +1,134 @@
++#ifndef XPCLazyCallContext_h
++#define XPCLazyCallContext_h
++
++#include "XPCCallContext.h"
++#include "jsapi.h"
++
++// No virtuals
++class XPCLazyCallContext
++{
++public:
++    XPCLazyCallContext(XPCCallContext& ccx)
++        : mCallBeginRequest(DONT_CALL_BEGINREQUEST)
++        , mCcx(&ccx)
++        , mCcxToDestroy(nsnull)
++#ifdef DEBUG
++        , mCx(nsnull)
++        , mCallerLanguage(JS_CALLER)
++        , mObj(nsnull)
++        , mFlattenedJSObject(nsnull)
++        , mWrapper(nsnull)
++        , mTearOff(nsnull)
++#endif
++    {
++    }
++    XPCLazyCallContext(XPCContext::LangType callerLanguage, JSContext* cx,
++                       JSObject* obj = nsnull,
++                       JSObject* flattenedJSObject = nsnull,
++                       XPCWrappedNative* wrapper = nsnull,
++                       XPCWrappedNativeTearOff* tearoff = nsnull)
++        : mCallBeginRequest(callerLanguage == NATIVE_CALLER ?
++                            CALL_BEGINREQUEST : DONT_CALL_BEGINREQUEST),
++          mCcx(nsnull),
++          mCcxToDestroy(nsnull),
++          mCx(cx),
++          mCallerLanguage(callerLanguage),
++          mObj(obj),
++          mFlattenedJSObject(flattenedJSObject),
++          mWrapper(wrapper),
++          mTearOff(tearoff)
++    {
++        NS_ASSERTION(cx, "Need a JS context!");
++        NS_ASSERTION(callerLanguage == NATIVE_CALLER ||
++                     callerLanguage == JS_CALLER,
++                     "Can't deal with unknown caller language!");
++#ifdef DEBUG
++        AssertContextIsTopOfStack(cx);
++#endif
++    }
++    ~XPCLazyCallContext()
++    {
++        if (mCcxToDestroy)
++            mCcxToDestroy->~XPCCallContext();
++        else if (mCallBeginRequest == CALLED_BEGINREQUEST)
++            JS_EndRequest(mCx);
++    }
++    void SetWrapper(XPCWrappedNative* wrapper,
++                    XPCWrappedNativeTearOff* tearoff);
++    void SetWrapper(JSObject* flattenedJSObject);
++
++    JSContext *GetJSContext()
++    {
++        if (mCcx)
++            return mCcx->GetJSContext();
++
++        if (mCallBeginRequest == CALL_BEGINREQUEST) {
++            JS_BeginRequest(mCx);
++            mCallBeginRequest = CALLED_BEGINREQUEST;
++        }
++
++        return mCx;
++    }
++    JSObject *GetScopeForNewJSObjects() const
++    {
++        if (mCcx)
++            return mCcx->GetScopeForNewJSObjects();
++
++        return mObj;
++    }
++    void SetScopeForNewJSObjects(JSObject *obj)
++    {
++        if (mCcx) {
++            mCcx->SetScopeForNewJSObjects(obj);
++            return;
++        }
++        NS_ABORT_IF_FALSE(!mObj, "already set!");
++        mObj = obj;
++    }
++    JSObject *GetFlattenedJSObject() const
++    {
++        if (mCcx)
++            return mCcx->GetFlattenedJSObject();
++
++        return mFlattenedJSObject;
++    }
++    XPCCallContext &GetXPCCallContext()
++    {
++        if (!mCcx) {
++            mCcxToDestroy = mCcx =
++                new (mData) XPCCallContext(mCallerLanguage, mCx,
++                                           mCallBeginRequest == CALL_BEGINREQUEST,
++                                           mObj,
++                                           mFlattenedJSObject, mWrapper,
++                                           mTearOff);
++            if (!mCcx->IsValid()) {
++                NS_ERROR("This is not supposed to fail!");
++            }
++        }
++
++        return *mCcx;
++    }
++
++private:
++#ifdef DEBUG
++    static void AssertContextIsTopOfStack(JSContext* cx);
++#endif
++
++    enum {
++        DONT_CALL_BEGINREQUEST,
++        CALL_BEGINREQUEST,
++        CALLED_BEGINREQUEST
++    } mCallBeginRequest;
++
++    XPCCallContext *mCcx;
++    XPCCallContext *mCcxToDestroy;
++    JSContext *mCx;
++    XPCContext::LangType mCallerLanguage;
++    JSObject *mObj;
++    JSObject *mFlattenedJSObject;
++    XPCWrappedNative *mWrapper;
++    XPCWrappedNativeTearOff *mTearOff;
++    char mData[sizeof(XPCCallContext)];
++};
++
++#endif // XPCLazyCallContext_h
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -147,16 +147,17 @@
+ #include "nsINode.h"
+ #include "XPCNativeSet.h"
+ #include "XPCLock.h"
+ #include "nsXPConnect.h"
+ #include "XPCJSRuntime.h"
+ #include "XPCContext.h"
+ #include "XPCReadableJSStringWrapper.h"
+ #include "XPCCallContext.h"
++#include "XPCLazyCallContext.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -291,145 +292,16 @@ AddToCCKind(JSGCTraceKind kind)
+ {
+     return kind == JSTRACE_OBJECT || kind == JSTRACE_XML || kind == JSTRACE_SCRIPT;
+ }
+ 
+ const bool OBJ_IS_GLOBAL = true;
+ const bool OBJ_IS_NOT_GLOBAL = false;
+ 
+ 
+-/***************************************************************************/
+-
+-// No virtuals
+-class XPCLazyCallContext
+-{
+-public:
+-    XPCLazyCallContext(XPCCallContext& ccx)
+-        : mCallBeginRequest(DONT_CALL_BEGINREQUEST),
+-          mCcx(&ccx),
+-          mCcxToDestroy(nsnull)
+-#ifdef DEBUG
+-          , mCx(nsnull)
+-          , mCallerLanguage(JS_CALLER)
+-          , mObj(nsnull)
+-          , mFlattenedJSObject(nsnull)
+-          , mWrapper(nsnull)
+-          , mTearOff(nsnull)
+-#endif
+-    {
+-    }
+-    XPCLazyCallContext(XPCContext::LangType callerLanguage, JSContext* cx,
+-                       JSObject* obj = nsnull,
+-                       JSObject* flattenedJSObject = nsnull,
+-                       XPCWrappedNative* wrapper = nsnull,
+-                       XPCWrappedNativeTearOff* tearoff = nsnull)
+-        : mCallBeginRequest(callerLanguage == NATIVE_CALLER ?
+-                            CALL_BEGINREQUEST : DONT_CALL_BEGINREQUEST),
+-          mCcx(nsnull),
+-          mCcxToDestroy(nsnull),
+-          mCx(cx),
+-          mCallerLanguage(callerLanguage),
+-          mObj(obj),
+-          mFlattenedJSObject(flattenedJSObject),
+-          mWrapper(wrapper),
+-          mTearOff(tearoff)
+-    {
+-        NS_ASSERTION(cx, "Need a JS context!");
+-        NS_ASSERTION(callerLanguage == NATIVE_CALLER ||
+-                     callerLanguage == JS_CALLER,
+-                     "Can't deal with unknown caller language!");
+-#ifdef DEBUG
+-        AssertContextIsTopOfStack(cx);
+-#endif
+-    }
+-    ~XPCLazyCallContext()
+-    {
+-        if (mCcxToDestroy)
+-            mCcxToDestroy->~XPCCallContext();
+-        else if (mCallBeginRequest == CALLED_BEGINREQUEST)
+-            JS_EndRequest(mCx);
+-    }
+-    void SetWrapper(XPCWrappedNative* wrapper,
+-                    XPCWrappedNativeTearOff* tearoff);
+-    void SetWrapper(JSObject* flattenedJSObject);
+-
+-    JSContext *GetJSContext()
+-    {
+-        if (mCcx)
+-            return mCcx->GetJSContext();
+-
+-        if (mCallBeginRequest == CALL_BEGINREQUEST) {
+-            JS_BeginRequest(mCx);
+-            mCallBeginRequest = CALLED_BEGINREQUEST;
+-        }
+-
+-        return mCx;
+-    }
+-    JSObject *GetScopeForNewJSObjects() const
+-    {
+-        if (mCcx)
+-            return mCcx->GetScopeForNewJSObjects();
+-
+-        return mObj;
+-    }
+-    void SetScopeForNewJSObjects(JSObject *obj)
+-    {
+-        if (mCcx) {
+-            mCcx->SetScopeForNewJSObjects(obj);
+-            return;
+-        }
+-        NS_ABORT_IF_FALSE(!mObj, "already set!");
+-        mObj = obj;
+-    }
+-    JSObject *GetFlattenedJSObject() const
+-    {
+-        if (mCcx)
+-            return mCcx->GetFlattenedJSObject();
+-
+-        return mFlattenedJSObject;
+-    }
+-    XPCCallContext &GetXPCCallContext()
+-    {
+-        if (!mCcx) {
+-            mCcxToDestroy = mCcx =
+-                new (mData) XPCCallContext(mCallerLanguage, mCx,
+-                                           mCallBeginRequest == CALL_BEGINREQUEST,
+-                                           mObj,
+-                                           mFlattenedJSObject, mWrapper,
+-                                           mTearOff);
+-            if (!mCcx->IsValid()) {
+-                NS_ERROR("This is not supposed to fail!");
+-            }
+-        }
+-
+-        return *mCcx;
+-    }
+-
+-private:
+-#ifdef DEBUG
+-    static void AssertContextIsTopOfStack(JSContext* cx);
+-#endif
+-
+-    enum {
+-        DONT_CALL_BEGINREQUEST,
+-        CALL_BEGINREQUEST,
+-        CALLED_BEGINREQUEST
+-    } mCallBeginRequest;
+-
+-    XPCCallContext *mCcx;
+-    XPCCallContext *mCcxToDestroy;
+-    JSContext *mCx;
+-    XPCContext::LangType mCallerLanguage;
+-    JSObject *mObj;
+-    JSObject *mFlattenedJSObject;
+-    XPCWrappedNative *mWrapper;
+-    XPCWrappedNativeTearOff *mTearOff;
+-    char mData[sizeof(XPCCallContext)];
+-};
+-
+ /***************************************************************************
+ ****************************************************************************
+ *
+ * Core classes for wrapped native objects for use from JavaScript...
+ *
+ ****************************************************************************
+ ***************************************************************************/
+ 

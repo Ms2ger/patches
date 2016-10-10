@@ -1,0 +1,147 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -4252,40 +4252,40 @@ nsHTMLEditor::RemoveBlockContainer(nsIDO
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // GetPriorHTMLSibling: returns the previous editable sibling, if there is
+ //                   one within the parent
+ //                       
+ nsresult
+ nsHTMLEditor::GetPriorHTMLSibling(nsIDOMNode *inNode, nsCOMPtr<nsIDOMNode> *outNode)
+ {
+-  NS_ENSURE_TRUE(outNode && inNode, NS_ERROR_NULL_POINTER);
+-  nsresult res = NS_OK;
+-  *outNode = nsnull;
+-  nsCOMPtr<nsIDOMNode> temp, node = do_QueryInterface(inNode);
++  NS_ENSURE_TRUE(outNode, NS_ERROR_NULL_POINTER);
++
++  nsCOMPtr<nsINode> node = do_QueryInterface(inNode);
++  NS_ENSURE_TRUE(node, NS_ERROR_NULL_POINTER);
+   
+-  while (1)
+-  {
+-    res = node->GetPreviousSibling(getter_AddRefs(temp));
+-    NS_ENSURE_SUCCESS(res, res);
+-    if (!temp) {
+-      // return null sibling
+-      return NS_OK;
++  *outNode = do_QueryInterface(GetPriorHTMLSibling(node));
++  return NS_OK;
++}
++
++nsIContent*
++nsHTMLEditor::GetPriorHTMLSibling(nsINode* aNode)
++{
++  MOZ_ASSERT(aNode);
++  for (nsIContent* node = aNode->GetPreviousSibling();
++       node;
++       node = node->GetPreviousSibling()) {
++    // if it's editable, we're done
++    if (IsEditable(node)) {
++      return node;
+     }
+-    // if it's editable, we're done
+-    if (IsEditable(temp)) break;
+-    // otherwise try again
+-    node = temp;
+   }
+-  *outNode = temp;
+-  return res;
++  return nsnull;
+ }
+ 
+-
+-
+ ///////////////////////////////////////////////////////////////////////////
+ // GetPriorHTMLSibling: returns the previous editable sibling, if there is
+ //                   one within the parent.  just like above routine but
+ //                   takes a parent/offset instead of a node.
+ //                       
+ nsresult
+ nsHTMLEditor::GetPriorHTMLSibling(nsIDOMNode *inParent, int32_t inOffset, nsCOMPtr<nsIDOMNode> *outNode)
+ {
+@@ -4310,39 +4310,39 @@ nsHTMLEditor::GetPriorHTMLSibling(nsIDOM
+ ///////////////////////////////////////////////////////////////////////////
+ // GetNextHTMLSibling: returns the next editable sibling, if there is
+ //                   one within the parent
+ //                       
+ nsresult
+ nsHTMLEditor::GetNextHTMLSibling(nsIDOMNode *inNode, nsCOMPtr<nsIDOMNode> *outNode)
+ {
+   NS_ENSURE_TRUE(outNode, NS_ERROR_NULL_POINTER);
+-  nsresult res = NS_OK;
+-  *outNode = nsnull;
+-  nsCOMPtr<nsIDOMNode> temp, node = do_QueryInterface(inNode);
++
++  nsCOMPtr<nsINode> node = do_QueryInterface(inNode);
++  NS_ENSURE_TRUE(node, NS_ERROR_NULL_POINTER);
+   
+-  while (1)
+-  {
+-    res = node->GetNextSibling(getter_AddRefs(temp));
+-    NS_ENSURE_SUCCESS(res, res);
+-    if (!temp) {
+-      // return null sibling
+-      return NS_OK;
++  *outNode = do_QueryInterface(GetNextHTMLSibling(node));
++  return NS_OK;
++}
++
++nsIContent*
++nsHTMLEditor::GetNextHTMLSibling(nsINode* aNode)
++{
++  MOZ_ASSERT(aNode);
++  for (nsIContent* node = aNode->GetNextSibling();
++       node;
++       node = node->GetNextSibling()) {
++    // if it's editable, we're done
++    if (IsEditable(node)) {
++      return node;
+     }
+-    // if it's editable, we're done
+-    if (IsEditable(temp)) break;
+-    // otherwise try again
+-    node = temp;
+   }
+-  *outNode = temp;
+-  return res;
++  return nsnull;
+ }
+ 
+-
+-
+ ///////////////////////////////////////////////////////////////////////////
+ // GetNextHTMLSibling: returns the next editable sibling, if there is
+ //                   one within the parent.  just like above routine but
+ //                   takes a parent/offset instead of a node.
+ //                       
+ nsresult
+ nsHTMLEditor::GetNextHTMLSibling(nsIDOMNode *inParent, int32_t inOffset, nsCOMPtr<nsIDOMNode> *outNode)
+ {
+diff --git a/editor/libeditor/html/nsHTMLEditor.h b/editor/libeditor/html/nsHTMLEditor.h
+--- a/editor/libeditor/html/nsHTMLEditor.h
++++ b/editor/libeditor/html/nsHTMLEditor.h
+@@ -690,18 +690,20 @@ protected:
+   bool NodeIsProperty(nsIDOMNode *aNode);
+   bool HasAttr(nsIDOMNode *aNode, const nsAString *aAttribute);
+   bool HasAttrVal(nsIDOMNode *aNode, const nsAString *aAttribute, const nsAString *aValue);
+   bool IsAtFrontOfNode(nsIDOMNode *aNode, int32_t aOffset);
+   bool IsAtEndOfNode(nsIDOMNode *aNode, int32_t aOffset);
+   bool IsOnlyAttribute(nsIDOMNode *aElement, const nsAString *aAttribute);
+ 
+   nsresult RemoveBlockContainer(nsIDOMNode *inNode);
++  nsIContent* GetPriorHTMLSibling(nsINode* aNode);
+   nsresult GetPriorHTMLSibling(nsIDOMNode *inNode, nsCOMPtr<nsIDOMNode> *outNode);
+   nsresult GetPriorHTMLSibling(nsIDOMNode *inParent, int32_t inOffset, nsCOMPtr<nsIDOMNode> *outNode);
++  nsIContent* GetNextHTMLSibling(nsINode* aNode);
+   nsresult GetNextHTMLSibling(nsIDOMNode *inNode, nsCOMPtr<nsIDOMNode> *outNode);
+   nsresult GetNextHTMLSibling(nsIDOMNode *inParent, int32_t inOffset, nsCOMPtr<nsIDOMNode> *outNode);
+   nsresult GetPriorHTMLNode(nsIDOMNode *inNode, nsCOMPtr<nsIDOMNode> *outNode, bool bNoBlockCrossing = false);
+   nsresult GetPriorHTMLNode(nsIDOMNode *inParent, int32_t inOffset, nsCOMPtr<nsIDOMNode> *outNode, bool bNoBlockCrossing = false);
+   nsresult GetNextHTMLNode(nsIDOMNode *inNode, nsCOMPtr<nsIDOMNode> *outNode, bool bNoBlockCrossing = false);
+   nsresult GetNextHTMLNode(nsIDOMNode *inParent, int32_t inOffset, nsCOMPtr<nsIDOMNode> *outNode, bool bNoBlockCrossing = false);
+ 
+   nsresult IsFirstEditableChild( nsIDOMNode *aNode, bool *aOutIsFirst);

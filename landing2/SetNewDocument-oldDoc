@@ -1,0 +1,81 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -1783,17 +1783,17 @@ nsGlobalWindow::SetNewDocument(nsIDocume
+   if (aForceReuseInnerWindow &&
+       !wouldReuseInnerWindow &&
+       mDoc &&
+       mDoc->NodePrincipal() != aDocument->NodePrincipal()) {
+     NS_ERROR("Attempted forced inner window reuse while changing principal");
+     return NS_ERROR_UNEXPECTED;
+   }
+ 
+-  nsCOMPtr<nsIDocument> oldDoc(do_QueryInterface(mDocument));
++  bool documentChanged = (mDoc != aDocument);
+ 
+   nsIScriptContext *scx = GetContextInternal();
+   NS_ENSURE_TRUE(scx, NS_ERROR_NOT_INITIALIZED);
+ 
+   JSContext *cx = scx->GetNativeContext();
+ #ifndef MOZ_DISABLE_DOMCRYPTO
+   // clear smartcard events, our document has gone away.
+   if (mCrypto) {
+@@ -1860,17 +1860,17 @@ nsGlobalWindow::SetNewDocument(nsIDocume
+   NS_ASSERTION(!aState || wsh, "What kind of weird state are you giving me here?");
+ 
+   if (reUseInnerWindow) {
+     // We're reusing the current inner window.
+     NS_ASSERTION(!currentInner->IsFrozen(),
+                  "We should never be reusing a shared inner window");
+     newInnerWindow = currentInner;
+ 
+-    if (aDocument != oldDoc) {
++    if (documentChanged) {
+       xpc_UnmarkGrayObject(currentInner->mJSObject);
+       nsWindowSH::InvalidateGlobalScopePolluter(cx, currentInner->mJSObject);
+     }
+ 
+     // We're reusing the inner window, but this still counts as a navigation,
+     // so all expandos and such defined on the outer window should go away. Force
+     // all Xray wrappers to be recomputed.
+     xpc_UnmarkGrayObject(mJSObject);
+@@ -1928,17 +1928,17 @@ nsGlobalWindow::SetNewDocument(nsIDocume
+       mCreatingInnerWindow = false;
+       createdInnerWindow = true;
+       Thaw();
+ 
+       NS_ENSURE_SUCCESS(rv, rv);
+     }
+ 
+     if (currentInner && currentInner->mJSObject) {
+-      if (oldDoc == aDocument) {
++      if (!documentChanged) {
+         // Move the navigator from the old inner window to the new one since
+         // this is a document.write. This is safe from a same-origin point of
+         // view because document.write can only be used by the same origin.
+         newInnerWindow->mNavigator = currentInner->mNavigator;
+         currentInner->mNavigator = nullptr;
+         if (newInnerWindow->mNavigator) {
+           newInnerWindow->mNavigator->SetWindow(newInnerWindow);
+         }
+@@ -2087,17 +2087,17 @@ nsGlobalWindow::SetNewDocument(nsIDocume
+   // prototype (as it would be if this was done before the prototype
+   // fixup above) we would end up holding the GSP alive (through
+   // XPConnect's internal marking of wrapper prototypes) as long as
+   // the inner window was around, and if the GSP had properties on
+   // it that held an element alive we'd hold the document alive,
+   // which could hold event handlers alive, which hold the context
+   // alive etc.
+ 
+-  if ((!reUseInnerWindow || aDocument != oldDoc) && !aState) {
++  if ((!reUseInnerWindow || documentChanged) && !aState) {
+     nsCOMPtr<nsIHTMLDocument> html_doc(do_QueryInterface(mDocument));
+     nsWindowSH::InstallGlobalScopePolluter(cx, newInnerWindow->mJSObject,
+                                            html_doc);
+   }
+ 
+   aDocument->SetScriptGlobalObject(newInnerWindow);
+ 
+   if (!aState) {

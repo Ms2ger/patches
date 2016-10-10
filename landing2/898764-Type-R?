@@ -1,0 +1,618 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 898764 - Part b: Introduce CSSRule::Type(); r=?heycam
+
+diff --git a/layout/style/CSSRule.h b/layout/style/CSSRule.h
+--- a/layout/style/CSSRule.h
++++ b/layout/style/CSSRule.h
+@@ -8,20 +8,26 @@
+ #define mozilla_dom_CSSRule_h
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ class CSSRule
+ {
+ public:
++  virtual uint16_t Type() const = 0;
+ };
+ 
+ #define FORWARD_NSIDOMCSSRULE_TO_CSSRULE                                      \
+-  NS_IMETHOD GetType(uint16_t* aType) MOZ_OVERRIDE;                           \
++  NS_IMETHOD                                                                  \
++  GetType(uint16_t* aType) MOZ_OVERRIDE                                       \
++  {                                                                           \
++    *aType = Type();                                                          \
++    return NS_OK;                                                             \
++  }                                                                           \
+   NS_IMETHOD GetCssText(nsAString& aCssText) MOZ_OVERRIDE;                    \
+   NS_IMETHOD SetCssText(const nsAString& aCssText) MOZ_OVERRIDE;              \
+   NS_IMETHOD GetParentStyleSheet(nsIDOMCSSStyleSheet** aParentStyleSheet)     \
+     MOZ_OVERRIDE;                                                             \
+   NS_IMETHOD GetParentRule(nsIDOMCSSRule** aParentRule) MOZ_OVERRIDE;         \
+   virtual mozilla::dom::CSSRule* GetCSSRule() MOZ_OVERRIDE                    \
+   {                                                                           \
+     return this;                                                              \
+diff --git a/layout/style/ImportRule.h b/layout/style/ImportRule.h
+--- a/layout/style/ImportRule.h
++++ b/layout/style/ImportRule.h
+@@ -48,16 +48,22 @@ public:
+   // Rule methods
+   virtual int32_t GetType() const;
+   virtual already_AddRefed<Rule> Clone() const;
+ 
+   void SetSheet(nsCSSStyleSheet*);
+ 
+   virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+ 
++  // dom::CSSRule
++  virtual uint16_t Type() const MOZ_OVERRIDE
++  {
++    return nsIDOMCSSRule::IMPORT_RULE;
++  }
++
+   // nsIDOMCSSRule interface
+   FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+   // nsIDOMCSSImportRule interface
+   NS_DECL_NSIDOMCSSIMPORTRULE
+ 
+ private:
+   nsString  mURLSpec;
+diff --git a/layout/style/NameSpaceRule.h b/layout/style/NameSpaceRule.h
+--- a/layout/style/NameSpaceRule.h
++++ b/layout/style/NameSpaceRule.h
+@@ -52,16 +52,22 @@ public:
+ 
+   nsIAtom* GetPrefix() const { return mPrefix; }
+ 
+   void GetURLSpec(nsString& aURLSpec) const { aURLSpec = mURLSpec; }
+ 
+   virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+     MOZ_MUST_OVERRIDE;
+ 
++  // dom::CSSRule
++  virtual uint16_t Type() const MOZ_OVERRIDE
++  {
++    return nsIDOMCSSRule::NAMESPACE_RULE;
++  }
++
+   // nsIDOMCSSRule interface
+   FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+ private:
+   nsCOMPtr<nsIAtom> mPrefix;
+   nsString          mURLSpec;
+ };
+ 
+diff --git a/layout/style/StyleRule.cpp b/layout/style/StyleRule.cpp
+--- a/layout/style/StyleRule.cpp
++++ b/layout/style/StyleRule.cpp
+@@ -1008,16 +1008,22 @@ public:
+   DOMCSSStyleRule(StyleRule *aRule);
+   virtual ~DOMCSSStyleRule();
+ 
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(DOMCSSStyleRule)
+   FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+   NS_DECL_NSIDOMCSSSTYLERULE
+ 
++  // dom::CSSRule
++  virtual uint16_t Type() const MOZ_OVERRIDE
++  {
++    return nsIDOMCSSRule::STYLE_RULE;
++  }
++
+   // nsICSSStyleRuleDOMWrapper
+   NS_IMETHOD GetCSSStyleRule(StyleRule **aResult);
+ 
+   DOMCSSDeclarationImpl* DOMDeclaration() { return &mDOMDeclaration; }
+ 
+   friend class ::DOMCSSDeclarationImpl;
+ 
+ protected:
+@@ -1181,24 +1187,16 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(DOMCSSStyleRule)
+   // Just NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS here: that will call
+   // into our Trace hook, where we do the right thing with declarations
+   // already.
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+ 
+ NS_IMETHODIMP
+-DOMCSSStyleRule::GetType(uint16_t* aType)
+-{
+-  *aType = nsIDOMCSSRule::STYLE_RULE;
+-  
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+ DOMCSSStyleRule::GetCssText(nsAString& aCssText)
+ {
+   if (!Rule()) {
+     aCssText.Truncate();
+   } else {
+     Rule()->GetCssText(aCssText);
+   }
+   return NS_OK;
+diff --git a/layout/style/nsCSSRules.cpp b/layout/style/nsCSSRules.cpp
+--- a/layout/style/nsCSSRules.cpp
++++ b/layout/style/nsCSSRules.cpp
+@@ -276,23 +276,16 @@ CharsetRule::GetEncoding(nsAString& aEnc
+ NS_IMETHODIMP
+ CharsetRule::SetEncoding(const nsAString& aEncoding)
+ {
+   mEncoding = aEncoding;
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+-CharsetRule::GetType(uint16_t* aType)
+-{
+-  *aType = nsIDOMCSSRule::CHARSET_RULE;
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+ CharsetRule::GetCssText(nsAString& aCssText)
+ {
+   aCssText.AssignLiteral("@charset \"");
+   aCssText.Append(mEncoding);
+   aCssText.AppendLiteral("\";");
+   return NS_OK;
+ }
+ 
+@@ -417,24 +410,16 @@ ImportRule::SetSheet(nsCSSStyleSheet* aS
+   // set our medialist to be the same as the sheet's medialist
+   nsCOMPtr<nsIDOMMediaList> mediaList;
+   mChildSheet->GetMedia(getter_AddRefs(mediaList));
+   NS_ABORT_IF_FALSE(mediaList, "GetMedia returned null");
+   mMedia = static_cast<nsMediaList*>(mediaList.get());
+ }
+ 
+ NS_IMETHODIMP
+-ImportRule::GetType(uint16_t* aType)
+-{
+-  NS_ENSURE_ARG_POINTER(aType);
+-  *aType = nsIDOMCSSRule::IMPORT_RULE;
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+ ImportRule::GetCssText(nsAString& aCssText)
+ {
+   aCssText.AssignLiteral("@import url(");
+   nsStyleUtil::AppendEscapedCSSString(mURLSpec, aCssText);
+   aCssText.Append(NS_LITERAL_STRING(")"));
+   if (mMedia) {
+     nsAutoString mediaText;
+     mMedia->GetText(mediaText);
+@@ -853,23 +838,16 @@ MediaRule::SetMedia(nsMediaList* aMedia)
+   mMedia = aMedia;
+   if (aMedia)
+     mMedia->SetStyleSheet(GetStyleSheet());
+   return NS_OK;
+ }
+ 
+ // nsIDOMCSSRule methods
+ NS_IMETHODIMP
+-MediaRule::GetType(uint16_t* aType)
+-{
+-  *aType = nsIDOMCSSRule::MEDIA_RULE;
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+ MediaRule::GetCssText(nsAString& aCssText)
+ {
+   aCssText.AssignLiteral("@media ");
+   AppendConditionText(aCssText);
+   GroupRule::AppendRulesToCssText(aCssText);
+   return NS_OK;
+ }
+ 
+@@ -1060,24 +1038,16 @@ DocumentRule::GetType() const
+ DocumentRule::Clone() const
+ {
+   nsRefPtr<Rule> clone = new DocumentRule(*this);
+   return clone.forget();
+ }
+ 
+ // nsIDOMCSSRule methods
+ NS_IMETHODIMP
+-DocumentRule::GetType(uint16_t* aType)
+-{
+-  // XXX What should really happen here?
+-  *aType = nsIDOMCSSRule::UNKNOWN_RULE;
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+ DocumentRule::GetCssText(nsAString& aCssText)
+ {
+   aCssText.AssignLiteral("@-moz-document ");
+   AppendConditionText(aCssText);
+   GroupRule::AppendRulesToCssText(aCssText);
+   return NS_OK;
+ }
+ 
+@@ -1305,23 +1275,16 @@ NameSpaceRule::GetType() const
+ /* virtual */ already_AddRefed<Rule>
+ NameSpaceRule::Clone() const
+ {
+   nsRefPtr<Rule> clone = new NameSpaceRule(*this);
+   return clone.forget();
+ }
+ 
+ NS_IMETHODIMP
+-NameSpaceRule::GetType(uint16_t* aType)
+-{
+-  *aType = nsIDOMCSSRule::NAMESPACE_RULE;
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+ NameSpaceRule::GetCssText(nsAString& aCssText)
+ {
+   aCssText.AssignLiteral("@namespace ");
+   if (mPrefix) {
+     aCssText.Append(nsDependentAtomString(mPrefix) + NS_LITERAL_STRING(" "));
+   }
+   aCssText.AppendLiteral("url(");
+   nsStyleUtil::AppendEscapedCSSString(mURLSpec, aCssText);
+@@ -1816,23 +1779,16 @@ nsCSSFontFaceRule::List(FILE* out, int32
+ 
+ /* virtual */ int32_t
+ nsCSSFontFaceRule::GetType() const
+ {
+   return Rule::FONT_FACE_RULE;
+ }
+ 
+ NS_IMETHODIMP
+-nsCSSFontFaceRule::GetType(uint16_t* aType)
+-{
+-  *aType = nsIDOMCSSRule::FONT_FACE_RULE;
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+ nsCSSFontFaceRule::GetCssText(nsAString& aCssText)
+ {
+   nsAutoString propText;
+   mDecl.GetCssText(propText);
+ 
+   aCssText.AssignLiteral("@font-face {\n");
+   aCssText.Append(propText);
+   aCssText.Append('}');
+@@ -2019,23 +1975,16 @@ nsCSSFontFeatureValuesRule::List(FILE* o
+ 
+ /* virtual */ int32_t
+ nsCSSFontFeatureValuesRule::GetType() const
+ {
+   return Rule::FONT_FEATURE_VALUES_RULE;
+ }
+ 
+ NS_IMETHODIMP
+-nsCSSFontFeatureValuesRule::GetType(uint16_t* aType)
+-{
+-  *aType = nsIDOMCSSRule::FONT_FEATURE_VALUES_RULE;
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+ nsCSSFontFeatureValuesRule::GetCssText(nsAString& aCssText)
+ {
+   FontFeatureValuesRuleToString(mFamilyList, mFeatureValues, aCssText);
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsCSSFontFeatureValuesRule::SetCssText(const nsAString& aCssText)
+@@ -2299,23 +2248,16 @@ nsCSSKeyframeRule::List(FILE* out, int32
+ 
+ /* virtual */ int32_t
+ nsCSSKeyframeRule::GetType() const
+ {
+   return Rule::KEYFRAME_RULE;
+ }
+ 
+ NS_IMETHODIMP
+-nsCSSKeyframeRule::GetType(uint16_t* aType)
+-{
+-  *aType = nsIDOMCSSRule::KEYFRAME_RULE;
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+ nsCSSKeyframeRule::GetCssText(nsAString& aCssText)
+ {
+   DoGetKeyText(aCssText);
+   aCssText.AppendLiteral(" { ");
+   nsAutoString tmp;
+   mDeclaration->ToString(tmp);
+   aCssText.Append(tmp);
+   aCssText.AppendLiteral(" }");
+@@ -2474,23 +2416,16 @@ nsCSSKeyframesRule::List(FILE* out, int3
+ 
+ /* virtual */ int32_t
+ nsCSSKeyframesRule::GetType() const
+ {
+   return Rule::KEYFRAMES_RULE;
+ }
+ 
+ NS_IMETHODIMP
+-nsCSSKeyframesRule::GetType(uint16_t* aType)
+-{
+-  *aType = nsIDOMCSSRule::KEYFRAMES_RULE;
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+ nsCSSKeyframesRule::GetCssText(nsAString& aCssText)
+ {
+   aCssText.AssignLiteral("@keyframes ");
+   aCssText.Append(mName);
+   aCssText.AppendLiteral(" {\n");
+   nsAutoString tmp;
+   for (uint32_t i = 0, i_end = mRules.Count(); i != i_end; ++i) {
+     static_cast<nsCSSKeyframeRule*>(mRules[i])->GetCssText(tmp);
+@@ -2771,23 +2706,16 @@ nsCSSPageRule::List(FILE* out, int32_t a
+ 
+ /* virtual */ int32_t
+ nsCSSPageRule::GetType() const
+ {
+   return Rule::PAGE_RULE;
+ }
+ 
+ NS_IMETHODIMP
+-nsCSSPageRule::GetType(uint16_t* aType)
+-{
+-  *aType = nsIDOMCSSRule::PAGE_RULE;
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+ nsCSSPageRule::GetCssText(nsAString& aCssText)
+ {
+   aCssText.AppendLiteral("@page { ");
+   nsAutoString tmp;
+   mDeclaration->ToString(tmp);
+   aCssText.Append(tmp);
+   aCssText.AppendLiteral(" }");
+   return NS_OK;
+@@ -2921,23 +2849,16 @@ NS_INTERFACE_MAP_BEGIN(CSSSupportsRule)
+   NS_INTERFACE_MAP_ENTRY(nsIDOMCSSConditionRule)
+   NS_INTERFACE_MAP_ENTRY(nsIDOMCSSSupportsRule)
+   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIStyleRule)
+   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(CSSSupportsRule)
+ NS_INTERFACE_MAP_END_INHERITING(GroupRule)
+ 
+ // nsIDOMCSSRule methods
+ NS_IMETHODIMP
+-CSSSupportsRule::GetType(uint16_t* aType)
+-{
+-  *aType = nsIDOMCSSRule::SUPPORTS_RULE;
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+ CSSSupportsRule::GetCssText(nsAString& aCssText)
+ {
+   aCssText.AssignLiteral("@supports ");
+   aCssText.Append(mCondition);
+   css::GroupRule::AppendRulesToCssText(aCssText);
+   return NS_OK;
+ }
+ 
+diff --git a/layout/style/nsCSSRules.h b/layout/style/nsCSSRules.h
+--- a/layout/style/nsCSSRules.h
++++ b/layout/style/nsCSSRules.h
+@@ -70,16 +70,22 @@ public:
+   {
+     return this;
+   }
+   virtual nsIDOMCSSRule* GetExistingDOMRule()
+   {
+     return this;
+   }
+ 
++  // dom::CSSRule
++  virtual uint16_t Type() const MOZ_OVERRIDE
++  {
++    return nsIDOMCSSRule::MEDIA_RULE;
++  }
++
+   // nsIDOMCSSRule interface
+   FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+   // nsIDOMCSSGroupingRule interface
+   NS_DECL_NSIDOMCSSGROUPINGRULE
+ 
+   // nsIDOMCSSConditionRule interface
+   NS_DECL_NSIDOMCSSCONDITIONRULE
+@@ -128,16 +134,23 @@ public:
+   {
+     return this;
+   }
+   virtual nsIDOMCSSRule* GetExistingDOMRule()
+   {
+     return this;
+   }
+ 
++  // dom::CSSRule
++  virtual uint16_t Type() const MOZ_OVERRIDE
++  {
++    // XXX What should really happen here?
++    return nsIDOMCSSRule::UNKNOWN_RULE;
++  }
++
+   // nsIDOMCSSRule interface
+   FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+   // nsIDOMCSSGroupingRule interface
+   NS_DECL_NSIDOMCSSGROUPINGRULE
+ 
+   // nsIDOMCSSConditionRule interface
+   NS_DECL_NSIDOMCSSCONDITIONRULE
+@@ -250,16 +263,22 @@ public:
+ #endif
+ 
+   // Rule methods
+   DECL_STYLE_RULE_INHERIT
+ 
+   virtual int32_t GetType() const MOZ_OVERRIDE;
+   virtual already_AddRefed<mozilla::css::Rule> Clone() const;
+ 
++  // dom::CSSRule
++  virtual uint16_t Type() const MOZ_OVERRIDE
++  {
++    return nsIDOMCSSRule::FONT_FACE_RULE;
++  }
++
+   // nsIDOMCSSRule interface
+   FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+   // nsIDOMCSSFontFaceRule interface
+   NS_DECL_NSIDOMCSSFONTFACERULE
+ 
+   void SetDesc(nsCSSFontDesc aDescID, nsCSSValue const & aValue);
+   void GetDesc(nsCSSFontDesc aDescID, nsCSSValue & aValue);
+@@ -314,16 +333,22 @@ public:
+ #endif
+ 
+   // Rule methods
+   DECL_STYLE_RULE_INHERIT
+ 
+   virtual int32_t GetType() const MOZ_OVERRIDE;
+   virtual already_AddRefed<mozilla::css::Rule> Clone() const MOZ_OVERRIDE;
+ 
++  // dom::CSSRule
++  virtual uint16_t Type() const MOZ_OVERRIDE
++  {
++    return nsIDOMCSSRule::FONT_FEATURE_VALUES_RULE;
++  }
++
+   // nsIDOMCSSRule interface
+   FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+   // nsIDOMCSSFontFaceRule interface
+   NS_DECL_NSIDOMCSSFONTFEATUREVALUESRULE
+ 
+   const nsTArray<nsString>& GetFamilyList() { return mFamilyList; }
+   void SetFamilyList(const nsAString& aFamilyList, bool& aContainsGeneric);
+@@ -371,16 +396,22 @@ public:
+ #ifdef DEBUG
+   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const MOZ_OVERRIDE;
+ #endif
+ 
+   // Rule methods
+   virtual int32_t GetType() const;
+   virtual already_AddRefed<Rule> Clone() const;
+ 
++  // dom::CSSRule
++  virtual uint16_t Type() const MOZ_OVERRIDE
++  {
++    return nsIDOMCSSRule::CHARSET_RULE;
++  }
++
+   // nsIDOMCSSRule interface
+   FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+   // nsIDOMCSSCharsetRule methods
+   NS_IMETHOD GetEncoding(nsAString& aEncoding) MOZ_OVERRIDE;
+   NS_IMETHOD SetEncoding(const nsAString& aEncoding) MOZ_OVERRIDE;
+ 
+   virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+@@ -443,16 +474,22 @@ public:
+   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const MOZ_OVERRIDE;
+ #endif
+ 
+   // Rule methods
+   DECL_STYLE_RULE_INHERIT
+   virtual int32_t GetType() const MOZ_OVERRIDE;
+   virtual already_AddRefed<mozilla::css::Rule> Clone() const;
+ 
++  // dom::CSSRule
++  virtual uint16_t Type() const MOZ_OVERRIDE
++  {
++    return nsIDOMCSSRule::KEYFRAME_RULE;
++  }
++
+   // nsIDOMCSSRule interface
+   FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+   // nsIDOMMozCSSKeyframeRule interface
+   NS_DECL_NSIDOMMOZCSSKEYFRAMERULE
+ 
+   const nsTArray<float>& GetKeys() const     { return mKeys; }
+   mozilla::css::Declaration* Declaration()   { return mDeclaration; }
+@@ -496,16 +533,23 @@ public:
+   virtual nsIDOMCSSRule* GetDOMRule()
+   {
+     return this;
+   }
+   virtual nsIDOMCSSRule* GetExistingDOMRule()
+   {
+     return this;
+   }
++
++  // dom::CSSRule
++  virtual uint16_t Type() const MOZ_OVERRIDE
++  {
++    return nsIDOMCSSRule::KEYFRAMES_RULE;
++  }
++
+   // nsIDOMCSSRule interface
+   FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+   // nsIDOMMozCSSKeyframesRule interface
+   NS_DECL_NSIDOMMOZCSSKEYFRAMESRULE
+ 
+   // rest of GroupRule
+   virtual bool UseForPresentation(nsPresContext* aPresContext,
+@@ -571,16 +615,22 @@ public:
+   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const MOZ_OVERRIDE;
+ #endif
+ 
+   // Rule methods
+   DECL_STYLE_RULE_INHERIT
+   virtual int32_t GetType() const MOZ_OVERRIDE;
+   virtual already_AddRefed<mozilla::css::Rule> Clone() const;
+ 
++  // dom::CSSRule
++  virtual uint16_t Type() const MOZ_OVERRIDE
++  {
++    return nsIDOMCSSRule::PAGE_RULE;
++  }
++
+   // nsIDOMCSSRule interface
+   FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+   // nsIDOMCSSPageRule interface
+   NS_DECL_NSIDOMCSSPAGERULE
+ 
+   mozilla::css::Declaration* Declaration()   { return mDeclaration; }
+ 
+@@ -622,16 +672,22 @@ public:
+   }
+   virtual nsIDOMCSSRule* GetExistingDOMRule()
+   {
+     return this;
+   }
+ 
+   NS_DECL_ISUPPORTS_INHERITED
+ 
++  // dom::CSSRule
++  virtual uint16_t Type() const MOZ_OVERRIDE
++  {
++    return nsIDOMCSSRule::SUPPORTS_RULE;
++  }
++
+   // nsIDOMCSSRule interface
+   FORWARD_NSIDOMCSSRULE_TO_CSSRULE
+ 
+   // nsIDOMCSSGroupingRule interface
+   NS_DECL_NSIDOMCSSGROUPINGRULE
+ 
+   // nsIDOMCSSConditionRule interface
+   NS_DECL_NSIDOMCSSCONDITIONRULE

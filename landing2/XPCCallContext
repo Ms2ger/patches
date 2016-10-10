@@ -1,0 +1,587 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/public/nsAXPCNativeCallContext.h b/js/xpconnect/public/nsAXPCNativeCallContext.h
+--- a/js/xpconnect/public/nsAXPCNativeCallContext.h
++++ b/js/xpconnect/public/nsAXPCNativeCallContext.h
+@@ -37,37 +37,44 @@
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #ifndef nsAXPCNativeCallContext_h__
+ #define nsAXPCNativeCallContext_h__
+ 
++#include "nscore.h"
++
++#include "jspubtd.h"
++
++class nsIClassInfo;
++class nsIInterfaceInfo;
++class nsISupports;
+ class nsIXPConnectWrappedNative;
+ 
+ /**
+ * A native call context is allocated on the stack when XPConnect calls a
+ * native method. Holding a pointer to this object beyond the currently
+ * executing stack frame is not permitted.
+ */
+ class nsAXPCNativeCallContext
+ {
+ public:
+     NS_IMETHOD GetCallee(nsISupports **aResult) = 0;
+     NS_IMETHOD GetCalleeMethodIndex(uint16_t *aResult) = 0;
+     NS_IMETHOD GetCalleeWrapper(nsIXPConnectWrappedNative **aResult) = 0;
+     NS_IMETHOD GetJSContext(JSContext **aResult) = 0;
+     NS_IMETHOD GetArgc(uint32_t *aResult) = 0;
+-    NS_IMETHOD GetArgvPtr(jsval **aResult) = 0;
++    NS_IMETHOD GetArgvPtr(JS::Value **aResult) = 0;
+ 
+     /**
+      * This may be NULL if the JS caller is ignoring the result of the call.
+      */
+-    NS_IMETHOD GetRetValPtr(jsval **aResult) = 0;
++    NS_IMETHOD GetRetValPtr(JS::Value **aResult) = 0;
+ 
+     /**
+      * Set this to indicate that the callee has directly set the return value
+      * (using RetValPtr and the JSAPI). If set then xpconnect will not attempt
+      * to overwrite it with the converted retval from the C++ callee.
+      */
+     NS_IMETHOD GetReturnValueWasSet(bool *aResult) = 0;
+     NS_IMETHOD SetReturnValueWasSet(bool aValue) = 0;
+diff --git a/js/xpconnect/src/XPCCallContext.cpp b/js/xpconnect/src/XPCCallContext.cpp
+--- a/js/xpconnect/src/XPCCallContext.cpp
++++ b/js/xpconnect/src/XPCCallContext.cpp
+@@ -35,16 +35,18 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* Call context. */
+ 
++#include "XPCCallContext.h"
++
+ #include "xpcprivate.h"
+ 
+ XPCCallContext::XPCCallContext(XPCContext::LangType callerLanguage,
+                                JSContext* cx    /* = nsnull    */,
+                                JSObject* obj    /* = nsnull    */,
+                                JSObject* funobj /* = nsnull    */,
+                                jsid name        /* = JSID_VOID */,
+                                uintN argc       /* = NO_ARGS   */,
+diff --git a/js/xpconnect/src/XPCCallContext.h b/js/xpconnect/src/XPCCallContext.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCCallContext.h
+@@ -0,0 +1,245 @@
++#ifndef XPCCallContext_h
++#define XPCCallContext_h
++
++#include "nsAXPCNativeCallContext.h"
++
++#include "XPCContext.h"
++#include "XPCReadableJSStringWrapper.h"
++
++#include "mozilla/Util.h"
++
++class XPCNativeInterface;
++class XPCNativeMember;
++class XPCNativeScriptableInfo;
++class XPCNativeSet;
++class XPCPerThreadData;
++class XPCWrappedNativeProto;
++class XPCWrappedNativeTearOff;
++
++
++// XPCCallContext is ALWAYS declared as a local variable in some function;
++// i.e. instance lifetime is always controled by some C++ function returning.
++//
++// These things are created frequently in many places. We *intentionally* do
++// not inialialize all members in order to save on construction overhead.
++// Some constructor pass more valid params than others. We init what must be
++// init'd and leave other members undefined. In debug builds the accessors
++// use a CHECK_STATE macro to track whether or not the object is in a valid
++// state to answer the question a caller might be asking. As long as this
++// class is maintained correctly it can do its job without a bunch of added
++// overhead from useless initializations and non-DEBUG error checking.
++//
++// Note that most accessors are inlined.
++
++class XPCCallContext : public nsAXPCNativeCallContext
++{
++public:
++    NS_IMETHOD GetCallee(nsISupports **aResult);
++    NS_IMETHOD GetCalleeMethodIndex(uint16_t *aResult);
++    NS_IMETHOD GetCalleeWrapper(nsIXPConnectWrappedNative **aResult);
++    NS_IMETHOD GetJSContext(JSContext **aResult);
++    NS_IMETHOD GetArgc(uint32_t *aResult);
++    NS_IMETHOD GetArgvPtr(JS::Value **aResult);
++    NS_IMETHOD GetRetValPtr(JS::Value **aResult);
++    NS_IMETHOD GetReturnValueWasSet(bool *aResult);
++    NS_IMETHOD SetReturnValueWasSet(bool aValue);
++    NS_IMETHOD GetCalleeInterface(nsIInterfaceInfo **aResult);
++    NS_IMETHOD GetCalleeClassInfo(nsIClassInfo **aResult);
++    NS_IMETHOD GetPreviousCallContext(nsAXPCNativeCallContext **aResult);
++    NS_IMETHOD GetLanguage(uint16_t *aResult);
++
++    enum {NO_ARGS = (uintN) -1};
++
++    XPCCallContext(XPCContext::LangType callerLanguage,
++                   JSContext* cx    = nsnull,
++                   JSObject* obj    = nsnull,
++                   JSObject* funobj = nsnull,
++                   jsid id          = JSID_VOID,
++                   uintN argc       = NO_ARGS,
++                   JS::Value *argv  = nsnull,
++                   JS::Value *rval  = nsnull);
++
++    virtual ~XPCCallContext();
++
++    inline JSBool                       IsValid() const ;
++
++    inline nsXPConnect*                 GetXPConnect() const ;
++    inline XPCJSRuntime*                GetRuntime() const ;
++    inline XPCPerThreadData*            GetThreadData() const ;
++    inline XPCContext*                  GetXPCContext() const ;
++    inline JSContext*                   GetJSContext() const ;
++    inline JSBool                       GetContextPopRequired() const ;
++    inline XPCContext::LangType         GetCallerLanguage() const ;
++    inline XPCContext::LangType         GetPrevCallerLanguage() const ;
++    inline XPCCallContext*              GetPrevCallContext() const ;
++
++    /*
++     * The 'scope for new JSObjects' will be the scope for objects created when
++     * carrying out a JS/C++ call. This member is only available if HAVE_SCOPE.
++     * The object passed to the ccx constructor is used as the scope for new
++     * JSObjects. However, this object is also queried for a wrapper, so
++     * clients that don't want a wrapper (and thus pass NULL to the ccx
++     * constructor) need to manually call SetScopeForNewJSObjects.
++     */
++    inline JSObject*                    GetScopeForNewJSObjects() const ;
++    inline void                         SetScopeForNewJSObjects(JSObject *obj) ;
++
++    inline JSObject*                    GetFlattenedJSObject() const ;
++    inline nsISupports*                 GetIdentityObject() const ;
++    inline XPCWrappedNative*            GetWrapper() const ;
++    inline XPCWrappedNativeProto*       GetProto() const ;
++
++    inline JSBool                       CanGetTearOff() const ;
++    inline XPCWrappedNativeTearOff*     GetTearOff() const ;
++
++    inline XPCNativeScriptableInfo*     GetScriptableInfo() const ;
++    inline JSBool                       CanGetSet() const ;
++    inline XPCNativeSet*                GetSet() const ;
++    inline JSBool                       CanGetInterface() const ;
++    inline XPCNativeInterface*          GetInterface() const ;
++    inline XPCNativeMember*             GetMember() const ;
++    inline JSBool                       HasInterfaceAndMember() const ;
++    inline jsid                         GetName() const ;
++    inline JSBool                       GetStaticMemberIsLocal() const ;
++    inline uintN                        GetArgc() const ;
++    inline JS::Value*                   GetArgv() const ;
++    inline JS::Value*                   GetRetVal() const ;
++    inline JSBool                       GetReturnValueWasSet() const ;
++
++    inline uint16_t                     GetMethodIndex() const ;
++    inline void                         SetMethodIndex(uint16_t index) ;
++
++    inline JSBool   GetDestroyJSContextInDestructor() const;
++    inline void     SetDestroyJSContextInDestructor(JSBool b);
++
++    inline jsid GetResolveName() const;
++    inline jsid SetResolveName(jsid name);
++
++    inline XPCWrappedNative* GetResolvingWrapper() const;
++    inline XPCWrappedNative* SetResolvingWrapper(XPCWrappedNative* w);
++
++    inline void SetRetVal(JS::Value val);
++
++    void SetName(jsid name);
++    void SetArgsAndResultPtr(uintN argc, JS::Value *argv, JS::Value *rval);
++    void SetCallInfo(XPCNativeInterface* iface, XPCNativeMember* member,
++                     JSBool isSetter);
++
++    nsresult  CanCallNow();
++
++    void SystemIsBeingShutDown();
++
++    operator JSContext*() const {return GetJSContext();}
++
++    XPCReadableJSStringWrapper *NewStringWrapper(const PRUnichar *str, uint32_t len);
++    void DeleteString(nsAString *string);
++
++private:
++
++    // no copy ctor or assignment allowed
++    XPCCallContext(const XPCCallContext& r); // not implemented
++    XPCCallContext& operator= (const XPCCallContext& r); // not implemented
++
++    friend class XPCLazyCallContext;
++    XPCCallContext(XPCContext::LangType callerLanguage,
++                   JSContext* cx,
++                   JSBool callBeginRequest,
++                   JSObject* obj,
++                   JSObject* flattenedJSObject,
++                   XPCWrappedNative* wn,
++                   XPCWrappedNativeTearOff* tearoff);
++
++    enum WrapperInitOptions {
++        WRAPPER_PASSED_TO_CONSTRUCTOR,
++        INIT_SHOULD_LOOKUP_WRAPPER
++    };
++
++    void Init(XPCContext::LangType callerLanguage,
++              JSBool callBeginRequest,
++              JSObject* obj,
++              JSObject* funobj,
++              WrapperInitOptions wrapperInitOptions,
++              jsid name,
++              uintN argc,
++              JS::Value *argv,
++              JS::Value *rval);
++
++private:
++    // posible values for mState
++    enum State {
++        INIT_FAILED,
++        SYSTEM_SHUTDOWN,
++        HAVE_CONTEXT,
++        HAVE_SCOPE,
++        HAVE_OBJECT,
++        HAVE_NAME,
++        HAVE_ARGS,
++        READY_TO_CALL,
++        CALL_DONE
++    };
++
++#ifdef DEBUG
++inline void CHECK_STATE(int s) const {NS_ASSERTION(mState >= s, "bad state");}
++#else
++#define CHECK_STATE(s) ((void)0)
++#endif
++
++private:
++    State                           mState;
++
++    nsXPConnect*                    mXPC;
++
++    XPCPerThreadData*               mThreadData;
++    XPCContext*                     mXPCContext;
++    JSContext*                      mJSContext;
++    JSBool                          mContextPopRequired;
++    JSBool                          mDestroyJSContextInDestructor;
++
++    XPCContext::LangType            mCallerLanguage;
++
++    // ctor does not necessarily init the following. BEWARE!
++
++    XPCContext::LangType            mPrevCallerLanguage;
++
++    XPCCallContext*                 mPrevCallContext;
++
++    JSObject*                       mScopeForNewJSObjects;
++    JSObject*                       mFlattenedJSObject;
++    XPCWrappedNative*               mWrapper;
++    XPCWrappedNativeTearOff*        mTearOff;
++
++    XPCNativeScriptableInfo*        mScriptableInfo;
++
++    XPCNativeSet*                   mSet;
++    XPCNativeInterface*             mInterface;
++    XPCNativeMember*                mMember;
++
++    jsid                            mName;
++    JSBool                          mStaticMemberIsLocal;
++
++    uintN                           mArgc;
++    JS::Value*                      mArgv;
++    JS::Value*                      mRetVal;
++
++    JSBool                          mReturnValueWasSet;
++    uint16_t                        mMethodIndex;
++
++#define XPCCCX_STRING_CACHE_SIZE 2
++
++    // String wrapper entry, holds a string, and a boolean that tells
++    // whether the string is in use or not.
++    //
++    // NB: The string is not stored by value so that we avoid the cost of
++    // construction/destruction.
++    struct StringWrapperEntry
++    {
++        StringWrapperEntry() : mInUse(false) { }
++
++        mozilla::AlignedStorage2<XPCReadableJSStringWrapper> mString;
++        bool mInUse;
++    };
++
++    StringWrapperEntry mScratchStrings[XPCCCX_STRING_CACHE_SIZE];
++};
++
++#endif // XPCCallContext_h
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -146,16 +146,17 @@
+ 
+ #include "nsINode.h"
+ #include "XPCNativeSet.h"
+ #include "XPCLock.h"
+ #include "nsXPConnect.h"
+ #include "XPCJSRuntime.h"
+ #include "XPCContext.h"
+ #include "XPCReadableJSStringWrapper.h"
++#include "XPCCallContext.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -293,241 +294,16 @@ AddToCCKind(JSGCTraceKind kind)
+ 
+ const bool OBJ_IS_GLOBAL = true;
+ const bool OBJ_IS_NOT_GLOBAL = false;
+ 
+ 
+ /***************************************************************************/
+ 
+ // No virtuals
+-// XPCCallContext is ALWAYS declared as a local variable in some function;
+-// i.e. instance lifetime is always controled by some C++ function returning.
+-//
+-// These things are created frequently in many places. We *intentionally* do
+-// not inialialize all members in order to save on construction overhead.
+-// Some constructor pass more valid params than others. We init what must be
+-// init'd and leave other members undefined. In debug builds the accessors
+-// use a CHECK_STATE macro to track whether or not the object is in a valid
+-// state to answer the question a caller might be asking. As long as this
+-// class is maintained correctly it can do its job without a bunch of added
+-// overhead from useless initializations and non-DEBUG error checking.
+-//
+-// Note that most accessors are inlined.
+-
+-class XPCCallContext : public nsAXPCNativeCallContext
+-{
+-public:
+-    NS_IMETHOD GetCallee(nsISupports **aResult);
+-    NS_IMETHOD GetCalleeMethodIndex(uint16_t *aResult);
+-    NS_IMETHOD GetCalleeWrapper(nsIXPConnectWrappedNative **aResult);
+-    NS_IMETHOD GetJSContext(JSContext **aResult);
+-    NS_IMETHOD GetArgc(uint32_t *aResult);
+-    NS_IMETHOD GetArgvPtr(jsval **aResult);
+-    NS_IMETHOD GetRetValPtr(jsval **aResult);
+-    NS_IMETHOD GetReturnValueWasSet(bool *aResult);
+-    NS_IMETHOD SetReturnValueWasSet(bool aValue);
+-    NS_IMETHOD GetCalleeInterface(nsIInterfaceInfo **aResult);
+-    NS_IMETHOD GetCalleeClassInfo(nsIClassInfo **aResult);
+-    NS_IMETHOD GetPreviousCallContext(nsAXPCNativeCallContext **aResult);
+-    NS_IMETHOD GetLanguage(uint16_t *aResult);
+-
+-    enum {NO_ARGS = (uintN) -1};
+-
+-    XPCCallContext(XPCContext::LangType callerLanguage,
+-                   JSContext* cx    = nsnull,
+-                   JSObject* obj    = nsnull,
+-                   JSObject* funobj = nsnull,
+-                   jsid id          = JSID_VOID,
+-                   uintN argc       = NO_ARGS,
+-                   jsval *argv      = nsnull,
+-                   jsval *rval      = nsnull);
+-
+-    virtual ~XPCCallContext();
+-
+-    inline JSBool                       IsValid() const ;
+-
+-    inline nsXPConnect*                 GetXPConnect() const ;
+-    inline XPCJSRuntime*                GetRuntime() const ;
+-    inline XPCPerThreadData*            GetThreadData() const ;
+-    inline XPCContext*                  GetXPCContext() const ;
+-    inline JSContext*                   GetJSContext() const ;
+-    inline JSBool                       GetContextPopRequired() const ;
+-    inline XPCContext::LangType         GetCallerLanguage() const ;
+-    inline XPCContext::LangType         GetPrevCallerLanguage() const ;
+-    inline XPCCallContext*              GetPrevCallContext() const ;
+-
+-    /*
+-     * The 'scope for new JSObjects' will be the scope for objects created when
+-     * carrying out a JS/C++ call. This member is only available if HAVE_SCOPE.
+-     * The object passed to the ccx constructor is used as the scope for new
+-     * JSObjects. However, this object is also queried for a wrapper, so
+-     * clients that don't want a wrapper (and thus pass NULL to the ccx
+-     * constructor) need to manually call SetScopeForNewJSObjects.
+-     */
+-    inline JSObject*                    GetScopeForNewJSObjects() const ;
+-    inline void                         SetScopeForNewJSObjects(JSObject *obj) ;
+-
+-    inline JSObject*                    GetFlattenedJSObject() const ;
+-    inline nsISupports*                 GetIdentityObject() const ;
+-    inline XPCWrappedNative*            GetWrapper() const ;
+-    inline XPCWrappedNativeProto*       GetProto() const ;
+-
+-    inline JSBool                       CanGetTearOff() const ;
+-    inline XPCWrappedNativeTearOff*     GetTearOff() const ;
+-
+-    inline XPCNativeScriptableInfo*     GetScriptableInfo() const ;
+-    inline JSBool                       CanGetSet() const ;
+-    inline XPCNativeSet*                GetSet() const ;
+-    inline JSBool                       CanGetInterface() const ;
+-    inline XPCNativeInterface*          GetInterface() const ;
+-    inline XPCNativeMember*             GetMember() const ;
+-    inline JSBool                       HasInterfaceAndMember() const ;
+-    inline jsid                         GetName() const ;
+-    inline JSBool                       GetStaticMemberIsLocal() const ;
+-    inline uintN                        GetArgc() const ;
+-    inline jsval*                       GetArgv() const ;
+-    inline jsval*                       GetRetVal() const ;
+-    inline JSBool                       GetReturnValueWasSet() const ;
+-
+-    inline uint16_t                     GetMethodIndex() const ;
+-    inline void                         SetMethodIndex(uint16_t index) ;
+-
+-    inline JSBool   GetDestroyJSContextInDestructor() const;
+-    inline void     SetDestroyJSContextInDestructor(JSBool b);
+-
+-    inline jsid GetResolveName() const;
+-    inline jsid SetResolveName(jsid name);
+-
+-    inline XPCWrappedNative* GetResolvingWrapper() const;
+-    inline XPCWrappedNative* SetResolvingWrapper(XPCWrappedNative* w);
+-
+-    inline void SetRetVal(jsval val);
+-
+-    void SetName(jsid name);
+-    void SetArgsAndResultPtr(uintN argc, jsval *argv, jsval *rval);
+-    void SetCallInfo(XPCNativeInterface* iface, XPCNativeMember* member,
+-                     JSBool isSetter);
+-
+-    nsresult  CanCallNow();
+-
+-    void SystemIsBeingShutDown();
+-
+-    operator JSContext*() const {return GetJSContext();}
+-
+-    XPCReadableJSStringWrapper *NewStringWrapper(const PRUnichar *str, uint32_t len);
+-    void DeleteString(nsAString *string);
+-
+-private:
+-
+-    // no copy ctor or assignment allowed
+-    XPCCallContext(const XPCCallContext& r); // not implemented
+-    XPCCallContext& operator= (const XPCCallContext& r); // not implemented
+-
+-    friend class XPCLazyCallContext;
+-    XPCCallContext(XPCContext::LangType callerLanguage,
+-                   JSContext* cx,
+-                   JSBool callBeginRequest,
+-                   JSObject* obj,
+-                   JSObject* flattenedJSObject,
+-                   XPCWrappedNative* wn,
+-                   XPCWrappedNativeTearOff* tearoff);
+-
+-    enum WrapperInitOptions {
+-        WRAPPER_PASSED_TO_CONSTRUCTOR,
+-        INIT_SHOULD_LOOKUP_WRAPPER
+-    };
+-
+-    void Init(XPCContext::LangType callerLanguage,
+-              JSBool callBeginRequest,
+-              JSObject* obj,
+-              JSObject* funobj,
+-              WrapperInitOptions wrapperInitOptions,
+-              jsid name,
+-              uintN argc,
+-              jsval *argv,
+-              jsval *rval);
+-
+-private:
+-    // posible values for mState
+-    enum State {
+-        INIT_FAILED,
+-        SYSTEM_SHUTDOWN,
+-        HAVE_CONTEXT,
+-        HAVE_SCOPE,
+-        HAVE_OBJECT,
+-        HAVE_NAME,
+-        HAVE_ARGS,
+-        READY_TO_CALL,
+-        CALL_DONE
+-    };
+-
+-#ifdef DEBUG
+-inline void CHECK_STATE(int s) const {NS_ASSERTION(mState >= s, "bad state");}
+-#else
+-#define CHECK_STATE(s) ((void)0)
+-#endif
+-
+-private:
+-    State                           mState;
+-
+-    nsXPConnect*                    mXPC;
+-
+-    XPCPerThreadData*               mThreadData;
+-    XPCContext*                     mXPCContext;
+-    JSContext*                      mJSContext;
+-    JSBool                          mContextPopRequired;
+-    JSBool                          mDestroyJSContextInDestructor;
+-
+-    XPCContext::LangType            mCallerLanguage;
+-
+-    // ctor does not necessarily init the following. BEWARE!
+-
+-    XPCContext::LangType            mPrevCallerLanguage;
+-
+-    XPCCallContext*                 mPrevCallContext;
+-
+-    JSObject*                       mScopeForNewJSObjects;
+-    JSObject*                       mFlattenedJSObject;
+-    XPCWrappedNative*               mWrapper;
+-    XPCWrappedNativeTearOff*        mTearOff;
+-
+-    XPCNativeScriptableInfo*        mScriptableInfo;
+-
+-    XPCNativeSet*                   mSet;
+-    XPCNativeInterface*             mInterface;
+-    XPCNativeMember*                mMember;
+-
+-    jsid                            mName;
+-    JSBool                          mStaticMemberIsLocal;
+-
+-    uintN                           mArgc;
+-    jsval*                          mArgv;
+-    jsval*                          mRetVal;
+-
+-    JSBool                          mReturnValueWasSet;
+-    uint16_t                        mMethodIndex;
+-
+-#define XPCCCX_STRING_CACHE_SIZE 2
+-
+-    // String wrapper entry, holds a string, and a boolean that tells
+-    // whether the string is in use or not.
+-    //
+-    // NB: The string is not stored by value so that we avoid the cost of
+-    // construction/destruction.
+-    struct StringWrapperEntry
+-    {
+-        StringWrapperEntry() : mInUse(false) { }
+-
+-        js::AlignedStorage2<XPCReadableJSStringWrapper> mString;
+-        bool mInUse;
+-    };
+-
+-    StringWrapperEntry mScratchStrings[XPCCCX_STRING_CACHE_SIZE];
+-};
+-
+ class XPCLazyCallContext
+ {
+ public:
+     XPCLazyCallContext(XPCCallContext& ccx)
+         : mCallBeginRequest(DONT_CALL_BEGINREQUEST),
+           mCcx(&ccx),
+           mCcxToDestroy(nsnull)
+ #ifdef DEBUG

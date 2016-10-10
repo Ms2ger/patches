@@ -1,0 +1,127 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCJSID.cpp b/js/xpconnect/src/XPCJSID.cpp
+--- a/js/xpconnect/src/XPCJSID.cpp
++++ b/js/xpconnect/src/XPCJSID.cpp
+@@ -38,16 +38,17 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* An xpcom implementation of the JavaScript nsIID and nsCID objects. */
+ 
+ #include "nsJSID.h"
+ #include "nsJSIID.h"
++#include "nsJSCID.h"
+ 
+ #include "xpcprivate.h"
+ 
+ /***************************************************************************/
+ // nsJSID
+ 
+ NS_IMPL_THREADSAFE_ISUPPORTS1(nsJSID, nsIJSID)
+ 
+diff --git a/js/xpconnect/src/nsJSCID.h b/js/xpconnect/src/nsJSCID.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/nsJSCID.h
+@@ -0,0 +1,34 @@
++#ifndef nsJSCID_h
++#define nsJSCID_h
++
++#include "xpcjsid.h"
++#include "nsIXPCScriptable.h"
++
++#include "nsJSID.h"
++
++class nsJSCID : public nsIJSCID,
++                public nsIXPCScriptable
++{
++public:
++    NS_DECL_ISUPPORTS
++
++    // we manually delagate these to nsJSID
++    NS_DECL_NSIJSID
++
++    // we implement the rest...
++    NS_DECL_NSIJSCID
++    NS_DECL_NSIXPCSCRIPTABLE
++
++    static nsJSCID* NewID(const char* str);
++
++    nsJSCID();
++    virtual ~nsJSCID();
++
++private:
++    void ResolveName();
++
++private:
++    nsJSID mDetails;
++};
++
++#endif // nsJSCID_h
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -167,16 +167,17 @@
+ #include "xpcObjectHelper.h"
+ #include "XPCConvert.h"
+ #include "XPCStringConvert.h"
+ #include "XPCThrower.h"
+ #include "XPCJSStack.h"
+ #include "nsXPCException.h"
+ #include "nsJSID.h"
+ #include "nsJSIID.h"
++#include "nsJSCID.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -474,43 +475,16 @@ enum WrapperType {
+ ****************************************************************************
+ ***************************************************************************/
+ 
+ /***************************************************************************/
+ 
+ extern void xpc_InitJSxIDClassObjects();
+ extern void xpc_DestroyJSxIDClassObjects();
+ 
+-// nsJSCID
+-
+-class nsJSCID : public nsIJSCID, public nsIXPCScriptable
+-{
+-public:
+-    NS_DECL_ISUPPORTS
+-
+-    // we manually delagate these to nsJSID
+-    NS_DECL_NSIJSID
+-
+-    // we implement the rest...
+-    NS_DECL_NSIJSCID
+-    NS_DECL_NSIXPCSCRIPTABLE
+-
+-    static nsJSCID* NewID(const char* str);
+-
+-    nsJSCID();
+-    virtual ~nsJSCID();
+-
+-private:
+-    void ResolveName();
+-
+-private:
+-    nsJSID mDetails;
+-};
+-
+-
+ /***************************************************************************/
+ // XPCJSContextStack is not actually an xpcom object, but xpcom calls are
+ // delegated to it as an implementation detail.
+ struct XPCJSContextInfo {
+     XPCJSContextInfo(JSContext* aCx) :
+         cx(aCx),
+         savedFrameChain(false),
+         suspendDepth(0)

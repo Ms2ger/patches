@@ -1,0 +1,73 @@
+diff --git a/content/html/content/src/nsHTMLCanvasElement.cpp b/content/html/content/src/nsHTMLCanvasElement.cpp
+--- a/content/html/content/src/nsHTMLCanvasElement.cpp
++++ b/content/html/content/src/nsHTMLCanvasElement.cpp
+@@ -415,48 +415,39 @@ nsHTMLCanvasElement::MozGetAsFileImpl(co
+   return NS_OK;
+ }
+ 
+ nsresult
+ nsHTMLCanvasElement::GetContextHelper(const nsAString& aContextId,
+                                       bool aForceThebes,
+                                       nsICanvasRenderingContextInternal **aContext)
+ {
+-  NS_ENSURE_ARG(aContext);
++  MOZ_ASSERT(aContext);
+ 
+-  NS_ConvertUTF16toUTF8 ctxId(aContextId);
++  nsCOMPtr<nsICanvasRenderingContextInternal> ctx;
+ 
+-  // check that ctxId is clamped to A-Za-z0-9_-
+-  for (uint32_t i = 0; i < ctxId.Length(); i++) {
+-    if ((ctxId[i] < 'A' || ctxId[i] > 'Z') &&
+-        (ctxId[i] < 'a' || ctxId[i] > 'z') &&
+-        (ctxId[i] < '0' || ctxId[i] > '9') &&
+-        (ctxId[i] != '-') &&
+-        (ctxId[i] != '_'))
+-    {
+-      // XXX ERRMSG we need to report an error to developers here! (bug 329026)
+-      return NS_OK;
++  if (aContextId.EqualsLiteral("2d")) {
++    nsCOMPtr<nsIDOMCanvasRenderingContext2D> context;
++    nsresult rv;
++    if (aForceThebes) {
++      rv = NS_NewCanvasRenderingContext2DThebes(getter_AddRefs(context));
++    } else {
++      rv = NS_NewCanvasRenderingContext2D(getter_AddRefs(context));
+     }
+-  }
+-
+-  nsCString ctxString("@mozilla.org/content/canvas-rendering-context;1?id=");
+-  ctxString.Append(ctxId);
+-
+-  if (aForceThebes && ctxId.EqualsASCII("2d")) {
+-    ctxString.AssignASCII("@mozilla.org/content/2dthebes-canvas-rendering-context;1");
+-  }
+-
+-  nsresult rv;
+-  nsCOMPtr<nsICanvasRenderingContextInternal> ctx =
+-    do_CreateInstance(ctxString.get(), &rv);
+-  if (rv == NS_ERROR_OUT_OF_MEMORY) {
+-    *aContext = nullptr;
+-    return NS_ERROR_OUT_OF_MEMORY;
+-  }
+-  if (NS_FAILED(rv)) {
++    NS_ENSURE_SUCCESS(rv, rv);
++    ctx = do_QueryInterface(context);
++    MOZ_ASSERT(ctx);
++  } else if (aContextId.EqualsLiteral("moz-webgl") ||
++             aContextId.EqualsLiteral("experimental-webgl")) {
++    nsCOMPtr<nsIDOMWebGLRenderingContext> context;
++    nsresult rv = NS_NewCanvasRenderingContextWebGL(getter_AddRefs(context));
++    NS_ENSURE_SUCCESS(rv, rv);
++    ctx = do_QueryInterface(context);
++    MOZ_ASSERT(ctx);
++  } else {
+     *aContext = nullptr;
+     // XXX ERRMSG we need to report an error to developers here! (bug 329026)
+     return NS_OK;
+   }
+ 
+   ctx->SetCanvasElement(this);
+   ctx.forget(aContext);
+   return NS_OK;
+

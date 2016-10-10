@@ -1,0 +1,65 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/bindings/BindingUtils.cpp b/dom/bindings/BindingUtils.cpp
+--- a/dom/bindings/BindingUtils.cpp
++++ b/dom/bindings/BindingUtils.cpp
+@@ -2065,16 +2065,17 @@ ConstructJSImplementation(JSContext* aCx
+ 
+   return window.forget();
+ }
+ 
+ bool
+ NonVoidByteStringToJsval(JSContext *cx, const nsACString &str,
+                          JS::MutableHandle<JS::Value> rval)
+ {
++    MOZ_ASSERT(!str.IsVoid());
+     if (str.IsEmpty()) {
+         rval.set(JS_GetEmptyStringValue(cx));
+         return true;
+     }
+ 
+     // ByteStrings are not UTF-8 encoded.
+     JSString* jsStr = JS_NewStringCopyN(cx, str.Data(), str.Length());
+ 
+diff --git a/js/xpconnect/src/XPCQuickStubs.cpp b/js/xpconnect/src/XPCQuickStubs.cpp
+--- a/js/xpconnect/src/XPCQuickStubs.cpp
++++ b/js/xpconnect/src/XPCQuickStubs.cpp
+@@ -782,16 +782,17 @@ xpc_qsJsvalToWcharStr(JSContext *cx, jsv
+     return true;
+ }
+ 
+ namespace xpc {
+ 
+ bool
+ NonVoidStringToJsval(JSContext *cx, nsAString &str, JS::Value *rval)
+ {
++    MOZ_ASSERT(!str.IsVoid());
+     nsStringBuffer* sharedBuffer;
+     jsval jsstr = XPCStringConvert::ReadableToJSVal(cx, str, &sharedBuffer);
+     if (JSVAL_IS_NULL(jsstr))
+         return false;
+     *rval = jsstr;
+     if (sharedBuffer) {
+         // The string was shared but ReadableToJSVal didn't addref it.
+         // Move the ownership from str to jsstr.
+diff --git a/js/xpconnect/src/xpcpublic.h b/js/xpconnect/src/xpcpublic.h
+--- a/js/xpconnect/src/xpcpublic.h
++++ b/js/xpconnect/src/xpcpublic.h
+@@ -252,16 +252,17 @@ StringToJsval(JSContext* cx, const nsASt
+ 
+ /**
+  * As above, but for mozilla::dom::DOMString.
+  */
+ MOZ_ALWAYS_INLINE
+ bool NonVoidStringToJsval(JSContext* cx, mozilla::dom::DOMString& str,
+                           JS::Value *rval)
+ {
++    MOZ_ASSERT(!str.IsNull());
+     if (!str.HasStringBuffer()) {
+         // It's an actual XPCOM string
+         return NonVoidStringToJsval(cx, str.AsAString(), rval);
+     }
+ 
+     uint32_t length = str.StringBufferLength();
+     if (length == 0) {
+         *rval = JS_GetEmptyStringValue(cx);

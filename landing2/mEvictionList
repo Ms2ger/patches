@@ -1,0 +1,302 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/netwerk/cache/nsMemoryCacheDevice.cpp b/netwerk/cache/nsMemoryCacheDevice.cpp
+--- a/netwerk/cache/nsMemoryCacheDevice.cpp
++++ b/netwerk/cache/nsMemoryCacheDevice.cpp
+@@ -54,19 +54,16 @@ nsMemoryCacheDevice::nsMemoryCacheDevice
+       mSoftLimit((mHardLimit * 9) / 10), // default, if no pref
+       mTotalSize(0),
+       mInactiveSize(0),
+       mEntryCount(0),
+       mMaxEntryCount(0),
+       mMaxEntrySize(-1), // -1 means "no limit"
+       mReporter(nullptr)
+ {
+-    for (int i=0; i<kQueueCount; ++i)
+-        PR_INIT_CLIST(&mEvictionList[i]);
+-
+     mReporter = new NetworkMemoryCacheReporter(this);
+     NS_RegisterMemoryReporter(mReporter);
+ }
+ 
+ 
+ nsMemoryCacheDevice::~nsMemoryCacheDevice()
+ {
+     NS_UnregisterMemoryReporter(mReporter);
+@@ -89,24 +86,22 @@ nsresult
+ nsMemoryCacheDevice::Shutdown()
+ {
+     NS_ASSERTION(mInitialized, "### attempting shutdown while not initialized");
+     NS_ENSURE_TRUE(mInitialized, NS_ERROR_NOT_INITIALIZED);
+     
+     mMemCacheEntries.Shutdown();
+ 
+     // evict all entries
+-    nsCacheEntry * entry, * next;
+-
+     for (int i = kQueueCount - 1; i >= 0; --i) {
+-        entry = (nsCacheEntry *)PR_LIST_HEAD(&mEvictionList[i]);
+-        while (entry != &mEvictionList[i]) {
++        nsCacheEntry* entry = mEvictionList[i].getFirst();
++        while (entry) {
+             NS_ASSERTION(!entry->IsInUse(), "### shutting down with active entries");
+-            next = (nsCacheEntry *)PR_NEXT_LINK(static_cast<PRCList*>(entry));
+-            PR_REMOVE_AND_INIT_LINK(static_cast<PRCList*>(entry));
++            nsCacheEntry* next = entry->getNext();
++            entry->removeFrom(mEvictionList[i]);
+         
+             // update statistics
+             int32_t memoryRecovered = (int32_t)entry->DataSize();
+             mTotalSize    -= memoryRecovered;
+             mInactiveSize -= memoryRecovered;
+             --mEntryCount;
+ 
+             delete entry;
+@@ -137,19 +132,18 @@ nsMemoryCacheDevice::GetDeviceID()
+ nsCacheEntry *
+ nsMemoryCacheDevice::FindEntry(nsCString * key, bool *collision)
+ {
+     mozilla::Telemetry::AutoTimer<mozilla::Telemetry::CACHE_MEMORY_SEARCH_2> timer;
+     nsCacheEntry * entry = mMemCacheEntries.GetEntry(key);
+     if (!entry)  return nullptr;
+ 
+     // move entry to the tail of an eviction list
+-    PR_REMOVE_AND_INIT_LINK(static_cast<PRCList*>(entry));
+-    PR_APPEND_LINK(static_cast<PRCList*>(entry),
+-                   &mEvictionList[EvictionList(entry, 0)]);
++    entry->remove();
++    mEvictionList[EvictionList(entry, 0)].insertBack(entry);
+     
+     mInactiveSize -= entry->DataSize();
+ 
+     return entry;
+ }
+ 
+ 
+ nsresult
+@@ -180,27 +174,25 @@ nsMemoryCacheDevice::DeactivateEntry(nsC
+     return NS_OK;
+ }
+ 
+ 
+ nsresult
+ nsMemoryCacheDevice::BindEntry(nsCacheEntry * entry)
+ {
+     if (!entry->IsDoomed()) {
+-        NS_ASSERTION(PR_CLIST_IS_EMPTY(static_cast<PRCList*>(entry)),
+-                     "entry is already on a list!");
++        NS_ASSERTION(!entry->isInList(), "entry is already on a list!");
+ 
+         // append entry to the eviction list
+-        PR_APPEND_LINK(static_cast<PRCList*>(entry),
+-                       &mEvictionList[EvictionList(entry, 0)]);
++        mEvictionList[EvictionList(entry, 0)].insertBack(entry);
+ 
+         // add entry to hashtable of mem cache entries
+         nsresult  rv = mMemCacheEntries.AddEntry(entry);
+         if (NS_FAILED(rv)) {
+-            PR_REMOVE_AND_INIT_LINK(static_cast<PRCList*>(entry));
++            entry->remove();
+             return rv;
+         }
+ 
+         // add size of entry to memory totals
+         ++mEntryCount;
+         if (mMaxEntryCount < mEntryCount) mMaxEntryCount = mEntryCount;
+ 
+         mTotalSize += entry->DataSize();
+@@ -324,18 +316,18 @@ nsMemoryCacheDevice::OnDataSizeChange( n
+         }
+     }
+ 
+     // adjust our totals
+     mTotalSize    += deltaSize;
+     
+     if (!entry->IsDoomed()) {
+         // move entry to the tail of the appropriate eviction list
+-        PR_REMOVE_AND_INIT_LINK(static_cast<PRCList*>(entry));
+-        PR_APPEND_LINK(static_cast<PRCList*>(entry), &mEvictionList[EvictionList(entry, deltaSize)]);
++        entry->remove();
++        mEvictionList[EvictionList(entry, deltaSize)].insertBack(entry);
+     }
+ 
+     EvictEntriesIfNecessary();
+     return NS_OK;
+ }
+ 
+ 
+ void
+@@ -369,43 +361,40 @@ nsMemoryCacheDevice::EvictEntry(nsCacheE
+     
+     if (deleteEntry)  delete entry;
+ }
+ 
+ 
+ void
+ nsMemoryCacheDevice::EvictEntriesIfNecessary(void)
+ {
+-    nsCacheEntry * entry;
+-    nsCacheEntry * maxEntry;
+     CACHE_LOG_DEBUG(("EvictEntriesIfNecessary.  mTotalSize: %d, mHardLimit: %d,"
+                      "mInactiveSize: %d, mSoftLimit: %d\n",
+                      mTotalSize, mHardLimit, mInactiveSize, mSoftLimit));
+     
+     if ((mTotalSize < mHardLimit) && (mInactiveSize < mSoftLimit))
+         return;
+ 
+     uint32_t now = SecondsFromPRTime(PR_Now());
+     uint64_t entryCost = 0;
+     uint64_t maxCost = 0;
+     do {
+         // LRU-SP eviction selection: Check the head of each segment (each
+         // eviction list, kept in LRU order) and select the maximal-cost
+         // entry for eviction. Cost is time-since-accessed * size / nref.
+-        maxEntry = 0;
++        nsCacheEntry* maxEntry = nullptr;
+         for (int i = kQueueCount - 1; i >= 0; --i) {
+-            entry = (nsCacheEntry *)PR_LIST_HEAD(&mEvictionList[i]);
++            nsCacheEntry* entry = mEvictionList[i].getFirst();
+ 
+             // If the head of a list is in use, check the next available entry
+-            while ((entry != &mEvictionList[i]) &&
+-                   (entry->IsInUse())) {
+-                entry = (nsCacheEntry *)PR_NEXT_LINK(static_cast<PRCList*>(entry));
++            while (entry && entry->IsInUse()) {
++                entry = entry->getNext();
+             }
+ 
+-            if (entry != &mEvictionList[i]) {
++            if (entry) {
+                 entryCost = (uint64_t)
+                     (now - entry->LastFetched()) * entry->DataSize() / 
+                     std::max(1, entry->FetchCount());
+                 if (!maxEntry || (entryCost > maxCost)) {
+                     maxEntry = entry;
+                     maxCost = entryCost;
+                 }
+             }
+@@ -445,33 +434,26 @@ nsMemoryCacheDevice::Visit(nsICacheVisit
+ 
+     bool keepGoing;
+     nsresult rv = visitor->VisitDevice(gMemoryDeviceID, deviceInfo, &keepGoing);
+     if (NS_FAILED(rv)) return rv;
+ 
+     if (!keepGoing)
+         return NS_OK;
+ 
+-    nsCacheEntry *              entry;
+-    nsCOMPtr<nsICacheEntryInfo> entryRef;
+-
+     for (int i = kQueueCount - 1; i >= 0; --i) {
+-        entry = (nsCacheEntry *)PR_LIST_HEAD(&mEvictionList[i]);
+-        while (entry != &mEvictionList[i]) {
+-            nsCacheEntryInfo * entryInfo = new nsCacheEntryInfo(entry);
+-            if (!entryInfo) return NS_ERROR_OUT_OF_MEMORY;
+-            entryRef = entryInfo;
++        for (nsCacheEntry* entry = mEvictionList[i].getFirst();
++             entry;
++             entry = entry->getNext()) {
++            nsRefPtr<nsCacheEntryInfo> entryInfo = new nsCacheEntryInfo(entry);
+ 
+             rv = visitor->VisitEntry(gMemoryDeviceID, entryInfo, &keepGoing);
+             entryInfo->DetachEntry();
+             if (NS_FAILED(rv)) return rv;
+             if (!keepGoing) break;
+-
+-            // XXX multiple lists?
+-            entry = (nsCacheEntry *)PR_NEXT_LINK(static_cast<PRCList*>(entry));
+         }
+     }
+     return NS_OK;
+ }
+ 
+ 
+ static bool
+ IsEntryPrivate(nsCacheEntry* entry, void* args)
+@@ -491,36 +473,35 @@ EntryMatchesClientID(nsCacheEntry* entry
+     uint32_t prefixLength = static_cast<ClientIDArgs*>(args)->prefixLength;
+     const char * key = entry->Key()->get();
+     return !clientID || nsCRT::strncmp(clientID, key, prefixLength) == 0;
+ }
+ 
+ nsresult
+ nsMemoryCacheDevice::DoEvictEntries(bool (*matchFn)(nsCacheEntry* entry, void* args), void* args)
+ {
+-    nsCacheEntry * entry;
+-
+     for (int i = kQueueCount - 1; i >= 0; --i) {
+-        PRCList * elem = PR_LIST_HEAD(&mEvictionList[i]);
+-        while (elem != &mEvictionList[i]) {
+-            entry = (nsCacheEntry *)elem;
+-            elem = PR_NEXT_LINK(elem);
++        nsCacheEntry* entry = mEvictionList[i].getFirst();
++        while (entry) {
++            nsCacheEntry* next = entry->getNext();
+ 
+             if (!matchFn(entry, args))
+                 continue;
+             
+             if (entry->IsInUse()) {
+                 nsresult rv = nsCacheService::DoomEntry(entry);
+                 if (NS_FAILED(rv)) {
+                     CACHE_LOG_WARNING(("memCache->DoEvictEntries() aborted: rv =%x", rv));
+                     return rv;
+                 }
+             } else {
+                 EvictEntry(entry, DELETE_ENTRY);
+             }
++
++            entry = next;
+         }
+     }
+ 
+     return NS_OK;
+ }
+ 
+ nsresult
+ nsMemoryCacheDevice::EvictEntries(const char * clientID)
+@@ -567,19 +548,19 @@ CountEntry(PLDHashTable * table, PLDHash
+ 
+ void
+ nsMemoryCacheDevice::CheckEntryCount()
+ {
+     if (!mInitialized)  return;
+ 
+     int32_t evictionListCount = 0;
+     for (int i=0; i<kQueueCount; ++i) {
+-        PRCList * elem = PR_LIST_HEAD(&mEvictionList[i]);
+-        while (elem != &mEvictionList[i]) {
+-            elem = PR_NEXT_LINK(elem);
++        for (nsCacheEntry* entry = mEvictionList[i].getFirst();
++             entry;
++             entry = entry->getNext()) {
+             ++evictionListCount;
+         }
+     }
+     NS_ASSERTION(mEntryCount == evictionListCount, "### mem cache badness");
+ 
+     int32_t entryCount = 0;
+     mMemCacheEntries.VisitEntries(CountEntry, &entryCount);
+     NS_ASSERTION(mEntryCount == entryCount, "### mem cache badness");    
+diff --git a/netwerk/cache/nsMemoryCacheDevice.h b/netwerk/cache/nsMemoryCacheDevice.h
+--- a/netwerk/cache/nsMemoryCacheDevice.h
++++ b/netwerk/cache/nsMemoryCacheDevice.h
+@@ -82,17 +82,17 @@ private:
+      */
+     enum {
+         kQueueCount = 24   // entries > 2^23 (8Mb) start in last queue
+     };
+ 
+     nsCacheEntryHashTable  mMemCacheEntries;
+     bool                   mInitialized;
+ 
+-    PRCList                mEvictionList[kQueueCount];
++    mozilla::LinkedList<nsCacheEntry> mEvictionList[kQueueCount];
+ 
+     int32_t                mHardLimit;
+     int32_t                mSoftLimit;
+ 
+     int32_t                mTotalSize;
+     int32_t                mInactiveSize;
+ 
+     int32_t                mEntryCount;

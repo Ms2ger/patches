@@ -1,0 +1,186 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/toolkit/components/places/Helpers.cpp b/toolkit/components/places/Helpers.cpp
+--- a/toolkit/components/places/Helpers.cpp
++++ b/toolkit/components/places/Helpers.cpp
+@@ -298,17 +298,17 @@ GenerateGUID(nsCString& _guid)
+   // bytes, we get one character.
+   const uint32_t kRequiredBytesLength =
+     static_cast<uint32_t>(GUID_LENGTH / 4 * 3);
+ 
+   uint8_t buffer[kRequiredBytesLength];
+   nsresult rv = GenerateRandomBytes(kRequiredBytesLength, buffer);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+-  nsDependentCString stringBuffer(buffer, kRequiredBytesLength);
++  nsDependentCString stringBuffer(reinterpret_cast<char*>(buffer), kRequiredBytesLength);
+   rv = Base64URLEncode(stringBuffer, _guid);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   NS_ASSERTION(_guid.Length() == GUID_LENGTH, "GUID is not the right size!");
+   return NS_OK;
+ }
+ 
+ bool
+diff --git a/toolkit/components/url-classifier/nsUrlClassifierDBService.cpp b/toolkit/components/url-classifier/nsUrlClassifierDBService.cpp
+--- a/toolkit/components/url-classifier/nsUrlClassifierDBService.cpp
++++ b/toolkit/components/url-classifier/nsUrlClassifierDBService.cpp
+@@ -74,16 +74,18 @@
+ #include "nsXPCOMStrings.h"
+ #include "mozilla/Mutex.h"
+ #include "mozilla/Telemetry.h"
+ #include "prlog.h"
+ #include "prprf.h"
+ #include "prnetdb.h"
+ #include "zlib.h"
+ 
++#include "mozilla/Base64.h"
++
+ // Needed to interpert mozIStorageConnection::GetLastError
+ #include <sqlite3.h>
+ 
+ using namespace mozilla;
+ 
+ /**
+  * The DBServices stores a set of Fragments.  A fragment is one URL
+  * fragment containing two or more domain components and some number
+@@ -2751,17 +2753,17 @@ nsUrlClassifierDBServiceWorker::ProcessR
+     LOG(("Processing %s\n", PromiseFlatCString(line).get()));
+ 
+     if (mHMAC && mServerMAC.IsEmpty()) {
+       // If we did not receive a server MAC during BeginStream(), we
+       // require the first line of the update to be either a MAC or
+       // a request to rekey.
+       if (StringBeginsWith(line, NS_LITERAL_CSTRING("m:"))) {
+         mServerMAC = Substring(line, 2);
+-        nsUrlClassifierUtils::UnUrlsafeBase64(mServerMAC);
++        UnUrlsafeBase64(mServerMAC);
+ 
+         // The remainder of the pending update needs to be digested.
+         const nsCSubstring &toDigest = Substring(updateString, cur);
+         rv = mHMAC->Update(reinterpret_cast<const uint8_t*>(toDigest.BeginReading()),
+                            toDigest.Length());
+         NS_ENSURE_SUCCESS(rv, rv);
+       } else if (line.EqualsLiteral("e:pleaserekey")) {
+         mUpdateObserver->RekeyRequested();
+@@ -2800,17 +2802,17 @@ nsUrlClassifierDBServiceWorker::ProcessR
+         sepEnd = end;
+ 
+         if (!RFindInReadable(NS_LITERAL_CSTRING(","), sepBegin, sepEnd)) {
+           NS_WARNING("No MAC specified for a redirect in a request that expects a MAC");
+           return NS_ERROR_FAILURE;
+         }
+ 
+         nsCString serverMAC(Substring(sepEnd, end));
+-        nsUrlClassifierUtils::UnUrlsafeBase64(serverMAC);
++        UnUrlsafeBase64(serverMAC);
+         mUpdateObserver->UpdateUrlRequested(Substring(begin, sepBegin),
+                                             mUpdateTable,
+                                             serverMAC);
+       } else {
+         // We didn't ask for a MAC, none should have been specified.
+         mUpdateObserver->UpdateUrlRequested(data, mUpdateTable,
+                                             NS_LITERAL_CSTRING(""));
+       }
+diff --git a/toolkit/components/url-classifier/nsUrlClassifierUtils.h b/toolkit/components/url-classifier/nsUrlClassifierUtils.h
+--- a/toolkit/components/url-classifier/nsUrlClassifierUtils.h
++++ b/toolkit/components/url-classifier/nsUrlClassifierUtils.h
+@@ -101,20 +101,16 @@ public:
+                        nsACString & _retval);
+ 
+   void ParseIPAddress(const nsACString & host, nsACString & _retval);
+   void CanonicalNum(const nsACString & num,
+                     uint32_t bytes,
+                     bool allowOctal,
+                     nsACString & _retval);
+ 
+-  // Convert an urlsafe base64 string to a normal base64 string.
+-  // This method will leave an already-normal base64 string alone.
+-  static void UnUrlsafeBase64(nsACString & str);
+-
+   // Takes an urlsafe-base64 encoded client key and gives back binary
+   // key data
+   static nsresult DecodeClientKey(const nsACString& Base64urlEncode,
+                                   nsACString& _retval)
+   {
+     // Client key is sent in urlsafe base64, we need to decode it first.
+     return mozilla::Base64URLDecode(Base64urlEncode, _retval);
+   }
+diff --git a/xpcom/io/Base64.cpp b/xpcom/io/Base64.cpp
+--- a/xpcom/io/Base64.cpp
++++ b/xpcom/io/Base64.cpp
+@@ -369,40 +369,31 @@ Base64URLEncode(const nsACString& aBytes
+ 
+   // base64url encoding is defined in RFC 4648.  It replaces the last two
+   // alphabet characters of base64 encoding with '-' and '_' respectively.
+   aResult.ReplaceChar('+', '-');
+   aResult.ReplaceChar('/', '_');
+   return NS_OK;
+ }
+ 
+-static void
++void
+ UnUrlsafeBase64(nsACString& str)
+ {
+   char* iter = str.BeginWriting();
+   char* end = str.EndWriting();
+   while (iter != end) {
+     if (*iter == '-') {
+       *iter = '+';
+     } else if (*iter == '_') {
+       *iter = '/';
+     }
+     iter++;
+   }
+ }
+ 
+-nsresult
+-Base64URLDecode(const nsACString& aBinaryData, nsACString& aString)
+-{
+-  nsCAutoString base64(key);
+-  UnUrlsafeBase64(base64);
+-
+-  return Base64Decode(base64, aString);
+-}
+-
+ static bool
+ Is8bit(const nsAString& aString)
+ {
+   static const PRUnichar EIGHT_BIT = PRUnichar(~0x00FF);
+ 
+   nsAString::const_iterator done_reading;
+   aString.EndReading(done_reading);
+ 
+diff --git a/xpcom/io/Base64.h b/xpcom/io/Base64.h
+--- a/xpcom/io/Base64.h
++++ b/xpcom/io/Base64.h
+@@ -67,15 +67,26 @@ Base64Decode(const nsAString &aBinaryDat
+ 
+ // These functions implement <http://www.whatwg.org/html/#atob>.
+ nsresult
+ Btoa(const nsAString& aBinaryData, nsAString& aAsciiBase64String);
+ nsresult
+ Atob(const nsAString& aAsciiString, nsAString& aBinaryData);
+ 
+ nsresult
+-Base64urlEncode(const nsACString& aBytes, nsCString& aResult);
+-nsresult
+-Base64URLDecode(const nsACString& aBinaryData, nsACString& aString);
++Base64URLEncode(const nsACString& aBytes, nsCString& aResult);
++
++// Convert an urlsafe base64 string to a normal base64 string.
++// This method will leave an already-normal base64 string alone.
++void
++UnUrlsafeBase64(nsACString& str);
++inline nsresult
++Base64URLDecode(const nsACString& aBinaryData, nsACString& aString)
++{
++  nsCAutoString base64(aBinaryData);
++  UnUrlsafeBase64(base64);
++
++  return Base64Decode(base64, aString);
++}
+ 
+ } // namespace mozilla
+ 
+ #endif

@@ -1,0 +1,104 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/content/src/HTMLFormControlsCollection.h b/content/html/content/src/HTMLFormControlsCollection.h
+--- a/content/html/content/src/HTMLFormControlsCollection.h
++++ b/content/html/content/src/HTMLFormControlsCollection.h
+@@ -32,16 +32,18 @@ public:
+ 
+   void DropFormReference();
+ 
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+ 
+   // nsIDOMHTMLCollection interface
+   NS_DECL_NSIDOMHTMLCOLLECTION
+ 
++  using nsIHTMLCollection::GetWrapperPreserveColor;
++
+   virtual Element* GetElementAt(uint32_t index);
+   virtual nsINode* GetParentObject() MOZ_OVERRIDE;
+ 
+   virtual Element*
+   DoNamedGetter(const nsAString& aName, bool& aFound) MOZ_OVERRIDE;
+ 
+   void
+   NamedGetter(const nsAString& aName,
+diff --git a/content/html/content/src/HTMLFormElement.cpp b/content/html/content/src/HTMLFormElement.cpp
+--- a/content/html/content/src/HTMLFormElement.cpp
++++ b/content/html/content/src/HTMLFormElement.cpp
+@@ -184,22 +184,16 @@ NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION
+                                 nsIRadioGroupContainer)
+ NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLElement)
+ 
+ 
+ // nsIDOMHTMLFormElement
+ 
+ NS_IMPL_ELEMENT_CLONE_WITH_INIT(HTMLFormElement)
+ 
+-nsIHTMLCollection*
+-HTMLFormElement::Elements()
+-{
+-  return mControls;
+-}
+-
+ NS_IMETHODIMP
+ HTMLFormElement::GetElements(nsIDOMHTMLCollection** aElements)
+ {
+   *aElements = Elements();
+   NS_ADDREF(*aElements);
+   return NS_OK;
+ }
+ 
+diff --git a/content/html/content/src/HTMLFormElement.h b/content/html/content/src/HTMLFormElement.h
+--- a/content/html/content/src/HTMLFormElement.h
++++ b/content/html/content/src/HTMLFormElement.h
+@@ -364,19 +364,20 @@ public:
+     GetHTMLAttr(nsGkAtoms::target, aValue);
+   }
+ 
+   void SetTarget(const nsAString& aValue, ErrorResult& aRv)
+   {
+     SetHTMLAttr(nsGkAtoms::target, aValue, aRv);
+   }
+ 
+-  // it's only out-of-line because the class definition is not available in the
+-  // header
+-  nsIHTMLCollection* Elements();
++  HTMLFormControlsCollection* Elements() const
++  {
++    return mControls;
++  }
+ 
+   int32_t Length();
+ 
+   void Submit(ErrorResult& aRv);
+ 
+   // XPCOM Reset() is OK
+ 
+   bool CheckValidity()
+diff --git a/dom/webidl/HTMLFormElement.webidl b/dom/webidl/HTMLFormElement.webidl
+--- a/dom/webidl/HTMLFormElement.webidl
++++ b/dom/webidl/HTMLFormElement.webidl
+@@ -28,21 +28,21 @@ interface HTMLFormElement : HTMLElement 
+            [Pure, SetterThrows]
+            attribute DOMString name;
+            [Pure, SetterThrows]
+            attribute boolean noValidate;
+            [Pure, SetterThrows]
+            attribute DOMString target;
+ 
+   [Constant]
+-  readonly attribute HTMLCollection elements;
++  readonly attribute HTMLFormControlsCollection elements;
+   [Pure]
+   readonly attribute long length;
+ 
+   getter Element (unsigned long index);
+-  // TODO this should be: getter (RadioNodeList or HTMLInputElement or HTMLImageElement) (DOMString name);
++  // TODO this should be: getter (RadioNodeList or Element) (DOMString name);
+   getter nsISupports (DOMString name);
+ 
+   [Throws]
+   void submit();
+   void reset();
+   boolean checkValidity();
+ };

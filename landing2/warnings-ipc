@@ -1,0 +1,201 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/ipc/chromium/moz.build b/ipc/chromium/moz.build
+--- a/ipc/chromium/moz.build
++++ b/ipc/chromium/moz.build
+@@ -233,10 +233,11 @@ if ost.find('86') == -1 and ost.find('ar
+     CPP_SOURCES += [
+         'src/base/atomicops_internals_mutex.cc',
+     ]
+ 
+ LIBXUL_LIBRARY = True
+ 
+ LIBRARY_NAME = 'chromium_s'
+ 
++FAIL_ON_WARNINGS = True
+ EXPORT_LIBRARY = True
+ 
+diff --git a/ipc/chromium/src/base/logging.cc b/ipc/chromium/src/base/logging.cc
+--- a/ipc/chromium/src/base/logging.cc
++++ b/ipc/chromium/src/base/logging.cc
+@@ -1,23 +1,24 @@
+ // Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
+ #include "base/logging.h"
+ #include "prmem.h"
+ #include "prprf.h"
+ #include "base/string_util.h"
++#include "mozilla/DebugOnly.h"
+ #include "nsXPCOM.h"
+ 
+ namespace mozilla {
+ 
+ Logger::~Logger()
+ {
+-  PRLogModuleLevel prlevel = PR_LOG_DEBUG;
++  DebugOnly<PRLogModuleLevel> prlevel = PR_LOG_DEBUG;
+   int xpcomlevel = -1;
+ 
+   switch (mSeverity) {
+   case LOG_INFO:
+     prlevel = PR_LOG_DEBUG;
+     xpcomlevel = -1;
+     break;
+ 
+diff --git a/ipc/chromium/src/base/string_util.cc b/ipc/chromium/src/base/string_util.cc
+--- a/ipc/chromium/src/base/string_util.cc
++++ b/ipc/chromium/src/base/string_util.cc
+@@ -19,16 +19,21 @@
+ 
+ #include <algorithm>
+ #include <vector>
+ 
+ #include "base/basictypes.h"
+ #include "base/logging.h"
+ #include "base/singleton.h"
+ 
++#include "mozilla/MathAlgorithms.h"
++#include "mozilla/TypeTraits.h"
++
++using namespace mozilla;
++
+ namespace {
+ 
+ // Force the singleton used by Empty[W]String[16] to be a unique type. This
+ // prevents other code that might accidentally use Singleton<string> from
+ // getting our internal one.
+ struct EmptyStrings {
+   EmptyStrings() {}
+   const std::string s;
+@@ -433,56 +438,52 @@ static void StringAppendVT(StringType* d
+       dst->append(&mem_buf[0], result);
+       return;
+     }
+   }
+ }
+ 
+ namespace {
+ 
+-template <typename STR, typename INT, typename UINT, bool NEG>
++template <typename STR, typename INT>
+ struct IntToStringT {
+-
+-  // This is to avoid a compiler warning about unary minus on unsigned type.
+-  // For example, say you had the following code:
+-  //   template <typename INT>
+-  //   INT abs(INT value) { return value < 0 ? -value : value; }
+-  // Even though if INT is unsigned, it's impossible for value < 0, so the
+-  // unary minus will never be taken, the compiler will still generate a
+-  // warning.  We do a little specialization dance...
+-  template <typename INT2, typename UINT2, bool NEG2>
++  template <typename INT2, bool NEG = IsUnsigned<INT2>::value>
+   struct ToUnsignedT { };
+ 
+-  template <typename INT2, typename UINT2>
+-  struct ToUnsignedT<INT2, UINT2, false> {
+-    static UINT2 ToUnsigned(INT2 value) {
+-      return static_cast<UINT2>(value);
++  template <typename INT2>
++  struct ToUnsignedT<INT2, true> {
++    static INT2 ToUnsigned(INT2 value) {
++      return value;
++    }
++    static bool IsNegative(INT2) {
++      return false;
+     }
+   };
+ 
+-  template <typename INT2, typename UINT2>
+-  struct ToUnsignedT<INT2, UINT2, true> {
+-    static UINT2 ToUnsigned(INT2 value) {
+-      return static_cast<UINT2>(value < 0 ? -value : value);
++  template <typename INT2>
++  struct ToUnsignedT<INT2, false> {
++    static typename detail::AbsReturnType<INT2>::Type ToUnsigned(INT2 value) {
++      return Abs<INT2>(value);
++    }
++    static bool IsNegative(INT2 value) {
++      return value < 0;
+     }
+   };
+ 
+   static STR IntToString(INT value) {
+     // log10(2) ~= 0.3 bytes needed per bit or per byte log10(2**8) ~= 2.4.
+     // So round up to allocate 3 output characters per byte, plus 1 for '-'.
+     const int kOutputBufSize = 3 * sizeof(INT) + 1;
+ 
+     // Allocate the whole string right away, we will right back to front, and
+     // then return the substr of what we ended up using.
+     STR outbuf(kOutputBufSize, 0);
+ 
+-    bool is_neg = value < 0;
+-    // Even though is_neg will never be true when INT is parameterized as
+-    // unsigned, even the presence of the unary operation causes a warning.
+-    UINT res = ToUnsignedT<INT, UINT, NEG>::ToUnsigned(value);
++    bool is_neg = ToUnsignedT<INT>::IsNegative(value);
++    auto res = ToUnsignedT<INT>::ToUnsigned(value);
+ 
+     for (typename STR::iterator it = outbuf.end();;) {
+       --it;
+       DCHECK(it != outbuf.begin());
+       *it = static_cast<typename STR::value_type>((res % 10) + '0');
+       res /= 10;
+ 
+       // We're done..
+@@ -498,46 +499,38 @@ struct IntToStringT {
+     NOTREACHED();
+     return STR();
+   }
+ };
+ 
+ }
+ 
+ std::string IntToString(int value) {
+-  return IntToStringT<std::string, int, unsigned int, true>::
+-      IntToString(value);
++  return IntToStringT<std::string, int>::IntToString(value);
+ }
+ std::wstring IntToWString(int value) {
+-  return IntToStringT<std::wstring, int, unsigned int, true>::
+-      IntToString(value);
++  return IntToStringT<std::wstring, int>::IntToString(value);
+ }
+ std::string UintToString(unsigned int value) {
+-  return IntToStringT<std::string, unsigned int, unsigned int, false>::
+-      IntToString(value);
++  return IntToStringT<std::string, unsigned int>::IntToString(value);
+ }
+ std::wstring UintToWString(unsigned int value) {
+-  return IntToStringT<std::wstring, unsigned int, unsigned int, false>::
+-      IntToString(value);
++  return IntToStringT<std::wstring, unsigned int>::IntToString(value);
+ }
+ std::string Int64ToString(int64_t value) {
+-  return IntToStringT<std::string, int64_t, uint64_t, true>::
+-      IntToString(value);
++  return IntToStringT<std::string, int64_t>::IntToString(value);
+ }
+ std::wstring Int64ToWString(int64_t value) {
+-  return IntToStringT<std::wstring, int64_t, uint64_t, true>::
+-      IntToString(value);
++  return IntToStringT<std::wstring, int64_t>::IntToString(value);
+ }
+ std::string Uint64ToString(uint64_t value) {
+-  return IntToStringT<std::string, uint64_t, uint64_t, false>::
+-      IntToString(value);
++  return IntToStringT<std::string, uint64_t>::IntToString(value);
+ }
+ std::wstring Uint64ToWString(uint64_t value) {
+-  return IntToStringT<std::wstring, uint64_t, uint64_t, false>::
+-      IntToString(value);
++  return IntToStringT<std::wstring, uint64_t>::IntToString(value);
+ }
+ 
+ // Lower-level routine that takes a va_list and appends to a specified
+ // string.  All other routines are just convenience wrappers around it.
+ static void StringAppendV(std::string* dst, const char* format, va_list ap) {
+   StringAppendVT(dst, format, ap);
+ }
+ 

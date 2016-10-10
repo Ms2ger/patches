@@ -1,0 +1,185 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCNativeScriptableShared.h b/js/xpconnect/src/XPCNativeScriptableShared.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCNativeScriptableShared.h
+@@ -0,0 +1,65 @@
++#ifndef XPCNativeScriptableShared_h
++#define XPCNativeScriptableShared_h
++
++#include "XPCNativeScriptableFlags.h"
++
++#include "prtypes.h"
++#include "nsMemory.h"
++
++#include "jsclass.h"
++
++// XPCNativeScriptableShared is used to hold the JSClass and the
++// associated scriptable flags for XPCWrappedNatives. These are shared across
++// the runtime and are garbage collected by xpconnect. We *used* to just store
++// this inside the XPCNativeScriptableInfo (usually owned by instances of
++// XPCWrappedNativeProto. This had two problems... It was wasteful, and it
++// was a big problem when wrappers are reparented to different scopes (and
++// thus different protos (the DOM does this).
++
++struct XPCNativeScriptableSharedJSClass
++{
++    js::Class base;
++    uint32_t interfacesBitmap;
++};
++
++class XPCNativeScriptableShared
++{
++public:
++    const XPCNativeScriptableFlags& GetFlags() const {return mFlags;}
++    uint32_t                        GetInterfacesBitmap() const
++        {return mJSClass.interfacesBitmap;}
++    JSClass*                        GetJSClass()
++        {return Jsvalify(&mJSClass.base);}
++    JSClass*                        GetSlimJSClass()
++        {if (mCanBeSlim) return GetJSClass(); return nsnull;}
++
++    XPCNativeScriptableShared(JSUint32 aFlags, char* aName,
++                              uint32_t interfacesBitmap)
++        : mFlags(aFlags),
++          mCanBeSlim(false)
++        {memset(&mJSClass, 0, sizeof(mJSClass));
++         mJSClass.base.name = aName;  // take ownership
++         mJSClass.interfacesBitmap = interfacesBitmap;
++         MOZ_COUNT_CTOR(XPCNativeScriptableShared);}
++
++    ~XPCNativeScriptableShared()
++        {if (mJSClass.base.name)nsMemory::Free((void*)mJSClass.base.name);
++         MOZ_COUNT_DTOR(XPCNativeScriptableShared);}
++
++    char* TransferNameOwnership()
++        {char* name=(char*)mJSClass.base.name; mJSClass.base.name = nsnull;
++        return name;}
++
++    void PopulateJSClass(JSBool isGlobal);
++
++    void Mark()       {mFlags.Mark();}
++    void Unmark()     {mFlags.Unmark();}
++    JSBool IsMarked() const {return mFlags.IsMarked();}
++
++private:
++    XPCNativeScriptableFlags mFlags;
++    XPCNativeScriptableSharedJSClass mJSClass;
++    JSBool                   mCanBeSlim;
++};
++
++#endif // XPCNativeScriptableShared_h
+diff --git a/js/xpconnect/src/XPCWrappedNativeJSOps.cpp b/js/xpconnect/src/XPCWrappedNativeJSOps.cpp
+--- a/js/xpconnect/src/XPCWrappedNativeJSOps.cpp
++++ b/js/xpconnect/src/XPCWrappedNativeJSOps.cpp
+@@ -39,16 +39,17 @@
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* JavaScript JSClasses and JSOps for our Wrapped Native JS Objects. */
+ 
+ #include "xpcprivate.h"
+ #include "XPCWrapper.h"
+ #include "nsWrapperCacheInlines.h"
++#include "XPCNativeScriptableShared.h"
+ 
+ /***************************************************************************/
+ 
+ class NS_STACK_CLASS AutoResolveName
+ {
+ public:
+     AutoResolveName(XPCCallContext& ccx, jsid name
+                     MOZILLA_GUARD_OBJECT_NOTIFIER_PARAM)
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -153,16 +153,17 @@
+ #include "XPCReadableJSStringWrapper.h"
+ #include "XPCCallContext.h"
+ #include "XPCLazyCallContext.h"
+ #include "XPCWrappedNativeScope.h"
+ #include "XPCNativeMember.h"
+ #include "XPCNativeInterface.h"
+ #include "XPCNativeSetKey.h"
+ #include "XPCNativeScriptableFlags.h"
++#include "XPCNativeScriptableShared.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -451,70 +452,16 @@ enum WrapperType {
+     COW             = 1 << 4,
+     SOW             = 1 << 5
+ };
+ 
+ }
+ 
+ /***************************************************************************/
+ 
+-// XPCNativeScriptableShared is used to hold the JSClass and the
+-// associated scriptable flags for XPCWrappedNatives. These are shared across
+-// the runtime and are garbage collected by xpconnect. We *used* to just store
+-// this inside the XPCNativeScriptableInfo (usually owned by instances of
+-// XPCWrappedNativeProto. This had two problems... It was wasteful, and it
+-// was a big problem when wrappers are reparented to different scopes (and
+-// thus different protos (the DOM does this).
+-
+-struct XPCNativeScriptableSharedJSClass
+-{
+-    js::Class base;
+-    uint32_t interfacesBitmap;
+-};
+-
+-class XPCNativeScriptableShared
+-{
+-public:
+-    const XPCNativeScriptableFlags& GetFlags() const {return mFlags;}
+-    uint32_t                        GetInterfacesBitmap() const
+-        {return mJSClass.interfacesBitmap;}
+-    JSClass*                        GetJSClass()
+-        {return Jsvalify(&mJSClass.base);}
+-    JSClass*                        GetSlimJSClass()
+-        {if (mCanBeSlim) return GetJSClass(); return nsnull;}
+-
+-    XPCNativeScriptableShared(JSUint32 aFlags, char* aName,
+-                              uint32_t interfacesBitmap)
+-        : mFlags(aFlags),
+-          mCanBeSlim(false)
+-        {memset(&mJSClass, 0, sizeof(mJSClass));
+-         mJSClass.base.name = aName;  // take ownership
+-         mJSClass.interfacesBitmap = interfacesBitmap;
+-         MOZ_COUNT_CTOR(XPCNativeScriptableShared);}
+-
+-    ~XPCNativeScriptableShared()
+-        {if (mJSClass.base.name)nsMemory::Free((void*)mJSClass.base.name);
+-         MOZ_COUNT_DTOR(XPCNativeScriptableShared);}
+-
+-    char* TransferNameOwnership()
+-        {char* name=(char*)mJSClass.base.name; mJSClass.base.name = nsnull;
+-        return name;}
+-
+-    void PopulateJSClass(JSBool isGlobal);
+-
+-    void Mark()       {mFlags.Mark();}
+-    void Unmark()     {mFlags.Unmark();}
+-    JSBool IsMarked() const {return mFlags.IsMarked();}
+-
+-private:
+-    XPCNativeScriptableFlags mFlags;
+-    XPCNativeScriptableSharedJSClass mJSClass;
+-    JSBool                   mCanBeSlim;
+-};
+-
+ /***************************************************************************/
+ // XPCNativeScriptableInfo is used to hold the nsIXPCScriptable state for a
+ // given class or instance.
+ 
+ class XPCNativeScriptableInfo
+ {
+ public:
+     static XPCNativeScriptableInfo*

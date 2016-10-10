@@ -1,0 +1,135 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 829942 - Make jit_test.py Py3k-readier; r=terrence+jhammel f=decoder
+
+diff --git a/js/src/tests/lib/jittests.py b/js/src/tests/lib/jittests.py
+--- a/js/src/tests/lib/jittests.py
++++ b/js/src/tests/lib/jittests.py
+@@ -1,16 +1,18 @@
+ #!/usr/bin/env python
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ 
+ # jit_test.py -- Python harness for JavaScript trace tests.
+ 
++from __future__ import print_function, unicode_literals
++
+ import datetime, os, re, sys, tempfile, traceback, time, shlex
+ import subprocess
+ from subprocess import *
+ from threading import Thread
+ import signal
+ 
+ try:
+     from multiprocessing import Process, Queue, Manager, cpu_count
+@@ -132,29 +134,32 @@ def find_tests(dir, substring = None):
+                 continue
+             if filename in ('shell.js', 'browser.js', 'jsref.js'):
+                 continue
+             test = os.path.join(dirpath, filename)
+             if substring is None or substring in os.path.relpath(test, dir):
+                 ans.append(test)
+     return ans
+ 
++def define_consts(consts):
++    return '; '.join('const %s="%s"' % const for const in consts)
++
+ def get_test_cmd(path, jitflags, lib_dir, shell_args):
+     libdir_var = lib_dir
+     if not libdir_var.endswith('/'):
+         libdir_var += '/'
+     scriptdir_var = os.path.dirname(path);
+     if not scriptdir_var.endswith('/'):
+         scriptdir_var += '/'
+-    expr = ("const platform=%r; const libdir=%r; const scriptdir=%r"
+-            % (sys.platform, libdir_var, scriptdir_var))
++    consts = (('platform', sys.platform), ('libdir', libdir_var), ('scriptdir', scriptdir_var))
+     # We may have specified '-a' or '-d' twice: once via --jitflags, once
+     # via the "|jit-test|" line.  Remove dups because they are toggles.
+     return ([ JS ] + list(set(jitflags)) + shell_args +
+-            [ '-e', expr, '-f', os.path.join(lib_dir, 'prolog.js'), '-f', path ])
++            [ '-e', define_consts(consts)] +
++            [ '-f', os.path.join(lib_dir, 'prolog.js'), '-f', path ])
+ 
+ def tmppath(token):
+     fd, path = tempfile.mkstemp(prefix=token)
+     os.close(fd)
+     return path
+ 
+ def read_and_unlink(path):
+     f = open(path)
+@@ -263,16 +268,18 @@ def run_test(test, lib_dir, shell_args):
+     else:
+         run = run_cmd
+ 
+     env = os.environ.copy()
+     if test.tz_pacific:
+         env['TZ'] = 'PST8PDT'
+ 
+     out, err, code, timed_out = run(cmd, env, OPTIONS.timeout)
++    out = out.decode('utf-8')
++    err = err.decode('utf-8')
+ 
+     if OPTIONS.show_output:
+         sys.stdout.write(out)
+         sys.stdout.write(err)
+         sys.stdout.write('Exit code: %s\n' % code)
+     if test.valgrind:
+         sys.stdout.write(err)
+     return (check_output(out, err, code, test),
+@@ -301,17 +308,17 @@ def print_tinderbox(label, test, message
+     if (test != None):
+         jitflags = " ".join(test.jitflags)
+         result = "%s | jit_test.py %-15s| %s" % (label, jitflags, test.path)
+     else:
+         result = "%s | jit_test.py " % label
+ 
+     if message:
+         result += ": " + message
+-    print result
++    print(result)
+ 
+ def wrap_parallel_run_test(test, lib_dir, shell_args, resultQueue, options, js):
+     # This is necessary because on Windows global variables are not automatically
+     # available in the children, while on Linux and OSX this is the case (because of fork).
+     global OPTIONS
+     global JS
+     OPTIONS = options
+     JS = js
+@@ -670,17 +677,17 @@ def main(argv):
+ 
+     if OPTIONS.exclude:
+         exclude_list = []
+         for exclude in OPTIONS.exclude:
+             exclude_list += find_tests(test_dir, exclude)
+         test_list = [ test for test in test_list if test not in set(exclude_list) ]
+ 
+     if not test_list:
+-        print >> sys.stderr, "No tests found matching command line arguments."
++        print("No tests found matching command line arguments.", file=sys.stderr)
+         sys.exit(0)
+ 
+     test_list = [ Test.from_file(_, OPTIONS) for _ in test_list ]
+ 
+     if not OPTIONS.run_slow:
+         test_list = [ _ for _ in test_list if not _.slow ]
+ 
+     # The full test list is ready. Now create copies for each JIT configuration.
+@@ -739,15 +746,15 @@ def main(argv):
+         if OPTIONS.max_jobs > 1 and HAVE_MULTIPROCESSING:
+             ok = run_tests_parallel(job_list, test_dir, lib_dir, shell_args)
+         else:
+             ok = run_tests(job_list, test_dir, lib_dir, shell_args)
+         if not ok:
+             sys.exit(2)
+     except OSError:
+         if not os.path.exists(JS):
+-            print >> sys.stderr, "JS shell argument: file does not exist: '%s'"%JS
++            print("JS shell argument: file does not exist: '%s'"%JS, file=sys.stderr)
+             sys.exit(1)
+         else:
+             raise
+ 
+ if __name__ == '__main__':
+     print 'Use ../jit-test/jit_test.py to run these tests.'

@@ -1,0 +1,149 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/public/Element.h b/content/base/public/Element.h
+--- a/content/base/public/Element.h
++++ b/content/base/public/Element.h
+@@ -564,25 +564,17 @@ public:
+     GetAttr(kNameSpaceID_None, nsGkAtoms::id, aId);
+   }
+   void SetId(const nsAString& aId)
+   {
+     SetAttr(kNameSpaceID_None, nsGkAtoms::id, aId, true);
+   }
+ 
+   nsDOMTokenList* GetClassList();
+-  nsDOMAttributeMap* Attributes()
+-  {
+-    nsDOMSlots* slots = DOMSlots();
+-    if (!slots->mAttributeMap) {
+-      slots->mAttributeMap = new nsDOMAttributeMap(this);
+-    }
+-
+-    return slots->mAttributeMap;
+-  }
++  nsDOMAttributeMap* Attributes();
+   void GetAttribute(const nsAString& aName, nsString& aReturn)
+   {
+     DOMString str;
+     GetAttribute(aName, str);
+     str.ToString(aReturn);
+   }
+ 
+   void GetAttribute(const nsAString& aName, DOMString& aReturn);
+diff --git a/content/base/src/Element.cpp b/content/base/src/Element.cpp
+--- a/content/base/src/Element.cpp
++++ b/content/base/src/Element.cpp
+@@ -441,16 +441,27 @@ Element::GetClassList()
+     if (classAttr) {
+       slots->mClassList = new nsDOMTokenList(this, classAttr);
+     }
+   }
+ 
+   return slots->mClassList;
+ }
+ 
++nsDOMAttributeMap*
++Element::Attributes()
++{
++  nsDOMSlots* slots = DOMSlots();
++  if (!slots->mAttributeMap) {
++    slots->mAttributeMap = new nsDOMAttributeMap(this);
++  }
++
++  return slots->mAttributeMap;
++}
++
+ void
+ Element::GetClassList(nsISupports** aClassList)
+ {
+   NS_IF_ADDREF(*aClassList = GetClassList());
+ }
+ 
+ already_AddRefed<nsIHTMLCollection>
+ Element::GetElementsByTagName(const nsAString& aLocalName)
+diff --git a/content/base/src/nsDOMAttributeMap.cpp b/content/base/src/nsDOMAttributeMap.cpp
+--- a/content/base/src/nsDOMAttributeMap.cpp
++++ b/content/base/src/nsDOMAttributeMap.cpp
+@@ -548,13 +548,19 @@ nsDOMAttributeMap::SizeOfIncludingThis(M
+   size_t n = aMallocSizeOf(this);
+   n += mAttributeCache.SizeOfExcludingThis(AttrCacheSizeEnumerator,
+                                            aMallocSizeOf);
+ 
+   // NB: mContent is non-owning and thus not counted.
+   return n;
+ }
+ 
++ParentObject
++nsDOMAttributeMap::GetParentObject() const
++{
++  return ParentObject(mContent);
++}
++
+ /* virtual */ JSObject*
+ nsDOMAttributeMap::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+ {
+   return MozNamedAttrMapBinding::Wrap(aCx, aScope, this);
+ }
+diff --git a/content/base/src/nsDOMAttributeMap.h b/content/base/src/nsDOMAttributeMap.h
+--- a/content/base/src/nsDOMAttributeMap.h
++++ b/content/base/src/nsDOMAttributeMap.h
+@@ -18,16 +18,22 @@
+ #include "nsRefPtrHashtable.h"
+ #include "nsStringGlue.h"
+ #include "nsWrapperCache.h"
+ 
+ class nsIAtom;
+ class nsINodeInfo;
+ class nsIDocument;
+ 
++namespace mozilla {
++namespace dom {
++class ParentObject;
++} // namespace dom
++} // namespace mozilla
++
+ /**
+  * Structure used as a key for caching Attrs in nsDOMAttributeMap's mAttributeCache.
+  */
+ class nsAttrKey
+ {
+ public:
+   /**
+    * The namespace of the attribute
+@@ -132,20 +138,17 @@ public:
+   /**
+    * Enumerates over the attribute nodess in the map and calls aFunc for each
+    * one. If aFunc returns PL_DHASH_STOP we'll stop enumerating at that point.
+    *
+    * @return The number of attribute nodes that aFunc was called for.
+    */
+   uint32_t Enumerate(AttrCache::EnumReadFunction aFunc, void *aUserArg) const;
+ 
+-  Element* GetParentObject() const
+-  {
+-    return mContent;
+-  }
++  mozilla::dom::ParentObject GetParentObject() const;
+   virtual JSObject* WrapObject(JSContext* aCx,
+                                JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+ 
+   // WebIDL
+   Attr* GetNamedItem(const nsAString& aAttrName);
+   Attr* NamedGetter(const nsAString& aAttrName, bool& aFound);
+   already_AddRefed<Attr>
+   SetNamedItem(Attr& aAttr, ErrorResult& aError)
+@@ -200,14 +203,9 @@ private:
+   Attr* GetAttribute(nsINodeInfo* aNodeInfo, bool aNsAware);
+ 
+   /**
+    * Remove an attribute, returns the removed node.
+    */
+   already_AddRefed<Attr> RemoveAttribute(nsINodeInfo* aNodeInfo);
+ };
+ 
+-// XXX khuey yes this is crazy.  The bindings code needs to see this include,
+-// but if we pull it in at the top of the file we get a circular include
+-// problem.
+-#include "mozilla/dom/Element.h"
+-
+ #endif /* nsDOMAttributeMap_h */

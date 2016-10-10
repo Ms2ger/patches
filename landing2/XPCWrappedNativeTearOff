@@ -1,0 +1,199 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCWrappedNativeTearOff.h b/js/xpconnect/src/XPCWrappedNativeTearOff.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCWrappedNativeTearOff.h
+@@ -0,0 +1,51 @@
++#ifndef XPCWrappedNativeTearOff_h
++#define XPCWrappedNativeTearOff_h
++
++#include "nsISupports.h"
++#include "jspubtd.h"
++
++class XPCNativeInterface;
++
++// XPCWrappedNativeTearOff represents the info needed to make calls to one
++// interface on the underlying native object of a XPCWrappedNative.
++
++class XPCWrappedNativeTearOff
++{
++public:
++    JSBool IsAvailable() const {return mInterface == nsnull;}
++    JSBool IsReserved()  const {return mInterface == (XPCNativeInterface*)1;}
++    JSBool IsValid()     const {return !IsAvailable() && !IsReserved();}
++    void   SetReserved()       {mInterface = (XPCNativeInterface*)1;}
++
++    XPCNativeInterface* GetInterface() const {return mInterface;}
++    nsISupports*        GetNative()    const {return mNative;}
++    JSObject*           GetJSObject()  const;
++    void SetInterface(XPCNativeInterface*  Interface) {mInterface = Interface;}
++    void SetNative(nsISupports*  Native)              {mNative = Native;}
++    void SetJSObject(JSObject*  JSObj);
++
++    void JSObjectFinalized() {SetJSObject(nsnull);}
++
++    XPCWrappedNativeTearOff()
++        : mInterface(nsnull), mNative(nsnull), mJSObject(nsnull) {}
++    ~XPCWrappedNativeTearOff();
++
++    // NOP. This is just here to make the AutoMarkingPtr code compile.
++    inline void TraceJS(JSTracer* trc) {}
++    inline void AutoTrace(JSTracer* trc) {}
++
++    void Mark()       {mJSObject = (JSObject*)(((jsword)mJSObject) | 1);}
++    void Unmark()     {mJSObject = (JSObject*)(((jsword)mJSObject) & ~1);}
++    JSBool IsMarked() const {return (JSBool)(((jsword)mJSObject) & 1);}
++
++private:
++    XPCWrappedNativeTearOff(const XPCWrappedNativeTearOff& r); // not implemented
++    XPCWrappedNativeTearOff& operator= (const XPCWrappedNativeTearOff& r); // not implemented
++
++private:
++    XPCNativeInterface* mInterface;
++    nsISupports*        mNative;
++    JSObject*           mJSObject;
++};
++
++#endif // XPCWrappedNativeTearOff_h
+diff --git a/js/xpconnect/src/XPCWrappedNativeTearOffChunk.h b/js/xpconnect/src/XPCWrappedNativeTearOffChunk.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCWrappedNativeTearOffChunk.h
+@@ -0,0 +1,29 @@
++#ifndef XPCWrappedNativeTearOffChunk_h
++#define XPCWrappedNativeTearOffChunk_h
++
++#include "XPCWrappedNativeTearOff.h"
++
++// XPCWrappedNativeTearOffChunk is a collections of XPCWrappedNativeTearOff
++// objects. It lets us allocate a set of XPCWrappedNativeTearOff objects and
++// link the sets - rather than only having the option of linking single
++// XPCWrappedNativeTearOff objects.
++//
++// The value of XPC_WRAPPED_NATIVE_TEAROFFS_PER_CHUNK can be tuned at buildtime
++// to balance between the code of allocations of additional chunks and the waste
++// of space for ununsed XPCWrappedNativeTearOff objects.
++
++#define XPC_WRAPPED_NATIVE_TEAROFFS_PER_CHUNK 1
++
++class XPCWrappedNativeTearOffChunk
++{
++friend class XPCWrappedNative;
++private:
++    XPCWrappedNativeTearOffChunk() : mNextChunk(nsnull) {}
++    ~XPCWrappedNativeTearOffChunk() {delete mNextChunk;}
++
++private:
++    XPCWrappedNativeTearOff mTearOffs[XPC_WRAPPED_NATIVE_TEAROFFS_PER_CHUNK];
++    XPCWrappedNativeTearOffChunk* mNextChunk;
++};
++
++#endif // XPCWrappedNativeTearOffChunk_h
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -47,16 +47,18 @@
+ #define xpcprivate_h___
+ 
+ #include <string.h>
+ #include <stdlib.h>
+ #include <stdarg.h>
+ #include <math.h>
+ #include "xpcpublic.h"
+ #include "mozilla/xpc/PtrAndPrincipalHashKey.h"
++#include "XPCWrappedNativeTearOff.h"
++#include "XPCWrappedNativeTearOffChunk.h"
+ 
+ #include "jsapi.h"
+ #include "jsdhash.h"
+ #include "jsprf.h"
+ #include "prprf.h"
+ #include "jscntxt.h"
+ #include "jsdbgapi.h"
+ #include "jsfriendapi.h"
+@@ -2278,84 +2280,16 @@ extern JSBool MorphSlimWrapper(JSContext
+ 
+ static inline XPCWrappedNativeProto*
+ GetSlimWrapperProto(JSObject *obj)
+ {
+   const js::Value &v = js::GetReservedSlot(obj, 0);
+   return static_cast<XPCWrappedNativeProto*>(v.toPrivate());
+ }
+ 
+-
+-/***********************************************/
+-// XPCWrappedNativeTearOff represents the info needed to make calls to one
+-// interface on the underlying native object of a XPCWrappedNative.
+-
+-class XPCWrappedNativeTearOff
+-{
+-public:
+-    JSBool IsAvailable() const {return mInterface == nsnull;}
+-    JSBool IsReserved()  const {return mInterface == (XPCNativeInterface*)1;}
+-    JSBool IsValid()     const {return !IsAvailable() && !IsReserved();}
+-    void   SetReserved()       {mInterface = (XPCNativeInterface*)1;}
+-
+-    XPCNativeInterface* GetInterface() const {return mInterface;}
+-    nsISupports*        GetNative()    const {return mNative;}
+-    JSObject*           GetJSObject()  const;
+-    void SetInterface(XPCNativeInterface*  Interface) {mInterface = Interface;}
+-    void SetNative(nsISupports*  Native)              {mNative = Native;}
+-    void SetJSObject(JSObject*  JSObj);
+-
+-    void JSObjectFinalized() {SetJSObject(nsnull);}
+-
+-    XPCWrappedNativeTearOff()
+-        : mInterface(nsnull), mNative(nsnull), mJSObject(nsnull) {}
+-    ~XPCWrappedNativeTearOff();
+-
+-    // NOP. This is just here to make the AutoMarkingPtr code compile.
+-    inline void TraceJS(JSTracer* trc) {}
+-    inline void AutoTrace(JSTracer* trc) {}
+-
+-    void Mark()       {mJSObject = (JSObject*)(((jsword)mJSObject) | 1);}
+-    void Unmark()     {mJSObject = (JSObject*)(((jsword)mJSObject) & ~1);}
+-    JSBool IsMarked() const {return (JSBool)(((jsword)mJSObject) & 1);}
+-
+-private:
+-    XPCWrappedNativeTearOff(const XPCWrappedNativeTearOff& r); // not implemented
+-    XPCWrappedNativeTearOff& operator= (const XPCWrappedNativeTearOff& r); // not implemented
+-
+-private:
+-    XPCNativeInterface* mInterface;
+-    nsISupports*        mNative;
+-    JSObject*           mJSObject;
+-};
+-
+-/***********************************************/
+-// XPCWrappedNativeTearOffChunk is a collections of XPCWrappedNativeTearOff
+-// objects. It lets us allocate a set of XPCWrappedNativeTearOff objects and
+-// link the sets - rather than only having the option of linking single
+-// XPCWrappedNativeTearOff objects.
+-//
+-// The value of XPC_WRAPPED_NATIVE_TEAROFFS_PER_CHUNK can be tuned at buildtime
+-// to balance between the code of allocations of additional chunks and the waste
+-// of space for ununsed XPCWrappedNativeTearOff objects.
+-
+-#define XPC_WRAPPED_NATIVE_TEAROFFS_PER_CHUNK 1
+-
+-class XPCWrappedNativeTearOffChunk
+-{
+-friend class XPCWrappedNative;
+-private:
+-    XPCWrappedNativeTearOffChunk() : mNextChunk(nsnull) {}
+-    ~XPCWrappedNativeTearOffChunk() {delete mNextChunk;}
+-
+-private:
+-    XPCWrappedNativeTearOff mTearOffs[XPC_WRAPPED_NATIVE_TEAROFFS_PER_CHUNK];
+-    XPCWrappedNativeTearOffChunk* mNextChunk;
+-};
+-
+ void *xpc_GetJSPrivate(JSObject *obj);
+ 
+ /***************************************************************************/
+ // XPCWrappedNative the wrapper around one instance of a native xpcom object
+ // to be used from JavaScript.
+ 
+ class XPCWrappedNative : public nsIXPConnectWrappedNative
+ {

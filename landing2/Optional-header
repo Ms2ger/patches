@@ -1,0 +1,772 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsFormData.h b/content/base/src/nsFormData.h
+--- a/content/base/src/nsFormData.h
++++ b/content/base/src/nsFormData.h
+@@ -17,16 +17,17 @@
+ class nsIDOMFile;
+ 
+ namespace mozilla {
+ class ErrorResult;
+ 
+ namespace dom {
+ class HTMLFormElement;
+ class GlobalObject;
++template<typename> class Optional;
+ } // namespace dom
+ } // namespace mozilla
+ 
+ class nsFormData : public nsIDOMFormData,
+                    public nsIXHRSendable,
+                    public nsFormSubmission,
+                    public nsWrapperCache
+ {
+diff --git a/content/media/webspeech/recognition/SpeechGrammarList.h b/content/media/webspeech/recognition/SpeechGrammarList.h
+--- a/content/media/webspeech/recognition/SpeechGrammarList.h
++++ b/content/media/webspeech/recognition/SpeechGrammarList.h
+@@ -17,16 +17,18 @@
+ #include "SpeechGrammar.h"
+ 
+ struct JSContext;
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ class GlobalObject;
++template<typename> class Optional;
++
+ class SpeechGrammarList MOZ_FINAL : public nsISupports,
+                                     public nsWrapperCache,
+                                     public EnableWebSpeechRecognitionCheck
+ {
+ public:
+   SpeechGrammarList(nsISupports* aParent);
+   ~SpeechGrammarList();
+ 
+diff --git a/dom/bindings/BindingDeclarations.h b/dom/bindings/BindingDeclarations.h
+--- a/dom/bindings/BindingDeclarations.h
++++ b/dom/bindings/BindingDeclarations.h
+@@ -8,23 +8,22 @@
+  * A header for declaring various things that binding implementation headers
+  * might need.  The idea is to make binding implementation headers safe to
+  * include anywhere without running into include hell like we do with
+  * BindingUtils.h
+  */
+ #ifndef mozilla_dom_BindingDeclarations_h__
+ #define mozilla_dom_BindingDeclarations_h__
+ 
+-#include "nsStringGlue.h"
+ #include "jsapi.h"
+-#include "mozilla/Util.h"
+ #include "nsCOMPtr.h"
+ #include "nsTArray.h"
+ #include "nsAutoPtr.h" // for nsRefPtr member variables
+ 
++class nsAString;
+ class nsWrapperCache;
+ 
+ // nsGlobalWindow implements nsWrapperCache, but doesn't always use it. Don't
+ // try to use it without fixing that first.
+ class nsGlobalWindow;
+ 
+ namespace mozilla {
+ namespace dom {
+@@ -97,287 +96,16 @@ public:
+     return !Get();
+   }
+ 
+ private:
+   JS::RootedObject mGlobalJSObject;
+   JSContext* mCx;
+ };
+ 
+-// Class for representing optional arguments.
+-template<typename T, typename InternalType>
+-class Optional_base
+-{
+-public:
+-  Optional_base()
+-  {}
+-
+-  explicit Optional_base(const T& aValue)
+-  {
+-    mImpl.construct(aValue);
+-  }
+-
+-  template<typename T1, typename T2>
+-  explicit Optional_base(const T1& aValue1, const T2& aValue2)
+-  {
+-    mImpl.construct(aValue1, aValue2);
+-  }
+-
+-  bool WasPassed() const
+-  {
+-    return !mImpl.empty();
+-  }
+-
+-  void Construct()
+-  {
+-    mImpl.construct();
+-  }
+-
+-  template <class T1>
+-  void Construct(const T1 &t1)
+-  {
+-    mImpl.construct(t1);
+-  }
+-
+-  template <class T1, class T2>
+-  void Construct(const T1 &t1, const T2 &t2)
+-  {
+-    mImpl.construct(t1, t2);
+-  }
+-
+-  const T& Value() const
+-  {
+-    return mImpl.ref();
+-  }
+-
+-  // Return InternalType here so we can work with it usefully.
+-  InternalType& Value()
+-  {
+-    return mImpl.ref();
+-  }
+-
+-  // And an explicit way to get the InternalType even if we're const.
+-  const InternalType& InternalValue() const
+-  {
+-    return mImpl.ref();
+-  }
+-
+-  // If we ever decide to add conversion operators for optional arrays
+-  // like the ones Nullable has, we'll need to ensure that Maybe<> has
+-  // the boolean before the actual data.
+-
+-private:
+-  // Forbid copy-construction and assignment
+-  Optional_base(const Optional_base& other) MOZ_DELETE;
+-  const Optional_base &operator=(const Optional_base &other) MOZ_DELETE;
+-
+-protected:
+-  Maybe<InternalType> mImpl;
+-};
+-
+-template<typename T>
+-class Optional : public Optional_base<T, T>
+-{
+-public:
+-  Optional() :
+-    Optional_base<T, T>()
+-  {}
+-
+-  explicit Optional(const T& aValue) :
+-    Optional_base<T, T>(aValue)
+-  {}
+-};
+-
+-template<typename T>
+-class Optional<JS::Handle<T> > :
+-  public Optional_base<JS::Handle<T>, JS::Rooted<T> >
+-{
+-public:
+-  Optional() :
+-    Optional_base<JS::Handle<T>, JS::Rooted<T> >()
+-  {}
+-
+-  Optional(JSContext* cx) :
+-    Optional_base<JS::Handle<T>, JS::Rooted<T> >()
+-  {
+-    this->Construct(cx);
+-  }
+-
+-  Optional(JSContext* cx, const T& aValue) :
+-    Optional_base<JS::Handle<T>, JS::Rooted<T> >(cx, aValue)
+-  {}
+-
+-  // Override the const Value() to return the right thing so we're not
+-  // returning references to temporaries.
+-  JS::Handle<T> Value() const
+-  {
+-    return this->mImpl.ref();
+-  }
+-
+-  // And we have to override the non-const one too, since we're
+-  // shadowing the one on the superclass.
+-  JS::Rooted<T>& Value()
+-  {
+-    return this->mImpl.ref();
+-  }
+-};
+-
+-// A specialization of Optional for JSObject* to make sure that when someone
+-// calls Construct() on it we will pre-initialized the JSObject* to nullptr so
+-// it can be traced safely.
+-template<>
+-class Optional<JSObject*> : public Optional_base<JSObject*, JSObject*>
+-{
+-public:
+-  Optional() :
+-    Optional_base<JSObject*, JSObject*>()
+-  {}
+-
+-  explicit Optional(JSObject* aValue) :
+-    Optional_base<JSObject*, JSObject*>(aValue)
+-  {}
+-
+-  // Don't allow us to have an uninitialized JSObject*
+-  void Construct()
+-  {
+-    // The Android compiler sucks and thinks we're trying to construct
+-    // a JSObject* from an int if we don't cast here.  :(
+-    Optional_base<JSObject*, JSObject*>::Construct(
+-      static_cast<JSObject*>(nullptr));
+-  }
+-
+-  template <class T1>
+-  void Construct(const T1& t1)
+-  {
+-    Optional_base<JSObject*, JSObject*>::Construct(t1);
+-  }
+-};
+-
+-// A specialization of Optional for JS::Value to make sure that when someone
+-// calls Construct() on it we will pre-initialized the JS::Value to
+-// JS::UndefinedValue() so it can be traced safely.
+-template<>
+-class Optional<JS::Value> : public Optional_base<JS::Value, JS::Value>
+-{
+-public:
+-  Optional() :
+-    Optional_base<JS::Value, JS::Value>()
+-  {}
+-
+-  explicit Optional(JS::Value aValue) :
+-    Optional_base<JS::Value, JS::Value>(aValue)
+-  {}
+-
+-  // Don't allow us to have an uninitialized JS::Value
+-  void Construct()
+-  {
+-    Optional_base<JS::Value, JS::Value>::Construct(JS::UndefinedValue());
+-  }
+-
+-  template <class T1>
+-  void Construct(const T1& t1)
+-  {
+-    Optional_base<JS::Value, JS::Value>::Construct(t1);
+-  }
+-};
+-
+-// A specialization of Optional for NonNull that lets us get a T& from Value()
+-template<typename U> class NonNull;
+-template<typename T>
+-class Optional<NonNull<T> > : public Optional_base<T, NonNull<T> >
+-{
+-public:
+-  // We want our Value to actually return a non-const reference, even
+-  // if we're const.  At least for things that are normally pointer
+-  // types...
+-  T& Value() const
+-  {
+-    return *this->mImpl.ref().get();
+-  }
+-
+-  // And we have to override the non-const one too, since we're
+-  // shadowing the one on the superclass.
+-  NonNull<T>& Value()
+-  {
+-    return this->mImpl.ref();
+-  }
+-};
+-
+-// A specialization of Optional for OwningNonNull that lets us get a
+-// T& from Value()
+-template<typename U> class OwningNonNull;
+-template<typename T>
+-class Optional<OwningNonNull<T> > : public Optional_base<T, OwningNonNull<T> >
+-{
+-public:
+-  // We want our Value to actually return a non-const reference, even
+-  // if we're const.  At least for things that are normally pointer
+-  // types...
+-  T& Value() const
+-  {
+-    return *this->mImpl.ref().get();
+-  }
+-
+-  // And we have to override the non-const one too, since we're
+-  // shadowing the one on the superclass.
+-  OwningNonNull<T>& Value()
+-  {
+-    return this->mImpl.ref();
+-  }
+-};
+-
+-// Specialization for strings.
+-// XXXbz we can't pull in FakeDependentString here, because it depends on
+-// internal strings.  So we just have to forward-declare it and reimplement its
+-// ToAStringPtr.
+-
+-struct FakeDependentString;
+-
+-template<>
+-class Optional<nsAString>
+-{
+-public:
+-  Optional() : mPassed(false) {}
+-
+-  bool WasPassed() const
+-  {
+-    return mPassed;
+-  }
+-
+-  void operator=(const nsAString* str)
+-  {
+-    MOZ_ASSERT(str);
+-    mStr = str;
+-    mPassed = true;
+-  }
+-
+-  // If this code ever goes away, remove the comment pointing to it in the
+-  // FakeDependentString class in BindingUtils.h.
+-  void operator=(const FakeDependentString* str)
+-  {
+-    MOZ_ASSERT(str);
+-    mStr = reinterpret_cast<const nsDependentString*>(str);
+-    mPassed = true;
+-  }
+-
+-  const nsAString& Value() const
+-  {
+-    MOZ_ASSERT(WasPassed());
+-    return *mStr;
+-  }
+-
+-private:
+-  // Forbid copy-construction and assignment
+-  Optional(const Optional& other) MOZ_DELETE;
+-  const Optional &operator=(const Optional &other) MOZ_DELETE;
+-
+-  bool mPassed;
+-  const nsAString* mStr;
+-};
+-
+ template<class T>
+ class NonNull
+ {
+ public:
+   NonNull()
+ #ifdef DEBUG
+     : inited(false)
+ #endif
+diff --git a/dom/bindings/Codegen.py b/dom/bindings/Codegen.py
+--- a/dom/bindings/Codegen.py
++++ b/dom/bindings/Codegen.py
+@@ -8678,16 +8678,17 @@ class CGBindingRoot(CGThing):
+                       "\n")
+ 
+         # Add header includes.
+         curr = CGHeaders(descriptors,
+                          mainDictionaries + workerDictionaries,
+                          mainCallbacks + workerCallbacks,
+                          callbackDescriptors,
+                          ['mozilla/dom/BindingDeclarations.h',
++                          'mozilla/dom/Optional.h',
+                           'mozilla/ErrorResult.h',
+                           'mozilla/dom/DOMJSClass.h',
+                           'mozilla/dom/DOMJSProxyHandler.h'],
+                          ['mozilla/dom/BindingUtils.h',
+                           'mozilla/dom/Nullable.h',
+                           'PrimitiveConversions.h',
+                           'WrapperFactory.h',
+                           # Have to include nsDOMQS.h to get fast arg unwrapping
+diff --git a/dom/bindings/Optional.h b/dom/bindings/Optional.h
+new file mode 100644
+--- /dev/null
++++ b/dom/bindings/Optional.h
+@@ -0,0 +1,296 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++/* Representation for optional arguments. */
++
++#ifndef mozilla_dom_Optional_h
++#define mozilla_dom_Optional_h
++
++#include "js/RootingAPI.h"
++#include "js/Value.h"
++#include "mozilla/Attributes.h"
++#include "mozilla/Util.h"
++#include "nsStringGlue.h"
++
++namespace mozilla {
++namespace dom {
++
++template<typename T, typename InternalType>
++class Optional_base
++{
++public:
++  Optional_base()
++  {}
++
++  explicit Optional_base(const T& aValue)
++  {
++    mImpl.construct(aValue);
++  }
++
++  template<typename T1, typename T2>
++  explicit Optional_base(const T1& aValue1, const T2& aValue2)
++  {
++    mImpl.construct(aValue1, aValue2);
++  }
++
++  bool WasPassed() const
++  {
++    return !mImpl.empty();
++  }
++
++  void Construct()
++  {
++    mImpl.construct();
++  }
++
++  template <class T1>
++  void Construct(const T1& aValue1)
++  {
++    mImpl.construct(aValue1);
++  }
++
++  template <class T1, class T2>
++  void Construct(const T1& aValue1, const T2& aValue2)
++  {
++    mImpl.construct(aValue1, aValue2);
++  }
++
++  const T& Value() const
++  {
++    return mImpl.ref();
++  }
++
++  // Return InternalType here so we can work with it usefully.
++  InternalType& Value()
++  {
++    return mImpl.ref();
++  }
++
++  // And an explicit way to get the InternalType even if we're const.
++  const InternalType& InternalValue() const
++  {
++    return mImpl.ref();
++  }
++
++  // If we ever decide to add conversion operators for optional arrays
++  // like the ones Nullable has, we'll need to ensure that Maybe<> has
++  // the boolean before the actual data.
++
++private:
++  // Forbid copy-construction and assignment
++  Optional_base(const Optional_base& aOther) MOZ_DELETE;
++  const Optional_base& operator=(const Optional_base& aOther) MOZ_DELETE;
++
++protected:
++  Maybe<InternalType> mImpl;
++};
++
++template<typename T>
++class Optional : public Optional_base<T, T>
++{
++public:
++  Optional()
++    : Optional_base<T, T>()
++  {}
++
++  explicit Optional(const T& aValue)
++    : Optional_base<T, T>(aValue)
++  {}
++};
++
++template<typename T>
++class Optional<JS::Handle<T> > :
++  public Optional_base<JS::Handle<T>, JS::Rooted<T> >
++{
++public:
++  Optional()
++    : Optional_base<JS::Handle<T>, JS::Rooted<T> >()
++  {}
++
++  Optional(JSContext* aCx)
++    : Optional_base<JS::Handle<T>, JS::Rooted<T> >()
++  {
++    this->Construct(aCx);
++  }
++
++  Optional(JSContext* aCx, const T& aValue)
++    : Optional_base<JS::Handle<T>, JS::Rooted<T> >(aCx, aValue)
++  {}
++
++  // Override the const Value() to return the right thing so we're not
++  // returning references to temporaries.
++  JS::Handle<T> Value() const
++  {
++    return this->mImpl.ref();
++  }
++
++  // And we have to override the non-const one too, since we're
++  // shadowing the one on the superclass.
++  JS::Rooted<T>& Value()
++  {
++    return this->mImpl.ref();
++  }
++};
++
++// A specialization of Optional for JSObject* to make sure that when someone
++// calls Construct() on it we will pre-initialized the JSObject* to nullptr so
++// it can be traced safely.
++template<>
++class Optional<JSObject*> : public Optional_base<JSObject*, JSObject*>
++{
++public:
++  Optional()
++    : Optional_base<JSObject*, JSObject*>()
++  {}
++
++  explicit Optional(JSObject* aValue)
++    : Optional_base<JSObject*, JSObject*>(aValue)
++  {}
++
++  // Don't allow us to have an uninitialized JSObject*
++  void Construct()
++  {
++    // The Android compiler sucks and thinks we're trying to construct
++    // a JSObject* from an int if we don't cast here.  :(
++    Optional_base<JSObject*, JSObject*>::Construct(
++      static_cast<JSObject*>(nullptr));
++  }
++
++  template <class T1>
++  void Construct(const T1& aValue1)
++  {
++    Optional_base<JSObject*, JSObject*>::Construct(aValue1);
++  }
++};
++
++// A specialization of Optional for JS::Value to make sure that when someone
++// calls Construct() on it we will pre-initialized the JS::Value to
++// JS::UndefinedValue() so it can be traced safely.
++template<>
++class Optional<JS::Value> : public Optional_base<JS::Value, JS::Value>
++{
++public:
++  Optional()
++    : Optional_base<JS::Value, JS::Value>()
++  {}
++
++  explicit Optional(JS::Value aValue)
++    : Optional_base<JS::Value, JS::Value>(aValue)
++  {}
++
++  // Don't allow us to have an uninitialized JS::Value
++  void Construct()
++  {
++    Optional_base<JS::Value, JS::Value>::Construct(JS::UndefinedValue());
++  }
++
++  template <class T1>
++  void Construct(const T1& aValue1)
++  {
++    Optional_base<JS::Value, JS::Value>::Construct(aValue1);
++  }
++};
++
++// A specialization of Optional for NonNull that lets us get a T& from Value()
++template<typename T> class NonNull;
++template<typename T>
++class Optional<NonNull<T> > : public Optional_base<T, NonNull<T> >
++{
++public:
++  // We want our Value to actually return a non-const reference, even
++  // if we're const.  At least for things that are normally pointer
++  // types...
++  T& Value() const
++  {
++    return *this->mImpl.ref().get();
++  }
++
++  // And we have to override the non-const one too, since we're
++  // shadowing the one on the superclass.
++  NonNull<T>& Value()
++  {
++    return this->mImpl.ref();
++  }
++};
++
++// A specialization of Optional for OwningNonNull that lets us get a
++// T& from Value()
++template<typename T> class OwningNonNull;
++template<typename T>
++class Optional<OwningNonNull<T> > : public Optional_base<T, OwningNonNull<T> >
++{
++public:
++  // We want our Value to actually return a non-const reference, even
++  // if we're const.  At least for things that are normally pointer
++  // types...
++  T& Value() const
++  {
++    return *this->mImpl.ref().get();
++  }
++
++  // And we have to override the non-const one too, since we're
++  // shadowing the one on the superclass.
++  OwningNonNull<T>& Value()
++  {
++    return this->mImpl.ref();
++  }
++};
++
++// Specialization for strings.
++// XXXbz we can't pull in FakeDependentString here, because it depends on
++// internal strings.  So we just have to forward-declare it and reimplement its
++// ToAStringPtr.
++
++struct FakeDependentString;
++
++template<>
++class Optional<nsAString>
++{
++public:
++  Optional()
++    : mPassed(false)
++  {}
++
++  bool WasPassed() const
++  {
++    return mPassed;
++  }
++
++  void operator=(const nsAString* aStr)
++  {
++    MOZ_ASSERT(aStr);
++    mStr = aStr;
++    mPassed = true;
++  }
++
++  // If this code ever goes away, remove the comment pointing to it in the
++  // FakeDependentString class in BindingUtils.h.
++  void operator=(const FakeDependentString* aStr)
++  {
++    MOZ_ASSERT(aStr);
++    mStr = reinterpret_cast<const nsDependentString*>(aStr);
++    mPassed = true;
++  }
++
++  const nsAString& Value() const
++  {
++    MOZ_ASSERT(WasPassed());
++    return *mStr;
++  }
++
++private:
++  // Forbid copy-construction and assignment
++  Optional(const Optional& aOther) MOZ_DELETE;
++  const Optional& operator=(const Optional& aOther) MOZ_DELETE;
++
++  bool mPassed;
++  const nsAString* mStr;
++};
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_Optional_h
+diff --git a/dom/bindings/moz.build b/dom/bindings/moz.build
+--- a/dom/bindings/moz.build
++++ b/dom/bindings/moz.build
+@@ -18,16 +18,17 @@ EXPORTS.mozilla.dom += [
+     'CallbackObject.h',
+     'DOMJSClass.h',
+     'DOMJSProxyHandler.h',
+     'DOMString.h',
+     'Date.h',
+     'Errors.msg',
+     'NonRefcountedDOMObject.h',
+     'Nullable.h',
++    'Optional.h',
+     'PrimitiveConversions.h',
+     'TypedArray.h',
+ ]
+ 
+ FAIL_ON_WARNINGS = True
+ 
+ LIBXUL_LIBRARY = True
+ 
+diff --git a/dom/camera/DOMCameraManager.h b/dom/camera/DOMCameraManager.h
+--- a/dom/camera/DOMCameraManager.h
++++ b/dom/camera/DOMCameraManager.h
+@@ -23,16 +23,17 @@
+ 
+ class nsPIDOMWindow;
+ 
+ namespace mozilla {
+   class ErrorResult;
+ class nsDOMCameraControl;
+ namespace dom {
+ class CameraSelector;
++template<typename> class Optional;
+ }
+ }
+ 
+ typedef nsTArray<nsRefPtr<mozilla::nsDOMCameraControl> > CameraControls;
+ typedef nsClassHashtable<nsUint64HashKey, CameraControls> WindowTable;
+ 
+ class nsDOMCameraManager MOZ_FINAL
+   : public nsIObserver
+diff --git a/dom/indexedDB/IDBFactory.h b/dom/indexedDB/IDBFactory.h
+--- a/dom/indexedDB/IDBFactory.h
++++ b/dom/indexedDB/IDBFactory.h
+@@ -7,16 +7,17 @@
+ #ifndef mozilla_dom_indexeddb_idbfactory_h__
+ #define mozilla_dom_indexeddb_idbfactory_h__
+ 
+ #include "mozilla/dom/indexedDB/IndexedDatabase.h"
+ 
+ #include "mozIStorageConnection.h"
+ 
+ #include "mozilla/dom/BindingUtils.h"
++#include "mozilla/dom/Optional.h"
+ #include "nsCycleCollectionParticipant.h"
+ #include "nsWrapperCache.h"
+ 
+ class nsIAtom;
+ class nsIFile;
+ class nsIFileURL;
+ class nsPIDOMWindow;
+ 
+diff --git a/dom/workers/FileReaderSync.h b/dom/workers/FileReaderSync.h
+--- a/dom/workers/FileReaderSync.h
++++ b/dom/workers/FileReaderSync.h
+@@ -13,16 +13,22 @@
+ #include "nsICharsetDetectionObserver.h"
+ #include "nsStringGlue.h"
+ #include "mozilla/Attributes.h"
+ #include "mozilla/dom/BindingUtils.h"
+ 
+ class nsIInputStream;
+ class nsIDOMBlob;
+ 
++namespace mozilla {
++namespace dom {
++template<typename> class Optional;
++}
++}
++
+ BEGIN_WORKERS_NAMESPACE
+ 
+ class FileReaderSync MOZ_FINAL : public DOMBindingBase,
+                                  public nsICharsetDetectionObserver
+ {
+   nsCString mCharset;
+   nsresult ConvertStream(nsIInputStream *aStream, const char *aCharset,
+                          nsAString &aResult);

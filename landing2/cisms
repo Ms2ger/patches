@@ -1,0 +1,97 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/src/jsemit.cpp b/js/src/jsemit.cpp
+--- a/js/src/jsemit.cpp
++++ b/js/src/jsemit.cpp
+@@ -4342,42 +4342,40 @@ MaybeEmitGroupAssignment(JSContext *cx, 
+ }
+ 
+ #endif /* JS_HAS_DESTRUCTURING */
+ 
+ static JSBool
+ EmitVariables(JSContext *cx, JSCodeGenerator *cg, JSParseNode *pn,
+               JSBool inLetHead, ptrdiff_t *headNoteIndex)
+ {
+-    bool forInVar, first;
+-    ptrdiff_t off, noteIndex, tmp;
+-    JSParseNode *pn2, *pn3, *next;
+-    JSOp op;
+-    jsatomid atomIndex;
+-    uintN oldflags;
+-
+     /* Default in case of JS_HAS_BLOCK_SCOPE early return, below. */
+     *headNoteIndex = -1;
+ 
+     /*
+      * Let blocks and expressions have a parenthesized head in which the new
+      * scope is not yet open. Initializer evaluation uses the parent node's
+      * lexical scope. If popScope is true below, then we hide the top lexical
+      * block from any calls to BindNameToSlot hiding in pn2->pn_expr so that
+      * it won't find any names in the new let block.
+      *
+      * The same goes for let declarations in the head of any kind of for loop.
+      * Unlike a let declaration 'let x = i' within a block, where x is hoisted
+      * to the start of the block, a 'for (let x = i...) ...' loop evaluates i
+      * in the containing scope, and puts x in the loop body's scope.
+      */
+     DebugOnly<bool> let = (pn->isOp(JSOP_NOP));
+-    forInVar = (pn->pn_xflags & PNX_FORINVAR) != 0;
+-
+-    off = noteIndex = -1;
++    bool forInVar = (pn->pn_xflags & PNX_FORINVAR) != 0;
++
++    bool first;
++    JSParseNode *pn2, *pn3, *next;
++    JSOp op;
++    jsatomid atomIndex;
++
++    ptrdiff_t off = -1, noteIndex = -1;
+     for (pn2 = pn->pn_head; ; pn2 = next) {
+         first = pn2 == pn->pn_head;
+         next = pn2->pn_next;
+ 
+         if (!pn2->isKind(TOK_NAME)) {
+ #if JS_HAS_DESTRUCTURING
+             if (pn2->isKind(TOK_RB) || pn2->isKind(TOK_RC)) {
+                 /*
+@@ -4498,17 +4496,17 @@ EmitVariables(JSContext *cx, JSCodeGener
+                     JS_ASSERT(!let);
+                     EMIT_INDEX_OP(JSOP_BINDGNAME, atomIndex);
+                 }
+                 if (pn->isOp(JSOP_DEFCONST) &&
+                     !js_DefineCompileTimeConstant(cx, cg, pn2->pn_atom, pn3)) {
+                     return JS_FALSE;
+                 }
+ 
+-                oldflags = cg->flags;
++                uintN oldflags = cg->flags;
+                 cg->flags &= ~TCF_IN_FOR_INIT;
+                 if (!js_EmitTree(cx, cg, pn3))
+                     return JS_FALSE;
+                 cg->flags |= oldflags & TCF_IN_FOR_INIT;
+             }
+         }
+ 
+         /*
+@@ -4543,19 +4541,19 @@ EmitVariables(JSContext *cx, JSCodeGener
+             EMIT_UINT16_IMM_OP(op, atomIndex);
+         } else {
+             EMIT_INDEX_OP(op, atomIndex);
+         }
+ 
+ #if JS_HAS_DESTRUCTURING
+     emit_note_pop:
+ #endif
+-        tmp = CG_OFFSET(cg);
++        ptrdiff_t tmp = CG_OFFSET(cg);
+         if (noteIndex >= 0) {
+-            if (!js_SetSrcNoteOffset(cx, cg, (uintN)noteIndex, 0, tmp-off))
++            if (!js_SetSrcNoteOffset(cx, cg, (uintN)noteIndex, 0, tmp - off))
+                 return JS_FALSE;
+         }
+         if (!next)
+             break;
+         off = tmp;
+         noteIndex = js_NewSrcNote2(cx, cg, SRC_PCDELTA, 0);
+         if (noteIndex < 0 || js_Emit1(cx, cg, JSOP_POP) < 0)
+             return JS_FALSE;

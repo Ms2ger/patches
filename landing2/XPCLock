@@ -1,0 +1,266 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCLock.h b/js/xpconnect/src/XPCLock.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCLock.h
+@@ -0,0 +1,115 @@
++#ifndef XPCLock_h
++#define XPCLock_h
++
++#include "mozilla/AutoRestore.h" // MOZILLA_GUARD_OBJECT_NOTIFIER_*
++#include "mozilla/ReentrantMonitor.h"
++
++typedef mozilla::ReentrantMonitor XPCLock;
++
++static inline void xpc_Wait(XPCLock* lock)
++{
++    NS_ASSERTION(lock, "xpc_Wait called with null lock!");
++    lock->Wait();
++}
++
++static inline void xpc_NotifyAll(XPCLock* lock)
++{
++    NS_ASSERTION(lock, "xpc_NotifyAll called with null lock!");
++    lock->NotifyAll();
++}
++
++// This is a cloned subset of nsAutoMonitor. We want the use of a monitor -
++// mostly because we need reenterability - but we also want to support passing
++// a null monitor in without things blowing up. This is used for wrappers that
++// are guaranteed to be used only on one thread. We avoid lock overhead by
++// using a null monitor. By changing this class we can avoid having multiplte
++// code paths or (conditional) manual calls to PR_{Enter,Exit}Monitor.
++//
++// Note that xpconnect only makes *one* monitor and *mostly* holds it locked
++// only through very small critical sections.
++
++class NS_STACK_CLASS XPCAutoLock {
++public:
++
++    static XPCLock* NewLock(const char* name)
++    {
++        return new mozilla::ReentrantMonitor(name);
++    }
++    static void DestroyLock(XPCLock* lock)
++    {
++        delete lock;
++    }
++
++    XPCAutoLock(XPCLock* lock MOZILLA_GUARD_OBJECT_NOTIFIER_PARAM)
++        : mLock(lock)
++    {
++        MOZILLA_GUARD_OBJECT_NOTIFIER_INIT;
++        if (mLock)
++            mLock->Enter();
++    }
++
++    ~XPCAutoLock()
++    {
++        if (mLock)
++            mLock->Exit();
++    }
++
++private:
++    XPCLock* mLock;
++    MOZILLA_DECL_USE_GUARD_OBJECT_NOTIFIER
++
++    // Not meant to be implemented. This makes it a compiler error to
++    // construct or assign an XPCAutoLock object incorrectly.
++    XPCAutoLock(void) {}
++    XPCAutoLock(XPCAutoLock& /*aMon*/) {}
++    XPCAutoLock& operator =(XPCAutoLock& /*aMon*/) {
++        return *this;
++    }
++
++    // Not meant to be implemented. This makes it a compiler error to
++    // attempt to create an XPCAutoLock object on the heap.
++    static void* operator new(size_t /*size*/) CPP_THROW_NEW {
++        return nsnull;
++    }
++    static void operator delete(void* /*memory*/) {}
++};
++
++/************************************************/
++
++class NS_STACK_CLASS XPCAutoUnlock {
++public:
++    XPCAutoUnlock(XPCLock* lock MOZILLA_GUARD_OBJECT_NOTIFIER_PARAM)
++        : mLock(lock)
++    {
++        MOZILLA_GUARD_OBJECT_NOTIFIER_INIT;
++        if (mLock)
++            mLock->Exit();
++    }
++
++    ~XPCAutoUnlock()
++    {
++        if (mLock)
++            mLock->Enter();
++    }
++
++private:
++    XPCLock* mLock;
++    MOZILLA_DECL_USE_GUARD_OBJECT_NOTIFIER
++
++    // Not meant to be implemented. This makes it a compiler error to
++    // construct or assign an XPCAutoUnlock object incorrectly.
++    XPCAutoUnlock(void) {}
++    XPCAutoUnlock(XPCAutoUnlock& /*aMon*/) {}
++    XPCAutoUnlock& operator =(XPCAutoUnlock& /*aMon*/) {
++        return *this;
++    }
++
++    // Not meant to be implemented. This makes it a compiler error to
++    // attempt to create an XPCAutoUnlock object on the heap.
++    static void* operator new(size_t /*size*/) CPP_THROW_NEW {
++        return nsnull;
++    }
++    static void operator delete(void* /*memory*/) {}
++};
++
++#endif // XPCLock_h
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -141,16 +141,17 @@
+ #endif
+ #ifdef GetClassName
+ #undef GetClassName
+ #endif
+ #endif /* XP_WIN */
+ 
+ #include "nsINode.h"
+ #include "XPCNativeSet.h"
++#include "XPCLock.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -271,122 +272,16 @@ typedef nsDataHashtable<xpc::PtrAndPrinc
+ /***************************************************************************/
+ // Auto locking support class...
+ 
+ // We PROMISE to never screw this up.
+ #ifdef _MSC_VER
+ #pragma warning(disable : 4355) // OK to pass "this" in member initializer
+ #endif
+ 
+-typedef mozilla::ReentrantMonitor XPCLock;
+-
+-static inline void xpc_Wait(XPCLock* lock)
+-    {
+-        NS_ASSERTION(lock, "xpc_Wait called with null lock!");
+-        lock->Wait();
+-    }
+-
+-static inline void xpc_NotifyAll(XPCLock* lock)
+-    {
+-        NS_ASSERTION(lock, "xpc_NotifyAll called with null lock!");
+-        lock->NotifyAll();
+-    }
+-
+-// This is a cloned subset of nsAutoMonitor. We want the use of a monitor -
+-// mostly because we need reenterability - but we also want to support passing
+-// a null monitor in without things blowing up. This is used for wrappers that
+-// are guaranteed to be used only on one thread. We avoid lock overhead by
+-// using a null monitor. By changing this class we can avoid having multiplte
+-// code paths or (conditional) manual calls to PR_{Enter,Exit}Monitor.
+-//
+-// Note that xpconnect only makes *one* monitor and *mostly* holds it locked
+-// only through very small critical sections.
+-
+-class NS_STACK_CLASS XPCAutoLock {
+-public:
+-
+-    static XPCLock* NewLock(const char* name)
+-                        {return new mozilla::ReentrantMonitor(name);}
+-    static void     DestroyLock(XPCLock* lock)
+-                        {delete lock;}
+-
+-    XPCAutoLock(XPCLock* lock MOZILLA_GUARD_OBJECT_NOTIFIER_PARAM)
+-        : mLock(lock)
+-    {
+-        MOZILLA_GUARD_OBJECT_NOTIFIER_INIT;
+-        if (mLock)
+-            mLock->Enter();
+-    }
+-
+-    ~XPCAutoLock()
+-    {
+-        if (mLock) {
+-            mLock->Exit();
+-        }
+-    }
+-
+-private:
+-    XPCLock*  mLock;
+-    MOZILLA_DECL_USE_GUARD_OBJECT_NOTIFIER
+-
+-    // Not meant to be implemented. This makes it a compiler error to
+-    // construct or assign an XPCAutoLock object incorrectly.
+-    XPCAutoLock(void) {}
+-    XPCAutoLock(XPCAutoLock& /*aMon*/) {}
+-    XPCAutoLock& operator =(XPCAutoLock& /*aMon*/) {
+-        return *this;
+-    }
+-
+-    // Not meant to be implemented. This makes it a compiler error to
+-    // attempt to create an XPCAutoLock object on the heap.
+-    static void* operator new(size_t /*size*/) CPP_THROW_NEW {
+-        return nsnull;
+-    }
+-    static void operator delete(void* /*memory*/) {}
+-};
+-
+-/************************************************/
+-
+-class NS_STACK_CLASS XPCAutoUnlock {
+-public:
+-    XPCAutoUnlock(XPCLock* lock MOZILLA_GUARD_OBJECT_NOTIFIER_PARAM)
+-        : mLock(lock)
+-    {
+-        MOZILLA_GUARD_OBJECT_NOTIFIER_INIT;
+-        if (mLock) {
+-            mLock->Exit();
+-        }
+-    }
+-
+-    ~XPCAutoUnlock()
+-    {
+-        if (mLock)
+-            mLock->Enter();
+-    }
+-
+-private:
+-    XPCLock*  mLock;
+-    MOZILLA_DECL_USE_GUARD_OBJECT_NOTIFIER
+-
+-    // Not meant to be implemented. This makes it a compiler error to
+-    // construct or assign an XPCAutoUnlock object incorrectly.
+-    XPCAutoUnlock(void) {}
+-    XPCAutoUnlock(XPCAutoUnlock& /*aMon*/) {}
+-    XPCAutoUnlock& operator =(XPCAutoUnlock& /*aMon*/) {
+-        return *this;
+-    }
+-
+-    // Not meant to be implemented. This makes it a compiler error to
+-    // attempt to create an XPCAutoUnlock object on the heap.
+-    static void* operator new(size_t /*size*/) CPP_THROW_NEW {
+-        return nsnull;
+-    }
+-    static void operator delete(void* /*memory*/) {}
+-};
+-
+ /***************************************************************************
+ ****************************************************************************
+ *
+ * Core runtime and context classes...
+ *
+ ****************************************************************************
+ ***************************************************************************/
+ 

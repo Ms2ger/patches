@@ -1,0 +1,692 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/gfx/2d/DrawTargetCG.cpp b/gfx/2d/DrawTargetCG.cpp
+--- a/gfx/2d/DrawTargetCG.cpp
++++ b/gfx/2d/DrawTargetCG.cpp
+@@ -126,45 +126,47 @@ DrawTargetCG::~DrawTargetCG()
+ 
+ TemporaryRef<SourceSurface>
+ DrawTargetCG::Snapshot()
+ {
+   if (!mSnapshot) {
+     mSnapshot = new SourceSurfaceCGBitmapContext(this);
+   }
+ 
+-  return mSnapshot;
++  RefPtr<SourceSurface> snapshot = mSnapshot;
++  return snapshot.forget();
+ }
+ 
+ TemporaryRef<DrawTarget>
+ DrawTargetCG::CreateSimilarDrawTarget(const IntSize &aSize, SurfaceFormat aFormat) const
+ {
+   // XXX: in thebes we use CGLayers to do this kind of thing. It probably makes sense
+   // to add that in somehow, but at a higher level
+   RefPtr<DrawTargetCG> newTarget = new DrawTargetCG();
+-  if (newTarget->Init(aSize, aFormat)) {
+-    return newTarget;
+-  } else {
++
++  if (!newTarget->Init(aSize, aFormat)) {
+     return NULL;
+   }
++
++  return newTarget.forget();
+ }
+ 
+ TemporaryRef<SourceSurface>
+ DrawTargetCG::CreateSourceSurfaceFromData(unsigned char *aData,
+-                                           const IntSize &aSize,
+-                                           int32_t aStride,
+-                                           SurfaceFormat aFormat) const
++                                          const IntSize &aSize,
++                                          int32_t aStride,
++                                          SurfaceFormat aFormat) const
+ {
+   RefPtr<SourceSurfaceCG> newSurf = new SourceSurfaceCG();
+ 
+- if (!newSurf->InitFromData(aData, aSize, aStride, aFormat)) {
++  if (!newSurf->InitFromData(aData, aSize, aStride, aFormat)) {
+     return NULL;
+   }
+ 
+-  return newSurf;
++  return newSurf.forget();
+ }
+ 
+ static CGImageRef
+ GetImageFromSourceSurface(SourceSurface *aSurface)
+ {
+   if (aSurface->GetType() == SURFACE_COREGRAPHICS_IMAGE)
+     return static_cast<SourceSurfaceCG*>(aSurface)->GetImage();
+   else if (aSurface->GetType() == SURFACE_COREGRAPHICS_CGCONTEXT)
+@@ -929,17 +931,17 @@ DrawTargetCG::Init(const IntSize &aSize,
+ 
+   return true;
+ }
+ 
+ TemporaryRef<PathBuilder>
+ DrawTargetCG::CreatePathBuilder(FillRule aFillRule) const
+ {
+   RefPtr<PathBuilderCG> pb = new PathBuilderCG(aFillRule);
+-  return pb;
++  return pb.forget();
+ }
+ 
+ void*
+ DrawTargetCG::GetNativeSurface(NativeSurfaceType aType)
+ {
+   if (aType == NATIVE_SURFACE_CGCONTEXT) {
+     return mCg;
+   } else {
+diff --git a/gfx/2d/DrawTargetCairo.cpp b/gfx/2d/DrawTargetCairo.cpp
+--- a/gfx/2d/DrawTargetCairo.cpp
++++ b/gfx/2d/DrawTargetCairo.cpp
+@@ -289,17 +289,17 @@ DrawTargetCairo::Snapshot()
+   cairo_surface_t* csurf = cairo_get_target(mContext);
+   IntSize size;
+   if (GetCairoSurfaceSize(csurf, size)) {
+     cairo_content_t content = cairo_surface_get_content(csurf);
+     RefPtr<SourceSurfaceCairo> surf = new SourceSurfaceCairo(csurf, size,
+                                                              CairoContentToGfxFormat(content),
+                                                              this);
+     AppendSnapshot(surf);
+-    return surf;
++    return surf.forget();
+   }
+ 
+   return NULL;
+ }
+ 
+ void
+ DrawTargetCairo::Flush()
+ {
+@@ -639,75 +639,76 @@ DrawTargetCairo::CreatePathBuilder(FillR
+                                                           const_cast<DrawTargetCairo*>(this),
+                                                           aFillRule);
+ 
+   // Creating a PathBuilder implicitly resets our mPathObserver, as it calls
+   // SetPathObserver() on us. Since this guarantees our old path is saved off,
+   // it's safe to reset the path here.
+   cairo_new_path(mContext);
+ 
+-  return builder;
++  return builder.forget();
+ }
+ 
+ TemporaryRef<GradientStops>
+ DrawTargetCairo::CreateGradientStops(GradientStop *aStops, uint32_t aNumStops, ExtendMode aExtendMode) const
+ {
+   RefPtr<GradientStopsCairo> stops = new GradientStopsCairo(aStops, aNumStops);
+-  return stops;
++  return stops.forget();
+ }
+ 
+ TemporaryRef<SourceSurface>
+ DrawTargetCairo::CreateSourceSurfaceFromData(unsigned char *aData,
+                                              const IntSize &aSize,
+                                              int32_t aStride,
+                                              SurfaceFormat aFormat) const
+ {
+   cairo_surface_t* surf = cairo_image_surface_create_for_data(aData,
+                                                               GfxFormatToCairoFormat(aFormat),
+                                                               aSize.width,
+                                                               aSize.height,
+                                                               aStride);
+   RefPtr<SourceSurfaceCairo> source_surf = new SourceSurfaceCairo(surf, aSize, aFormat);
+   cairo_surface_destroy(surf);
+-  return source_surf;
++  return source_surf.forget();
+ }
+ 
+ TemporaryRef<SourceSurface>
+ DrawTargetCairo::OptimizeSourceSurface(SourceSurface *aSurface) const
+ {
+-  return aSurface;
++  RefPtr<SourceSurface> surface = aSurface;
++  return surface.forget();
+ }
+ 
+ TemporaryRef<SourceSurface>
+ DrawTargetCairo::CreateSourceSurfaceFromNativeSurface(const NativeSurface &aSurface) const
+ {
+   if (aSurface.mType == NATIVE_SURFACE_CAIRO_SURFACE) {
+     IntSize size;
+     cairo_surface_t* surf = static_cast<cairo_surface_t*>(aSurface.mSurface);
+     if (GetCairoSurfaceSize(surf, size)) {
+       RefPtr<SourceSurfaceCairo> source =
+         new SourceSurfaceCairo(surf, size, aSurface.mFormat);
+-      return source;
++      return source.forget();
+     }
+   }
+ 
+   return NULL;
+ }
+ 
+ TemporaryRef<DrawTarget>
+ DrawTargetCairo::CreateSimilarDrawTarget(const IntSize &aSize, SurfaceFormat aFormat) const
+ {
+   cairo_surface_t* similar = cairo_surface_create_similar(cairo_get_target(mContext),
+                                                           GfxFormatToCairoContent(aFormat),
+                                                           aSize.width, aSize.height);
+ 
+   if (!cairo_surface_status(similar)) {
+     RefPtr<DrawTargetCairo> target = new DrawTargetCairo();
+     target->Init(similar);
+-    return target;
++    return target.forget();
+   }
+ 
+   return NULL;
+ }
+ 
+ bool
+ DrawTargetCairo::Init(cairo_surface_t* aSurface)
+ {
+diff --git a/gfx/2d/DrawTargetSkia.cpp b/gfx/2d/DrawTargetSkia.cpp
+--- a/gfx/2d/DrawTargetSkia.cpp
++++ b/gfx/2d/DrawTargetSkia.cpp
+@@ -192,17 +192,17 @@ DrawTargetSkia::~DrawTargetSkia()
+ TemporaryRef<SourceSurface>
+ DrawTargetSkia::Snapshot()
+ {
+   RefPtr<SourceSurfaceSkia> source = new SourceSurfaceSkia();
+   if (!source->InitWithBitmap(mBitmap, mFormat, this)) {
+     return NULL;
+   }
+   AppendSnapshot(source);
+-  return source;
++  return source.forget();
+ }
+ 
+ SkShader::TileMode
+ ExtendModeToTileMode(ExtendMode aMode)
+ {
+   switch (aMode)
+   {
+     case EXTEND_CLAMP:
+@@ -610,27 +610,27 @@ DrawTargetSkia::CreateSourceSurfaceFromD
+ {
+   RefPtr<SourceSurfaceSkia> newSurf = new SourceSurfaceSkia();
+ 
+   if (!newSurf->InitFromData(aData, aSize, aStride, aFormat)) {
+     gfxDebug() << *this << ": Failure to create source surface from data. Size: " << aSize;
+     return NULL;
+   }
+     
+-  return newSurf;
++  return newSurf.forget();
+ }
+ 
+ TemporaryRef<DrawTarget>
+ DrawTargetSkia::CreateSimilarDrawTarget(const IntSize &aSize, SurfaceFormat aFormat) const
+ {
+   RefPtr<DrawTargetSkia> target = new DrawTargetSkia();
+   if (!target->Init(aSize, aFormat)) {
+     return NULL;
+   }
+-  return target;
++  return target.forget();
+ }
+ 
+ TemporaryRef<SourceSurface>
+ DrawTargetSkia::OptimizeSourceSurface(SourceSurface *aSurface) const
+ {
+   return NULL;
+ }
+ 
+@@ -707,17 +707,17 @@ DrawTargetSkia::SetTransform(const Matri
+   mCanvas->setMatrix(mat);
+   mTransform = aTransform;
+ }
+ 
+ TemporaryRef<PathBuilder> 
+ DrawTargetSkia::CreatePathBuilder(FillRule aFillRule) const
+ {
+   RefPtr<PathBuilderSkia> pb = new PathBuilderSkia(aFillRule);
+-  return pb;
++  return pb.forget();
+ }
+ 
+ void
+ DrawTargetSkia::ClearRect(const Rect &aRect)
+ {
+   MarkChanged();
+   SkPaint paint;
+   mCanvas->save();
+diff --git a/gfx/2d/Factory.cpp b/gfx/2d/Factory.cpp
+--- a/gfx/2d/Factory.cpp
++++ b/gfx/2d/Factory.cpp
+@@ -89,39 +89,39 @@ Factory::CreateDrawTarget(BackendType aB
+ {
+   switch (aBackend) {
+ #ifdef WIN32
+   case BACKEND_DIRECT2D:
+     {
+       RefPtr<DrawTargetD2D> newTarget;
+       newTarget = new DrawTargetD2D();
+       if (newTarget->Init(aSize, aFormat)) {
+-        return newTarget;
++        return newTarget.forget();
+       }
+       break;
+     }
+ #elif defined XP_MACOSX || defined ANDROID || defined LINUX
+ #ifdef USE_SKIA
+   case BACKEND_SKIA:
+     {
+       RefPtr<DrawTargetSkia> newTarget;
+       newTarget = new DrawTargetSkia();
+       if (newTarget->Init(aSize, aFormat)) {
+-        return newTarget;
++        return newTarget.forget();
+       }
+       break;
+     }
+ #endif
+ #ifdef XP_MACOSX
+   case BACKEND_COREGRAPHICS:
+     {
+       RefPtr<DrawTargetCG> newTarget;
+       newTarget = new DrawTargetCG();
+       if (newTarget->Init(aSize, aFormat)) {
+-        return newTarget;
++        return newTarget.forget();
+       }
+       break;
+     }
+ #endif
+ #endif
+   default:
+     gfxDebug() << "Invalid draw target type specified.";
+     return NULL;
+@@ -177,31 +177,31 @@ Factory::CreateScaledFontWithCairo(const
+ {
+ #ifdef USE_CAIRO
+   // In theory, we could pull the NativeFont out of the cairo_scaled_font_t*,
+   // but that would require a lot of code that would be otherwise repeated in
+   // various backends.
+   // Therefore, we just reuse CreateScaledFontForNativeFont's implementation.
+   RefPtr<ScaledFont> font = CreateScaledFontForNativeFont(aNativeFont, aSize);
+   static_cast<ScaledFontBase*>(font.get())->SetCairoScaledFont(aScaledFont);
+-  return font;
++  return font.forget();
+ #else
+   return NULL;
+ #endif
+ }
+ 
+ #ifdef WIN32
+ TemporaryRef<DrawTarget>
+ Factory::CreateDrawTargetForD3D10Texture(ID3D10Texture2D *aTexture, SurfaceFormat aFormat)
+ {
+   RefPtr<DrawTargetD2D> newTarget;
+ 
+   newTarget = new DrawTargetD2D();
+   if (newTarget->Init(aTexture, aFormat)) {
+-    return newTarget;
++    return newTarget.forget();
+   }
+ 
+   gfxWarning() << "Failed to create draw target for D3D10 texture.";
+ 
+   // Failed
+   return NULL;
+ }
+ 
+@@ -220,17 +220,17 @@ Factory::GetDirect3D10Device()
+ #endif // XP_WIN
+ 
+ #ifdef USE_CAIRO
+ TemporaryRef<DrawTarget>
+ Factory::CreateDrawTargetForCairoSurface(cairo_surface_t* aSurface)
+ {
+   RefPtr<DrawTargetCairo> newTarget = new DrawTargetCairo();
+   if (newTarget->Init(aSurface)) {
+-    return newTarget;
++    return newTarget.forget();
+   }
+ 
+   return NULL;
+ }
+ #endif
+ 
+ }
+ }
+diff --git a/gfx/2d/PathCG.cpp b/gfx/2d/PathCG.cpp
+--- a/gfx/2d/PathCG.cpp
++++ b/gfx/2d/PathCG.cpp
+@@ -114,25 +114,25 @@ void
+ PathBuilderCG::EnsureActive(const Point &aPoint)
+ {
+ }
+ 
+ TemporaryRef<Path>
+ PathBuilderCG::Finish()
+ {
+   RefPtr<PathCG> path = new PathCG(mCGPath, mFillRule);
+-  return path;
++  return path.forget();
+ }
+ 
+ TemporaryRef<PathBuilder>
+ PathCG::CopyToBuilder(FillRule aFillRule) const
+ {
+   CGMutablePathRef path = CGPathCreateMutableCopy(mPath);
+   RefPtr<PathBuilderCG> builder = new PathBuilderCG(path, aFillRule);
+-  return builder;
++  return builder.forget();
+ }
+ 
+ 
+ 
+ TemporaryRef<PathBuilder>
+ PathCG::TransformedCopyToBuilder(const Matrix &aTransform, FillRule aFillRule) const
+ {
+   // 10.7 adds CGPathCreateMutableCopyByTransformingPath it might be faster than doing
+@@ -183,17 +183,17 @@ PathCG::TransformedCopyToBuilder(const M
+   };
+ 
+   TransformApplier ta;
+   ta.path = CGPathCreateMutable();
+   ta.transform = GfxMatrixToCGAffineTransform(aTransform);
+ 
+   CGPathApply(mPath, &ta, TransformApplier::TranformCGPathApplierFunc);
+   RefPtr<PathBuilderCG> builder = new PathBuilderCG(ta.path, aFillRule);
+-  return builder;
++  return builder.forget();
+ }
+ 
+ 
+ bool
+ PathCG::ContainsPoint(const Point &aPoint, const Matrix &aTransform) const
+ {
+   Matrix inverse = aTransform;
+   inverse.Invert();
+diff --git a/gfx/2d/PathCairo.cpp b/gfx/2d/PathCairo.cpp
+--- a/gfx/2d/PathCairo.cpp
++++ b/gfx/2d/PathCairo.cpp
+@@ -266,47 +266,48 @@ PathBuilderCairo::CurrentPoint() const
+ 
+ TemporaryRef<Path>
+ PathBuilderCairo::Finish()
+ {
+   RefPtr<PathCairo> path = new PathCairo(*mPathContext,
+                                          mPathContext->GetDrawTarget(),
+                                          mFillRule,
+                                          mPathContext->GetTransform());
+-  return path;
++  return path.forget();
+ }
+ 
+ TemporaryRef<CairoPathContext>
+ PathBuilderCairo::GetPathContext()
+ {
+-  return mPathContext;
++  RefPtr<CairoPathContext> pathContext = mPathContext;
++  return pathContext.forget();
+ }
+ 
+ PathCairo::PathCairo(cairo_t* aCtx, DrawTargetCairo* aDrawTarget, FillRule aFillRule, const Matrix& aTransform)
+  : mPathContext(new CairoPathContext(aCtx, aDrawTarget, aFillRule, aTransform))
+  , mFillRule(aFillRule)
+ {}
+ 
+ TemporaryRef<PathBuilder>
+ PathCairo::CopyToBuilder(FillRule aFillRule) const
+ {
+   // Note: This PathBuilderCairo constructor causes our mPathContext to copy
+   // out the path, since the path builder is going to change the path on us.
+   RefPtr<PathBuilderCairo> builder = new PathBuilderCairo(mPathContext);
+-  return builder;
++  return builder.forget();
+ }
+ 
+ TemporaryRef<PathBuilder>
+ PathCairo::TransformedCopyToBuilder(const Matrix &aTransform, FillRule aFillRule) const
+ {
+   // Note: This PathBuilderCairo constructor causes our mPathContext to copy
+   // out the path, since the path builder is going to change the path on us.
+   RefPtr<PathBuilderCairo> builder = new PathBuilderCairo(mPathContext,
+                                                           aTransform);
+-  return builder;
++  return builder.forget();
+ }
+ 
+ bool
+ PathCairo::ContainsPoint(const Point &aPoint, const Matrix &aTransform) const
+ {
+   Matrix inverse = aTransform;
+   inverse.Invert();
+   Point transformed = inverse * aPoint;
+@@ -335,17 +336,18 @@ PathCairo::GetStrokedBounds(const Stroke
+   cairo_stroke_extents(*mPathContext, &x1, &y1, &x2, &y2);
+   Rect bounds(x1, y1, x2 - x1, y2 - y1);
+   return aTransform.TransformBounds(bounds);
+ }
+ 
+ TemporaryRef<CairoPathContext>
+ PathCairo::GetPathContext()
+ {
+-  return mPathContext;
++  RefPtr<CairoPathContext> pathContext = mPathContext;
++  return pathContext.forget();
+ }
+ 
+ void
+ PathCairo::CopyPathTo(cairo_t* aContext, DrawTargetCairo* aDrawTarget)
+ {
+   if (mPathContext->GetContext() != aContext) {
+     mPathContext->CopyPathTo(aContext);
+ 
+diff --git a/gfx/2d/PathSkia.cpp b/gfx/2d/PathSkia.cpp
+--- a/gfx/2d/PathSkia.cpp
++++ b/gfx/2d/PathSkia.cpp
+@@ -133,30 +133,30 @@ PathBuilderSkia::CurrentPoint() const
+   SkPoint point = mPath.getPoint(pointCount - 1);
+   return Point(SkScalarToFloat(point.fX), SkScalarToFloat(point.fY));
+ }
+ 
+ TemporaryRef<Path>
+ PathBuilderSkia::Finish()
+ {
+   RefPtr<PathSkia> path = new PathSkia(mPath, mFillRule);
+-  return path;
++  return path.forget();
+ }
+ 
+ TemporaryRef<PathBuilder>
+ PathSkia::CopyToBuilder(FillRule aFillRule) const
+ {
+   return TransformedCopyToBuilder(Matrix(), aFillRule);
+ }
+ 
+ TemporaryRef<PathBuilder>
+ PathSkia::TransformedCopyToBuilder(const Matrix &aTransform, FillRule aFillRule) const
+ {
+   RefPtr<PathBuilderSkia> builder = new PathBuilderSkia(aTransform, mPath, aFillRule);
+-  return builder;
++  return builder.forget();
+ }
+ 
+ bool
+ PathSkia::ContainsPoint(const Point &aPoint, const Matrix &aTransform) const
+ {
+   Matrix inverse = aTransform;
+   inverse.Invert();
+   Point transformed = inverse * aPoint;
+diff --git a/gfx/2d/SourceSurfaceCG.cpp b/gfx/2d/SourceSurfaceCG.cpp
+--- a/gfx/2d/SourceSurfaceCG.cpp
++++ b/gfx/2d/SourceSurfaceCG.cpp
+@@ -64,17 +64,17 @@ SourceSurfaceCG::GetFormat() const
+ 
+ TemporaryRef<DataSourceSurface>
+ SourceSurfaceCG::GetDataSurface()
+ {
+   //XXX: we should be more disciplined about who takes a reference and where
+   CGImageRetain(mImage);
+   RefPtr<DataSourceSurfaceCG> dataSurf =
+     new DataSourceSurfaceCG(mImage);
+-  return dataSurf;
++  return dataSurf.forget();
+ }
+ 
+ static void releaseCallback(void *info, const void *data, size_t size) {
+   free(info);
+ }
+ 
+ bool
+ SourceSurfaceCG::InitFromData(unsigned char *aData,
+diff --git a/gfx/2d/SourceSurfaceCairo.cpp b/gfx/2d/SourceSurfaceCairo.cpp
+--- a/gfx/2d/SourceSurfaceCairo.cpp
++++ b/gfx/2d/SourceSurfaceCairo.cpp
+@@ -106,17 +106,17 @@ SourceSurfaceCairo::GetDataSurface()
+     cairo_set_source_surface(ctx, mSurface, 0, 0);
+     cairo_paint(ctx);
+     cairo_destroy(ctx);
+ 
+     dataSurf = new DataSourceSurfaceCairo(imageSurf);
+     cairo_surface_destroy(imageSurf);
+   }
+ 
+-  return dataSurf;
++  return dataSurf.forget();
+ }
+ 
+ cairo_surface_t*
+ SourceSurfaceCairo::GetSurface() const
+ {
+   return mSurface;
+ }
+ 
+diff --git a/gfx/layers/Layers.cpp b/gfx/layers/Layers.cpp
+--- a/gfx/layers/Layers.cpp
++++ b/gfx/layers/Layers.cpp
+@@ -213,18 +213,19 @@ LayerManager::CreateOptimalSurface(const
+   return gfxPlatform::GetPlatform()->
+     CreateOffscreenSurface(aSize, gfxASurface::ContentFromFormat(aFormat));
+ }
+ 
+ TemporaryRef<DrawTarget>
+ LayerManager::CreateDrawTarget(const IntSize &aSize,
+                                SurfaceFormat aFormat)
+ {
+-  return gfxPlatform::GetPlatform()->
++  RefPtr<DrawTarget> drawTarget = gfxPlatform::GetPlatform()->
+     CreateOffscreenDrawTarget(aSize, aFormat);
++  return drawTarget.forget();
+ }
+ 
+ #ifdef DEBUG
+ void
+ LayerManager::Mutated(Layer* aLayer)
+ {
+ }
+ #endif  // DEBUG
+diff --git a/mfbt/RefPtr.h b/mfbt/RefPtr.h
+--- a/mfbt/RefPtr.h
++++ b/mfbt/RefPtr.h
+@@ -167,18 +167,16 @@ public:
+         ptr = 0;
+         return TemporaryRef<T>(tmp, dontRef());
+     }
+ 
+     T* get() const { return ptr; }
+     operator T*() const { return ptr; }
+     T* operator->() const { return ptr; }
+     T& operator*() const { return *ptr; }
+-    template<typename U>
+-    operator TemporaryRef<U>() { return TemporaryRef<U>(ptr); }
+ 
+ private:
+     void assign(T* t) {
+         unref(ptr);
+         ptr = t;
+     }
+ 
+     T* ptr;
+@@ -226,18 +224,18 @@ public:
+         return tmp;
+     }
+ 
+ private:
+     TemporaryRef(T* t, const dontRef&) : ptr(t) {}
+ 
+     mutable T* ptr;
+ 
+-    TemporaryRef();
+-    TemporaryRef& operator=(const TemporaryRef&);
++    TemporaryRef() MOZ_DELETE;
++    TemporaryRef& operator=(const TemporaryRef&) MOZ_DELETE;
+ };
+ 
+ /**
+  * OutParamRef is a wrapper that tracks a refcounted pointer passed as
+  * an outparam argument to a function.  OutParamRef implements COM T**
+  * outparam semantics: this requires the callee to AddRef() the T*
+  * returned through the T** outparam on behalf of the caller.  This
+  * means the caller (through OutParamRef) must Release() the old
+diff --git a/mozglue/linker/CustomElf.cpp b/mozglue/linker/CustomElf.cpp
+--- a/mozglue/linker/CustomElf.cpp
++++ b/mozglue/linker/CustomElf.cpp
+@@ -216,17 +216,17 @@ CustomElf::Load(Mappable *mappable, cons
+   ElfLoader::Singleton.Register(elf);
+ 
+   if (!elf->InitDyn(dyn))
+     return NULL;
+ 
+   elf->stats("oneLibLoaded");
+   debug("CustomElf::Load(\"%s\", %x) = %p", path, flags,
+         static_cast<void *>(elf));
+-  return elf;
++  return elf.forget();
+ }
+ 
+ CustomElf::~CustomElf()
+ {
+   debug("CustomElf::~CustomElf(%p [\"%s\"])",
+         reinterpret_cast<void *>(this), GetPath());
+   CallFini();
+   /* Normally, __cxa_finalize is called by the .fini function. However,
+diff --git a/mozglue/linker/ElfLoader.cpp b/mozglue/linker/ElfLoader.cpp
+--- a/mozglue/linker/ElfLoader.cpp
++++ b/mozglue/linker/ElfLoader.cpp
+@@ -175,17 +175,17 @@ ElfLoader ElfLoader::Singleton;
+ TemporaryRef<LibHandle>
+ ElfLoader::Load(const char *path, int flags, LibHandle *parent)
+ {
+   RefPtr<LibHandle> handle;
+ 
+   /* Handle dlopen(NULL) directly. */
+   if (!path) {
+     handle = SystemElf::Load(NULL, flags);
+-    return handle;
++    return handle.forget();
+   }
+ 
+   /* TODO: Handle relative paths correctly */
+   const char *name = LeafName(path);
+ 
+   /* Search the list of handles we already have for a match. When the given
+    * path is not absolute, compare file names, otherwise compare full paths. */
+   if (name == path) {
+@@ -259,17 +259,17 @@ ElfLoader::Load(const char *path, int fl
+   if (!handle && abs_path)
+     handle = SystemElf::Load(name, flags);
+ 
+   delete [] abs_path;
+   debug("ElfLoader::Load(\"%s\", 0x%x, %p [\"%s\"]) = %p", requested_path, flags,
+         reinterpret_cast<void *>(parent), parent ? parent->GetPath() : "",
+         static_cast<void *>(handle));
+ 
+-  return handle;
++  return handle.forget();
+ }
+ 
+ mozilla::TemporaryRef<LibHandle>
+ ElfLoader::GetHandleByPtr(void *addr)
+ {
+   /* Scan the list of handles we already have for a match */
+   for (LibHandleList::iterator it = handles.begin(); it < handles.end(); ++it) {
+     if ((*it)->Contains(addr))

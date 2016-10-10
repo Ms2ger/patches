@@ -1,0 +1,105 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/document/src/HTMLAllCollection.cpp b/content/html/document/src/HTMLAllCollection.cpp
+--- a/content/html/document/src/HTMLAllCollection.cpp
++++ b/content/html/document/src/HTMLAllCollection.cpp
+@@ -74,16 +74,22 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(HT
+   tmp->mObject = nullptr;
+   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocument)
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+ 
+ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(HTMLAllCollection)
+   NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mObject)
+ NS_IMPL_CYCLE_COLLECTION_TRACE_END
+ 
++uint32_t
++HTMLAllCollection::Length()
++{
++  return Collection()->Length(true);
++}
++
+ JSObject*
+ HTMLAllCollection::GetObject(JSContext* aCx, ErrorResult& aRv)
+ {
+   MOZ_ASSERT(aCx);
+ 
+   if (!mObject) {
+     JS::Rooted<JSObject*> wrapper(aCx, mDocument->GetWrapper());
+     MOZ_ASSERT(wrapper);
+@@ -191,33 +197,18 @@ nsHTMLDocumentSH::DocumentAllGetProperty
+ 
+   nsHTMLDocument *doc = GetDocument(obj);
+   nsISupports *result;
+   nsWrapperCache *cache;
+   nsresult rv = NS_OK;
+ 
+   if (JSID_IS_STRING(id)) {
+     if (nsDOMClassInfo::sLength_id == id) {
+-      // Map document.all.length to the length of the collection
+-      // document.getElementsByTagName("*"), and make sure <div
+-      // id="length"> doesn't shadow document.all.length.
+-
+-      nsRefPtr<nsContentList> nodeList = doc->All()->Collection();
+-
+-      uint32_t length;
+-      rv = nodeList->GetLength(&length);
+-
+-      if (NS_FAILED(rv)) {
+-        xpc::Throw(cx, rv);
+-
+-        return false;
+-      }
+-
+-      vp.set(INT_TO_JSVAL(length));
+-
++      // Make sure <div id="length"> doesn't shadow document.all.length.
++      vp.setNumber(doc->All()->Length());
+       return true;
+     }
+ 
+     // For all other strings, look for an element by id or name.
+     nsDependentJSString str(id);
+     result = doc->GetDocumentAllResult(str, &cache, &rv);
+ 
+     if (NS_FAILED(rv)) {
+diff --git a/content/html/document/src/HTMLAllCollection.h b/content/html/document/src/HTMLAllCollection.h
+--- a/content/html/document/src/HTMLAllCollection.h
++++ b/content/html/document/src/HTMLAllCollection.h
+@@ -7,16 +7,18 @@
+ #ifndef mozilla_dom_HTMLAllCollection_h
+ #define mozilla_dom_HTMLAllCollection_h
+ 
+ #include "js/RootingAPI.h"
+ #include "nsAutoPtr.h"
+ #include "nsCycleCollectionParticipant.h"
+ #include "nsISupportsImpl.h"
+ 
++#include <stdint.h>
++
+ class nsContentList;
+ class nsHTMLDocument;
+ 
+ namespace mozilla {
+ class ErrorResult;
+ 
+ namespace dom {
+ 
+@@ -24,16 +26,18 @@ class HTMLAllCollection
+ {
+ public:
+   HTMLAllCollection(nsHTMLDocument* aDocument);
+   ~HTMLAllCollection();
+ 
+   NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(HTMLAllCollection)
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(HTMLAllCollection)
+ 
++  uint32_t Length();
++
+   JSObject* GetObject(JSContext* aCx, ErrorResult& aRv);
+ 
+   nsContentList* Collection();
+ 
+ private:
+   JS::Heap<JSObject*> mObject;
+   nsRefPtr<nsHTMLDocument> mDocument;
+   nsRefPtr<nsContentList> mCollection;

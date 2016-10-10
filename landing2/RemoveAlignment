@@ -1,0 +1,580 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/base/nsEditor.cpp b/editor/libeditor/base/nsEditor.cpp
+--- a/editor/libeditor/base/nsEditor.cpp
++++ b/editor/libeditor/base/nsEditor.cpp
+@@ -1255,17 +1255,24 @@ nsEditor::GetAttributeValue(nsIDOMElemen
+   NS_ENSURE_SUCCESS(rv, rv);
+   if (!DOMStringIsNull(value)) {
+     *aResultIsSet = true;
+     aResultValue = value;
+   }
+   return rv;
+ }
+ 
+-NS_IMETHODIMP 
++nsresult
++nsEditor::RemoveAttribute(dom::Element *aElement, const nsAString& aAttribute)
++{
++  nsCOMPtr<nsIDOMElement> element = do_QueryInterface(aElement);
++  return RemoveAttribute(element, aAttribute);
++}
++
++NS_IMETHODIMP
+ nsEditor::RemoveAttribute(nsIDOMElement *aElement, const nsAString& aAttribute)
+ {
+   nsRefPtr<ChangeAttributeTxn> txn;
+   nsresult result = CreateTxnForRemoveAttribute(aElement, aAttribute,
+                                                 getter_AddRefs(txn));
+   if (NS_SUCCEEDED(result))  {
+     result = DoTransaction(txn);  
+   }
+@@ -5022,16 +5029,27 @@ nsEditor::CreateHTMLContent(const nsAStr
+     NS_ERROR("Don't pass an empty tag to nsEditor::CreateHTMLContent, "
+              "check caller.");
+     return NS_ERROR_FAILURE;
+   }
+ 
+   return doc->CreateElem(aTag, nsnull, kNameSpaceID_XHTML, aContent);
+ }
+ 
++/* non-virtual */ nsresult
++nsEditor::SetAttributeOrEquivalent(dom::Element* aElement,
++                                   const nsAString& aAttribute,
++                                   const nsAString& aValue,
++                                   bool aSuppressTransaction)
++{
++  nsCOMPtr<nsIDOMElement> element = do_QueryInterface(aElement);
++  return SetAttributeOrEquivalent(aElement, aAttribute, aValue,
++                                  aSuppressTransaction);
++}
++
+ nsresult
+ nsEditor::SetAttributeOrEquivalent(nsIDOMElement * aElement,
+                                    const nsAString & aAttribute,
+                                    const nsAString & aValue,
+                                    bool aSuppressTransaction)
+ {
+   return SetAttribute(aElement, aAttribute, aValue);
+ }
+diff --git a/editor/libeditor/base/nsEditor.h b/editor/libeditor/base/nsEditor.h
+--- a/editor/libeditor/base/nsEditor.h
++++ b/editor/libeditor/base/nsEditor.h
+@@ -62,16 +62,17 @@
+ #include "nsSelectionState.h"
+ #include "nsIEditorSpellCheck.h"
+ #include "nsIInlineSpellChecker.h"
+ #include "nsIDOMEventTarget.h"
+ #include "nsStubMutationObserver.h"
+ #include "nsIViewManager.h"
+ #include "nsCycleCollectionParticipant.h"
+ #include "nsIObserver.h"
++#include "nsINode.h"
+ 
+ class nsIDOMCharacterData;
+ class nsIDOMRange;
+ class nsIPresShell;
+ class ChangeAttributeTxn;
+ class CreateElementTxn;
+ class InsertElementTxn;
+ class DeleteElementTxn;
+@@ -186,16 +187,21 @@ public:
+   /* helper routines for node/parent manipulations */
+   nsresult ReplaceContainer(nsIDOMNode *inNode, 
+                             nsCOMPtr<nsIDOMNode> *outNode, 
+                             const nsAString &aNodeType,
+                             const nsAString *aAttribute = nsnull,
+                             const nsAString *aValue = nsnull,
+                             bool aCloneAttributes = false);
+ 
++  nsresult RemoveContainer(nsINode* aNode)
++  {
++    nsCOMPtr<nsIDOMNode> node = do_QueryInterface(aNode);
++    return RemoveContainer(node);
++  };
+   nsresult RemoveContainer(nsIDOMNode *inNode);
+   nsresult InsertContainerAbove(nsIDOMNode *inNode, 
+                                 nsCOMPtr<nsIDOMNode> *outNode, 
+                                 const nsAString &aNodeType,
+                                 const nsAString *aAttribute = nsnull,
+                                 const nsAString *aValue = nsnull);
+   nsresult MoveNode(nsIDOMNode *aNode, nsIDOMNode *aParent, int32_t aOffset);
+ 
+@@ -232,16 +238,22 @@ public:
+         mEditor->EndKeypressHandling();
+       }
+     }
+   private:
+     nsEditor* mEditor;
+     bool mShouldAct;
+   };
+ 
++  nsresult RemoveAttribute(mozilla::dom::Element* aElement,
++                           const nsAString& aAttribute);
++  nsresult SetAttributeOrEquivalent(mozilla::dom::Element* aElement,
++                                    const nsAString& aAttributeName,
++                                    const nsAString& aAttributeValue,
++                                    bool aSuppressTransaction);
+ protected:
+   nsCString mContentMIMEType;       // MIME type of the doc we are editing.
+ 
+   nsresult DetermineCurrentDirection();
+ 
+   /** create a transaction for setting aAttribute to aValue on aElement
+     */
+   NS_IMETHOD CreateTxnForSetAttribute(nsIDOMElement *aElement, 
+diff --git a/editor/libeditor/html/nsHTMLCSSUtils.cpp b/editor/libeditor/html/nsHTMLCSSUtils.cpp
+--- a/editor/libeditor/html/nsHTMLCSSUtils.cpp
++++ b/editor/libeditor/html/nsHTMLCSSUtils.cpp
+@@ -50,16 +50,17 @@
+ #include "nsTextEditUtils.h"
+ #include "nsReadableUtils.h"
+ #include "nsUnicharUtils.h"
+ #include "nsHTMLCSSUtils.h"
+ #include "nsColor.h"
+ #include "nsAttrName.h"
+ #include "nsAutoPtr.h"
+ #include "mozilla/Preferences.h"
++#include "mozilla/dom/Element.h"
+ 
+ using namespace mozilla;
+ 
+ static
+ void ProcessBValue(const nsAString * aInputString, nsAString & aOutputString,
+                    const char * aDefaultValueString,
+                    const char * aPrependString, const char* aAppendString)
+ {
+@@ -477,16 +478,25 @@ nsHTMLCSSUtils::SetCSSPropertyPixels(nsI
+   return SetCSSProperty(aElement, aProperty, s + NS_LITERAL_STRING("px"),
+                         aSuppressTransaction);
+ }
+ 
+ // the lowest level above the transaction; removes the value aValue from the list of values
+ // specified for the CSS property aProperty, or totally remove the declaration if this
+ // property accepts only one value
+ nsresult
++nsHTMLCSSUtils::RemoveCSSProperty(dom::Element* aElement, nsIAtom* aProperty,
++                                  const nsAString& aValue,
++                                  bool aSuppressTransaction)
++{
++  nsCOMPtr<nsIDOMElement> element = do_QueryInterface(aElement);
++  return RemoveCSSProperty(element, aProperty, aValue, aSuppressTransaction);
++}
++
++nsresult
+ nsHTMLCSSUtils::RemoveCSSProperty(nsIDOMElement *aElement, nsIAtom * aProperty, const nsAString & aValue,
+                                   bool aSuppressTransaction)
+ {
+   nsRefPtr<ChangeCSSInlineStyleTxn> txn;
+   nsresult result = CreateCSSPropertyTxn(aElement, aProperty, aValue,
+                                          getter_AddRefs(txn), true);
+   if (NS_SUCCEEDED(result))  {
+     if (aSuppressTransaction) {
+@@ -603,42 +613,34 @@ nsHTMLCSSUtils::GetDefaultViewCSS(nsIDOM
+   NS_ENSURE_SUCCESS(res, res);
+   window.forget(aViewCSS);
+   return NS_OK;
+ }
+ 
+ // remove the CSS style "aProperty : aPropertyValue" and possibly remove the whole node
+ // if it is a span and if its only attribute is _moz_dirty
+ nsresult
+-nsHTMLCSSUtils::RemoveCSSInlineStyle(nsIDOMNode *aNode, nsIAtom *aProperty, const nsAString & aPropertyValue)
++nsHTMLCSSUtils::RemoveCSSInlineStyle(dom::Element* aElement, nsIAtom* aProperty,
++                                     const nsAString& aPropertyValue)
+ {
+-  nsCOMPtr<nsIDOMElement> elem = do_QueryInterface(aNode);
+-
+-  // remove the property from the style attribute
+-  nsresult res = RemoveCSSProperty(elem, aProperty, aPropertyValue, false);
++  // Remove the property from the style attribute.
++  nsresult res = RemoveCSSProperty(aElement, aProperty, aPropertyValue, false);
+   NS_ENSURE_SUCCESS(res, res);
+ 
+-  if (nsEditor::NodeIsType(aNode, nsEditProperty::span)) {
+-    nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
+-    uint32_t attrCount = content->GetAttrCount();
++  if (!aElement->IsHTML(nsGkAtoms::span)) {
++    return NS_OK;
++  }
+ 
+-    if (0 == attrCount) {
+-      // no more attributes on this span, let's remove the element
+-      res = mHTMLEditor->RemoveContainer(aNode);
+-      NS_ENSURE_SUCCESS(res, res);
+-    }
+-    else if (1 == attrCount) {
+-      // incredible hack in case the only remaining attribute is a _moz_dirty...
+-      if (content->GetAttrNameAt(0)->Equals(nsEditProperty::mozdirty)) {
+-        res = mHTMLEditor->RemoveContainer(aNode);
+-        NS_ENSURE_SUCCESS(res, res);
+-      }
+-    }
++  if (aElement->GetAttrCount() > 1 ||
++      !aElement->HasAttr(kNameSpaceID_None, nsEditProperty::mozdirty)) {
++    // No attributes or only a moz_dirty attribute.
++    return NS_OK;
+   }
+-  return NS_OK;
++
++  return mHTMLEditor->RemoveContainer(aElement);
+ }
+ 
+ // Answers true is the property can be removed by setting a "none" CSS value
+ // on a node
+ bool
+ nsHTMLCSSUtils::IsCSSInvertable(nsIAtom *aProperty, const nsAString *aAttribute)
+ {
+   return bool(nsEditProperty::b == aProperty);
+diff --git a/editor/libeditor/html/nsHTMLCSSUtils.h b/editor/libeditor/html/nsHTMLCSSUtils.h
+--- a/editor/libeditor/html/nsHTMLCSSUtils.h
++++ b/editor/libeditor/html/nsHTMLCSSUtils.h
+@@ -118,16 +118,20 @@ public:
+     * @param aSuppressTransaction [IN] a boolean indicating, when true,
+     *                                  that no transaction should be recorded
+     */
+   nsresult    SetCSSProperty(nsIDOMElement * aElement, nsIAtom * aProperty,
+                              const nsAString & aValue,
+                              bool aSuppressTransaction);
+   nsresult    SetCSSPropertyPixels(nsIDOMElement *aElement, nsIAtom *aProperty,
+                                    int32_t aIntValue, bool aSuppressTxn);
++  nsresult    RemoveCSSProperty(mozilla::dom::Element* aElement,
++                                nsIAtom* aProperty,
++                                const nsAString& aPropertyValue,
++                                bool aSuppressTransaction);
+   nsresult    RemoveCSSProperty(nsIDOMElement * aElement, nsIAtom * aProperty,
+                                 const nsAString & aPropertyValue, bool aSuppressTransaction);
+ 
+   /** directly adds/remove a CSS declaration to the STYLE atrribute carried by
+     * a given element without going through the txn manager
+     *
+     * @param aElement       [IN] a DOM element
+     * @param aProperty      [IN] a string containing the CSS property to set/remove
+@@ -155,17 +159,19 @@ public:
+   /** Removes a CSS property from the specified declarations in STYLE attribute
+    ** and removes the node if it is an useless span
+    *
+    * @param aNode           [IN] the specific node we want to remove a style from
+    * @param aProperty       [IN] the CSS property atom to remove
+    * @param aPropertyValue  [IN] the value of the property we have to rremove if the property
+    *                             accepts more than one value
+    */
+-  nsresult    RemoveCSSInlineStyle(nsIDOMNode * aNode, nsIAtom * aProperty, const nsAString & aPropertyValue);
++  nsresult    RemoveCSSInlineStyle(mozilla::dom::Element* aElement,
++                                   nsIAtom* aProperty,
++                                   const nsAString& aPropertyValue);
+ 
+    /** Answers true is the property can be removed by setting a "none" CSS value
+      * on a node
+      *
+      * @return              a boolean saying if the property can be remove by setting a "none" value
+      * @param aProperty     [IN] an atom containing a CSS property
+      * @param aAttribute    [IN] pointer to an attribute name or null if this information is irrelevant
+      */
+diff --git a/editor/libeditor/html/nsHTMLEditRules.cpp b/editor/libeditor/html/nsHTMLEditRules.cpp
+--- a/editor/libeditor/html/nsHTMLEditRules.cpp
++++ b/editor/libeditor/html/nsHTMLEditRules.cpp
+@@ -8692,85 +8692,93 @@ nsHTMLEditRules::DidDeleteSelection(nsIS
+ 
+ // Let's remove all alignment hints in the children of aNode; it can
+ // be an ALIGN attribute (in case we just remove it) or a CENTER
+ // element (here we have to remove the container and keep its
+ // children). We break on tables and don't look at their children.
+ nsresult
+ nsHTMLEditRules::RemoveAlignment(nsIDOMNode * aNode, const nsAString & aAlignType, bool aChildrenOnly)
+ {
++  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
++  return RemoveAlignment(node, aAlignType, aChildrenOnly);
++}
++
++nsresult
++nsHTMLEditRules::RemoveAlignment(nsINode* aNode, const nsAString& aAlignType, bool aChildrenOnly)
++{
+   NS_ENSURE_TRUE(aNode, NS_ERROR_NULL_POINTER);
+ 
+-  if (mHTMLEditor->IsTextNode(aNode) || nsHTMLEditUtils::IsTable(aNode)) return NS_OK;
+-  nsresult res = NS_OK;
+-
+-  nsCOMPtr<nsIDOMNode> child = aNode,tmp;
+-  if (aChildrenOnly)
+-  {
+-    aNode->GetFirstChild(getter_AddRefs(child));
+-  }
++  if (!aNode->IsElement()) {
++    return NS_OK;
++  }
++
++  nsCOMPtr<nsIContent> child = aNode->AsElement();
++  if (child->IsHTML(nsGkAtoms::table)) {
++    return NS_OK;
++  }
++
++  if (aChildrenOnly) {
++    child = aNode->GetFirstChild();
++  }
++
+   bool useCSS;
+   mHTMLEditor->GetIsCSSEnabled(&useCSS);
+ 
+-  while (child)
+-  {
++  nsresult res = NS_OK;
++  nsCOMPtr<nsIContent> tmp;
++  while (child) {
+     if (aChildrenOnly) {
+-      // get the next sibling right now because we could have to remove child
+-      child->GetNextSibling(getter_AddRefs(tmp));
+-    }
+-    else
+-    {
++      // Get the next sibling right now because we could have to remove child.
++      tmp = child->GetNextSibling();
++    } else {
++      // We should only go through this loop once.
+       tmp = nsnull;
+     }
+-    bool isBlock;
+-    res = mHTMLEditor->NodeIsBlockStatic(child, &isBlock);
+-    NS_ENSURE_SUCCESS(res, res);
+-
+-    if (nsEditor::NodeIsType(child, nsEditProperty::center))
+-    {
+-      // the current node is a CENTER element
+-      // first remove children's alignment
+-      res = RemoveAlignment(child, aAlignType, true);
+-      NS_ENSURE_SUCCESS(res, res);
+-
+-      // we may have to insert BRs in first and last position of element's children
+-      // if the nodes before/after are not blocks and not BRs
+-      res = MakeSureElemStartsOrEndsOnCR(child);
+-      NS_ENSURE_SUCCESS(res, res);
+-
+-      // now remove the CENTER container
++
++    if (!child->IsElement()) {
++      continue;
++    }
++
++    dom::Element* element = child->AsElement();
++
++    if (element->IsHTML(nsGkAtoms::center)) {
++      // The current node is a CENTER element, first remove the children's
++      // alignment.
++      res = RemoveAlignment(element, aAlignType, true);
++      NS_ENSURE_SUCCESS(res, res);
++
++      // We may have to insert BRs in first and last position of element's
++      // children if the nodes before/after are not blocks and not BRs.
++      res = MakeSureElemStartsOrEndsOnCR(element);
++      NS_ENSURE_SUCCESS(res, res);
++
++      // Now remove the CENTER container.
+       res = mHTMLEditor->RemoveContainer(child);
+       NS_ENSURE_SUCCESS(res, res);
+-    }
+-    else if (isBlock || nsHTMLEditUtils::IsHR(child))
+-    {
+-      // the current node is a block element
+-      nsCOMPtr<nsIDOMElement> curElem = do_QueryInterface(child);
+-      if (nsHTMLEditUtils::SupportsAlignAttr(child))
+-      {
+-        // remove the ALIGN attribute if this element can have it
+-        res = mHTMLEditor->RemoveAttribute(curElem, NS_LITERAL_STRING("align"));
++    } else if (element->IsHTML(nsGkAtoms::hr) ||
++               nsHTMLEditor::NodeIsBlockStatic(element)) {
++      // The current node is a block element.
++      if (nsHTMLEditUtils::SupportsAlignAttr(element)) {
++        // Remove the ALIGN attribute if this element can have it.
++        res = mHTMLEditor->RemoveAttribute(element, NS_LITERAL_STRING("align"));
+         NS_ENSURE_SUCCESS(res, res);
+       }
+-      if (useCSS)
+-      {
+-        if (nsHTMLEditUtils::IsTable(child) || nsHTMLEditUtils::IsHR(child))
+-        {
+-          res = mHTMLEditor->SetAttributeOrEquivalent(curElem, NS_LITERAL_STRING("align"), aAlignType, false); 
+-        }
+-        else
+-        {
++
++      if (useCSS) {
++        if (element->IsHTML(nsGkAtoms::table) ||
++            element->IsHTML(nsGkAtoms::hr)) {
++          res = mHTMLEditor->SetAttributeOrEquivalent(element, NS_LITERAL_STRING("align"), aAlignType, false); 
++        } else {
+           nsAutoString dummyCssValue;
+-          res = mHTMLEditor->mHTMLCSSUtils->RemoveCSSInlineStyle(child, nsEditProperty::cssTextAlign, dummyCssValue);
++          res = mHTMLEditor->mHTMLCSSUtils->RemoveCSSInlineStyle(element, nsEditProperty::cssTextAlign, dummyCssValue);
+         }
+         NS_ENSURE_SUCCESS(res, res);
+       }
+-      if (!nsHTMLEditUtils::IsTable(child))
+-      {
+-        // unless this is a table, look at children
++      if (!element->IsHTML(nsGkAtoms::table)) {
++        // Unless this is a table, look at children.
+         res = RemoveAlignment(child, aAlignType, true);
+         NS_ENSURE_SUCCESS(res, res);
+       }
+     }
+     child = tmp;
+   }
+   return NS_OK;
+ }
+diff --git a/editor/libeditor/html/nsHTMLEditRules.h b/editor/libeditor/html/nsHTMLEditRules.h
+--- a/editor/libeditor/html/nsHTMLEditRules.h
++++ b/editor/libeditor/html/nsHTMLEditRules.h
+@@ -95,16 +95,21 @@ public:
+   NS_IMETHOD DidDoAction(nsISelection *aSelection, nsRulesInfo *aInfo, nsresult aResult);
+   NS_IMETHOD DocumentModified();
+ 
+   nsresult GetListState(bool *aMixed, bool *aOL, bool *aUL, bool *aDL);
+   nsresult GetListItemState(bool *aMixed, bool *aLI, bool *aDT, bool *aDD);
+   nsresult GetIndentState(bool *aCanIndent, bool *aCanOutdent);
+   nsresult GetAlignment(bool *aMixed, nsIHTMLEditor::EAlignment *aAlign);
+   nsresult GetParagraphState(bool *aMixed, nsAString &outFormat);
++  nsresult MakeSureElemStartsOrEndsOnCR(nsINode* aNode)
++  {
++    nsCOMPtr<nsIDOMNode> node = do_QueryInterface(aNode);
++    return MakeSureElemStartsOrEndsOnCR(node);
++  };
+   nsresult MakeSureElemStartsOrEndsOnCR(nsIDOMNode *aNode);
+ 
+   // nsIEditActionListener methods
+   
+   NS_IMETHOD WillCreateNode(const nsAString& aTag, nsIDOMNode *aParent, int32_t aPosition);
+   NS_IMETHOD DidCreateNode(const nsAString& aTag, nsIDOMNode *aNode, nsIDOMNode *aParent, int32_t aPosition, nsresult aResult);
+   NS_IMETHOD WillInsertNode(nsIDOMNode *aNode, nsIDOMNode *aParent, int32_t aPosition);
+   NS_IMETHOD DidInsertNode(nsIDOMNode *aNode, nsIDOMNode *aParent, int32_t aPosition, nsresult aResult);
+@@ -289,16 +294,17 @@ protected:
+   nsresult InDifferentTableElements(nsIDOMNode *aNode1, nsIDOMNode *aNode2, bool *aResult);
+   nsresult RemoveEmptyNodes();
+   nsresult SelectionEndpointInNode(nsIDOMNode *aNode, bool *aResult);
+   nsresult UpdateDocChangeRange(nsIDOMRange *aRange);
+   nsresult ConfirmSelectionInBody();
+   nsresult InsertMozBRIfNeeded(nsIDOMNode *aNode);
+   bool     IsEmptyInline(nsIDOMNode *aNode);
+   bool     ListIsEmptyLine(nsCOMArray<nsIDOMNode> &arrayOfNodes);
++  nsresult RemoveAlignment(nsINode* aNode, const nsAString& aAlignType, bool aChildrenOnly);
+   nsresult RemoveAlignment(nsIDOMNode * aNode, const nsAString & aAlignType, bool aChildrenOnly);
+   nsresult MakeSureElemStartsOrEndsOnCR(nsIDOMNode *aNode, bool aStarts);
+   nsresult AlignBlock(nsIDOMElement * aElement, const nsAString * aAlignType, bool aContentsOnly);
+   nsresult RelativeChangeIndentationOfElementNode(nsIDOMNode *aNode, int8_t aRelativeChange);
+   void DocumentModifiedWorker();
+ 
+ // data members
+ protected:
+diff --git a/editor/libeditor/html/nsHTMLEditUtils.cpp b/editor/libeditor/html/nsHTMLEditUtils.cpp
+--- a/editor/libeditor/html/nsHTMLEditUtils.cpp
++++ b/editor/libeditor/html/nsHTMLEditUtils.cpp
+@@ -46,16 +46,18 @@
+ #include "nsEditProperty.h"
+ #include "nsIAtom.h"
+ #include "nsIDOMNode.h"
+ #include "nsIContent.h"
+ #include "nsIDOMNodeList.h"
+ #include "nsIDOMHTMLAnchorElement.h"
+ #include "nsHTMLTags.h"
+ 
++#include "mozilla/dom/Element.h"
++
+ using namespace mozilla;
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ //                  
+ bool 
+ nsHTMLEditUtils::IsBig(nsIDOMNode *node)
+ {
+   return nsEditor::NodeIsType(node, nsEditProperty::big);
+@@ -431,18 +433,25 @@ nsHTMLEditUtils::IsFormWidget(nsIDOMNode
+       || (nodeAtom == nsEditProperty::keygen)
+       || (nodeAtom == nsEditProperty::progress)
+       || (nodeAtom == nsEditProperty::input);
+ }
+ 
+ bool
+ nsHTMLEditUtils::SupportsAlignAttr(nsIDOMNode * aNode)
+ {
++  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
++  return node->IsElement() ? SupportsAlignAttr(node->AsElement()) : false;
++}
++
++bool
++nsHTMLEditUtils::SupportsAlignAttr(dom::Element* aElement)
++{
+   NS_PRECONDITION(aNode, "null node passed to nsHTMLEditUtils::SupportsAlignAttr");
+-  nsCOMPtr<nsIAtom> nodeAtom = nsEditor::GetTag(aNode);
++  nsCOMPtr<nsIAtom> nodeAtom = aElement->Tag();
+   return (nodeAtom == nsEditProperty::hr)
+       || (nodeAtom == nsEditProperty::table)
+       || (nodeAtom == nsEditProperty::tbody)
+       || (nodeAtom == nsEditProperty::tfoot)
+       || (nodeAtom == nsEditProperty::thead)
+       || (nodeAtom == nsEditProperty::tr)
+       || (nodeAtom == nsEditProperty::td)
+       || (nodeAtom == nsEditProperty::th)
+diff --git a/editor/libeditor/html/nsHTMLEditUtils.h b/editor/libeditor/html/nsHTMLEditUtils.h
+--- a/editor/libeditor/html/nsHTMLEditUtils.h
++++ b/editor/libeditor/html/nsHTMLEditUtils.h
+@@ -37,16 +37,22 @@
+ 
+ #ifndef nsHTMLEditUtils_h__
+ #define nsHTMLEditUtils_h__
+ 
+ #include "prtypes.h"  // for int32_t
+ 
+ class nsIDOMNode;
+ 
++namespace mozilla {
++namespace dom {
++class Element;
++} // namespace dom
++} // namespace mozilla
++
+ class nsHTMLEditUtils
+ {
+ public:
+   // from nsTextEditRules:
+   static bool IsBig(nsIDOMNode *aNode);
+   static bool IsSmall(nsIDOMNode *aNode);
+ 
+   // from nsHTMLEditRules:
+@@ -71,15 +77,16 @@ public:
+   static bool IsAnchor(nsIDOMNode *aNode);
+   static bool IsImage(nsIDOMNode *aNode);
+   static bool IsLink(nsIDOMNode *aNode);
+   static bool IsNamedAnchor(nsIDOMNode *aNode);
+   static bool IsDiv(nsIDOMNode *aNode);
+   static bool IsMozDiv(nsIDOMNode *aNode);
+   static bool IsMailCite(nsIDOMNode *aNode);
+   static bool IsFormWidget(nsIDOMNode *aNode);
+-  static bool SupportsAlignAttr(nsIDOMNode *aNode);
++  static bool SupportsAlignAttr(mozilla::dom::Element *aNode);
++  static bool SupportsAlignAttr(nsIDOMNode* aNode);
+   static bool CanContain(int32_t aParent, int32_t aChild);
+   static bool IsContainer(int32_t aTag);
+ };
+ 
+ #endif /* nsHTMLEditUtils_h__ */
+ 
+diff --git a/editor/libeditor/html/nsHTMLEditor.h b/editor/libeditor/html/nsHTMLEditor.h
+--- a/editor/libeditor/html/nsHTMLEditor.h
++++ b/editor/libeditor/html/nsHTMLEditor.h
+@@ -333,16 +333,17 @@ public:
+   virtual bool TagCanContainTag(const nsAString& aParentTag, const nsAString& aChildTag);
+   
+   /** returns true if aNode is a container */
+   virtual bool IsContainer(nsIDOMNode *aNode);
+ 
+   /** make the given selection span the entire document */
+   NS_IMETHOD SelectEntireDocument(nsISelection *aSelection);
+ 
++  using nsEditor::SetAttributeOrEquivalent;
+   NS_IMETHOD SetAttributeOrEquivalent(nsIDOMElement * aElement,
+                                       const nsAString & aAttribute,
+                                       const nsAString & aValue,
+                                       bool aSuppressTransaction);
+   NS_IMETHOD RemoveAttributeOrEquivalent(nsIDOMElement * aElement,
+                                          const nsAString & aAttribute,
+                                          bool aSuppressTransaction);
+ 

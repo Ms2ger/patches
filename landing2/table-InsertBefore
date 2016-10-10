@@ -1,0 +1,196 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/content/src/nsHTMLTableElement.cpp b/content/html/content/src/nsHTMLTableElement.cpp
+--- a/content/html/content/src/nsHTMLTableElement.cpp
++++ b/content/html/content/src/nsHTMLTableElement.cpp
+@@ -673,132 +673,124 @@ nsHTMLTableElement::InsertRow(int32_t aI
+ 
+   if (aIndex < -1) {
+     return NS_ERROR_DOM_INDEX_SIZE_ERR;
+   }
+ 
+   TableRowsCollection* rows = Rows();
+   uint32_t rowCount = rows->Length();
+ 
+-  if ((uint32_t)aIndex > rowCount && aIndex != -1) {
++  if (uint32_t(aIndex) > rowCount && aIndex != -1) {
+     return NS_ERROR_DOM_INDEX_SIZE_ERR;
+   }
+ 
+   // use local variable refIndex so we can remember original aIndex
+-  uint32_t refIndex = (uint32_t)aIndex;
++  uint32_t refIndex = uint32_t(aIndex);
+ 
+-  nsresult rv;
+   if (rowCount > 0) {
+     if (refIndex == rowCount || aIndex == -1) {
+       // we set refIndex to the last row so we can get the last row's
+       // parent we then do an AppendChild below if (rowCount<aIndex)
+-
+       refIndex = rowCount - 1;
+     }
+ 
+-    nsCOMPtr<nsIDOMNode> refRow;
+-    rows->Item(refIndex, getter_AddRefs(refRow));
++    nsRefPtr<nsGenericElement> refRow = rows->GetElementAt(refIndex);
++    MOZ_ASSERT(refRow);
+ 
+-    nsCOMPtr<nsIDOMNode> parent;
++    nsCOMPtr<nsINode> parent = refRow->GetParentNode();
++    MOZ_ASSERT(parent);
++    MOZ_ASSERT(parent->IsElement());
+ 
+-    refRow->GetParentNode(getter_AddRefs(parent));
+     // create the row
+     nsCOMPtr<nsINodeInfo> nodeInfo;
+-    nsContentUtils::NameChanged(mNodeInfo, nsGkAtoms::tr,
+-                                getter_AddRefs(nodeInfo));
++    nsresult rv = nsContentUtils::NameChanged(mNodeInfo, nsGkAtoms::tr,
++                                              getter_AddRefs(nodeInfo));
++    NS_ENSURE_SUCCESS(rv, rv);
++    MOZ_ASSERT(nodeInfo);
+ 
+     nsCOMPtr<nsIContent> newRow = NS_NewHTMLTableRowElement(nodeInfo.forget());
++    MOZ_ASSERT(newRow);
+ 
+-    if (newRow) {
+-      nsCOMPtr<nsIDOMNode> newRowNode(do_QueryInterface(newRow));
+-      nsCOMPtr<nsIDOMNode> retChild;
+-
++    ErrorResult error;
++    if (aIndex == -1 || uint32_t(aIndex) == rowCount) {
+       // If index is -1 or equal to the number of rows, the new row
+       // is appended.
+-      if (aIndex == -1 || uint32_t(aIndex) == rowCount) {
+-        rv = parent->AppendChild(newRowNode, getter_AddRefs(retChild));
+-        NS_ENSURE_SUCCESS(rv, rv);
+-      }
+-      else
+-      {
+-        // insert the new row before the reference row we found above
+-        rv = parent->InsertBefore(newRowNode, refRow,
+-                                  getter_AddRefs(retChild));
+-        NS_ENSURE_SUCCESS(rv, rv);
+-      }
++      parent->AppendChild(*newRow, error);
++    } else {
++      // insert the new row before the reference row we found above
++      parent->InsertBefore(*newRow, refRow, error);
++    }
++    if (error.Failed()) {
++      return error.ErrorCode();
++    }
+ 
+-      if (retChild) {
+-        CallQueryInterface(retChild, aValue);
+-      }
+-    }
++    nsCOMPtr<nsIDOMHTMLElement> newDOMRow = do_QueryInterface(newRow);
++    MOZ_ASSERT(newDOMRow);
++    newDOMRow.forget(aValue);
+   } else {
+     // the row count was 0, so 
+     // find the first row group and insert there as first child
+-    nsCOMPtr<nsIDOMNode> rowGroup;
++    nsCOMPtr<nsIContent> rowGroup;
+ 
+     for (nsIContent* child = nsINode::GetFirstChild();
+          child;
+          child = child->GetNextSibling()) {
+       nsINodeInfo *childInfo = child->NodeInfo();
+       nsIAtom *localName = childInfo->NameAtom();
+       if (childInfo->NamespaceID() == kNameSpaceID_XHTML &&
+           (localName == nsGkAtoms::thead ||
+            localName == nsGkAtoms::tbody ||
+            localName == nsGkAtoms::tfoot)) {
+-        rowGroup = do_QueryInterface(child);
+-        NS_ASSERTION(rowGroup, "HTML node did not QI to nsIDOMNode");
++        rowGroup = child;
+         break;
+       }
+     }
+ 
+     if (!rowGroup) { // need to create a TBODY
+       nsCOMPtr<nsINodeInfo> nodeInfo;
+-      nsContentUtils::NameChanged(mNodeInfo, nsGkAtoms::tbody,
+-                                  getter_AddRefs(nodeInfo));
++      nsresult rv = nsContentUtils::NameChanged(mNodeInfo, nsGkAtoms::tbody,
++                                                getter_AddRefs(nodeInfo));
++      NS_ENSURE_SUCCESS(rv, rv);
++      MOZ_ASSERT(nodeInfo);
+ 
+-      nsCOMPtr<nsIContent> newRowGroup =
+-        NS_NewHTMLTableSectionElement(nodeInfo.forget());
++      rowGroup = NS_NewHTMLTableSectionElement(nodeInfo.forget());
++      MOZ_ASSERT(rowGroup);
+ 
+-      if (newRowGroup) {
+-        rv = AppendChildTo(newRowGroup, true);
+-        NS_ENSURE_SUCCESS(rv, rv);
+-
+-        rowGroup = do_QueryInterface(newRowGroup);
+-      }
++      rv = AppendChildTo(rowGroup, true);
++      NS_ENSURE_SUCCESS(rv, rv);
+     }
+ 
+-    if (rowGroup) {
+-      nsCOMPtr<nsINodeInfo> nodeInfo;
+-      nsContentUtils::NameChanged(mNodeInfo, nsGkAtoms::tr,
+-                                  getter_AddRefs(nodeInfo));
++    // Now insert the row.
++    MOZ_ASSERT(rowGroup);
++    nsCOMPtr<nsINodeInfo> nodeInfo;
++    nsresult rv = nsContentUtils::NameChanged(mNodeInfo, nsGkAtoms::tr,
++                                              getter_AddRefs(nodeInfo));
++    NS_ENSURE_SUCCESS(rv, rv);
++    MOZ_ASSERT(nodeInfo);
+ 
+-      nsCOMPtr<nsIContent> newRow = NS_NewHTMLTableRowElement(nodeInfo.forget());
+-      if (newRow) {
+-        nsCOMPtr<nsIDOMNode> firstRow;
++    nsCOMPtr<nsIContent> newRow = NS_NewHTMLTableRowElement(nodeInfo.forget());
++    MOZ_ASSERT(newRow);
+ 
+-        nsCOMPtr<nsIDOMHTMLTableSectionElement> section =
+-          do_QueryInterface(rowGroup);
++    nsCOMPtr<nsIDOMHTMLTableSectionElement> section =
++      do_QueryInterface(rowGroup);
++    MOZ_ASSERT(section);
+ 
+-        if (section) {
+-          nsCOMPtr<nsIDOMHTMLCollection> rows;
+-          section->GetRows(getter_AddRefs(rows));
+-          if (rows) {
+-            rows->Item(0, getter_AddRefs(firstRow));
+-          }
+-        }
+-        
+-        nsCOMPtr<nsIDOMNode> retNode, newRowNode(do_QueryInterface(newRow));
++    nsCOMPtr<nsIDOMHTMLCollection> domRows;
++    section->GetRows(getter_AddRefs(domRows));
++    MOZ_ASSERT(domRows);
+ 
+-        rowGroup->InsertBefore(newRowNode, firstRow, getter_AddRefs(retNode));
++    nsCOMPtr<nsIHTMLCollection> rows = do_QueryInterface(domRows);
++    MOZ_ASSERT(rows);
+ 
+-        if (retNode) {
+-          CallQueryInterface(retNode, aValue);
+-        }
+-      }
+-    }
++    nsRefPtr<nsGenericElement> firstRow = rows->GetElementAt(0);
++
++    ErrorResult error;
++    rowGroup->InsertBefore(*newRow, firstRow, error);
++
++    newRow.forget(aValue);
+   }
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsHTMLTableElement::DeleteRow(int32_t aValue)
+ {

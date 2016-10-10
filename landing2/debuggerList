@@ -1,0 +1,250 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/src/jsapi.cpp b/js/src/jsapi.cpp
+--- a/js/src/jsapi.cpp
++++ b/js/src/jsapi.cpp
+@@ -862,17 +862,16 @@ JSRuntime::JSRuntime(JSUseHelperThreads 
+     ionJSContext(NULL),
+     ionStackLimit(0),
+     ionActivation(NULL),
+     ionPcScriptCache(NULL),
+     ionReturnOverride_(MagicValue(JS_ARG_POISON)),
+     useHelperThreads_(useHelperThreads)
+ {
+     /* Initialize infallibly first, so we can goto bad and JS_DestroyRuntime. */
+-    JS_INIT_CLIST(&debuggerList);
+     JS_INIT_CLIST(&onNewGlobalObjectWatchers);
+ 
+     PodZero(&debugHooks);
+     PodZero(&atomState);
+ 
+ #if JS_STACK_GROWTH_DIRECTION > 0
+     nativeStackLimit = UINTPTR_MAX;
+ #endif
+diff --git a/js/src/jscntxt.h b/js/src/jscntxt.h
+--- a/js/src/jscntxt.h
++++ b/js/src/jscntxt.h
+@@ -807,17 +807,17 @@ struct JSRuntime : js::RuntimeFriendFiel
+ 
+     /* Had an out-of-memory error which did not populate an exception. */
+     JSBool              hadOutOfMemory;
+ 
+     /*
+      * Linked list of all js::Debugger objects. This may be accessed by the GC
+      * thread, if any, or a thread that is in a request and holds gcLock.
+      */
+-    JSCList             debuggerList;
++    mozilla::LinkedList<js::Debugger> debuggerList;
+ 
+     /*
+      * Head of circular list of all enabled Debuggers that have
+      * onNewGlobalObject handler methods established.
+      */
+     JSCList             onNewGlobalObjectWatchers;
+ 
+     /* Bookkeeping information for debug scope objects. */
+diff --git a/js/src/jscompartment.cpp b/js/src/jscompartment.cpp
+--- a/js/src/jscompartment.cpp
++++ b/js/src/jscompartment.cpp
+@@ -835,17 +835,17 @@ JSCompartment::clearTraps(FreeOp *fop)
+         if (script->hasAnyBreakpointsOrStepMode())
+             script->clearTraps(fop);
+     }
+ }
+ 
+ void
+ JSCompartment::sweepBreakpoints(FreeOp *fop)
+ {
+-    if (JS_CLIST_IS_EMPTY(&rt->debuggerList))
++    if (rt->debuggerList.isEmpty())
+         return;
+ 
+     for (CellIterUnderGC i(this, FINALIZE_SCRIPT); !i.done(); i.next()) {
+         JSScript *script = i.get<JSScript>();
+         if (!script->hasAnyBreakpointsOrStepMode())
+             continue;
+         bool scriptGone = !IsScriptMarked(&script);
+         JS_ASSERT(script == i.get<JSScript>());
+diff --git a/js/src/vm/Debugger.cpp b/js/src/vm/Debugger.cpp
+--- a/js/src/vm/Debugger.cpp
++++ b/js/src/vm/Debugger.cpp
+@@ -350,38 +350,35 @@ Breakpoint::nextInDebugger()
+ 
+ Breakpoint *
+ Breakpoint::nextInSite()
+ {
+     JSCList *link = JS_NEXT_LINK(&siteLinks);
+     return (link == &site->breakpoints) ? NULL : fromSiteLinks(link);
+ }
+ 
+-
+ /*** Debugger hook dispatch **********************************************************************/
+ 
+ Debugger::Debugger(JSContext *cx, JSObject *dbg)
+   : object(dbg), uncaughtExceptionHook(NULL), enabled(true),
+     frames(cx), scripts(cx), objects(cx), environments(cx)
+ {
+     assertSameCompartment(cx, dbg);
+ 
+-    JSRuntime *rt = cx->runtime;
+-    JS_APPEND_LINK(&link, &rt->debuggerList);
++    cx->runtime->debuggerList.insertBack(this);
+     JS_INIT_CLIST(&breakpoints);
+     JS_INIT_CLIST(&onNewGlobalObjectWatchersLink);
+ }
+ 
+ Debugger::~Debugger()
+ {
+     JS_ASSERT(debuggees.empty());
+ 
+     /* This always happens in the GC thread, so no locking is required. */
+     JS_ASSERT(object->compartment()->rt->isHeapBusy());
+-    JS_REMOVE_LINK(&link);
+ 
+     /*
+      * Since the inactive state for this link is a singleton cycle, it's always
+      * safe to apply JS_REMOVE_LINK to it, regardless of whether we're in the list or not.
+      */
+     JS_REMOVE_LINK(&onNewGlobalObjectWatchersLink);
+ }
+ 
+@@ -1389,18 +1386,17 @@ void
+ Debugger::markCrossCompartmentDebuggerObjectReferents(JSTracer *tracer)
+ {
+     JSRuntime *rt = tracer->runtime;
+ 
+     /*
+      * Mark all objects in comp that are referents of Debugger.Objects in other
+      * compartments.
+      */
+-    for (JSCList *p = &rt->debuggerList; (p = JS_NEXT_LINK(p)) != &rt->debuggerList;) {
+-        Debugger *dbg = Debugger::fromLinks(p);
++    for (Debugger *dbg = rt->debuggerList.getFirst(); dbg; dbg = dbg->getNext()) {
+         if (!dbg->object->compartment()->isCollecting())
+             dbg->markKeysInCompartment(tracer);
+     }
+ }
+ 
+ /*
+  * This method has two tasks:
+  *   1. Mark Debugger objects that are unreachable except for debugger hooks that
+@@ -1518,19 +1514,17 @@ Debugger::trace(JSTracer *trc)
+     environments.trace(trc);
+ }
+ 
+ void
+ Debugger::sweepAll(FreeOp *fop)
+ {
+     JSRuntime *rt = fop->runtime();
+ 
+-    for (JSCList *p = &rt->debuggerList; (p = JS_NEXT_LINK(p)) != &rt->debuggerList;) {
+-        Debugger *dbg = Debugger::fromLinks(p);
+-
++    for (Debugger *dbg = rt->debuggerList.getFirst(); dbg; dbg = dbg->getNext()) {
+         if (!IsObjectMarked(&dbg->object)) {
+             /*
+              * dbg is being GC'd. Detach it from its debuggees. The debuggee
+              * might be GC'd too. Since detaching requires access to both
+              * objects, this must be done before finalize time.
+              */
+             for (GlobalObjectSet::Enum e(dbg->debuggees); !e.empty(); e.popFront())
+                 dbg->removeDebuggeeGlobal(fop, e.front(), NULL, &e);
+diff --git a/js/src/vm/Debugger.h b/js/src/vm/Debugger.h
+--- a/js/src/vm/Debugger.h
++++ b/js/src/vm/Debugger.h
+@@ -4,32 +4,34 @@
+  * This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef Debugger_h__
+ #define Debugger_h__
+ 
+ #include "mozilla/Attributes.h"
++#include "mozilla/LinkedList.h"
+ 
+ #include "jsapi.h"
+ #include "jsclist.h"
+ #include "jscntxt.h"
+ #include "jscompartment.h"
+ #include "jsgc.h"
+ #include "jsweakmap.h"
+ #include "jswrapper.h"
+ 
+ #include "gc/Barrier.h"
+ #include "js/HashTable.h"
+ #include "vm/GlobalObject.h"
+ 
+ namespace js {
+ 
+-class Debugger {
++class Debugger : public mozilla::LinkedListElement<Debugger>
++{
+     friend class Breakpoint;
+     friend JSBool (::JS_DefineDebuggerObject)(JSContext *cx, JSObject *obj);
+ 
+   public:
+     enum Hook {
+         OnDebuggerStatement,
+         OnExceptionUnwind,
+         OnNewScript,
+@@ -46,17 +48,16 @@ class Debugger {
+         JSSLOT_DEBUG_SCRIPT_PROTO,
+         JSSLOT_DEBUG_PROTO_STOP,
+         JSSLOT_DEBUG_HOOK_START = JSSLOT_DEBUG_PROTO_STOP,
+         JSSLOT_DEBUG_HOOK_STOP = JSSLOT_DEBUG_HOOK_START + HookCount,
+         JSSLOT_DEBUG_COUNT = JSSLOT_DEBUG_HOOK_STOP
+     };
+ 
+   private:
+-    JSCList link;                       /* See JSRuntime::debuggerList. */
+     HeapPtrObject object;               /* The Debugger object. Strong reference. */
+     GlobalObjectSet debuggees;          /* Debuggee globals. Cross-compartment weak references. */
+     js::HeapPtrObject uncaughtExceptionHook; /* Strong reference. */
+     bool enabled;
+     JSCList breakpoints;                /* Circular list of all js::Breakpoints in this debugger */
+ 
+     /*
+      * If this Debugger is enabled, and has a onNewGlobalObject handler, then
+@@ -210,17 +211,16 @@ class Debugger {
+     JSObject *newDebuggerScript(JSContext *cx, HandleScript script);
+ 
+     /*
+      * Receive a "new script" event from the engine. A new script was compiled
+      * or deserialized.
+      */
+     void fireNewScript(JSContext *cx, HandleScript script);
+ 
+-    static inline Debugger *fromLinks(JSCList *links);
+     inline Breakpoint *firstBreakpoint() const;
+ 
+     static inline Debugger *fromOnNewGlobalObjectWatchersLink(JSCList *link);
+ 
+   public:
+     Debugger(JSContext *cx, JSObject *dbg);
+     ~Debugger();
+ 
+@@ -432,23 +432,16 @@ class Breakpoint {
+     Breakpoint(Debugger *debugger, BreakpointSite *site, JSObject *handler);
+     void destroy(FreeOp *fop);
+     Breakpoint *nextInDebugger();
+     Breakpoint *nextInSite();
+     const HeapPtrObject &getHandler() const { return handler; }
+     HeapPtrObject &getHandlerRef() { return handler; }
+ };
+ 
+-Debugger *
+-Debugger::fromLinks(JSCList *links)
+-{
+-    char *p = reinterpret_cast<char *>(links);
+-    return reinterpret_cast<Debugger *>(p - offsetof(Debugger, link));
+-}
+-
+ Breakpoint *
+ Debugger::firstBreakpoint() const
+ {
+     if (JS_CLIST_IS_EMPTY(&breakpoints))
+         return NULL;
+     return Breakpoint::fromDebuggerLinks(JS_NEXT_LINK(&breakpoints));
+ }
+ 

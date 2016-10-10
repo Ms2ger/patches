@@ -1,0 +1,985 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/current_revision b/editor/libeditor/html/tests/browserscope/lib/richtext2/current_revision
+--- a/editor/libeditor/html/tests/browserscope/lib/richtext2/current_revision
++++ b/editor/libeditor/html/tests/browserscope/lib/richtext2/current_revision
+@@ -1,1 +1,1 @@
+-805
++913
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/__init__.py b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/__init__.py
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/common.py b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/common.py
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/handlers.py b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/handlers.py
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/common.css b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/common.css
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/editable.css b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/editable.css
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/canonicalize.js b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/canonicalize.js
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/compare.js b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/compare.js
+old mode 100644
+new mode 100755
+--- a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/compare.js
++++ b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/compare.js
+@@ -116,58 +116,60 @@ function compareHTMLTestResultTo(expecte
+   actual = actual.replace(/[\x60\xb4]/g, '');
+   actual = canonicalizeElementsAndAttributes(actual, emitFlags);
+ 
+   var bestExpected = compareHTMLToExpectation(actual, expected, emitFlags);
+ 
+   if (bestExpected == RESULT_EQUAL) {
+     // Shortcut - it doesn't get any better
+     result.valresult = VALRESULT_EQUAL;
+-    result.selresult = SELRESULT_EQUAL;
++    result.selresult = (result.selresult == SELRESULT_CANARY) ? SELRESULT_CANARY : SELRESULT_EQUAL;
+     return;
+   }
+ 
+   var bestAccepted = compareHTMLToExpectation(actual, accepted, emitFlags);
+ 
++  // Note that the selection result may already have been degraded if the selection went off
++  // into canary territory.
+   switch (bestExpected) {
+     case RESULT_SEL:
+       switch (bestAccepted) {
+         case RESULT_EQUAL:
+           // The HTML was equal to the/an expected HTML result as well
+           // (just not the selection there), therefore the difference
+           // between expected and accepted can only lie in the selection.
+           result.valresult = VALRESULT_EQUAL;
+-          result.selresult = SELRESULT_ACCEPT;
++          result.selresult = (result.selresult == SELRESULT_CANARY) ? SELRESULT_CANARY : SELRESULT_ACCEPT;
+           return;
+ 
+         case RESULT_SEL:
+         case RESULT_DIFF:
+           // The acceptable expectations did not yield a better result
+           // -> stay with the original (i.e., comparison to 'expected') result.
+           result.valresult = VALRESULT_EQUAL;
+-          result.selresult = SELRESULT_DIFF;
++          result.selresult = (result.selresult == SELRESULT_CANARY) ? SELRESULT_CANARY : SELRESULT_DIFF;
+           return;
+       }
+       break;
+ 
+     case RESULT_DIFF:
+       switch (bestAccepted) {
+         case RESULT_EQUAL:
+           result.valresult = VALRESULT_ACCEPT;
+-          result.selresult = SELRESULT_EQUAL;
++          result.selresult = (result.selresult == SELRESULT_CANARY) ? SELRESULT_CANARY : SELRESULT_EQUAL;
+           return;
+ 
+         case RESULT_SEL:
+           result.valresult = VALRESULT_ACCEPT;
+-          result.selresult = SELRESULT_DIFF;
++          result.selresult = (result.selresult == SELRESULT_CANARY) ? SELRESULT_CANARY : SELRESULT_DIFF;
+           return;
+ 
+         case RESULT_DIFF:
+           result.valresult = VALRESULT_DIFF;
+-          result.selresult = SELRESULT_NA;
++          result.selresult = (result.selresult == SELRESULT_CANARY) ? SELRESULT_CANARY : SELRESULT_NA;
+           return;
+       }
+       break;
+   }
+   
+   throw INTERNAL_ERR + HTML_COMPARISON;
+ }
+ 
+@@ -187,35 +189,38 @@ function verifyCanaries(container, resul
+ 
+   if (str.length < 2 * container.canary.length) {
+     result.valresult = VALRESULT_CANARY;
+     result.selresult = SELRESULT_NA;
+     result.output = result.bodyOuterHTML;
+     return false;
+   }
+ 
+-  var strBefore = str.substr(0, container.canary.length);
+-  var strAfter  = str.substr(str.length - container.canary.length);
++  // Check whether there are selection markers within canary region.
++  // Add 2 extra charactars to strings length to allow for selection character(s).
++  var strBefore = str.substr(0, container.canary.length + 2);
++  var strAfter  = str.substr(str.length - container.canary.length - 2);
+ 
+-  // Verify that the canary stretch doesn't contain any selection markers
+   if (SELECTION_MARKERS.test(strBefore) || SELECTION_MARKERS.test(strAfter)) {
+     str = str.replace(SELECTION_MARKERS, '');
++    result.output = result.bodyOuterHTML;
++    
+     if (str.length < 2 * container.canary.length) {
+       result.valresult = VALRESULT_CANARY;
+       result.selresult = SELRESULT_NA;
+-      result.output = result.bodyOuterHTML;
+       return false;
+     }
+-
++    
+     // Selection escaped contentEditable element, but HTML may still be ok.
+     result.selresult = SELRESULT_CANARY;
+-    strBefore = str.substr(0, container.canary.length);
+-    strAfter  = str.substr(str.length - container.canary.length);
+   }
+ 
++  // After removing selection markers (if any), check whether canary is undamaged.
++  strBefore = str.substr(0, container.canary.length);
++  strAfter  = str.substr(str.length - container.canary.length);
+   if (strBefore !== container.canary || strAfter !== container.canary) {
+     result.valresult = VALRESULT_CANARY;
+     result.selresult = SELRESULT_NA;
+     result.output = result.bodyOuterHTML;
+     return false;
+   }
+ 
+   return true;
+@@ -250,25 +255,25 @@ function compareHTMLTestResult(suite, gr
+   //      decide whether to compare vs. outer or inner HTML based on this.
+   var openingTagEnd = result.outerHTML.indexOf('>') + 1;
+   var openingTag = result.outerHTML.substr(0, openingTagEnd);
+ 
+   openingTag = canonicalizeElementsAndAttributes(openingTag, emitFlags);
+   var tagCmp = compareHTMLToExpectation(openingTag, container.tagOpen, emitFlags);
+ 
+   if (tagCmp == RESULT_EQUAL) {
+-    result.output = result.innerHTML;
++    result.output = (result.selresult == SELRESULT_CANARY) ? result.bodyOuterHTML : result.innerHTML;
+     compareHTMLTestResultTo(
+         getTestParameter(suite, group, test, PARAM_EXPECTED),
+         getTestParameter(suite, group, test, PARAM_ACCEPT),
+         result.innerHTML,
+         emitFlags,
+         result)
+   } else {
+-    result.output = result.outerHTML;
++    result.output = (result.selresult == SELRESULT_CANARY) ? result.bodyOuterHTML : result.outerHTML;
+     compareHTMLTestResultTo(
+         getContainerParameter(suite, group, test, container, PARAM_EXPECTED_OUTER),
+         getContainerParameter(suite, group, test, container, PARAM_ACCEPT_OUTER),
+         result.outerHTML,
+         emitFlags,
+         result)
+   }
+ }
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/output.js b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/output.js
+old mode 100644
+new mode 100755
+--- a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/output.js
++++ b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/output.js
+@@ -304,102 +304,135 @@ function outputTestResults(suite, clsID,
+     outerOutput += '</span>';
+   }
+   if (outerOutput) {
+     expectedOutput += '<hr>' + outerOutput;
+   }
+   setTD(trID + IDOUT_EXPECTED, expectedOutput);
+ 
+   // Iterate over the individual container results
+-  for (var cntIdx = 0; cntIdx < containers.length; ++cntIdx) {
+-    var cntID = containers[cntIdx].id;
+-    var cntTD = document.getElementById(trID + IDOUT_CONTAINER + cntID);
+-    var cntResult = testResult[cntID];
+-    var cntValOut = VALOUTPUT[cntResult.valresult];
+-    var cntSelOut = SELOUTPUT[cntResult.selresult];
+-    var cssVal = cntValOut.css;
+-    var cssSel = (!suiteChecksSelOnly || cntResult.selresult != SELRESULT_NA) ? cntSelOut.css : cssVal;
+-    var cssCnt = cssVal;
++  for (var containerIdx = 0; containerIdx < containers.length; ++containerIdx) {
++    var containerID = containers[containerIdx].id;
++    var containerTD = document.getElementById(trID + IDOUT_CONTAINER + containerID);
++    var containerResult = testResult[containerID];
++    var containerValOut = VALOUTPUT[containerResult.valresult];
++    var containerSelOut = SELOUTPUT[containerResult.selresult];
++    var containerValCSS = containerValOut.css;
++    var containerSelCSS = (!suiteChecksSelOnly || containerResult.selresult != SELRESULT_NA) ? containerSelOut.css : containerValCSS;
++    var containerCSS = containerValCSS;
+ 
+-    // Fill in result status cell ("PASS", "ACC.", "FAIL", "EXC.", etc.)
+-    setTD(trID + IDOUT_STATUSVAL + cntID, cntValOut.output, cntValOut.title, cssVal);
+-    
+-    // Fill in selection status cell ("PASS", "ACC.", "FAIL", "N/A")
+-    setTD(trID + IDOUT_STATUSSEL + cntID, cntSelOut.output, cntSelOut.title, cssSel);
+-
+-    // Fill in actual result
+-    switch (cntResult.valresult) {
++    switch (containerResult.valresult) {
+       case VALRESULT_SETUP_EXCEPTION:
+-        setTD(trID + IDOUT_ACTUAL + cntID,
+-              SETUP_EXCEPTION + '(mouseover)',
+-              escapeOutput(cntResult.output),
+-              cssVal);
+-        break;
+-
+       case VALRESULT_EXECUTION_EXCEPTION:
+-        setTD(trID + IDOUT_ACTUAL + cntID,
+-              EXECUTION_EXCEPTION + '(mouseover)',
+-              escapeOutput(cntResult.output.toString()),
+-              cssVal);
+-        break;
+-
+       case VALRESULT_VERIFICATION_EXCEPTION:
+-        setTD(trID + IDOUT_ACTUAL + cntID,
+-              VERIFICATION_EXCEPTION + '(mouseover)',
+-              escapeOutput(cntResult.output.toString()),
+-              cssVal);
+-        break;
+-
+       case VALRESULT_UNSUPPORTED:
+-        setTD(trID + IDOUT_ACTUAL + cntID,
+-              escapeOutput(cntResult.output),
+-              '',
+-              cssVal);
+-        break;
+-
+       case VALRESULT_CANARY:
+-        setTD(trID + IDOUT_ACTUAL + cntID,
+-              highlightSelectionMarkersAndTextNodes(escapeOutput(cntResult.output)),
+-              '',
+-              cssVal);
+         break;
+ 
+       case VALRESULT_DIFF:
+       case VALRESULT_ACCEPT:
+       case VALRESULT_EQUAL:
+-        if (!testUsesHTML) {
+-          setTD(trID + IDOUT_ACTUAL + cntID,
+-                formatValueOrString(cntResult.output),
+-                '',
+-                cssVal);
+-        } else if (cntResult.selresult == SELRESULT_CANARY) {
+-          cssCnt = suiteChecksSelOnly ? cssSel : cssVal;
+-          setTD(trID + IDOUT_ACTUAL + cntID, 
+-                highlightSelectionMarkersAndTextNodes(escapeOutput(cntResult.output)),
+-                '',
+-                cssCnt);
+-        } else {
+-          cssCnt = suiteChecksSelOnly ? cssSel : cssVal;
+-          setTD(trID + IDOUT_ACTUAL + cntID, 
+-                formatActualResult(suite, group, test, cntResult.output),
+-                '',
+-                cssCnt);
+-        }
++        containerCSS = (testUsesHTML && suiteChecksSelOnly) ? containerSelCSS : containerValCSS;
+         break;
+ 
+       default:
+-        cssCnt = 'exception';
+-        setTD(trID + IDOUT_ACTUAL + cntID,
++        containerCSS = 'exception';
++    }
++
++    // Output results for both unfocused and focused
++    for (var focusIdx = 0; focusIdx < focusArr.length; ++focusIdx) {
++      var focusID = focusArr[focusIdx];
++      var focusTD = document.getElementById(trID + IDOUT_FOCUS + containerID + ':' + focusID);
++      var focusResult = containerResult[focusID];
++      var focusValOut = VALOUTPUT[focusResult.valresult];
++      var focusSelOut = SELOUTPUT[focusResult.selresult];
++      var focusValCSS = focusValOut.css;
++      var focusSelCSS = (!suiteChecksSelOnly || focusResult.selresult != SELRESULT_NA) ? focusSelOut.css : focusValCSS;
++      var focusCSS = focusValCSS;
++
++      // Fill in result status cell ("PASS", "ACC.", "FAIL", "EXC.", etc.)
++      setTD(trID + IDOUT_STATUSVAL + containerID + ':' + focusID, focusValOut.output, focusValOut.title, focusValCSS);
++      
++      // Fill in selection status cell ("PASS", "ACC.", "FAIL", "N/A")
++      setTD(trID + IDOUT_STATUSSEL + containerID + ':' + focusID, focusSelOut.output, focusSelOut.title, focusSelCSS);
++
++      // Fill in actual result
++      switch (focusResult.valresult) {
++        case VALRESULT_SETUP_EXCEPTION:
++          setTD(trID + IDOUT_ACTUAL + containerID + ':' + focusID,
++                SETUP_EXCEPTION + '(mouseover)',
++                escapeOutput(focusResult.output),
++                focusValCSS);
++          break;
++  
++        case VALRESULT_EXECUTION_EXCEPTION:
++          setTD(trID + IDOUT_ACTUAL + containerID + ':' + focusID,
++                EXECUTION_EXCEPTION + '(mouseover)',
++                escapeOutput(focusResult.output.toString()),
++                focusValCSS);
++          break;
++  
++        case VALRESULT_VERIFICATION_EXCEPTION:
++          setTD(trID + IDOUT_ACTUAL + containerID + ':' + focusID,
++                VERIFICATION_EXCEPTION + '(mouseover)',
++                escapeOutput(focusResult.output.toString()),
++                focusValCSS);
++          break;
++  
++        case VALRESULT_UNSUPPORTED:
++          setTD(trID + IDOUT_ACTUAL + containerID + ':' + focusID,
++                focusResult.output,
++                '',
++                focusValCSS);
++          break;
++  
++        case VALRESULT_CANARY:
++          setTD(trID + IDOUT_ACTUAL + containerID + ':' + focusID,
++                highlightSelectionMarkersAndTextNodes(escapeOutput(focusResult.output)),
++                '',
++                focusValCSS);
++          break;
++  
++        case VALRESULT_DIFF:
++        case VALRESULT_ACCEPT:
++        case VALRESULT_EQUAL:
++          if (!testUsesHTML) {
++            setTD(trID + IDOUT_ACTUAL + containerID + ':' + focusID,
++                  formatValueOrString(focusResult.output),
++                  '',
++                  focusValCSS);
++          } else if (focusResult.selresult == SELRESULT_CANARY) {
++            focusCSS = suiteChecksSelOnly ? focusSelCSS : focusValCSS;
++            setTD(trID + IDOUT_ACTUAL + containerID + ':' + focusID, 
++                  highlightSelectionMarkersAndTextNodes(escapeOutput(focusResult.output)),
++                  '',
++                  focusCSS);
++          } else {
++            focusCSS = suiteChecksSelOnly ? focusSelCSS : focusValCSS;
++            setTD(trID + IDOUT_ACTUAL + containerID + ':' + focusID, 
++                  formatActualResult(suite, group, test, focusResult.output),
++                  '',
++                  focusCSS);
++          }
++          break;
++  
++        default:
++          focusCSS = 'exception';
++          setTD(trID + IDOUT_ACTUAL + containerID + ':' + focusID,
+               INTERNAL_ERR + 'UNKNOWN RESULT VALUE',
+               '',
+-              cssCnt);
++              focusCSS);
++      }
++      
++      if (focusTD) {
++        focusTD.className = focusCSS;
++      }
+     }
+-
+-    if (cntTD) {
+-      cntTD.className = cssCnt;
++    if (containerTD) {
++      containerTD.className = containerCSS;
+     }
+   }          
+ }
+ 
+ /**
+  * Outputs the results of a single test suite
+  *
+  * @param {Object} suite as object reference
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/pad.js b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/pad.js
+old mode 100644
+new mode 100755
+--- a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/pad.js
++++ b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/pad.js
+@@ -130,38 +130,43 @@ function deriveSelectionPoint(root, mark
+  *     ]   the selection end within a text node
+  *     |   collapsed selection between elements (same as {})
+  *     {   selection starting with the following element
+  *     }   selection ending with the preceding element
+  * {, } and | can also be used within an element tag, just before the closing
+  * angle bracket > to specify a selection [element, 0] where the element
+  * doesn't otherwise have any children. Ex.: <hr {>foobarbaz<hr }>
+  *
+- * Explicit and implicit specification can also be mixed between the 2 points.
+- * 
+  * A pad string must only contain at most ONE of the above that is suitable for
+  * that start or end point, respectively, and must contain either both or none.
+  *
+  * @param suite {Object} suite that test originates in as object reference
+  * @param group {Object} group of tests within the suite the test belongs to
+  * @param test {Object} test to be run as object reference
+  * @param container {Object} container descriptor as object reference
++ * @param focused {Boolean} whether the editing element should be focused
+  */
+-function initContainer(suite, group, test, container) {
++function initContainer(suite, group, test, container, focused) {
+   var pad = getTestParameter(suite, group, test, PARAM_PAD);
+   pad = canonicalizeSpaces(pad);
+   pad = convertSelectionIndicators(pad);
+ 
+   if (container.editorID) {
+     container.body.innerHTML = container.canary + container.tagOpen + pad + container.tagClose + container.canary;
+     container.editor = container.doc.getElementById(container.editorID);
+   } else {
+     container.body.innerHTML = pad;
+     container.editor = container.body;
+   }
++  if (focused) {
++    container.editor.focus();
++  } else {
++    window.focus();
++    window.blur();
++  }
+ 
+   win = container.win;
+   doc = container.doc;
+   body = container.body;
+   editor = container.editor;
+   sel = null;
+ 
+   if (!editor) {
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/range.js b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/range.js
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/run.js b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/run.js
+old mode 100644
+new mode 100755
+--- a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/run.js
++++ b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/run.js
+@@ -102,28 +102,28 @@ function initVariables() {
+  * Runs a single test - outputs and sets the result variables.
+  *
+  * @param suite {Object} suite that test originates in as object reference
+  * @param group {Object} group of tests within the suite the test belongs to
+  * @param test {Object} test to be run as object reference
+  * @param container {Object} container descriptor as object reference
+  * @see variables.js for RESULT... values
+  */
+-function runSingleTest(suite, group, test, container) {
++function runSingleTest(suite, group, test, container, focused) {
+   var result = {
+     valscore: 0,
+     selscore: 0,
+     valresult: VALRESULT_NOT_RUN,
+     selresult: SELRESULT_NOT_RUN,
+     output: ''
+   };
+ 
+   // 1.) Populate the editor element with the initial test setup HTML.
+   try {
+-    initContainer(suite, group, test, container);
++    initContainer(suite, group, test, container, focused);
+   } catch(ex) {
+     result.valresult = VALRESULT_SETUP_EXCEPTION;
+     result.selresult = SELRESULT_NA;
+     result.output = SETUP_EXCEPTION + ex.toString();
+     return result;
+   }
+ 
+   // 2.) Run the test command, general function or query function.
+@@ -220,16 +220,17 @@ function initTestSuiteResults(suite) {
+   var totalTestCount = 0;
+ 
+   for (var clsIdx = 0; clsIdx < testClassCount; ++clsIdx) {
+     var clsID = testClassIDs[clsIdx];
+     var cls = suite[clsID];
+     if (!cls)
+       continue;
+ 
++    results[suiteID][clsID] = {};
+     results[suiteID][clsID] = {
+         count: 0,
+         valscore: 0,
+         selscore: 0
+     };
+     var clsTestCount = 0;
+ 
+     var groupCount = cls.length;
+@@ -244,25 +245,37 @@ function initTestSuiteResults(suite) {
+         var test = group.tests[testIdx];
+         
+         results[suiteID][clsID ][test.id] = {
+             valscore: 0,
+             selscore: 0,
+             valresult: VALRESULT_NOT_RUN,
+             selresult: SELRESULT_NOT_RUN
+         };
++
+         for (var cntIdx = 0; cntIdx < containers.length; ++cntIdx) {
+           var cntID = containers[cntIdx].id;
+ 
+           results[suiteID][clsID][test.id][cntID] = {
+             valscore: 0,
+             selscore: 0,
+             valresult: VALRESULT_NOT_RUN,
+             selresult: SELRESULT_NOT_RUN,
+-            output: ''
++          };
++          
++          for (var focusIdx = 0; focusIdx < focusArr.length; ++focusIdx) {
++            var focusID = focusArr[focusIdx];
++
++            results[suiteID][clsID][test.id][cntID][focusID] = {
++              valscore: 0,
++              selscore: 0,
++              valresult: VALRESULT_NOT_RUN,
++              selresult: SELRESULT_NOT_RUN,
++              output: ''
++            };
+           }
+         }
+       }
+     }
+     results[suiteID][clsID].count = clsTestCount;
+   }
+   results[suiteID].count = totalTestCount;
+ }
+@@ -296,27 +309,45 @@ function runTestSuite(suite) {
+         var valscore = 1;
+         var selscore = 1;
+         var valresult = VALRESULT_EQUAL;
+         var selresult = SELRESULT_EQUAL;
+ 
+         for (var cntIdx = 0; cntIdx < containers.length; ++cntIdx) {
+           var container = containers[cntIdx];
+           var cntID = container.id;
++          var containerValscore = 1;
++          var containerSelscore = 1;
++          var containerValresult = VALRESULT_EQUAL;
++          var containerSelresult = SELRESULT_EQUAL;
+ 
+-          var result = runSingleTest(suite, group, test, container);
++          for (var focusIdx = 0; focusIdx < focusArr.length; ++focusIdx) {
++            var focusID = focusArr[focusIdx];
+ 
+-          results[suiteID][clsID][test.id][cntID] = result;
++            var result = runSingleTest(suite, group, test, container, focusID == 'focused');
+ 
+-          valscore = Math.min(valscore, result.valscore);
+-          selscore = Math.min(selscore, result.selscore);
+-          valresult = Math.min(valresult, result.valresult);
+-          selresult = Math.min(selresult, result.selresult);
++            results[suiteID][clsID][test.id][cntID][focusID] = result;
+ 
+-          resetContainer(container);
++            containerValscore = Math.min(containerValscore, result.valscore);
++            containerSelscore = Math.min(containerSelscore, result.selscore);
++            containerValresult = Math.min(containerValresult, result.valresult);
++            containerSelresult = Math.min(containerSelresult, result.selresult);
++
++            valscore = Math.min(valscore, result.valscore);
++            selscore = Math.min(selscore, result.selscore);
++            valresult = Math.min(valresult, result.valresult);
++            selresult = Math.min(selresult, result.selresult);
++
++            resetContainer(container);
++          }
++
++          results[suiteID][clsID][test.id][cntID].valscore = containerValscore;
++          results[suiteID][clsID][test.id][cntID].selscore = containerSelscore;
++          results[suiteID][clsID][test.id][cntID].valresult = containerValresult;
++          results[suiteID][clsID][test.id][cntID].selresult = containerSelresult;
+         }          
+ 
+         results[suiteID][clsID][test.id].valscore = valscore;
+         results[suiteID][clsID][test.id].selscore = selscore;
+         results[suiteID][clsID][test.id].valresult = valresult;
+         results[suiteID][clsID][test.id].selresult = selresult;
+ 
+         results[suiteID][clsID].valscore += valscore;
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/units.js b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/units.js
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/variables.js b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/variables.js
+old mode 100644
+new mode 100755
+--- a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/variables.js
++++ b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/static/js/variables.js
+@@ -38,58 +38,55 @@ var HTML_COMPARISON          = 'WHEN COM
+ var SELMODIFY_UNSUPPORTED      = 'UNSUPPORTED selection.modify()';
+ var SELALLCHILDREN_UNSUPPORTED = 'UNSUPPORTED selection.selectAllChildren()';
+ 
+ // Output string for unsupported functions
+ // (returning bool 'false' as opposed to throwing an exception)
+ var UNSUPPORTED = '<i>false</i> (UNSUPPORTED)';
+ 
+ // HTML comparison result contants.
+-var VALRESULT_NOT_RUN                = 0;  // test hasn't been run yet
+-var VALRESULT_SETUP_EXCEPTION        = 1;
+-var VALRESULT_EXECUTION_EXCEPTION    = 2;
+-var VALRESULT_VERIFICATION_EXCEPTION = 3;
+-var VALRESULT_UNSUPPORTED            = 4;
++var VALRESULT_NOT_RUN                = 0;  // Test hasn't been run yet.
++var VALRESULT_SETUP_EXCEPTION        = 1;  // Exception was thrown during test setup.
++var VALRESULT_EXECUTION_EXCEPTION    = 2;  // Exception was thrown during test execution.
++var VALRESULT_VERIFICATION_EXCEPTION = 3;  // Exception was thrown during result verification.
++var VALRESULT_UNSUPPORTED            = 4;  // Editing command is unsupported.
+ var VALRESULT_CANARY                 = 5;  // HTML changes bled into the canary.
+-var VALRESULT_DIFF                   = 6;
++var VALRESULT_DIFF                   = 6;  // Result differs from expectations.
+ var VALRESULT_ACCEPT                 = 7;  // HTML technically correct, but not ideal.
+-var VALRESULT_EQUAL                  = 8;
++var VALRESULT_EQUAL                  = 8;  // Result is equal to ideal expectations.
+ 
+ var VALOUTPUT = [  // IMPORTANT: this array MUST be coordinated with the values above!!
+     {css: 'grey',        output: '???',    title: 'The test has not been run yet.'},                                            // VALRESULT_NOT_RUN
+     {css: 'exception',   output: 'EXC.',   title: 'Exception was thrown during setup.'},                                        // VALRESULT_SETUP_EXCEPTION
+     {css: 'exception',   output: 'EXC.',   title: 'Exception was thrown during execution.'},                                    // VALRESULT_EXECUTION_EXCEPTION
+     {css: 'exception',   output: 'EXC.',   title: 'Exception was thrown during result verification.'},                          // VALRESULT_VERIFICATION_EXCEPTION
+     {css: 'unsupported', output: 'UNS.',   title: 'Unsupported command or value'},                                              // VALRESULT_UNSUPPORTED
+     {css: 'canary',      output: 'CANARY', title: 'The command affected the contentEditable root element, or outside HTML.'},   // VALRESULT_CANARY
+     {css: 'fail',        output: 'FAIL',   title: 'The result differs from the expectation(s).'},                               // VALRESULT_DIFF
+     {css: 'accept',      output: 'ACC.',   title: 'The result is technically correct, but sub-optimal.'},                       // VALRESULT_ACCEPT
+     {css: 'pass',        output: 'PASS',   title: 'The test result matches the expectation.'}                                   // VALRESULT_EQUAL
+ ]
+ 
+ // Selection comparison result contants.
+-var SELRESULT_NOT_RUN = 0;  // test hasn't been run yet
+-var SELRESULT_CANARY  = 1;  // selection escapes the contentEditable element
+-var SELRESULT_DIFF    = 2;
+-var SELRESULT_NA      = 3;
++var SELRESULT_NOT_RUN = 0;  // Test hasn't been run yet.
++var SELRESULT_CANARY  = 1;  // Selection escapes the contentEditable element.
++var SELRESULT_DIFF    = 2;  // Selection result shows differences from expectation.
++var SELRESULT_NA      = 3;  // Selection result is meaningless.
+ var SELRESULT_ACCEPT  = 4;  // Selection is acceptable, but not ideal.
+-var SELRESULT_EQUAL   = 5;
++var SELRESULT_EQUAL   = 5;  // Selection is equal to expectations.
+ 
+ var SELOUTPUT = [  // IMPORTANT: this array MUST be coordinated with the values above!!
+-    {css: 'grey',   output: 'grey',   title: 'The test has not been run yet.'},                           // SELRESULT_NOT_RUN
++    {css: 'grey',   output: '???',   title: 'The test has not been run yet.'},                           // SELRESULT_NOT_RUN
+     {css: 'canary', output: 'CANARY', title: 'The selection escaped the contentEditable boundary!'},      // SELRESULT_CANARY
+     {css: 'fail',   output: 'FAIL',   title: 'The selection differs from the expectation(s).'},           // SELRESULT_DIFF   
+     {css: 'na',     output: 'N/A',    title: 'The correctness of the selection could not be verified.'},  // SELRESULT_NA     
+     {css: 'accept', output: 'ACC.',   title: 'The selection is technically correct, but sub-optimal.'},   // SELRESULT_ACCEPT 
+     {css: 'pass',   output: 'PASS',   title: 'The selection matches the expectation.'}                    // SELRESULT_EQUAL  
+ ];
+ 
+-// RegExp for selection markers
+-var SELECTION_MARKERS = /[\[\]\{\}\|\^]/;
+-
+ // Special attributes used to mark selections within elements that otherwise
+ // have no children. Important: attribute name MUST be lower case!
+ var ATTRNAME_SEL_START = 'bsselstart';
+ var ATTRNAME_SEL_END   = 'bsselend';
+ 
+ // DOM node type constants.
+ var DOM_NODE_TYPE_ELEMENT = 1;
+ var DOM_NODE_TYPE_TEXT    = 3;
+@@ -124,30 +121,34 @@ var IDOUT_VALUE      = '_:val';   // per
+ var IDOUT_CHECKATTRS = '_:att';   // per test
+ var IDOUT_CHECKSTYLE = '_:sty';   // per test
+ var IDOUT_CONTAINER  = '_:cnt:';  // per container
+ var IDOUT_STATUSVAL  = '_:sta:';  // per container
+ var IDOUT_STATUSSEL  = '_:sel:';  // per container
+ var IDOUT_PAD        = '_:pad';   // per test
+ var IDOUT_EXPECTED   = '_:exp';   // per test
+ var IDOUT_ACTUAL     = '_:act:';  // per container
++var IDOUT_FOCUS      = '_:foc:';  // per test + unfocused/focused
+ 
+ // Output strings to use for yes/no/NA
+ var OUTSTR_YES = '&#x25CF;'; 
+ var OUTSTR_NO  = '&#x25CB;'; 
+ var OUTSTR_NA  = '-';
+ 
+ // Tags at the start of HTML strings where they were taken from
+ var HTMLTAG_BODY  = 'B:';
+ var HTMLTAG_OUTER = 'O:';
+ var HTMLTAG_INNER = 'I:';
+ 
+ // What to use for the canary
+ var CANARY = 'CAN<br>ARY';
+ 
++// RegExp for selection markers
++var SELECTION_MARKERS = /[\]\[^{}|]/g;
++
+ // Containers for tests, and their associated DOM elements:
+ // iframe, win, doc, body, elem
+ var containers = [
+   { id:       'dM',
+     iframe:   null,
+     win:      null,
+     doc:      null,
+     body:     null,
+@@ -208,16 +209,19 @@ var emitFlagsForOutput = {
+ 
+ // Shades of output colors
+ var colorShades = ['Lo', 'Hi'];
+ 
+ // Classes of tests
+ var testClassIDs = ['Finalized', 'RFC', 'Proposed'];
+ var testClassCount = testClassIDs.length;
+ 
++// Focused/unfocused helper array
++var focusArr = ['unfocused', 'focused'];
++
+ // Dictionary storing the detailed test results.
+ var results = {
+     count: 0,
+     score: 0
+ };
+ 
+ // Results - populated by the fillResults() function.
+ var beacon = [];
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/templates/output.html b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/templates/output.html
+old mode 100644
+new mode 100755
+--- a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/templates/output.html
++++ b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/templates/output.html
+@@ -68,69 +68,103 @@
+         <TH TITLE="Unique ID of the test" ALIGN="LEFT">ID</TH>
+         <TH TITLE="Command or function used in the test" ALIGN="LEFT">Command</TH>
+         <TH TITLE="Value field for commands" ALIGN="LEFT">Value</TH>
+         {% ifnotequal s.id.0 "S" %}{% ifnotequal s.id.0 "Q" %}{% comment %} Don't output attribute and style columns for selection and "queryCommand..." tests. {% endcomment %}
+         <TH TITLE="check Atributes?">A</TH>
+         <TH TITLE="check Style">S</TH>
+         {% endifnotequal %}{% endifnotequal %}
+         <TH TITLE="Testing HTML Element">Env.</TH>
++        <TH TITLE="Editing container has focus?">Focus</TH>
+         {% ifnotequal s.id.0 "S" %}{% comment %} Don't output HTML status column for selection tests. {% endcomment %}
+         <TH TITLE="State of the test">Status</TH>
+         {% endifnotequal %}
+         {% ifnotequal s.id.0 "Q" %}{% comment %} Don't output selection result column for "queryCommand..." tests. {% endcomment %}
+         <TH TITLE="State of the test regarding the selection">Selection</TH>
+         {% endifnotequal %}
+         <TH TITLE="Initial HTML and selection" ALIGN="LEFT">Initial</TH>
+         <TH TITLE="Expected HTML and selection" ALIGN="LEFT">Expected</TH>
+         <TH TITLE="Actual result HTML and selection" ALIGN="LEFT">Actual (lower case, canonicalized, selection marks)</TH>
+         <TH TITLE="Short description of the test" ALIGN="LEFT">Description</TH>
+       </TR>
+     </THEAD>
+     <TBODY>
+       {% for g in pv %}{% for t in g.tests %}
+-      <TR ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:TR:dM" CLASS="{% cycle 'lo' 'lo' 'lo' 'hi' 'hi' 'hi' as shade %}">
+-        <TD ROWSPAN=3 ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:tid"><A CLASS="idLabel" NAME="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}" HREF="#{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}">{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}</A></TD>
+-        <TD ROWSPAN=3 ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:cmd">&nbsp;</TD>
+-        <TD ROWSPAN=3 ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:val">&nbsp;</TD>
++      <TR ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:TR:dM:unfocused" CLASS="{% cycle 'hi' 'lo' as shade %}">
++        <TD ROWSPAN=6 ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:tid"><A CLASS="idLabel" NAME="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}" HREF="#{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}">{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}</A></TD>
++        <TD ROWSPAN=6 ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:cmd">&nbsp;</TD>
++        <TD ROWSPAN=6 ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:val">&nbsp;</TD>
+         {% ifnotequal s.id.0 "S" %}{% ifnotequal s.id.0 "Q" %}{% comment %} Don't output attribute and style columns for selection and "queryCommand..." tests. {% endcomment %}
+-        <TD ROWSPAN=3 ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:att" ALIGN="CENTER">&nbsp;</TD>
+-        <TD ROWSPAN=3 ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:sty" ALIGN="CENTER">&nbsp;</TD>
++        <TD ROWSPAN=6 ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:att" ALIGN="CENTER">&nbsp;</TD>
++        <TD ROWSPAN=6 ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:sty" ALIGN="CENTER">&nbsp;</TD>
+         {% endifnotequal %}{% endifnotequal %}
+-        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:cnt:dM" TITLE="designMode=&quot;on&quot;" ALIGN="CENTER">dM</TD>
++        <TD ROWSPAN=2 ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:cnt:dM" TITLE="designMode=&quot;on&quot;" ALIGN="CENTER">dM</TD>
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:foc:dM:unfocused" TITLE="unfocused" ALIGN="CENTER">&#x25CB;</TD>
+         {% ifnotequal s.id.0 "S" %}
+-        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:sta:dM" ALIGN="CENTER">NONE</TD>
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:sta:dM:unfocused" ALIGN="CENTER">NONE</TD>
+         {% endifnotequal %}
+         {% ifnotequal s.id.0 "Q" %}
+-        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:sel:dM" ALIGN="CENTER">NONE</TD>
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:sel:dM:unfocused" ALIGN="CENTER">NONE</TD>
+         {% endifnotequal %}
+-        <TD ROWSPAN=3 ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:pad">&nbsp;</TD>
+-        <TD ROWSPAN=3 ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:exp">&nbsp;</TD>
+-        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:act:dM"><I>Processing...</I></TD>
+-        <TD ROWSPAN=3>{{ t.desc|default:"&nbsp;" }}</TD>
++        <TD ROWSPAN=6 ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:pad">&nbsp;</TD>
++        <TD ROWSPAN=6 ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:exp">&nbsp;</TD>
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:act:dM:unfocused"><I>Processing...</I></TD>
++        <TD ROWSPAN=6>{{ t.desc|default:"&nbsp;" }}</TD>
+       </TR>
+-      <TR ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:TR:body" CLASS="{% cycle shade %}">
+-        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:cnt:body" TITLE="&lt;body contentEditable=&quot;true&quot;&gt;" ALIGN="CENTER">body</TD>
++      <TR ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:TR:dM:focused" CLASS="{% cycle shade %}">
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:foc:dM:focused" TITLE="focused" ALIGN="CENTER">&#x25CF;</TD>
+         {% ifnotequal s.id.0 "S" %}
+-        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:sta:body" ALIGN="CENTER">NONE</TD>
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:sta:dM:focused" ALIGN="CENTER">NONE</TD>
+         {% endifnotequal %}
+         {% ifnotequal s.id.0 "Q" %}
+-        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:sel:body" ALIGN="CENTER">NONE</TD>
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:sel:dM:focused" ALIGN="CENTER">NONE</TD>
+         {% endifnotequal %}
+-        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:act:body"><I>Processing...</I></TD>
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:act:dM:focused"><I>Processing...</I></TD>
+       </TR>
+-      <TR ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:TR:div" CLASS="{% cycle shade %}">
+-        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:cnt:div" TITLE="&lt;div contentEditable=&quot;true&quot;&gt;" ALIGN="CENTER">div</TD>
++      <TR ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:TR:body:unfocused" CLASS="{% cycle shade %}">
++        <TD ROWSPAN=2 ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:cnt:body" TITLE="&lt;body contentEditable=&quot;true&quot;&gt;" ALIGN="CENTER">body</TD>
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:foc:body:unfocused" TITLE="unfocused" ALIGN="CENTER">&#x25CB;</TD>
+         {% ifnotequal s.id.0 "S" %}
+-        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:sta:div" ALIGN="CENTER">NONE</TD>
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:sta:body:unfocused" ALIGN="CENTER">NONE</TD>
+         {% endifnotequal %}
+         {% ifnotequal s.id.0 "Q" %}
+-        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:sel:div" ALIGN="CENTER">NONE</TD>
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:sel:body:unfocused" ALIGN="CENTER">NONE</TD>
+         {% endifnotequal %}
+-        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:act:div"><I>Processing...</I></TD>
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:act:body:unfocused"><I>Processing...</I></TD>
++      </TR>
++      <TR ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:TR:body:focused" CLASS="{% cycle shade %}">
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:foc:body:focused" TITLE="unfocused" ALIGN="CENTER">&#x25CF;</TD>
++        {% ifnotequal s.id.0 "S" %}
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:sta:body:focused" ALIGN="CENTER">NONE</TD>
++        {% endifnotequal %}
++        {% ifnotequal s.id.0 "Q" %}
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:sel:body:focused" ALIGN="CENTER">NONE</TD>
++        {% endifnotequal %}
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:act:body:focused"><I>Processing...</I></TD>
++      </TR>
++      <TR ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:TR:div:unfocused" CLASS="{% cycle shade %}">
++        <TD ROWSPAN=2 ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:cnt:div" TITLE="&lt;div contentEditable=&quot;true&quot;&gt;" ALIGN="CENTER">div</TD>
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:foc:div:unfocused" TITLE="unfocused" ALIGN="CENTER">&#x25CB;</TD>
++        {% ifnotequal s.id.0 "S" %}
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:sta:div:unfocused" ALIGN="CENTER">NONE</TD>
++        {% endifnotequal %}
++        {% ifnotequal s.id.0 "Q" %}
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:sel:div:unfocused" ALIGN="CENTER">NONE</TD>
++        {% endifnotequal %}
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:act:div:unfocused"><I>Processing...</I></TD>
++      </TR>
++      <TR ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:TR:div:focused" CLASS="{% cycle shade %}">
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:foc:div:focused" TITLE="unfocused" ALIGN="CENTER">&#x25CF;</TD>
++        {% ifnotequal s.id.0 "S" %}
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:sta:div:focused" ALIGN="CENTER">NONE</TD>
++        {% endifnotequal %}
++        {% ifnotequal s.id.0 "Q" %}
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:sel:div:focused" ALIGN="CENTER">NONE</TD>
++        {% endifnotequal %}
++        <TD ID="{{ commonIDPrefix }}-{{ s.id }}_{{ t.id }}_:act:div:focused"><I>Processing...</I></TD>
+       </TR>
+       {% endfor %}{% endfor %}
+     </TBODY>
+   </TABLE>
+   {% endifequal %}{% endfor %}{% endfor %} 
+ {% endfor %} 
+ 
+ 
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/templates/richtext2.html b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/templates/richtext2.html
+old mode 100644
+new mode 100755
+--- a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/templates/richtext2.html
++++ b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/templates/richtext2.html
+@@ -87,21 +87,23 @@
+      */
+     function cleanUp() {
+       var e = document.getElementById('iframe-dM');
+       e.parentNode.removeChild(e);
+       e = document.getElementById('iframe-body');
+       e.parentNode.removeChild(e);
+       e = document.getElementById('iframe-div');
+       e.parentNode.removeChild(e);
++      e = document.getElementById('hr');
++      e.parentNode.removeChild(e);
+     }
+     {% endautoescape %}
+   </script>  
+ </head> 
+ 
+ <body onload="runTests()">
+-  {% include "richtext2/templates/output.html" %}
+-  <hr>
+   <iframe name="iframe-dM" id="iframe-dM" src="static/editable-dM.html"></iframe>
+   <iframe name="iframe-body" id="iframe-body" src="static/editable-body.html"></iframe>
+   <iframe name="iframe-div" id="iframe-div" src="static/editable-div.html"></iframe>
++  <hr id="hr">
++  {% include "richtext2/templates/output.html" %}
+ </body> 
+ </html>
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/__init__.py b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/__init__.py
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/apply.py b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/apply.py
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/applyCSS.py b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/applyCSS.py
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/change.py b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/change.py
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/changeCSS.py b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/changeCSS.py
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/delete.py b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/delete.py
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/forwarddelete.py b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/forwarddelete.py
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/insert.py b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/insert.py
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/queryEnabled.py b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/queryEnabled.py
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/queryIndeterm.py b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/queryIndeterm.py
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/queryState.py b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/queryState.py
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/querySupported.py b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/querySupported.py
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/queryValue.py b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/queryValue.py
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/selection.py b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/selection.py
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/unapply.py b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/unapply.py
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/unapplyCSS.py b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/tests/unapplyCSS.py
+old mode 100644
+new mode 100755
+diff --git a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/unittestexample.html b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/unittestexample.html
+old mode 100644
+new mode 100755
+--- a/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/unittestexample.html
++++ b/editor/libeditor/html/tests/browserscope/lib/richtext2/richtext2/unittestexample.html
+@@ -63,37 +63,42 @@
+       //                 .selscore                 selection score (0 or 1), minimum over all containers (HTML tests only)
+       //                 .valresult                worst test value result (integer, see variables.js)
+       //                 .selresult                worst selection result (integer, see variables.js)
+       //                 [<cont. ID>]              structure containing the results of the test for a given container ****)
+       //                     .valscore                 value score (0 or 1)
+       //                     .selscore                 selection score (0 or 1)
+       //                     .valresult                value result (integer, see variables.js)
+       //                     .selresult                selection result (integer, see variables.js)
+-      //                     .output                   output string (mainly for use by the online version)
+-      //                     .innerHTML                inner HTML of the testing container (<div> or <body>) after the test
+-      //                     .outerHTML                outer HTML of the testing container (<div> or <body>) after the test
+-      //                     .bodyInnerHTML            inner HTML of the <body> after the test
+-      //                     .bodyOuterHTML            outer HTML of the <body> after the test
++      //                     ['unfocused'/'focused']       whether the editing container is focused or not
++      //                         .valscore                 value score (0 or 1)
++      //                         .selscore                 selection score (0 or 1)
++      //                         .valresult                value result (integer, see variables.js)
++      //                         .selresult                selection result (integer, see variables.js)
++      //                         .output                   output string (mainly for use by the online version)
++      //                         .innerHTML                inner HTML of the testing container (<div> or <body>) after the test
++      //                         .outerHTML                outer HTML of the testing container (<div> or <body>) after the test
++      //                         .bodyInnerHTML            inner HTML of the <body> after the test
++      //                         .bodyOuterHTML            outer HTML of the <body> after the test
+       //
+       // *)    <suite ID>:      a 1-3 character ID, e.g. UNAPPLY_TESTS.id, or 'U' (both referring the same suite)
+       // **)   <class ID>:      one of 'Proposed', 'RFC' or 'Finalized'
+       // ***)  <test ID>:       the ID of the test, without the leading 'RTE2-<suite ID>_' part
+       // ****) <container ID>:  one of 'div'  (test within a <div contenteditable="true">)
+       //                               'dM'   (test with designMode = 'on')
+       //                               'body' (test within a <body contenteditable="true">)
+ 
+       alert("Result of 'Apply' tests:\nOut of " + 
+             results[UNAPPLY_TESTS.id].count + " tests\n" +
+             results[UNAPPLY_TESTS.id].valscore + " had correct HTML, and\n" +
+             results[UNAPPLY_TESTS.id].selscore + " had a correct result selection\n(in all testing containers)." +
+             "\n\n" +
+-            "Test RTE2-U_B_B-1_SW results with a contenteditable <body>:\n" +
+-            results['U']['Proposed']['B_B-1_SW']['body'].valscore + " points for the value result, and\n" +
+-            results['U']['Proposed']['B_B-1_SW']['body'].selscore + " points for the selection" +
++            "Test RTE2-U_B_B-1_SW results with a contenteditable, unfocused <body>:\n" +
++            results['U']['Proposed']['B_B-1_SW']['body']['unfocused'].valscore + " points for the value result, and\n" +
++            results['U']['Proposed']['B_B-1_SW']['body']['unfocused'].selscore + " points for the selection" +
+             ""
+       );
+     }
+   </script>  
+ </head> 
+ 
+ <body onload="runTest()">
+   <iframe name="iframe-dM" id="iframe-dM" src="static/editable-dM.html"></iframe>

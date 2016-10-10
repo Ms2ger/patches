@@ -1,0 +1,1044 @@
+
+# HG changeset patch
+# User Ms2ger <ms2ger@gmail.com>
+# Date 1375427355 -7200
+# Node ID 531f544bc9cea36bfa014c2e94c48c40fc5a67c3
+# Parent 10c1de6b615bd9bd7991e73dbca166e7117d8828
+Bug 832883 - Move IDBKeyRange to WebIDL; r=khuey
+
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -146,17 +146,16 @@
+ // Workers
+ #include "mozilla/dom/workers/Workers.h"
+ 
+ #include "nsIDOMFile.h"
+ #include "nsDOMBlobBuilder.h" // nsDOMMultipartFile
+ 
+ #include "nsIEventListenerService.h"
+ #include "nsIMessageManager.h"
+-#include "mozilla/dom/indexedDB/IDBKeyRange.h"
+ #include "nsIDOMMediaQueryList.h"
+ 
+ #include "nsDOMTouchEvent.h"
+ 
+ #include "nsWrapperCacheInlines.h"
+ #include "mozilla/dom/HTMLCollectionBinding.h"
+ 
+ #include "nsIDOMPowerManager.h"
+@@ -519,20 +518,16 @@ static nsDOMClassInfoData sClassInfoData
+   NS_DEFINE_CHROME_ONLY_CLASSINFO_DATA(ContentFrameMessageManager, nsEventTargetSH,
+                                        DOM_DEFAULT_SCRIPTABLE_FLAGS |
+                                        nsIXPCScriptable::IS_GLOBAL_OBJECT)
+   NS_DEFINE_CHROME_ONLY_CLASSINFO_DATA(ChromeMessageBroadcaster, nsDOMGenericSH,
+                                        DOM_DEFAULT_SCRIPTABLE_FLAGS)
+   NS_DEFINE_CHROME_ONLY_CLASSINFO_DATA(ChromeMessageSender, nsDOMGenericSH,
+                                        DOM_DEFAULT_SCRIPTABLE_FLAGS)
+ 
+-  NS_DEFINE_CLASSINFO_DATA(IDBKeyRange, nsDOMGenericSH,
+-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
+-
+-
+   NS_DEFINE_CLASSINFO_DATA(MozCSSKeyframeRule, nsDOMGenericSH,
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+   NS_DEFINE_CLASSINFO_DATA(MozCSSKeyframesRule, nsDOMGenericSH,
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+ 
+   NS_DEFINE_CLASSINFO_DATA(CSSPageRule, nsDOMGenericSH,
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+ 
+@@ -1387,20 +1382,16 @@ nsDOMClassInfo::Init()
+ 
+   DOM_CLASSINFO_MAP_BEGIN_NO_CLASS_IF(ChromeMessageSender, nsISupports)
+     DOM_CLASSINFO_MAP_ENTRY(nsIProcessChecker)
+     DOM_CLASSINFO_MAP_ENTRY(nsIFrameScriptLoader)
+     DOM_CLASSINFO_MAP_ENTRY(nsIMessageListenerManager)
+     DOM_CLASSINFO_MAP_ENTRY(nsIMessageSender)
+   DOM_CLASSINFO_MAP_END
+ 
+-  DOM_CLASSINFO_MAP_BEGIN(IDBKeyRange, nsIIDBKeyRange)
+-    DOM_CLASSINFO_MAP_ENTRY(nsIIDBKeyRange)
+-  DOM_CLASSINFO_MAP_END
+-
+   DOM_CLASSINFO_MAP_BEGIN(MozCSSKeyframeRule, nsIDOMMozCSSKeyframeRule)
+     DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozCSSKeyframeRule)
+   DOM_CLASSINFO_MAP_END
+ 
+   DOM_CLASSINFO_MAP_BEGIN(MozCSSKeyframesRule, nsIDOMMozCSSKeyframesRule)
+     DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozCSSKeyframesRule)
+   DOM_CLASSINFO_MAP_END
+ 
+@@ -2852,26 +2843,17 @@ nsDOMConstructor::ResolveInterfaceConsta
+     class_iid =
+       sClassInfoData[class_name_struct->mDOMClassInfoID].mProtoChainInterface;
+   } else if (class_name_struct->mType == nsGlobalNameStruct::eTypeExternalClassInfo) {
+     class_iid = class_name_struct->mData->mProtoChainInterface;
+   } else {
+     return NS_OK;
+   }
+ 
+-  nsresult rv = DefineInterfaceConstants(cx, obj, class_iid);
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  // Special case for |IDBKeyRange| which gets funny "static" functions.
+-  if (class_iid->Equals(NS_GET_IID(nsIIDBKeyRange)) &&
+-      !indexedDB::IDBKeyRange::DefineConstructors(cx, obj)) {
+-    return NS_ERROR_FAILURE;
+-  }
+-
+-  return NS_OK;
++  return DefineInterfaceConstants(cx, obj, class_iid);
+ }
+ 
+ NS_IMETHODIMP
+ nsDOMConstructor::ToString(nsAString &aResult)
+ {
+   aResult.AssignLiteral("[object ");
+   aResult.Append(mClassName);
+   aResult.Append(PRUnichar(']'));
+@@ -2985,22 +2967,16 @@ ResolvePrototype(nsIXPConnect *aXPConnec
+   const char *class_parent_name = nullptr;
+ 
+   if (!primary_iid->Equals(NS_GET_IID(nsISupports))) {
+     JSAutoCompartment ac(cx, class_obj);
+ 
+     rv = DefineInterfaceConstants(cx, class_obj, primary_iid);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+-    // Special case for |IDBKeyRange| which gets funny "static" functions.
+-    if (primary_iid->Equals(NS_GET_IID(nsIIDBKeyRange)) &&
+-        !indexedDB::IDBKeyRange::DefineConstructors(cx, class_obj)) {
+-      return NS_ERROR_FAILURE;
+-    }
+-
+     nsCOMPtr<nsIInterfaceInfoManager>
+       iim(do_GetService(NS_INTERFACEINFOMANAGER_SERVICE_CONTRACTID));
+     NS_ENSURE_TRUE(iim, NS_ERROR_NOT_AVAILABLE);
+ 
+     iim->GetInfoForIID(primary_iid, getter_AddRefs(if_info));
+     NS_ENSURE_TRUE(if_info, NS_ERROR_UNEXPECTED);
+ 
+     const nsIID *iid = nullptr;
+diff --git a/dom/base/nsDOMClassInfoClasses.h b/dom/base/nsDOMClassInfoClasses.h
+--- a/dom/base/nsDOMClassInfoClasses.h
++++ b/dom/base/nsDOMClassInfoClasses.h
+@@ -113,18 +113,16 @@ DOMCI_CLASS(CSSFontFaceRule)
+ DOMCI_CLASS(DataTransfer)
+ 
+ DOMCI_CLASS(EventListenerInfo)
+ 
+ DOMCI_CLASS(ContentFrameMessageManager)
+ DOMCI_CLASS(ChromeMessageBroadcaster)
+ DOMCI_CLASS(ChromeMessageSender)
+ 
+-DOMCI_CLASS(IDBKeyRange)
+-
+ DOMCI_CLASS(MozCSSKeyframeRule)
+ DOMCI_CLASS(MozCSSKeyframesRule)
+ 
+ DOMCI_CLASS(CSSPageRule)
+ 
+ DOMCI_CLASS(MediaQueryList)
+ 
+ #ifdef MOZ_B2G_RIL
+diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
+--- a/dom/bindings/Bindings.conf
++++ b/dom/bindings/Bindings.conf
+@@ -624,16 +624,21 @@ DOMInterfaces = {
+ 'IDBRequest': {
+     'nativeType': 'mozilla::dom::indexedDB::IDBRequest',
+ },
+ 
+ 'IDBTransaction': {
+     'nativeType': 'mozilla::dom::indexedDB::IDBTransaction',
+ },
+ 
++'IDBKeyRange': {
++    'nativeType': 'mozilla::dom::indexedDB::IDBKeyRange',
++    'wrapperCache': False,
++},
++
+ 'IDBVersionChangeEvent': {
+     'nativeType': 'mozilla::dom::indexedDB::IDBVersionChangeEvent',
+     'headerFile': 'IDBEvents.h',
+ },
+ 
+ 'IID': [
+ {
+     'nativeType': 'nsIJSID',
+diff --git a/dom/indexedDB/IDBIndex.cpp b/dom/indexedDB/IDBIndex.cpp
+--- a/dom/indexedDB/IDBIndex.cpp
++++ b/dom/indexedDB/IDBIndex.cpp
+@@ -3,18 +3,16 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "base/basictypes.h"
+ 
+ #include "IDBIndex.h"
+ 
+-#include "nsIIDBKeyRange.h"
+-
+ #include "mozilla/dom/ContentChild.h"
+ #include "mozilla/dom/ContentParent.h"
+ #include "mozilla/dom/ipc/Blob.h"
+ #include "mozilla/storage.h"
+ #include "nsEventDispatcher.h"
+ #include "nsThreadUtils.h"
+ #include "xpcpublic.h"
+ 
+diff --git a/dom/indexedDB/IDBKeyRange.cpp b/dom/indexedDB/IDBKeyRange.cpp
+--- a/dom/indexedDB/IDBKeyRange.cpp
++++ b/dom/indexedDB/IDBKeyRange.cpp
+@@ -13,64 +13,26 @@
+ #include "nsJSUtils.h"
+ #include "nsThreadUtils.h"
+ #include "nsContentUtils.h"
+ #include "nsDOMClassInfoID.h"
+ #include "Key.h"
+ 
+ #include "mozilla/dom/indexedDB/PIndexedDBIndex.h"
+ #include "mozilla/dom/indexedDB/PIndexedDBObjectStore.h"
++#include "mozilla/dom/IDBKeyRangeBinding.h"
+ 
++using namespace mozilla;
++using namespace mozilla::dom;
+ USING_INDEXEDDB_NAMESPACE
+ using namespace mozilla::dom::indexedDB::ipc;
+ 
+-namespace {
+-
+-inline
+-bool
+-ReturnKeyRange(JSContext* aCx,
+-               jsval* aVp,
+-               IDBKeyRange* aKeyRange)
+-{
+-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+-  NS_ASSERTION(aCx, "Null pointer!");
+-  NS_ASSERTION(aVp, "Null pointer!");
+-  NS_ASSERTION(aKeyRange, "Null pointer!");
+-
+-  nsIXPConnect* xpc = nsContentUtils::XPConnect();
+-  NS_ASSERTION(xpc, "This should never be null!");
+-
+-  JSObject* global = JS::CurrentGlobalOrNull(aCx);
+-  if (!global) {
+-    NS_WARNING("Couldn't get global object!");
+-    return false;
+-  }
+-
+-  nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
+-  if (NS_FAILED(xpc->WrapNative(aCx, global, aKeyRange,
+-                                NS_GET_IID(nsIIDBKeyRange),
+-                                getter_AddRefs(holder)))) {
+-    JS_ReportError(aCx, "Couldn't wrap IDBKeyRange object.");
+-    return false;
+-  }
+-
+-  JS::Rooted<JSObject*> result(aCx, holder->GetJSObject());
+-  if (!result) {
+-    JS_ReportError(aCx, "Couldn't get JSObject from wrapper.");
+-    return false;
+-  }
+-
+-  JS_SET_RVAL(aCx, aVp, OBJECT_TO_JSVAL(result));
+-  return true;
+-}
+-
+-inline
+-nsresult
++static inline nsresult
+ GetKeyFromJSVal(JSContext* aCx,
+-                jsval aVal,
++                JS::Handle<JS::Value> aVal,
+                 Key& aKey,
+                 bool aAllowUnset = false)
+ {
+   nsresult rv = aKey.SetFromJSVal(aCx, aVal);
+   if (NS_FAILED(rv)) {
+     NS_ASSERTION(NS_ERROR_GET_MODULE(rv) == NS_ERROR_MODULE_DOM_INDEXEDDB,
+                  "Bad error code!");
+     return rv;
+@@ -78,219 +40,147 @@ GetKeyFromJSVal(JSContext* aCx,
+ 
+   if (aKey.IsUnset() && !aAllowUnset) {
+     return NS_ERROR_DOM_INDEXEDDB_DATA_ERR;
+   }
+ 
+   return NS_OK;
+ }
+ 
+-inline
+-void
+-ThrowException(JSContext* aCx,
+-               nsresult aErrorCode)
++JSObject*
++IDBKeyRange::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+ {
+-  NS_ASSERTION(NS_FAILED(aErrorCode), "Not an error code!");
+-  xpc::Throw(aCx, aErrorCode);
++  return IDBKeyRangeBinding::Wrap(aCx, aScope, this);
+ }
+ 
+-inline
+-bool
+-GetKeyFromJSValOrThrow(JSContext* aCx,
+-                       jsval aVal,
+-                       Key& aKey)
++/* static */ already_AddRefed<IDBKeyRange>
++IDBKeyRange::Only(const GlobalObject& aGlobal, JSContext* aCx,
++                  JS::Handle<JS::Value> aValue, ErrorResult& aRv)
+ {
+-  nsresult rv = GetKeyFromJSVal(aCx, aVal, aKey);
+-  if (NS_FAILED(rv)) {
+-    ThrowException(aCx, rv);
+-    return false;
++  MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
++
++  nsRefPtr<IDBKeyRange> keyRange =
++    new IDBKeyRange(aGlobal.GetAsSupports(), false, false, true);
++
++  aRv = GetKeyFromJSVal(aCx, aValue, keyRange->Lower());
++  if (aRv.Failed()) {
++    return nullptr;
+   }
+-  return true;
++
++  return keyRange.forget();
+ }
+ 
+-bool
+-MakeOnlyKeyRange(JSContext* aCx,
+-                 unsigned aArgc,
+-                 jsval* aVp)
++/* static */ already_AddRefed<IDBKeyRange>
++IDBKeyRange::LowerBound(const GlobalObject& aGlobal, JSContext* aCx,
++                        JS::Handle<JS::Value> aValue, bool aOpen,
++                        ErrorResult& aRv)
+ {
+-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
++  MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
+ 
+-  JS::Rooted<JS::Value> val(aCx);
+-  if (!JS_ConvertArguments(aCx, aArgc, JS_ARGV(aCx, aVp), "v", val.address())) {
+-    return false;
++  nsRefPtr<IDBKeyRange> keyRange =
++    new IDBKeyRange(aGlobal.GetAsSupports(), aOpen, true, false);
++
++  aRv = GetKeyFromJSVal(aCx, aValue, keyRange->Lower());
++  if (aRv.Failed()) {
++    return nullptr;
+   }
+ 
+-  nsRefPtr<IDBKeyRange> keyRange = new IDBKeyRange(false, false, true);
++  return keyRange.forget();
++}
+ 
+-  if (!GetKeyFromJSValOrThrow(aCx, val, keyRange->Lower())) {
+-    return false;
++/* static */ already_AddRefed<IDBKeyRange>
++IDBKeyRange::UpperBound(const GlobalObject& aGlobal, JSContext* aCx,
++                        JS::Handle<JS::Value> aValue, bool aOpen,
++                        ErrorResult& aRv)
++{
++  MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
++
++  nsRefPtr<IDBKeyRange> keyRange =
++    new IDBKeyRange(aGlobal.GetAsSupports(), true, aOpen, false);
++
++  aRv = GetKeyFromJSVal(aCx, aValue, keyRange->Upper());
++  if (aRv.Failed()) {
++    return nullptr;
+   }
+ 
+-  return ReturnKeyRange(aCx, aVp, keyRange);
++  return keyRange.forget();
+ }
+ 
+-bool
+-MakeLowerBoundKeyRange(JSContext* aCx,
+-                       unsigned aArgc,
+-                       jsval* aVp)
++/* static */ already_AddRefed<IDBKeyRange>
++IDBKeyRange::Bound(const GlobalObject& aGlobal, JSContext* aCx,
++                   JS::Handle<JS::Value> aLower, JS::Handle<JS::Value> aUpper,
++                   bool aLowerOpen, bool aUpperOpen, ErrorResult& aRv)
+ {
+-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
++  MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
+ 
+-  JS::Rooted<JS::Value> val(aCx);
+-  bool open = false;
+-  if (!JS_ConvertArguments(aCx, aArgc, JS_ARGV(aCx, aVp), "v/b", val.address(),
+-                           &open)) {
+-    return false;
++  nsRefPtr<IDBKeyRange> keyRange =
++    new IDBKeyRange(aGlobal.GetAsSupports(), aLowerOpen, aUpperOpen, false);
++
++  aRv = GetKeyFromJSVal(aCx, aLower, keyRange->Lower());
++  if (aRv.Failed()) {
++    return nullptr;
+   }
+ 
+-  nsRefPtr<IDBKeyRange> keyRange = new IDBKeyRange(open, true, false);
+-
+-  if (!GetKeyFromJSValOrThrow(aCx, val, keyRange->Lower())) {
+-    return false;
+-  }
+-
+-  return ReturnKeyRange(aCx, aVp, keyRange);
+-}
+-
+-bool
+-MakeUpperBoundKeyRange(JSContext* aCx,
+-                       unsigned aArgc,
+-                       jsval* aVp)
+-{
+-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+-
+-  JS::Rooted<JS::Value> val(aCx);
+-  bool open = false;
+-  if (!JS_ConvertArguments(aCx, aArgc, JS_ARGV(aCx, aVp), "v/b", val.address(),
+-                           &open)) {
+-    return false;
+-  }
+-
+-  nsRefPtr<IDBKeyRange> keyRange = new IDBKeyRange(true, open, false);
+-
+-  if (!GetKeyFromJSValOrThrow(aCx, val, keyRange->Upper())) {
+-    return false;
+-  }
+-
+-  return ReturnKeyRange(aCx, aVp, keyRange);
+-}
+-
+-bool
+-MakeBoundKeyRange(JSContext* aCx,
+-                  unsigned aArgc,
+-                  jsval* aVp)
+-{
+-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+-
+-  JS::Rooted<JS::Value> lowerVal(aCx), upperVal(aCx);
+-  bool lowerOpen = false, upperOpen = false;
+-  if (!JS_ConvertArguments(aCx, aArgc, JS_ARGV(aCx, aVp), "vv/bb",
+-                           lowerVal.address(), upperVal.address(),
+-                           &lowerOpen, &upperOpen)) {
+-    return false;
+-  }
+-
+-  nsRefPtr<IDBKeyRange> keyRange = new IDBKeyRange(lowerOpen, upperOpen, false);
+-
+-  if (!GetKeyFromJSValOrThrow(aCx, lowerVal, keyRange->Lower()) ||
+-      !GetKeyFromJSValOrThrow(aCx, upperVal, keyRange->Upper())) {
+-    return false;
++  aRv = GetKeyFromJSVal(aCx, aUpper, keyRange->Upper());
++  if (aRv.Failed()) {
++    return nullptr;
+   }
+ 
+   if (keyRange->Lower() > keyRange->Upper() ||
+-      (keyRange->Lower() == keyRange->Upper() && (lowerOpen || upperOpen))) {
+-    ThrowException(aCx, NS_ERROR_DOM_INDEXEDDB_DATA_ERR);
+-    return false;
++      (keyRange->Lower() == keyRange->Upper() && (aLowerOpen || aUpperOpen))) {
++    aRv.Throw(NS_ERROR_DOM_INDEXEDDB_DATA_ERR);
++    return nullptr;
+   }
+ 
+-  return ReturnKeyRange(aCx, aVp, keyRange);
+-}
+-
+-#define KEYRANGE_FUNCTION_FLAGS (JSPROP_ENUMERATE | JSPROP_PERMANENT)
+-
+-const JSFunctionSpec gKeyRangeConstructors[] = {
+-  JS_FN("only", MakeOnlyKeyRange, 1, KEYRANGE_FUNCTION_FLAGS),
+-  JS_FN("lowerBound", MakeLowerBoundKeyRange, 1, KEYRANGE_FUNCTION_FLAGS),
+-  JS_FN("upperBound", MakeUpperBoundKeyRange, 1, KEYRANGE_FUNCTION_FLAGS),
+-  JS_FN("bound", MakeBoundKeyRange, 2, KEYRANGE_FUNCTION_FLAGS),
+-  JS_FS_END
+-};
+-
+-#undef KEYRANGE_FUNCTION_FLAGS
+-
+-} // anonymous namespace
+-
+-// static
+-bool
+-IDBKeyRange::DefineConstructors(JSContext* aCx,
+-                                JSObject* aObject)
+-{
+-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+-  NS_ASSERTION(aCx, "Null pointer!");
+-  NS_ASSERTION(aObject, "Null pointer!");
+-
+-  // Add the constructor methods for key ranges.
+-  return JS_DefineFunctions(aCx, aObject, gKeyRangeConstructors);
++  return keyRange.forget();
+ }
+ 
+ // static
+ nsresult
+ IDBKeyRange::FromJSVal(JSContext* aCx,
+-                       const jsval& aVal,
++                       const jsval& aValue,
+                        IDBKeyRange** aKeyRange)
+ {
+-  nsresult rv;
++  JS::Rooted<JS::Value> value(aCx, aValue);
+   nsRefPtr<IDBKeyRange> keyRange;
+ 
+-  if (JSVAL_IS_VOID(aVal) || JSVAL_IS_NULL(aVal)) {
++  if (value.isNullOrUndefined()) {
+     // undefined and null returns no IDBKeyRange.
+   }
+-  else if (JSVAL_IS_PRIMITIVE(aVal) ||
+-           JS_IsArrayObject(aCx, JSVAL_TO_OBJECT(aVal)) ||
+-           JS_ObjectIsDate(aCx, JSVAL_TO_OBJECT(aVal))) {
++  else if (value.isPrimitive() ||
++           JS_IsArrayObject(aCx, &value.toObject()) ||
++           JS_ObjectIsDate(aCx, &value.toObject())) {
+     // A valid key returns an 'only' IDBKeyRange.
+-    keyRange = new IDBKeyRange(false, false, true);
++    keyRange = new IDBKeyRange(nullptr, false, false, true);
+ 
+-    rv = GetKeyFromJSVal(aCx, aVal, keyRange->Lower());
++    nsresult rv = GetKeyFromJSVal(aCx, value, keyRange->Lower());
+     if (NS_FAILED(rv)) {
+       return rv;
+     }
+   }
+   else {
++    MOZ_ASSERT(value.isObject());
+     // An object is not permitted unless it's another IDBKeyRange.
+-    nsIXPConnect* xpc = nsContentUtils::XPConnect();
+-    NS_ASSERTION(xpc, "This should never be null!");
+-
+-    nsCOMPtr<nsIXPConnectWrappedNative> wrapper;
+-    rv = xpc->GetWrappedNativeOfJSObject(aCx, JSVAL_TO_OBJECT(aVal),
+-                                         getter_AddRefs(wrapper));
++    nsresult rv = UNWRAP_OBJECT(IDBKeyRange, aCx, &value.toObject(), keyRange);
+     if (NS_FAILED(rv)) {
+       return NS_ERROR_DOM_INDEXEDDB_DATA_ERR;
+     }
+-
+-    nsCOMPtr<nsIIDBKeyRange> iface;
+-    if (!wrapper || !(iface = do_QueryInterface(wrapper->Native()))) {
+-      // Some random JS object?
+-      return NS_ERROR_DOM_INDEXEDDB_DATA_ERR;
+-    }
+-
+-    keyRange = static_cast<IDBKeyRange*>(iface.get());
+   }
+ 
+   keyRange.forget(aKeyRange);
+   return NS_OK;
+ }
+ 
+ // static
+ template <class T>
+ already_AddRefed<IDBKeyRange>
+ IDBKeyRange::FromSerializedKeyRange(const T& aKeyRange)
+ {
+   nsRefPtr<IDBKeyRange> keyRange =
+-    new IDBKeyRange(aKeyRange.lowerOpen(), aKeyRange.upperOpen(),
++    new IDBKeyRange(nullptr, aKeyRange.lowerOpen(), aKeyRange.upperOpen(),
+                     aKeyRange.isOnly());
+   keyRange->Lower() = aKeyRange.lower();
+   if (!keyRange->IsOnly()) {
+     keyRange->Upper() = aKeyRange.upper();
+   }
+   return keyRange.forget();
+ }
+ 
+@@ -306,39 +196,37 @@ IDBKeyRange::ToSerializedKeyRange(T& aKe
+   if (!IsOnly()) {
+     aKeyRange.upper() = Upper();
+   }
+ }
+ 
+ NS_IMPL_CYCLE_COLLECTION_CLASS(IDBKeyRange)
+ 
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(IDBKeyRange)
++  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mGlobal)
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+ 
+ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(IDBKeyRange)
+   NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(mCachedLowerVal)
+   NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(mCachedUpperVal)
+ NS_IMPL_CYCLE_COLLECTION_TRACE_END
+ 
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(IDBKeyRange)
++  NS_IMPL_CYCLE_COLLECTION_UNLINK(mGlobal)
+   tmp->DropJSObjects();
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+ 
+ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(IDBKeyRange)
+   NS_INTERFACE_MAP_ENTRY(nsISupports)
+-  NS_INTERFACE_MAP_ENTRY(nsIIDBKeyRange)
+-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(IDBKeyRange)
+ NS_INTERFACE_MAP_END
+ 
+ NS_IMPL_CYCLE_COLLECTING_ADDREF(IDBKeyRange)
+ NS_IMPL_CYCLE_COLLECTING_RELEASE(IDBKeyRange)
+ 
+-DOMCI_DATA(IDBKeyRange, IDBKeyRange)
+-
+ void
+ IDBKeyRange::DropJSObjects()
+ {
+   if (!mRooted) {
+     return;
+   }
+   mCachedLowerVal = JSVAL_VOID;
+   mCachedUpperVal = JSVAL_VOID;
+@@ -348,77 +236,58 @@ IDBKeyRange::DropJSObjects()
+   NS_DROP_JS_OBJECTS(this, IDBKeyRange);
+ }
+ 
+ IDBKeyRange::~IDBKeyRange()
+ {
+   DropJSObjects();
+ }
+ 
+-NS_IMETHODIMP
+-IDBKeyRange::GetLower(JSContext* aCx,
+-                      jsval* aLower)
++JS::Value
++IDBKeyRange::GetLower(JSContext* aCx, ErrorResult& aRv)
+ {
+-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
++  MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
+ 
+   if (!mHaveCachedLowerVal) {
+     if (!mRooted) {
+       NS_HOLD_JS_OBJECTS(this, IDBKeyRange);
+       mRooted = true;
+     }
+ 
+-    nsresult rv = Lower().ToJSVal(aCx, mCachedLowerVal);
+-    NS_ENSURE_SUCCESS(rv, rv);
++    aRv = Lower().ToJSVal(aCx, mCachedLowerVal);
++    if (aRv.Failed()) {
++      return JS::UndefinedValue();
++    }
+ 
+     mHaveCachedLowerVal = true;
+   }
+ 
+-  *aLower = mCachedLowerVal;
+-  return NS_OK;
++  return mCachedLowerVal;
+ }
+ 
+-NS_IMETHODIMP
+-IDBKeyRange::GetUpper(JSContext* aCx,
+-                      jsval* aUpper)
++JS::Value
++IDBKeyRange::GetUpper(JSContext* aCx, ErrorResult& aRv)
+ {
+-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
++  MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
+ 
+   if (!mHaveCachedUpperVal) {
+     if (!mRooted) {
+       NS_HOLD_JS_OBJECTS(this, IDBKeyRange);
+       mRooted = true;
+     }
+ 
+-    nsresult rv = Upper().ToJSVal(aCx, mCachedUpperVal);
+-    NS_ENSURE_SUCCESS(rv, rv);
++    aRv = Upper().ToJSVal(aCx, mCachedUpperVal);
++    if (aRv.Failed()) {
++      return JS::UndefinedValue();
++    }
+ 
+     mHaveCachedUpperVal = true;
+   }
+ 
+-  *aUpper = mCachedUpperVal;
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+-IDBKeyRange::GetLowerOpen(bool* aLowerOpen)
+-{
+-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+-
+-  *aLowerOpen = mLowerOpen;
+-  return NS_OK;
+-}
+-
+-
+-NS_IMETHODIMP
+-IDBKeyRange::GetUpperOpen(bool* aUpperOpen)
+-{
+-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+-
+-  *aUpperOpen = mUpperOpen;
+-  return NS_OK;
++  return mCachedUpperVal;
+ }
+ 
+ // Explicitly instantiate for all our key range types... Grumble.
+ template already_AddRefed<IDBKeyRange>
+ IDBKeyRange::FromSerializedKeyRange<KeyRange> (const KeyRange& aKeyRange);
+ 
+ template void
+ IDBKeyRange::ToSerializedKeyRange<KeyRange> (KeyRange& aKeyRange);
+diff --git a/dom/indexedDB/IDBKeyRange.h b/dom/indexedDB/IDBKeyRange.h
+--- a/dom/indexedDB/IDBKeyRange.h
++++ b/dom/indexedDB/IDBKeyRange.h
+@@ -4,51 +4,86 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_indexeddb_idbkeyrange_h__
+ #define mozilla_dom_indexeddb_idbkeyrange_h__
+ 
+ #include "mozilla/dom/indexedDB/IndexedDatabase.h"
+ #include "mozilla/dom/indexedDB/Key.h"
+-
+-#include "nsIIDBKeyRange.h"
+-
++#include "mozilla/ErrorResult.h"
+ #include "nsCycleCollectionParticipant.h"
++#include "nsISupports.h"
+ 
+ class mozIStorageStatement;
+ 
++namespace mozilla {
++namespace dom {
++class GlobalObject;
++} // namespace dom
++} // namespace mozilla
++
+ BEGIN_INDEXEDDB_NAMESPACE
+ 
+ namespace ipc {
+ class KeyRange;
+ } // namespace ipc
+ 
+-class IDBKeyRange MOZ_FINAL : public nsIIDBKeyRange
++class IDBKeyRange MOZ_FINAL : public nsISupports
+ {
+ public:
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+-  NS_DECL_NSIIDBKEYRANGE
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(IDBKeyRange)
+ 
+-  static bool DefineConstructors(JSContext* aCx,
+-                                 JSObject* aObject);
++  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope);
++  nsISupports* GetParentObject() const
++  {
++    return mGlobal;
++  }
++
++  // WebIDL
++  JS::Value GetLower(JSContext* aCx, ErrorResult& aRv);
++  JS::Value GetUpper(JSContext* aCx, ErrorResult& aRv);
++  bool LowerOpen() const
++  {
++    return mLowerOpen;
++  }
++  bool UpperOpen() const
++  {
++    return mUpperOpen;
++  }
++
++  static already_AddRefed<IDBKeyRange>
++  Only(const GlobalObject& aGlobal, JSContext* aCx,
++       JS::Handle<JS::Value> aValue, ErrorResult& aRv);
++  static already_AddRefed<IDBKeyRange>
++  LowerBound(const GlobalObject& aGlobal, JSContext* aCx,
++             JS::Handle<JS::Value> aValue, bool aOpen, ErrorResult& aRv);
++  static already_AddRefed<IDBKeyRange>
++  UpperBound(const GlobalObject& aGlobal, JSContext* aCx,
++             JS::Handle<JS::Value> aValue, bool aOpen, ErrorResult& aRv);
++  static already_AddRefed<IDBKeyRange>
++  Bound(const GlobalObject& aGlobal, JSContext* aCx,
++        JS::Handle<JS::Value> aLower, JS::Handle<JS::Value> aUpper,
++        bool aLowerOpen, bool aUpperOpen, ErrorResult& aRv);
++
+ 
+   static nsresult FromJSVal(JSContext* aCx,
+                             const jsval& aVal,
+                             IDBKeyRange** aKeyRange);
+ 
+   template <class T>
+   static already_AddRefed<IDBKeyRange>
+   FromSerializedKeyRange(const T& aKeyRange);
+ 
+-  IDBKeyRange(bool aLowerOpen,
++  IDBKeyRange(nsISupports* aGlobal,
++              bool aLowerOpen,
+               bool aUpperOpen,
+               bool aIsOnly)
+-  : mCachedLowerVal(JSVAL_VOID), mCachedUpperVal(JSVAL_VOID),
++  : mGlobal(aGlobal), mCachedLowerVal(JSVAL_VOID), mCachedUpperVal(JSVAL_VOID),
+     mLowerOpen(aLowerOpen), mUpperOpen(aUpperOpen), mIsOnly(aIsOnly),
+     mHaveCachedLowerVal(false), mHaveCachedUpperVal(false), mRooted(false)
+   { }
+ 
+   const Key& Lower() const
+   {
+     return mLower;
+   }
+@@ -63,16 +98,17 @@ public:
+     return mIsOnly ? mLower : mUpper;
+   }
+ 
+   Key& Upper()
+   {
+     return mIsOnly ? mLower : mUpper;
+   }
+ 
++  // TODO (bug 900578): Remove these in favour of LowerOpen() / UpperOpen().
+   bool IsLowerOpen() const
+   {
+     return mLowerOpen;
+   }
+ 
+   bool IsUpperOpen() const
+   {
+     return mUpperOpen;
+@@ -148,23 +184,24 @@ public:
+   template <class T>
+   void ToSerializedKeyRange(T& aKeyRange);
+ 
+   void DropJSObjects();
+ 
+ private:
+   ~IDBKeyRange();
+ 
++  nsCOMPtr<nsISupports> mGlobal;
+   Key mLower;
+   Key mUpper;
+   JS::Heap<JS::Value> mCachedLowerVal;
+   JS::Heap<JS::Value> mCachedUpperVal;
+-  bool mLowerOpen;
+-  bool mUpperOpen;
+-  bool mIsOnly;
++  const bool mLowerOpen;
++  const bool mUpperOpen;
++  const bool mIsOnly;
+   bool mHaveCachedLowerVal;
+   bool mHaveCachedUpperVal;
+   bool mRooted;
+ };
+ 
+ END_INDEXEDDB_NAMESPACE
+ 
+ #endif // mozilla_dom_indexeddb_idbkeyrange_h__
+diff --git a/dom/indexedDB/IndexedDatabaseManager.cpp b/dom/indexedDB/IndexedDatabaseManager.cpp
+--- a/dom/indexedDB/IndexedDatabaseManager.cpp
++++ b/dom/indexedDB/IndexedDatabaseManager.cpp
+@@ -1,26 +1,28 @@
+ /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* vim: set ts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "IndexedDatabaseManager.h"
+ 
++#include "jsfriendapi.h"
+ #include "nsIConsoleService.h"
+ #include "nsIDiskSpaceWatcher.h"
+ #include "nsIDOMScriptObjectFactory.h"
+ #include "nsIFile.h"
+ #include "nsIFileStorage.h"
+ #include "nsIObserverService.h"
+ #include "nsIScriptError.h"
+ 
+ #include "mozilla/ClearOnShutdown.h"
+ #include "mozilla/CondVar.h"
++#include "mozilla/dom/IDBKeyRangeBinding.h"
+ #include "mozilla/dom/quota/QuotaManager.h"
+ #include "mozilla/dom/quota/Utilities.h"
+ #include "mozilla/dom/TabContext.h"
+ #include "mozilla/Services.h"
+ #include "mozilla/storage.h"
+ #include "nsContentUtils.h"
+ #include "nsEventDispatcher.h"
+ #include "nsThreadUtils.h"
+@@ -519,16 +521,20 @@ NS_IMPL_QUERY_INTERFACE2(IndexedDatabase
+ 
+ NS_IMETHODIMP
+ IndexedDatabaseManager::InitWindowless(const jsval& aObj, JSContext* aCx)
+ {
+   NS_ENSURE_TRUE(nsContentUtils::IsCallerChrome(), NS_ERROR_NOT_AVAILABLE);
+   NS_ENSURE_ARG(!JSVAL_IS_PRIMITIVE(aObj));
+ 
+   JS::Rooted<JSObject*> obj(aCx, JSVAL_TO_OBJECT(aObj));
++  if (!(js::GetObjectClass(obj)->flags & JSCLASS_DOM_GLOBAL)) {
++    NS_WARNING("initWindowless should only be called on a DOM global object.");
++    return NS_ERROR_FAILURE;
++  }
+ 
+   bool hasIndexedDB;
+   if (!JS_HasProperty(aCx, obj, "indexedDB", &hasIndexedDB)) {
+     return NS_ERROR_FAILURE;
+   }
+ 
+   if (hasIndexedDB) {
+     NS_WARNING("Passed object already has an 'indexedDB' property!");
+@@ -554,24 +560,20 @@ IndexedDatabaseManager::InitWindowless(c
+   rv = nsContentUtils::WrapNative(aCx, obj, factory, indexedDBVal.address());
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   if (!JS_DefineProperty(aCx, obj, "indexedDB", indexedDBVal, nullptr,
+                          nullptr, JSPROP_ENUMERATE)) {
+     return NS_ERROR_FAILURE;
+   }
+ 
+-  JS::Rooted<JSObject*> keyrangeObj(aCx,
+-    JS_NewObject(aCx, nullptr, nullptr, nullptr));
++  JS::Handle<JSObject*> keyrangeObj =
++    IDBKeyRangeBinding::GetConstructorObject(aCx, obj);
+   NS_ENSURE_TRUE(keyrangeObj, NS_ERROR_OUT_OF_MEMORY);
+ 
+-  if (!IDBKeyRange::DefineConstructors(aCx, keyrangeObj)) {
+-    return NS_ERROR_FAILURE;
+-  }
+-
+   if (!JS_DefineProperty(aCx, obj, "IDBKeyRange", OBJECT_TO_JSVAL(keyrangeObj),
+                          nullptr, nullptr, JSPROP_ENUMERATE)) {
+     return NS_ERROR_FAILURE;
+   }
+ 
+   return NS_OK;
+ }
+ 
+diff --git a/dom/indexedDB/moz.build b/dom/indexedDB/moz.build
+--- a/dom/indexedDB/moz.build
++++ b/dom/indexedDB/moz.build
+@@ -3,17 +3,16 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ DIRS += ['ipc']
+ TEST_DIRS += ['test']
+ 
+ XPIDL_SOURCES += [
+-    'nsIIDBKeyRange.idl',
+     'nsIIndexedDatabaseManager.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_indexeddb'
+ 
+ MODULE = 'dom'
+ 
+ EXPORTS.mozilla.dom.indexedDB += [
+diff --git a/dom/indexedDB/nsIIDBKeyRange.idl b/dom/indexedDB/nsIIDBKeyRange.idl
+deleted file mode 100644
+--- a/dom/indexedDB/nsIIDBKeyRange.idl
++++ /dev/null
+@@ -1,25 +0,0 @@
+-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+-/* vim: set ts=2 et sw=2 tw=80: */
+-/* This Source Code Form is subject to the terms of the Mozilla Public
+- * License, v. 2.0. If a copy of the MPL was not distributed with this
+- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+-
+-#include "nsISupports.idl"
+-
+-/**
+- * IDBKeyRange interface.  See
+- * http://dev.w3.org/2006/webapi/WebSimpleDB/#idl-def-IDBKeyRange for more
+- * information.
+- */
+-[scriptable, builtinclass, uuid(8aeb8660-76b3-4651-b8c2-9894ae6dfe68)]
+-interface nsIIDBKeyRange : nsISupports
+-{
+-  [implicit_jscontext]
+-  readonly attribute jsval lower;
+-
+-  [implicit_jscontext]
+-  readonly attribute jsval upper;
+-
+-  readonly attribute boolean lowerOpen;
+-  readonly attribute boolean upperOpen;
+-};
+diff --git a/dom/webidl/IDBKeyRange.webidl b/dom/webidl/IDBKeyRange.webidl
+new file mode 100644
+--- /dev/null
++++ b/dom/webidl/IDBKeyRange.webidl
+@@ -0,0 +1,29 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++/*
++ * The origin of this IDL file is
++ * https://dvcs.w3.org/hg/IndexedDB/raw-file/tip/Overview.html
++ *
++ * Copyright © 2012 W3C® (MIT, ERCIM, Keio), All Rights Reserved. W3C
++ * liability, trademark and document use rules apply.
++ */
++
++interface IDBKeyRange {
++  [Throws]
++  readonly attribute any     lower;
++  [Throws]
++  readonly attribute any     upper;
++  [Constant]
++  readonly attribute boolean lowerOpen;
++  [Constant]
++  readonly attribute boolean upperOpen;
++  [Creator, Throws]
++  static IDBKeyRange only (any value);
++  [Creator, Throws]
++  static IDBKeyRange lowerBound (any lower, optional boolean open = false);
++  [Creator, Throws]
++  static IDBKeyRange upperBound (any upper, optional boolean open = false);
++  [Creator, Throws]
++  static IDBKeyRange bound (any lower, any upper, optional boolean lowerOpen = false, optional boolean upperOpen = false);
++};
+diff --git a/dom/webidl/WebIDL.mk b/dom/webidl/WebIDL.mk
+--- a/dom/webidl/WebIDL.mk
++++ b/dom/webidl/WebIDL.mk
+@@ -166,16 +166,17 @@ webidl_files = \
+   HTMLTrackElement.webidl \
+   HTMLUListElement.webidl \
+   HTMLVideoElement.webidl \
+   IDBCursor.webidl \
+   IDBDatabase.webidl \
+   IDBFactory.webidl \
+   IDBFileHandle.webidl \
+   IDBIndex.webidl \
++  IDBKeyRange.webidl \
+   IDBObjectStore.webidl \
+   IDBOpenDBRequest.webidl \
+   IDBRequest.webidl \
+   IDBTransaction.webidl \
+   IDBVersionChangeEvent.webidl \
+   ImageData.webidl \
+   ImageDocument.webidl \
+   InspectorUtils.webidl \
+diff --git a/js/xpconnect/src/dom_quickstubs.qsconf b/js/xpconnect/src/dom_quickstubs.qsconf
+--- a/js/xpconnect/src/dom_quickstubs.qsconf
++++ b/js/xpconnect/src/dom_quickstubs.qsconf
+@@ -78,17 +78,16 @@ members = [
+     'nsIBoxObject.x',
+     'nsIBoxObject.y',
+     'nsIBoxObject.screenX',
+     'nsIBoxObject.screenY',
+     'nsIBoxObject.width',
+     'nsIBoxObject.height',
+ 
+     # dom/indexedDB
+-    'nsIIDBKeyRange.*',
+     'nsIIndexedDatabaseManager.*',
+ 
+     # dom/file
+     'nsIDOMLockedFile.*',
+ 
+     # dom/quota
+     'nsIQuotaManager.*',
+     'nsIQuotaRequest.*',

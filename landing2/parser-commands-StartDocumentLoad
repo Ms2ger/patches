@@ -1,0 +1,888 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/public/nsIDocument.h b/content/base/public/nsIDocument.h
+--- a/content/base/public/nsIDocument.h
++++ b/content/base/public/nsIDocument.h
+@@ -30,30 +30,30 @@
+ #include "nsPIDOMWindow.h"
+ #include "nsSMILAnimationController.h"
+ #include "nsIScriptGlobalObject.h"
+ #include "nsIDocumentEncoder.h"
+ #include "nsIFrameRequestCallback.h"
+ #include "nsEventStates.h"
+ #include "nsIStructuredCloneContainer.h"
+ #include "nsIBFCacheEntry.h"
++#include "nsIParser.h"
+ 
+ class nsIContent;
+ class nsPresContext;
+ class nsIPresShell;
+ class nsIDocShell;
+ class nsStyleSet;
+ class nsIStyleSheet;
+ class nsIStyleRule;
+ class nsCSSStyleSheet;
+ class nsIViewManager;
+ class nsIDOMEvent;
+ class nsIDOMEventTarget;
+ class nsDeviceContext;
+-class nsIParser;
+ class nsIDOMNode;
+ class nsIDOMElement;
+ class nsIDOMDocumentFragment;
+ class nsILineBreaker;
+ class nsIWordBreaker;
+ class nsISelection;
+ class nsIChannel;
+ class nsIPrincipal;
+@@ -144,17 +144,17 @@ public:
+       mPartID(0)
+   {
+     SetInDocument();
+   }
+ #endif
+   
+   /**
+    * Let the document know that we're starting to load data into it.
+-   * @param aCommand The parser command. Must not be null.
++   * @param aCommand The parser command.
+    *                 XXXbz It's odd to have that here.
+    * @param aChannel The channel the data will come from. The channel must be
+    *                 able to report its Content-Type.
+    * @param aLoadGroup The loadgroup this document should use from now on.
+    *                   Note that the document might not be the only thing using
+    *                   this loadgroup.
+    * @param aContainer The container this document is in.  This may be null.
+    *                   XXXbz maybe we should make it more explicit (eg make the
+@@ -175,17 +175,17 @@ public:
+    *              document. Even in the XML case, please don't add new calls
+    *              with non-null sink.
+    *
+    * Once this has been called, the document will return false for
+    * MayStartLayout() until SetMayStartLayout(true) is called on it.  Making
+    * sure this happens is the responsibility of the caller of
+    * StartDocumentLoad().
+    */  
+-  virtual nsresult StartDocumentLoad(const char* aCommand,
++  virtual nsresult StartDocumentLoad(eParserCommands aCommand,
+                                      nsIChannel* aChannel,
+                                      nsILoadGroup* aLoadGroup,
+                                      nsISupports* aContainer,
+                                      nsIStreamListener **aDocListener,
+                                      bool aReset,
+                                      nsIContentSink* aSink = nsnull) = 0;
+   virtual void StopDocumentLoad() = 0;
+ 
+diff --git a/content/base/src/nsDOMParser.cpp b/content/base/src/nsDOMParser.cpp
+--- a/content/base/src/nsDOMParser.cpp
++++ b/content/base/src/nsDOMParser.cpp
+@@ -185,17 +185,17 @@ nsDOMParser::ParseFromStream(nsIInputStr
+ 
+   // Keep the XULXBL state, base URL and principal setting in sync with the
+   // HTML case
+ 
+   if (nsContentUtils::IsSystemPrincipal(mOriginalPrincipal)) {
+     document->ForceEnableXULXBL();
+   }
+ 
+-  rv = document->StartDocumentLoad(kLoadAsData, parserChannel, 
++  rv = document->StartDocumentLoad(eLoadAsData, parserChannel, 
+                                    nsnull, nsnull, 
+                                    getter_AddRefs(listener),
+                                    false);
+ 
+   // Make sure to give this document the right base URI
+   document->SetBaseURI(mBaseURI);
+ 
+   // And the right principal
+diff --git a/content/base/src/nsDocument.cpp b/content/base/src/nsDocument.cpp
+--- a/content/base/src/nsDocument.cpp
++++ b/content/base/src/nsDocument.cpp
+@@ -2304,17 +2304,17 @@ nsDocument::FillStyleSet(nsStyleSet* aSt
+     nsIStyleSheet* sheet = mCatalogSheets[i];
+     if (sheet->IsApplicable()) {
+       aStyleSet->AppendStyleSheet(nsStyleSet::eAgentSheet, sheet);
+     }
+   }
+ }
+ 
+ nsresult
+-nsDocument::StartDocumentLoad(const char* aCommand, nsIChannel* aChannel,
++nsDocument::StartDocumentLoad(eParserCommands aCommand, nsIChannel* aChannel,
+                               nsILoadGroup* aLoadGroup,
+                               nsISupports* aContainer,
+                               nsIStreamListener **aDocListener,
+                               bool aReset, nsIContentSink* aSink)
+ {
+ #ifdef PR_LOGGING
+   if (gDocumentLeakPRLog && PR_LOG_TEST(gDocumentLeakPRLog, PR_LOG_DEBUG)) {
+     nsCOMPtr<nsIURI> uri;
+@@ -2325,28 +2325,28 @@ nsDocument::StartDocumentLoad(const char
+     PR_LogPrint("DOCUMENT %p StartDocumentLoad %s", this, spec.get());
+   }
+ #endif
+ 
+   MOZ_ASSERT(GetReadyStateEnum() == nsIDocument::READYSTATE_UNINITIALIZED,
+              "Bad readyState");
+   SetReadyStateInternal(READYSTATE_LOADING);
+ 
+-  if (nsCRT::strcmp(kLoadAsData, aCommand) == 0) {
++  if (eLoadAsData == aCommand) {
+     mLoadedAsData = true;
+     // We need to disable script & style loading in this case.
+     // We leave them disabled even in EndLoad(), and let anyone
+     // who puts the document on display to worry about enabling.
+ 
+     // Do not load/process scripts when loading as data
+     ScriptLoader()->SetEnabled(false);
+ 
+     // styles
+     CSSLoader()->SetEnabled(false); // Do not load/process styles when loading as data
+-  } else if (nsCRT::strcmp("external-resource", aCommand) == 0) {
++  } else if (eExternalResource == aCommand) {
+     // Allow CSS, but not scripts
+     ScriptLoader()->SetEnabled(false);
+   }
+ 
+   mMayStartLayout = false;
+ 
+   mHaveInputEncoding = true;
+ 
+diff --git a/content/base/src/nsDocument.h b/content/base/src/nsDocument.h
+--- a/content/base/src/nsDocument.h
++++ b/content/base/src/nsDocument.h
+@@ -480,17 +480,17 @@ public:
+ 
+   virtual void Reset(nsIChannel *aChannel, nsILoadGroup *aLoadGroup);
+   virtual void ResetToURI(nsIURI *aURI, nsILoadGroup *aLoadGroup,
+                           nsIPrincipal* aPrincipal);
+ 
+   // StartDocumentLoad is pure virtual so that subclasses must override it.
+   // The nsDocument StartDocumentLoad does some setup, but does NOT set
+   // *aDocListener; this is the job of subclasses.
+-  virtual nsresult StartDocumentLoad(const char* aCommand,
++  virtual nsresult StartDocumentLoad(eParserCommands aCommand,
+                                      nsIChannel* aChannel,
+                                      nsILoadGroup* aLoadGroup,
+                                      nsISupports* aContainer,
+                                      nsIStreamListener **aDocListener,
+                                      bool aReset = true,
+                                      nsIContentSink* aContentSink = nsnull) = 0;
+ 
+   virtual void StopDocumentLoad();
+diff --git a/content/base/src/nsSyncLoadService.cpp b/content/base/src/nsSyncLoadService.cpp
+--- a/content/base/src/nsSyncLoadService.cpp
++++ b/content/base/src/nsSyncLoadService.cpp
+@@ -162,17 +162,17 @@ nsSyncLoader::LoadDocument(nsIChannel* a
+     // Create document
+     nsCOMPtr<nsIDocument> document;
+     rv = NS_NewXMLDocument(getter_AddRefs(document));
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     // Start the document load. Do this before we attach the load listener
+     // since we reset the document which drops all observers.
+     nsCOMPtr<nsIStreamListener> listener;
+-    rv = document->StartDocumentLoad(kLoadAsData, mChannel, 
++    rv = document->StartDocumentLoad(eLoadAsData, mChannel, 
+                                      loadGroup, nsnull, 
+                                      getter_AddRefs(listener),
+                                      true);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     if (aForceToXML) {
+         nsCOMPtr<nsIStreamListener> forceListener =
+             new nsForceXMLListener(listener);
+diff --git a/content/base/src/nsXMLHttpRequest.cpp b/content/base/src/nsXMLHttpRequest.cpp
+--- a/content/base/src/nsXMLHttpRequest.cpp
++++ b/content/base/src/nsXMLHttpRequest.cpp
+@@ -2284,17 +2284,17 @@ nsXMLHttpRequest::OnStartRequest(nsIRequ
+         htmlDoc->DisableCookieAccess();
+       }
+     }
+ 
+     nsCOMPtr<nsIStreamListener> listener;
+     nsCOMPtr<nsILoadGroup> loadGroup;
+     channel->GetLoadGroup(getter_AddRefs(loadGroup));
+ 
+-    rv = mResponseXML->StartDocumentLoad(kLoadAsData, channel, loadGroup,
++    rv = mResponseXML->StartDocumentLoad(eLoadAsData, channel, loadGroup,
+                                          nsnull, getter_AddRefs(listener),
+                                          !(mState & XML_HTTP_REQUEST_USE_XSITE_AC));
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     mXMLParserStreamListener = listener;
+     rv = mXMLParserStreamListener->OnStartRequest(request, ctxt);
+     NS_ENSURE_SUCCESS(rv, rv);
+   }
+diff --git a/content/html/document/src/ImageDocument.cpp b/content/html/document/src/ImageDocument.cpp
+--- a/content/html/document/src/ImageDocument.cpp
++++ b/content/html/document/src/ImageDocument.cpp
+@@ -70,17 +70,17 @@ class ImageDocument : public MediaDocume
+ public:
+   ImageDocument();
+   virtual ~ImageDocument();
+ 
+   NS_DECL_ISUPPORTS_INHERITED
+ 
+   virtual nsresult Init();
+ 
+-  virtual nsresult StartDocumentLoad(const char*         aCommand,
++  virtual nsresult StartDocumentLoad(eParserCommands     aCommand,
+                                      nsIChannel*         aChannel,
+                                      nsILoadGroup*       aLoadGroup,
+                                      nsISupports*        aContainer,
+                                      nsIStreamListener** aDocListener,
+                                      bool                aReset = true,
+                                      nsIContentSink*     aSink = nsnull);
+ 
+   virtual void SetScriptGlobalObject(nsIScriptGlobalObject* aScriptGlobalObject);
+@@ -255,17 +255,17 @@ ImageDocument::Init()
+   mClickResizingEnabled = Preferences::GetBool(CLICK_IMAGE_RESIZING_PREF);
+   mShouldResize = mResizeImageByDefault;
+   mFirstResize = true;
+ 
+   return NS_OK;
+ }
+ 
+ nsresult
+-ImageDocument::StartDocumentLoad(const char*         aCommand,
++ImageDocument::StartDocumentLoad(eParserCommands     aCommand,
+                                  nsIChannel*         aChannel,
+                                  nsILoadGroup*       aLoadGroup,
+                                  nsISupports*        aContainer,
+                                  nsIStreamListener** aDocListener,
+                                  bool                aReset,
+                                  nsIContentSink*     aSink)
+ {
+   nsresult rv =
+diff --git a/content/html/document/src/MediaDocument.cpp b/content/html/document/src/MediaDocument.cpp
+--- a/content/html/document/src/MediaDocument.cpp
++++ b/content/html/document/src/MediaDocument.cpp
+@@ -119,17 +119,17 @@ MediaDocument::Init()
+   }
+ 
+   mIsSyntheticDocument = true;
+ 
+   return NS_OK;
+ }
+ 
+ nsresult
+-MediaDocument::StartDocumentLoad(const char*         aCommand,
++MediaDocument::StartDocumentLoad(eParserCommands     aCommand,
+                                  nsIChannel*         aChannel,
+                                  nsILoadGroup*       aLoadGroup,
+                                  nsISupports*        aContainer,
+                                  nsIStreamListener** aDocListener,
+                                  bool                aReset,
+                                  nsIContentSink*     aSink)
+ {
+   nsresult rv = nsDocument::StartDocumentLoad(aCommand, aChannel, aLoadGroup,
+diff --git a/content/html/document/src/MediaDocument.h b/content/html/document/src/MediaDocument.h
+--- a/content/html/document/src/MediaDocument.h
++++ b/content/html/document/src/MediaDocument.h
+@@ -19,17 +19,17 @@ namespace dom {
+ class MediaDocument : public nsHTMLDocument
+ {
+ public:
+   MediaDocument();
+   virtual ~MediaDocument();
+ 
+   virtual nsresult Init();
+ 
+-  virtual nsresult StartDocumentLoad(const char*         aCommand,
++  virtual nsresult StartDocumentLoad(eParserCommands     aCommand,
+                                      nsIChannel*         aChannel,
+                                      nsILoadGroup*       aLoadGroup,
+                                      nsISupports*        aContainer,
+                                      nsIStreamListener** aDocListener,
+                                      bool                aReset = true,
+                                      nsIContentSink*     aSink = nsnull);
+ 
+   virtual void SetScriptGlobalObject(nsIScriptGlobalObject* aGlobalObject);
+diff --git a/content/html/document/src/PluginDocument.cpp b/content/html/document/src/PluginDocument.cpp
+--- a/content/html/document/src/PluginDocument.cpp
++++ b/content/html/document/src/PluginDocument.cpp
+@@ -26,17 +26,17 @@ class PluginDocument : public MediaDocum
+ {
+ public:
+   PluginDocument();
+   virtual ~PluginDocument();
+ 
+   NS_DECL_ISUPPORTS_INHERITED
+   NS_DECL_NSIPLUGINDOCUMENT
+ 
+-  virtual nsresult StartDocumentLoad(const char*         aCommand,
++  virtual nsresult StartDocumentLoad(eParserCommands     aCommand,
+                                      nsIChannel*         aChannel,
+                                      nsILoadGroup*       aLoadGroup,
+                                      nsISupports*        aContainer,
+                                      nsIStreamListener** aDocListener,
+                                      bool                aReset = true,
+                                      nsIContentSink*     aSink = nsnull);
+ 
+   virtual void SetScriptGlobalObject(nsIScriptGlobalObject* aScriptGlobalObject);
+@@ -190,17 +190,17 @@ PluginDocument::CanSavePresentation(nsIR
+ {
+   // Full-page plugins cannot be cached, currently, because we don't have
+   // the stream listener data to feed to the plugin instance.
+   return false;
+ }
+ 
+ 
+ nsresult
+-PluginDocument::StartDocumentLoad(const char*         aCommand,
++PluginDocument::StartDocumentLoad(eParserCommands     aCommand,
+                                   nsIChannel*         aChannel,
+                                   nsILoadGroup*       aLoadGroup,
+                                   nsISupports*        aContainer,
+                                   nsIStreamListener** aDocListener,
+                                   bool                aReset,
+                                   nsIContentSink*     aSink)
+ {
+   // do not allow message panes to host full-page plugins
+diff --git a/content/html/document/src/VideoDocument.cpp b/content/html/document/src/VideoDocument.cpp
+--- a/content/html/document/src/VideoDocument.cpp
++++ b/content/html/document/src/VideoDocument.cpp
+@@ -13,17 +13,17 @@
+ #include "mozilla/dom/Element.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ class VideoDocument : public MediaDocument
+ {
+ public:
+-  virtual nsresult StartDocumentLoad(const char*         aCommand,
++  virtual nsresult StartDocumentLoad(eParserCommands     aCommand,
+                                      nsIChannel*         aChannel,
+                                      nsILoadGroup*       aLoadGroup,
+                                      nsISupports*        aContainer,
+                                      nsIStreamListener** aDocListener,
+                                      bool                aReset = true,
+                                      nsIContentSink*     aSink = nsnull);
+   virtual void SetScriptGlobalObject(nsIScriptGlobalObject* aScriptGlobalObject);
+ 
+@@ -34,17 +34,17 @@ protected:
+ 
+   nsresult CreateSyntheticVideoDocument(nsIChannel* aChannel,
+                                         nsIStreamListener** aListener);
+ 
+   nsRefPtr<MediaDocumentStreamListener> mStreamListener;
+ };
+ 
+ nsresult
+-VideoDocument::StartDocumentLoad(const char*         aCommand,
++VideoDocument::StartDocumentLoad(eParserCommands     aCommand,
+                                  nsIChannel*         aChannel,
+                                  nsILoadGroup*       aLoadGroup,
+                                  nsISupports*        aContainer,
+                                  nsIStreamListener** aDocListener,
+                                  bool                aReset,
+                                  nsIContentSink*     aSink)
+ {
+   nsresult rv =
+diff --git a/content/html/document/src/nsHTMLDocument.cpp b/content/html/document/src/nsHTMLDocument.cpp
+--- a/content/html/document/src/nsHTMLDocument.cpp
++++ b/content/html/document/src/nsHTMLDocument.cpp
+@@ -512,45 +512,40 @@ nsHTMLDocument::SetDocumentCharacterSet(
+   nsCOMPtr<nsIWyciwygChannel> wyciwygChannel = do_QueryInterface(mChannel);
+   if (wyciwygChannel) {
+     wyciwygChannel->SetCharsetAndSource(GetDocumentCharacterSetSource(),
+                                         aCharSetID);
+   }
+ }
+ 
+ nsresult
+-nsHTMLDocument::StartDocumentLoad(const char* aCommand,
++nsHTMLDocument::StartDocumentLoad(eParserCommands aCommand,
+                                   nsIChannel* aChannel,
+                                   nsILoadGroup* aLoadGroup,
+                                   nsISupports* aContainer,
+                                   nsIStreamListener **aDocListener,
+                                   bool aReset,
+                                   nsIContentSink* aSink)
+ {
+-  if (!aCommand) {
+-    MOZ_ASSERT(false, "Command is mandatory");
+-    return NS_ERROR_INVALID_POINTER;
+-  }
+   if (aSink) {
+     MOZ_ASSERT(false, "Got a sink override. Should not happen for HTML doc.");
+     return NS_ERROR_INVALID_ARG;
+   }
+   if (!mIsRegularHTML) {
+     MOZ_ASSERT(false, "Must not set HTML doc to XHTML mode before load start.");
+     return NS_ERROR_DOM_INVALID_STATE_ERR;
+   }
+ 
+   nsCAutoString contentType;
+   aChannel->GetContentType(contentType);
+ 
+-  bool view = !strcmp(aCommand, "view") ||
+-              !strcmp(aCommand, "external-resource");
+-  bool viewSource = !strcmp(aCommand, "view-source");
+-  bool asData = !strcmp(aCommand, kLoadAsData);
+-  if(!(view || viewSource || asData)) {
++  bool view = aCommand == eViewNormal || aCommand == eExternalResource;
++  bool viewSource = aCommand == eViewSource;
++  bool asData = aCommand == eLoadAsData;
++  if (!(view || viewSource || asData)) {
+     MOZ_ASSERT(false, "Bad parser command");
+     return NS_ERROR_INVALID_ARG;
+   }
+ 
+   bool html = contentType.EqualsLiteral(TEXT_HTML);
+   bool xhtml = !html && contentType.EqualsLiteral(APPLICATION_XHTML_XML);
+   bool plainText = !html && !xhtml && (contentType.EqualsLiteral(TEXT_PLAIN) ||
+     contentType.EqualsLiteral(TEXT_CSS) ||
+@@ -618,17 +613,17 @@ nsHTMLDocument::StartDocumentLoad(const 
+       if (viewSource) {
+         mParser->MarkAsNotScriptCreated("view-source-plain");
+       } else {
+         mParser->MarkAsNotScriptCreated("plain-text");
+       }
+     } else if (viewSource && !html) {
+       mParser->MarkAsNotScriptCreated("view-source-xml");
+     } else {
+-      mParser->MarkAsNotScriptCreated(aCommand);
++      mParser->MarkAsNotScriptCreated(NULL);
+     }
+   } else {
+     mParser = do_CreateInstance(kCParserCID, &rv);
+     NS_ENSURE_SUCCESS(rv, rv);
+   }
+ 
+   int32_t textType = GET_BIDI_OPTION_TEXTTYPE(GetBidiOptions());
+ 
+@@ -817,17 +812,17 @@ nsHTMLDocument::StartDocumentLoad(const 
+   nsCOMPtr<nsIStreamListener> listener = mParser->GetStreamListener();
+   listener.forget(aDocListener);
+ 
+ #ifdef DEBUG_charset
+   printf(" charset = %s source %d\n",
+         charset.get(), charsetSource);
+ #endif
+   mParser->SetDocumentCharset(parserCharset, parserCharsetSource);
+-  mParser->SetCommand(aCommand);
++  mParser->SetCommand(NULL);
+ 
+   if (!IsHTML()) {
+     MOZ_ASSERT(!loadAsHtml5);
+     nsCOMPtr<nsIXMLContentSink> xmlsink;
+     NS_NewXMLContentSink(getter_AddRefs(xmlsink), this, uri,
+                          docShell, aChannel);
+     mParser->SetContentSink(xmlsink);
+   } else {
+diff --git a/content/html/document/src/nsHTMLDocument.h b/content/html/document/src/nsHTMLDocument.h
+--- a/content/html/document/src/nsHTMLDocument.h
++++ b/content/html/document/src/nsHTMLDocument.h
+@@ -54,17 +54,17 @@ public:
+   virtual void ResetToURI(nsIURI* aURI, nsILoadGroup* aLoadGroup,
+                           nsIPrincipal* aPrincipal);
+ 
+   virtual nsresult CreateShell(nsPresContext* aContext,
+                                nsIViewManager* aViewManager,
+                                nsStyleSet* aStyleSet,
+                                nsIPresShell** aInstancePtrResult);
+ 
+-  virtual nsresult StartDocumentLoad(const char* aCommand,
++  virtual nsresult StartDocumentLoad(eParserCommands aCommand,
+                                      nsIChannel* aChannel,
+                                      nsILoadGroup* aLoadGroup,
+                                      nsISupports* aContainer,
+                                      nsIStreamListener **aDocListener,
+                                      bool aReset = true,
+                                      nsIContentSink* aSink = nsnull);
+   virtual void StopDocumentLoad();
+ 
+diff --git a/content/xbl/src/nsXBLService.cpp b/content/xbl/src/nsXBLService.cpp
+--- a/content/xbl/src/nsXBLService.cpp
++++ b/content/xbl/src/nsXBLService.cpp
+@@ -249,17 +249,17 @@ nsXBLStreamListener::OnStartRequest(nsIR
+   mBindingDocument.swap(doc);
+ 
+   nsCOMPtr<nsIChannel> channel = do_QueryInterface(request);
+   NS_ENSURE_TRUE(channel, NS_ERROR_UNEXPECTED);
+ 
+   nsCOMPtr<nsILoadGroup> group;
+   request->GetLoadGroup(getter_AddRefs(group));
+ 
+-  nsresult rv = doc->StartDocumentLoad("loadAsInteractiveData",
++  nsresult rv = doc->StartDocumentLoad(eLoadAsInteractiveData,
+                                        channel,
+                                        group,
+                                        nsnull,
+                                        getter_AddRefs(mInner),
+                                        true,
+                                        sink);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+@@ -1129,17 +1129,17 @@ nsXBLService::FetchBindingDocument(nsICo
+       if (bindingManager) {
+         bindingManager->RemoveLoadingDocListener(aDocumentURI);
+       }
+     }
+     return NS_OK;
+   }
+ 
+   nsCOMPtr<nsIStreamListener> listener;
+-  rv = doc->StartDocumentLoad("loadAsInteractiveData",
++  rv = doc->StartDocumentLoad(eLoadAsInteractiveData,
+                               channel,
+                               loadGroup,
+                               nsnull,
+                               getter_AddRefs(listener),
+                               true,
+                               xblSink);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+diff --git a/content/xml/document/src/nsXMLDocument.cpp b/content/xml/document/src/nsXMLDocument.cpp
+--- a/content/xml/document/src/nsXMLDocument.cpp
++++ b/content/xml/document/src/nsXMLDocument.cpp
+@@ -429,17 +429,17 @@ nsXMLDocument::Load(const nsAString& aUr
+   // Web content. But before doing that, assert that the current readyState
+   // is complete as it should be after the call to ResetToURI() above.
+   MOZ_ASSERT(GetReadyStateEnum() == nsIDocument::READYSTATE_COMPLETE,
+              "Bad readyState");
+   SetReadyStateInternal(nsIDocument::READYSTATE_UNINITIALIZED);
+ 
+   // Prepare for loading the XML document "into oneself"
+   nsCOMPtr<nsIStreamListener> listener;
+-  if (NS_FAILED(rv = StartDocumentLoad(kLoadAsData, channel, 
++  if (NS_FAILED(rv = StartDocumentLoad(eLoadAsData, channel, 
+                                        loadGroup, nsnull, 
+                                        getter_AddRefs(listener),
+                                        false))) {
+     NS_ERROR("nsXMLDocument::Load: Failed to start the document load.");
+     return rv;
+   }
+ 
+   // After this point, if we error out of this method we should clear
+@@ -478,33 +478,33 @@ nsXMLDocument::Load(const nsAString& aUr
+   } else {
+     *aReturn = true;
+   }
+ 
+   return NS_OK;
+ }
+ 
+ nsresult
+-nsXMLDocument::StartDocumentLoad(const char* aCommand,
++nsXMLDocument::StartDocumentLoad(eParserCommands aCommand,
+                                  nsIChannel* aChannel,
+                                  nsILoadGroup* aLoadGroup,
+                                  nsISupports* aContainer,
+                                  nsIStreamListener **aDocListener,
+                                  bool aReset,
+                                  nsIContentSink* aSink)
+ {
+   nsresult rv = nsDocument::StartDocumentLoad(aCommand,
+                                               aChannel, aLoadGroup,
+                                               aContainer, 
+                                               aDocListener, aReset, aSink);
+   if (NS_FAILED(rv)) return rv;
+ 
+-  if (nsCRT::strcmp("loadAsInteractiveData", aCommand) == 0) {
++  if (eLoadAsInteractiveData == aCommand) {
+     mLoadedAsInteractiveData = true;
+-    aCommand = kLoadAsData; // XBL, for example, needs scripts and styles
++    aCommand = eLoadAsData; // XBL, for example, needs scripts and styles
+   }
+ 
+ 
+   int32_t charsetSource = kCharsetFromDocTypeDefault;
+   nsCAutoString charset(NS_LITERAL_CSTRING("UTF-8"));
+   TryChannelCharset(aChannel, charsetSource, charset, nsnull);
+ 
+   nsCOMPtr<nsIURI> aUrl;
+@@ -536,17 +536,17 @@ nsXMLDocument::StartDocumentLoad(const c
+   rv = CallQueryInterface(mParser, aDocListener);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   NS_ASSERTION(mChannel, "How can we not have a channel here?");
+   mChannelIsPending = true;
+   
+   SetDocumentCharacterSet(charset);
+   mParser->SetDocumentCharset(charset, charsetSource);
+-  mParser->SetCommand(aCommand);
++  mParser->SetCommand(NULL);
+   mParser->SetContentSink(sink);
+   mParser->Parse(aUrl, nsnull, (void *)this);
+ 
+   return NS_OK;
+ }
+ 
+ void
+ nsXMLDocument::EndLoad()
+diff --git a/content/xml/document/src/nsXMLDocument.h b/content/xml/document/src/nsXMLDocument.h
+--- a/content/xml/document/src/nsXMLDocument.h
++++ b/content/xml/document/src/nsXMLDocument.h
+@@ -22,17 +22,18 @@ public:
+   virtual ~nsXMLDocument();
+ 
+   NS_DECL_ISUPPORTS_INHERITED
+ 
+   virtual void Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup);
+   virtual void ResetToURI(nsIURI *aURI, nsILoadGroup *aLoadGroup,
+                           nsIPrincipal* aPrincipal);
+ 
+-  virtual nsresult StartDocumentLoad(const char* aCommand, nsIChannel* channel,
++  virtual nsresult StartDocumentLoad(eParserCommands aCommand,
++                                     nsIChannel* channel,
+                                      nsILoadGroup* aLoadGroup,
+                                      nsISupports* aContainer,
+                                      nsIStreamListener **aDocListener,
+                                      bool aReset = true,
+                                      nsIContentSink* aSink = nsnull);
+ 
+   virtual void EndLoad();
+ 
+diff --git a/content/xul/document/src/nsXULDocument.cpp b/content/xul/document/src/nsXULDocument.cpp
+--- a/content/xul/document/src/nsXULDocument.cpp
++++ b/content/xul/document/src/nsXULDocument.cpp
+@@ -413,17 +413,17 @@ nsXULDocument::SetContentType(const nsAS
+                  "xul-documents always has content-type application/vnd.mozilla.xul+xml");
+     // Don't do anything, xul always has the mimetype
+     // application/vnd.mozilla.xul+xml
+ }
+ 
+ // This is called when the master document begins loading, whether it's
+ // being cached or not.
+ nsresult
+-nsXULDocument::StartDocumentLoad(const char* aCommand, nsIChannel* aChannel,
++nsXULDocument::StartDocumentLoad(eParserCommands aCommand, nsIChannel* aChannel,
+                                  nsILoadGroup* aLoadGroup,
+                                  nsISupports* aContainer,
+                                  nsIStreamListener **aDocListener,
+                                  bool aReset, nsIContentSink* aSink)
+ {
+ #ifdef PR_LOGGING
+     if (PR_LOG_TEST(gXULLog, PR_LOG_WARNING)) {
+ 
+@@ -2040,31 +2040,31 @@ nsXULDocument::MatchAttribute(nsIContent
+         }
+     }
+ 
+     return false;
+ }
+ 
+ nsresult
+ nsXULDocument::PrepareToLoad(nsISupports* aContainer,
+-                             const char* aCommand,
++                             eParserCommands aCommand,
+                              nsIChannel* aChannel,
+                              nsILoadGroup* aLoadGroup,
+                              nsIParser** aResult)
+ {
+     // Get the document's principal
+     nsCOMPtr<nsIPrincipal> principal;
+     nsContentUtils::GetSecurityManager()->
+         GetChannelPrincipal(aChannel, getter_AddRefs(principal));
+     return PrepareToLoadPrototype(mDocumentURI, aCommand, principal, aResult);
+ }
+ 
+ 
+ nsresult
+-nsXULDocument::PrepareToLoadPrototype(nsIURI* aURI, const char* aCommand,
++nsXULDocument::PrepareToLoadPrototype(nsIURI* aURI, eParserCommands aCommand,
+                                       nsIPrincipal* aDocumentPrincipal,
+                                       nsIParser** aResult)
+ {
+     nsresult rv;
+ 
+     // Create a new prototype document.
+     rv = NS_NewXULPrototypeDocument(getter_AddRefs(mCurrentPrototype));
+     if (NS_FAILED(rv)) return rv;
+@@ -2080,35 +2080,32 @@ nsXULDocument::PrepareToLoadPrototype(ns
+         mMasterPrototype = mCurrentPrototype;
+         // Set our principal based on the master proto.
+         SetPrincipal(aDocumentPrincipal);
+     }
+ 
+     // Create a XUL content sink, a parser, and kick off a load for
+     // the overlay.
+     nsRefPtr<XULContentSinkImpl> sink = new XULContentSinkImpl();
+-    if (!sink) return NS_ERROR_OUT_OF_MEMORY;
+ 
+     rv = sink->Init(this, mCurrentPrototype);
+     NS_ASSERTION(NS_SUCCEEDED(rv), "Unable to initialize datasource sink");
+     if (NS_FAILED(rv)) return rv;
+ 
+     nsCOMPtr<nsIParser> parser = do_CreateInstance(kParserCID, &rv);
+     NS_ASSERTION(NS_SUCCEEDED(rv), "unable to create parser");
+     if (NS_FAILED(rv)) return rv;
+ 
+-    parser->SetCommand(nsCRT::strcmp(aCommand, "view-source") ? eViewNormal :
+-                       eViewSource);
++    parser->SetCommand(aCommand != eViewSource ? eViewNormal : eViewSource);
+ 
+     parser->SetDocumentCharset(NS_LITERAL_CSTRING("UTF-8"),
+                                kCharsetFromDocTypeDefault);
+     parser->SetContentSink(sink); // grabs a reference to the parser
+ 
+-    *aResult = parser;
+-    NS_ADDREF(*aResult);
++    parser.forget(aResult);
+     return NS_OK;
+ }
+ 
+ 
+ nsresult
+ nsXULDocument::ApplyPersistentAttributes()
+ {
+     // For non-chrome documents, persistance is simply broken
+@@ -2720,17 +2717,17 @@ nsXULDocument::LoadOverlayInternal(nsIUR
+             PR_LOG(gXULLog, PR_LOG_DEBUG, ("xul: ...and document already destroyed"));
+             return NS_ERROR_NOT_AVAILABLE;
+         }
+ 
+         // We'll set the right principal on the proto doc when we get
+         // OnStartRequest from the parser, so just pass in a null principal for
+         // now.
+         nsCOMPtr<nsIParser> parser;
+-        rv = PrepareToLoadPrototype(aURI, "view", nsnull, getter_AddRefs(parser));
++        rv = PrepareToLoadPrototype(aURI, eViewNormal, nsnull, getter_AddRefs(parser));
+         if (NS_FAILED(rv)) return rv;
+ 
+         // Predicate mIsWritingFastLoad on the XUL cache being enabled,
+         // so we don't have to re-check whether the cache is enabled all
+         // the time.
+         mIsWritingFastLoad = useXULCache;
+ 
+         nsCOMPtr<nsIStreamListener> listener = do_QueryInterface(parser);
+diff --git a/content/xul/document/src/nsXULDocument.h b/content/xul/document/src/nsXULDocument.h
+--- a/content/xul/document/src/nsXULDocument.h
++++ b/content/xul/document/src/nsXULDocument.h
+@@ -94,17 +94,17 @@ public:
+     NS_DECL_ISUPPORTS_INHERITED
+     NS_DECL_NSISTREAMLOADEROBSERVER
+ 
+     // nsIDocument interface
+     virtual void Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup);
+     virtual void ResetToURI(nsIURI *aURI, nsILoadGroup* aLoadGroup,
+                             nsIPrincipal* aPrincipal);
+ 
+-    virtual nsresult StartDocumentLoad(const char* aCommand,
++    virtual nsresult StartDocumentLoad(eParserCommands aCommand,
+                                        nsIChannel *channel,
+                                        nsILoadGroup* aLoadGroup,
+                                        nsISupports* aContainer,
+                                        nsIStreamListener **aDocListener,
+                                        bool aReset = true,
+                                        nsIContentSink* aSink = nsnull);
+ 
+     virtual void SetContentType(const nsAString& aContentType);
+@@ -184,24 +184,24 @@ protected:
+     nsresult
+     AddElementToRefMap(mozilla::dom::Element* aElement);
+     void
+     RemoveElementFromRefMap(mozilla::dom::Element* aElement);
+ 
+     nsresult GetViewportSize(int32_t* aWidth, int32_t* aHeight);
+ 
+     nsresult PrepareToLoad(nsISupports* aContainer,
+-                           const char* aCommand,
++                           eParserCommands aCommand,
+                            nsIChannel* aChannel,
+                            nsILoadGroup* aLoadGroup,
+                            nsIParser** aResult);
+ 
+     nsresult
+     PrepareToLoadPrototype(nsIURI* aURI,
+-                           const char* aCommand,
++                           eParserCommands aCommand,
+                            nsIPrincipal* aDocumentPrincipal,
+                            nsIParser** aResult);
+ 
+     nsresult 
+     LoadOverlayInternal(nsIURI* aURI, bool aIsDynamic, bool* aShouldReturn,
+                         bool* aFailureFromContent);
+ 
+     nsresult ApplyPersistentAttributes();
+diff --git a/layout/build/nsContentDLF.cpp b/layout/build/nsContentDLF.cpp
+--- a/layout/build/nsContentDLF.cpp
++++ b/layout/build/nsContentDLF.cpp
+@@ -420,17 +420,17 @@ nsContentDLF::CreateDocument(eParserComm
+   rv = NS_NewContentViewer(getter_AddRefs(contentViewer));
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   doc->SetContainer(aContainer);
+ 
+   // Initialize the document to begin loading the data.  An
+   // nsIStreamListener connected to the parser is returned in
+   // aDocListener.
+-  rv = doc->StartDocumentLoad(NULL, aChannel, aLoadGroup, aContainer, aDocListener, true);
++  rv = doc->StartDocumentLoad(aCommand, aChannel, aLoadGroup, aContainer, aDocListener, true);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   // Bind the document to the Content Viewer
+   rv = contentViewer->LoadStart(doc);
+   contentViewer.forget(aContentViewer);
+   return rv;
+ }
+ 
+@@ -462,17 +462,17 @@ nsContentDLF::CreateXULDocument(eParserC
+    * Initialize the document to begin loading the data...
+    *
+    * An nsIStreamListener connected to the parser is returned in
+    * aDocListener.
+    */
+ 
+   doc->SetContainer(aContainer);
+ 
+-  rv = doc->StartDocumentLoad(NULL, aChannel, aLoadGroup, aContainer, aDocListener, true);
++  rv = doc->StartDocumentLoad(aCommand, aChannel, aLoadGroup, aContainer, aDocListener, true);
+   if (NS_FAILED(rv)) return rv;
+ 
+   /*
+    * Bind the document to the Content Viewer...
+    */
+   rv = contentViewer->LoadStart(doc);
+   contentViewer.forget(aContentViewer);
+   return rv;
+diff --git a/xpfe/components/directory/nsDirectoryViewer.cpp b/xpfe/components/directory/nsDirectoryViewer.cpp
+--- a/xpfe/components/directory/nsDirectoryViewer.cpp
++++ b/xpfe/components/directory/nsDirectoryViewer.cpp
+@@ -1276,17 +1276,17 @@ nsDirectoryViewerFactory::~nsDirectoryVi
+ }
+ 
+ 
+ NS_IMPL_ISUPPORTS1(nsDirectoryViewerFactory, nsIDocumentLoaderFactory)
+ 
+ 
+ 
+ NS_IMETHODIMP
+-nsDirectoryViewerFactory::CreateInstance(const char *aCommand,
++nsDirectoryViewerFactory::CreateInstance(eParserCommands aCommand,
+                                          nsIChannel* aChannel,
+                                          nsILoadGroup* aLoadGroup,
+                                          const char* aContentType, 
+                                          nsIDocShell* aContainer,
+                                          nsISupports* aExtraInfo,
+                                          nsIStreamListener** aDocListenerResult,
+                                          nsIContentViewer** aDocViewerResult)
+ {
+@@ -1368,21 +1368,21 @@ nsDirectoryViewerFactory::CreateInstance
+     return rv;
+ 
+   nsCOMPtr<nsIDocumentLoaderFactory> factory(do_GetService(contractID, &rv));
+   if (NS_FAILED(rv)) return rv;
+   
+   nsCOMPtr<nsIStreamListener> listener;
+ 
+   if (viewSource) {
+-    rv = factory->CreateInstance("view-source", aChannel, aLoadGroup, "text/html; x-view-type=view-source",
++    rv = factory->CreateInstance(eViewSource, aChannel, aLoadGroup, "text/html; x-view-type=view-source",
+                                  aContainer, aExtraInfo, getter_AddRefs(listener),
+                                  aDocViewerResult);
+   } else {
+-    rv = factory->CreateInstance("view", aChannel, aLoadGroup, "text/html",
++    rv = factory->CreateInstance(eViewNormal, aChannel, aLoadGroup, "text/html",
+                                  aContainer, aExtraInfo, getter_AddRefs(listener),
+                                  aDocViewerResult);
+   }
+ 
+   if (NS_FAILED(rv)) return rv;
+ 
+   nsCOMPtr<nsIStreamConverterService> scs = do_GetService("@mozilla.org/streamConverters;1", &rv);
+   if (NS_FAILED(rv)) return rv;

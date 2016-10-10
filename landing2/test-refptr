@@ -1,0 +1,517 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/mfbt/RefPtr.h b/mfbt/RefPtr.h
+--- a/mfbt/RefPtr.h
++++ b/mfbt/RefPtr.h
+@@ -278,164 +278,8 @@ OutParamRef<T>
+ byRef(RefPtr<T>& ptr)
+ {
+     return OutParamRef<T>(ptr);
+ }
+ 
+ } // namespace mozilla
+ 
+ #endif // mozilla_RefPtr_h_
+-
+-
+-#if 0
+-
+-// Command line that builds these tests
+-//
+-//   cp RefPtr.h test.cc && g++ -g -Wall -pedantic -DDEBUG -o test test.cc && ./test
+-
+-using namespace mozilla;
+-
+-struct Foo : public RefCounted<Foo>
+-{
+-    Foo() : dead(false) { }
+-    ~Foo() {
+-        MOZ_ASSERT(!dead);
+-        dead = true;
+-        numDestroyed++;
+-    }
+-
+-    bool dead;
+-    static int numDestroyed;
+-};
+-int Foo::numDestroyed;
+-
+-struct Bar : public Foo { };
+-
+-TemporaryRef<Foo>
+-NewFoo()
+-{
+-    return RefPtr<Foo>(new Foo());
+-}
+-
+-TemporaryRef<Foo>
+-NewBar()
+-{
+-    return new Bar();
+-}
+-
+-void
+-GetNewFoo(Foo** f)
+-{
+-    *f = new Bar();
+-    // Kids, don't try this at home
+-    (*f)->AddRef();
+-}
+-
+-void
+-GetPassedFoo(Foo** f)
+-{
+-    // Kids, don't try this at home
+-    (*f)->AddRef();
+-}
+-
+-void
+-GetNewFoo(RefPtr<Foo>* f)
+-{
+-    *f = new Bar();
+-}
+-
+-void
+-GetPassedFoo(RefPtr<Foo>* f)
+-{}
+-
+-TemporaryRef<Foo>
+-GetNullFoo()
+-{
+-    return 0;
+-}
+-
+-int
+-main(int argc, char** argv)
+-{
+-    // This should blow up
+-//    Foo* f = new Foo(); delete f;
+-
+-    MOZ_ASSERT(0 == Foo::numDestroyed);
+-    {
+-        RefPtr<Foo> f = new Foo();
+-        MOZ_ASSERT(f->refCount() == 1);
+-    }
+-    MOZ_ASSERT(1 == Foo::numDestroyed);
+-
+-    {
+-        RefPtr<Foo> f1 = NewFoo();
+-        RefPtr<Foo> f2(NewFoo());
+-        MOZ_ASSERT(1 == Foo::numDestroyed);
+-    }
+-    MOZ_ASSERT(3 == Foo::numDestroyed);
+-
+-    {
+-        RefPtr<Foo> b = NewBar();
+-        MOZ_ASSERT(3 == Foo::numDestroyed);
+-    }
+-    MOZ_ASSERT(4 == Foo::numDestroyed);
+-
+-    {
+-        RefPtr<Foo> f1;
+-        {
+-            f1 = new Foo();
+-            RefPtr<Foo> f2(f1);
+-            RefPtr<Foo> f3 = f2;
+-            MOZ_ASSERT(4 == Foo::numDestroyed);
+-        }
+-        MOZ_ASSERT(4 == Foo::numDestroyed);
+-    }
+-    MOZ_ASSERT(5 == Foo::numDestroyed);
+-
+-    {
+-        RefPtr<Foo> f = new Foo();
+-        f.forget();
+-        MOZ_ASSERT(6 == Foo::numDestroyed);
+-    }
+-
+-    {
+-        RefPtr<Foo> f = new Foo();
+-        GetNewFoo(byRef(f));
+-        MOZ_ASSERT(7 == Foo::numDestroyed);
+-    }
+-    MOZ_ASSERT(8 == Foo::numDestroyed);
+-
+-    {
+-        RefPtr<Foo> f = new Foo();
+-        GetPassedFoo(byRef(f));
+-        MOZ_ASSERT(8 == Foo::numDestroyed);
+-    }
+-    MOZ_ASSERT(9 == Foo::numDestroyed);
+-
+-    {
+-        RefPtr<Foo> f = new Foo();
+-        GetNewFoo(&f);
+-        MOZ_ASSERT(10 == Foo::numDestroyed);
+-    }
+-    MOZ_ASSERT(11 == Foo::numDestroyed);
+-
+-    {
+-        RefPtr<Foo> f = new Foo();
+-        GetPassedFoo(&f);
+-        MOZ_ASSERT(11 == Foo::numDestroyed);
+-    }
+-    MOZ_ASSERT(12 == Foo::numDestroyed);
+-
+-    {
+-        RefPtr<Foo> f1 = new Bar();
+-    }
+-    MOZ_ASSERT(13 == Foo::numDestroyed);
+-
+-    {
+-        RefPtr<Foo> f = GetNullFoo();
+-        MOZ_ASSERT(13 == Foo::numDestroyed);
+-    }
+-    MOZ_ASSERT(13 == Foo::numDestroyed);
+-
+-    return 0;
+-}
+-
+-#endif
+diff --git a/xpcom/tests/Makefile.in b/xpcom/tests/Makefile.in
+--- a/xpcom/tests/Makefile.in
++++ b/xpcom/tests/Makefile.in
+@@ -40,121 +40,28 @@ topsrcdir	= @top_srcdir@
+ srcdir		= @srcdir@
+ VPATH		= @srcdir@
+ relativesrcdir = xpcom/tests
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ MODULE		= xpcom
+ 
+-DIRS		= \
+-  external \
+-  component \
+-  bug656331_component \
+-  component_no_aslr \
+-  $(NULL)
+-
+-ifeq ($(OS_ARCH),WINNT)
+-DIRS		+= windows
+-endif
+-
+-ifdef DEHYDRA_PATH
+-DIRS += static-checker
+-endif
+-
+ VPATH += $(topsrcdir)/build
+ 
+ CPPSRCS = \
+-  nsIFileEnumerator.cpp \
+-  TestCallTemplates.cpp \
+-  TestINIParser.cpp \
+-  TestRacingServiceManager.cpp \
+-  TestRegistrationOrder.cpp \
+-  TestThreadPoolListener.cpp \
+-  TestTimers.cpp \
+-  TestBlockingProcess.cpp \
+-  TestQuickReturn.cpp \
+-  TestArguments.cpp \
+-  TestUnicodeArguments.cpp \
+   $(STDCPPFLAGS) \
+   $(NULL)
+ 
+-ifeq ($(OS_TARGET),WINNT)
+-CPPSRCS += TestBase64.cpp
+-endif
+-
+-ifdef WRAP_STL_INCLUDES
+-CPPSRCS += TestSTLWrappers.cpp
+-endif
+-
+ SIMPLE_PROGRAMS	:= $(CPPSRCS:.cpp=$(BIN_SUFFIX))
+ 
+ CPP_UNIT_TESTS = \
+-                 ShowAlignments.cpp \
+-                 ShowSSEConfig.cpp \
+-                 TestAutoPtr.cpp \
+-                 TestBloomFilter.cpp \
+-                 TestCOMArray.cpp \
+-                 TestCOMPtr.cpp \
+-                 TestCOMPtrEq.cpp \
+-                 TestDeque.cpp \
+-                 TestFile.cpp \
+-                 TestHashtables.cpp \
+-                 TestID.cpp \
+-                 TestObserverArray.cpp \
+-                 TestObserverService.cpp \
+-                 TestPipe.cpp \
+-                 TestRefPtr.cpp \
+-                 TestTextFormatter.cpp \
+-                 TestCheckedInt.cpp \
+-                 TestTArray.cpp \
+-                 $(NULL)
++  TestMFBTRefPtr.cpp \
++  $(NULL)
+ 
+-ifdef MOZ_MEMORY
+-CPP_UNIT_TESTS += TestJemalloc.cpp
+-endif
+-
+-# XXX Make this tests work in libxul builds.
+-#CPP_UNIT_TESTS += \
+-#                  TestArray.cpp \
+-#                  TestCRT.cpp \
+-#                  TestEncoding.cpp \
+-#                  TestExpirationTracker.cpp \
+-#                  TestPipes.cpp \
+-#                  TestPriorityQueue.cpp \
+-#                  TestStorageStream.cpp \
+-#                  TestStrings.cpp \
+-#                  TestSynchronization.cpp \
+-#                  TestTArray.cpp \
+-#                  TestThreadPool.cpp \
+-#                  TestThreads.cpp \
+-#                  TestTimeStamp.cpp \
+-#                  TestXPIDLString.cpp \
+-#                  TestUTF.cpp \
+-#                  TestAtoms.cpp \
+-#                  $(NULL)
+-## FIXME: bug 577500 TestStaticAtoms fails when run in dist/bin
+-## TestStaticAtoms.cpp
+-
+-ifdef MOZ_DEBUG
+-# FIXME bug 523392: TestDeadlockDetector doesn't like Windows
+-# FIXME bug 523378: also fails on OS X
+-ifneq (,$(filter-out WINNT Darwin,$(OS_ARCH)))
+-CPP_UNIT_TESTS += \
+-                  TestDeadlockDetector.cpp \
+-                  TestDeadlockDetectorScalability.cpp \
+-                  $(NULL)
+-endif
+-endif
+-
+-ifndef MOZILLA_INTERNAL_API
+-CPP_UNIT_TESTS += \
+-                  TestStringAPI.cpp \
+-                  $(NULL)
+-endif
+ 
+ include $(topsrcdir)/config/config.mk
+ 
+ LIBS += $(XPCOM_LIBS)
+ 
+ # Needed to resolve __yylex (?)
+ ifeq ($(OS_ARCH)$(OS_RELEASE),FreeBSD2)
+ LIBS		+= -lpcap
+@@ -195,18 +102,14 @@ endif
+ 
+ abs_srcdir = $(shell cd $(srcdir) && pwd)
+ 
+ DIST_PATH = $(DIST)/bin/
+ RM_DIST = rm -f
+ regOrderDir="$(call getnativepath,$(abs_srcdir)/regorder)";
+ DOCOPY=
+ 
+-check::
+-	XPCOM_DEBUG_BREAK=stack-and-abort $(RUN_TEST_PROGRAM) \
+-	  $(DIST)/bin/TestRegistrationOrder$(BIN_SUFFIX) $(regOrderDir)
+-
+ GARBAGE += TestScriptable.h
+ 
+ ifdef STDCXX_COMPAT
+ TestCheckedInt: $(STDCXX_COMPAT:.cpp=.$(OBJ_SUFFIX))
+ TestCheckedInt: LIBS += $(STDCXX_COMPAT:.cpp=.$(OBJ_SUFFIX))
+ endif
+diff --git a/xpcom/tests/TestMFBTRefPtr.cpp b/xpcom/tests/TestMFBTRefPtr.cpp
+new file mode 100644
+--- /dev/null
++++ b/xpcom/tests/TestMFBTRefPtr.cpp
+@@ -0,0 +1,196 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "mozilla/RefPtr.h"
++
++#include "TestHarness.h"
++
++using namespace mozilla;
++
++#if 0
++struct Foo : public RefCounted<Foo>
++{
++    Foo() : dead(false) { }
++    ~Foo() {
++        MOZ_ASSERT(!dead);
++        dead = true;
++        numDestroyed++;
++    }
++
++    bool dead;
++    static int numDestroyed;
++};
++int Foo::numDestroyed;
++
++struct Bar : public Foo { };
++
++TemporaryRef<Foo>
++NewFoo()
++{
++    return RefPtr<Foo>(new Foo());
++}
++
++TemporaryRef<Foo>
++NewBar()
++{
++    return new Bar();
++}
++
++void
++GetNewFoo(Foo** f)
++{
++    *f = new Bar();
++    // Kids, don't try this at home
++    (*f)->AddRef();
++}
++
++void
++GetPassedFoo(Foo** f)
++{
++    // Kids, don't try this at home
++    (*f)->AddRef();
++}
++
++void
++GetNewFoo(RefPtr<Foo>* f)
++{
++    *f = new Bar();
++}
++
++void
++GetPassedFoo(RefPtr<Foo>* f)
++{}
++
++TemporaryRef<Foo>
++GetNullFoo()
++{
++    return 0;
++}
++
++#endif
++
++struct Bar
++{
++  Bar() : refCnt(0) {
++    printf("ctor %d\n", refCnt);
++  };
++  ~Bar() {
++    printf("dtor %d\n", refCnt);
++  };
++  void AddRef() {
++    printf("AddRef %d\n", refCnt);
++    MOZ_ASSERT(refCnt >= 0);
++    ++refCnt;
++  }
++  void Release() {
++    printf("Release %d\n", refCnt);
++    MOZ_ASSERT(refCnt > 0);
++    if (0 == --refCnt) {
++      refCnt = -0xdead;
++      delete this;
++    }
++  }
++
++  int refCnt;
++};
++
++TemporaryRef<Bar>
++get()
++{
++  RefPtr<Bar> bar = new Bar();
++  return bar.forget();
++}
++
++int
++main(int argc, char** argv)
++{
++    // This should blow up
++//    Foo* f = new Foo(); delete f;
++
++    RefPtr<Bar> bar = get();
++
++#if 0
++    RefPtr<Bar> bar = new Bar();
++    TemporaryRef<Bar> tmp = bar.forget();
++    RefPtr<Bar> bar2 = tmp;
++
++    MOZ_ASSERT(0 == Foo::numDestroyed);
++    {
++        RefPtr<Foo> f = new Foo();
++        MOZ_ASSERT(f->refCount() == 1);
++    }
++    MOZ_ASSERT(1 == Foo::numDestroyed);
++
++    {
++        RefPtr<Foo> f1 = NewFoo();
++        RefPtr<Foo> f2(NewFoo());
++        MOZ_ASSERT(1 == Foo::numDestroyed);
++    }
++    MOZ_ASSERT(3 == Foo::numDestroyed);
++
++    {
++        RefPtr<Foo> b = NewBar();
++        MOZ_ASSERT(3 == Foo::numDestroyed);
++    }
++    MOZ_ASSERT(4 == Foo::numDestroyed);
++
++    {
++        RefPtr<Foo> f1;
++        {
++            f1 = new Foo();
++            RefPtr<Foo> f2(f1);
++            RefPtr<Foo> f3 = f2;
++            MOZ_ASSERT(4 == Foo::numDestroyed);
++        }
++        MOZ_ASSERT(4 == Foo::numDestroyed);
++    }
++    MOZ_ASSERT(5 == Foo::numDestroyed);
++
++    {
++        RefPtr<Foo> f = new Foo();
++        f.forget();
++        MOZ_ASSERT(6 == Foo::numDestroyed);
++    }
++
++    {
++        RefPtr<Foo> f = new Foo();
++        GetNewFoo(byRef(f));
++        MOZ_ASSERT(7 == Foo::numDestroyed);
++    }
++    MOZ_ASSERT(8 == Foo::numDestroyed);
++
++    {
++        RefPtr<Foo> f = new Foo();
++        GetPassedFoo(byRef(f));
++        MOZ_ASSERT(8 == Foo::numDestroyed);
++    }
++    MOZ_ASSERT(9 == Foo::numDestroyed);
++
++    {
++        RefPtr<Foo> f = new Foo();
++        GetNewFoo(&f);
++        MOZ_ASSERT(10 == Foo::numDestroyed);
++    }
++    MOZ_ASSERT(11 == Foo::numDestroyed);
++
++    {
++        RefPtr<Foo> f = new Foo();
++        GetPassedFoo(&f);
++        MOZ_ASSERT(11 == Foo::numDestroyed);
++    }
++    MOZ_ASSERT(12 == Foo::numDestroyed);
++
++    {
++        RefPtr<Foo> f1 = new Bar();
++    }
++    MOZ_ASSERT(13 == Foo::numDestroyed);
++
++    {
++        RefPtr<Foo> f = GetNullFoo();
++        MOZ_ASSERT(13 == Foo::numDestroyed);
++    }
++    MOZ_ASSERT(13 == Foo::numDestroyed);
++#endif
++    return 0;
++}

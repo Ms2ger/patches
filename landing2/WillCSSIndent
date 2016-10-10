@@ -1,0 +1,216 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/html/nsHTMLEditRules.cpp b/editor/libeditor/html/nsHTMLEditRules.cpp
+--- a/editor/libeditor/html/nsHTMLEditRules.cpp
++++ b/editor/libeditor/html/nsHTMLEditRules.cpp
+@@ -3563,135 +3563,124 @@ nsHTMLEditRules::WillCSSIndent(nsISelect
+     res = aSelection->Collapse(theBlock,0);
+     selectionResetter.Abort();  // to prevent selection reseter from overriding us.
+     *aHandled = true;
+     return res;
+   }
+   
+   // Ok, now go through all the nodes and put them in a blockquote, 
+   // or whatever is appropriate.  Wohoo!
+-  int32_t i;
+-  nsCOMPtr<nsIDOMNode> curParent;
+   nsCOMPtr<nsIDOMNode> curQuote;
+   nsCOMPtr<nsIDOMNode> curList;
+-  nsCOMPtr<nsIDOMNode> sibling;
+   int32_t listCount = arrayOfNodes.Count();
+-  for (i=0; i<listCount; i++)
+-  {
++  for (int32_t i = 0; i < listCount; ++i) {
+     // here's where we actually figure out what to do
+     nsCOMPtr<nsIDOMNode> curNode = arrayOfNodes[i];
++    nsCOMPtr<nsIContent> curContent = do_QueryInterface(curNode);
+ 
+     // Ignore all non-editable nodes.  Leave them be.
+-    if (!mHTMLEditor->IsEditable(curNode)) continue;
+-
+-    int32_t offset;
+-    res = nsEditor::GetNodeLocation(curNode, address_of(curParent), &offset);
+-    NS_ENSURE_SUCCESS(res, res);
+-    
++    if (!mHTMLEditor->IsEditable(curContent)) {
++      continue;
++    }
++
++    nsCOMPtr<nsIContent> curParent = curContent->GetParent();
++    NS_ENSURE_STATE(curParent);
++
+     // some logic for putting list items into nested lists...
+-    if (nsHTMLEditUtils::IsList(curParent))
+-    {
+-      sibling = nsnull;
+-
++    if (curParent->IsElement() &&
++        nsHTMLEditUtils::IsList(curParent->AsElement())) {
+       // Check for whether we should join a list that follows curNode.
+       // We do this if the next element is a list, and the list is of the
+       // same type (li/ol) as curNode was a part it.
+-      mHTMLEditor->GetNextHTMLSibling(curNode, address_of(sibling));
+-      if (sibling && nsHTMLEditUtils::IsList(sibling))
+-      {
+-        nsAutoString curListTag, siblingListTag;
+-        nsEditor::GetTagString(curParent, curListTag);
+-        nsEditor::GetTagString(sibling, siblingListTag);
+-        if (curListTag == siblingListTag)
+-        {
+-          res = mHTMLEditor->MoveNode(curNode, sibling, 0);
+-          NS_ENSURE_SUCCESS(res, res);
+-          continue;
+-        }
+-      }
++
++      nsCOMPtr<nsIContent> sibling = mHTMLEditor->GetNextHTMLSibling(curContent);
++      if (sibling && sibling->IsElement() &&
++          nsHTMLEditUtils::IsList(sibling->AsElement()) &&
++          curParent->Tag() == sibling->Tag()) {
++        res = mHTMLEditor->MoveNode(curNode, sibling->AsDOMNode(), 0);
++        NS_ENSURE_SUCCESS(res, res);
++        continue;
++      }
++
+       // Check for whether we should join a list that preceeds curNode.
+       // We do this if the previous element is a list, and the list is of
+       // the same type (li/ol) as curNode was a part of.
+-      mHTMLEditor->GetPriorHTMLSibling(curNode, address_of(sibling));
+-      if (sibling && nsHTMLEditUtils::IsList(sibling))
+-      {
+-        nsAutoString curListTag, siblingListTag;
+-        nsEditor::GetTagString(curParent, curListTag);
+-        nsEditor::GetTagString(sibling, siblingListTag);
+-        if (curListTag == siblingListTag)
+-        {
+-          res = mHTMLEditor->MoveNode(curNode, sibling, -1);
+-          NS_ENSURE_SUCCESS(res, res);
+-          continue;
+-        }
+-      }
+-      sibling = nsnull;
++      sibling = mHTMLEditor->GetPriorHTMLSibling(curContent);
++      if (sibling && sibling->IsElement() &&
++          nsHTMLEditUtils::IsList(sibling->AsElement()) &&
++          curParent->Tag() == sibling->Tag()) {
++        res = mHTMLEditor->MoveNode(curNode, sibling->AsDOMNode(), -1);
++        NS_ENSURE_SUCCESS(res, res);
++        continue;
++      }
+       
+       // check to see if curList is still appropriate.  Which it is if
+       // curNode is still right after it in the same list.
+-      if (curList)
+-        mHTMLEditor->GetPriorHTMLSibling(curNode, address_of(sibling));
+-
+-      if (!curList || (sibling && sibling != curList))
++      sibling = curList ? mHTMLEditor->GetPriorHTMLSibling(curContent) : nsnull;
++
++      if (!curList || (sibling && sibling->AsDOMNode() != curList))
+       {
+-        nsAutoString listTag;
+-        nsEditor::GetTagString(curParent,listTag);
+-        ToLowerCase(listTag);
++        nsDependentAtomString listTag(curParent->Tag());
+         // create a new nested list of correct type
+-        res = SplitAsNeeded(&listTag, address_of(curParent), &offset);
++        nsCOMPtr<nsIDOMNode> curDOMParent = curParent->AsDOMNode();
++        int32_t offset;
++        res = SplitAsNeeded(&listTag, address_of(curDOMParent), &offset);
+         NS_ENSURE_SUCCESS(res, res);
+-        res = mHTMLEditor->CreateNode(listTag, curParent, offset, getter_AddRefs(curList));
++
++        res = mHTMLEditor->CreateNode(listTag, curDOMParent, offset, getter_AddRefs(curList));
+         NS_ENSURE_SUCCESS(res, res);
+         // curList is now the correct thing to put curNode in
+         // remember our new block for postprocessing
+         mNewBlock = curList;
+       }
+       // tuck the node into the end of the active list
+       uint32_t listLen;
+       res = mHTMLEditor->GetLengthOfDOMNode(curList, listLen);
+       NS_ENSURE_SUCCESS(res, res);
+       res = mHTMLEditor->MoveNode(curNode, curList, listLen);
+       NS_ENSURE_SUCCESS(res, res);
++
++      continue;
+     }
+     
+-    else // not a list item
+-    {
+-      if (IsBlockNode(curNode)) {
+-        RelativeChangeIndentationOfElementNode(curNode, +1);
+-        curQuote = nsnull;
+-      }
+-      else {
+-        if (!curQuote)
+-        {
+-          // First, check that our element can contain a div.
+-          if (!mEditor->CanContainTag(curParent, nsGkAtoms::div)) {
+-            return NS_OK; // cancelled
+-          }
+-
+-          NS_NAMED_LITERAL_STRING(divquoteType, "div");
+-          res = SplitAsNeeded(&divquoteType, address_of(curParent), &offset);
+-          NS_ENSURE_SUCCESS(res, res);
+-          res = mHTMLEditor->CreateNode(divquoteType, curParent, offset, getter_AddRefs(curQuote));
+-          NS_ENSURE_SUCCESS(res, res);
+-          RelativeChangeIndentationOfElementNode(curQuote, +1);
+-          // remember our new block for postprocessing
+-          mNewBlock = curQuote;
+-          // curQuote is now the correct thing to put curNode in
+-        }
+-        
+-        // tuck the node into the end of the active blockquote
+-        uint32_t quoteLen;
+-        res = mHTMLEditor->GetLengthOfDOMNode(curQuote, quoteLen);
+-        NS_ENSURE_SUCCESS(res, res);
+-        res = mHTMLEditor->MoveNode(curNode, curQuote, quoteLen);
+-        NS_ENSURE_SUCCESS(res, res);
+-      }
+-    }
+-  }
+-  return res;
++    // Not a list item.
++    if (IsBlockNode(curNode)) {
++      RelativeChangeIndentationOfElementNode(curNode, +1);
++      curQuote = nsnull;
++      continue;
++    }
++
++    if (!curQuote) {
++      // First, check that our element can contain a div.
++      if (!mEditor->CanContainTag(curParent->AsDOMNode(), nsGkAtoms::div)) {
++        return NS_OK; // cancelled
++      }
++
++      NS_NAMED_LITERAL_STRING(divquoteType, "div");
++      nsCOMPtr<nsIDOMNode> curDOMParent = curParent->AsDOMNode();
++      int32_t offset;
++      res = SplitAsNeeded(&divquoteType, address_of(curDOMParent), &offset);
++      NS_ENSURE_SUCCESS(res, res);
++      res = mHTMLEditor->CreateNode(divquoteType, curDOMParent, offset, getter_AddRefs(curQuote));
++      NS_ENSURE_SUCCESS(res, res);
++      RelativeChangeIndentationOfElementNode(curQuote, +1);
++      // remember our new block for postprocessing
++      mNewBlock = curQuote;
++      // curQuote is now the correct thing to put curNode in
++    }
++
++    // tuck the node into the end of the active blockquote
++    uint32_t quoteLen;
++    res = mHTMLEditor->GetLengthOfDOMNode(curQuote, quoteLen);
++    NS_ENSURE_SUCCESS(res, res);
++    res = mHTMLEditor->MoveNode(curNode, curQuote, quoteLen);
++    NS_ENSURE_SUCCESS(res, res);
++  }
++
++  return NS_OK;
+ }
+ 
+ nsresult
+ nsHTMLEditRules::WillHTMLIndent(nsISelection *aSelection, bool *aCancel, bool * aHandled)
+ {
+   if (!aSelection || !aCancel || !aHandled) { return NS_ERROR_NULL_POINTER; }
+   nsresult res = WillInsert(aSelection, aCancel);
+   NS_ENSURE_SUCCESS(res, res);

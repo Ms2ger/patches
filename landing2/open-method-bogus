@@ -1,0 +1,33 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsXMLHttpRequest.cpp b/content/base/src/nsXMLHttpRequest.cpp
+--- a/content/base/src/nsXMLHttpRequest.cpp
++++ b/content/base/src/nsXMLHttpRequest.cpp
+@@ -1759,23 +1759,25 @@ nsXMLHttpRequest::Open(const nsACString&
+   return Open(method, url, async, realUser, realPassword);
+ }
+ 
+ nsresult
+ nsXMLHttpRequest::Open(const nsACString& method, const nsACString& url,
+                        bool async, const Optional<nsAString>& user,
+                        const Optional<nsAString>& password)
+ {
+-  NS_ENSURE_ARG(!method.IsEmpty());
+-
+   Telemetry::Accumulate(Telemetry::XMLHTTPREQUEST_ASYNC_OR_SYNC,
+                         async ? 0 : 1);
+ 
+   NS_ENSURE_TRUE(mPrincipal, NS_ERROR_NOT_INITIALIZED);
+ 
++  if (!nsHTTP::IsValidToken(method)) {
++    return NS_ERROR_DOM_SYNTAX_ERR;
++  }
++
+   // Disallow HTTP/1.1 TRACE method (see bug 302489)
+   // and MS IIS equivalent TRACK (see bug 381264)
+   if (method.LowerCaseEqualsLiteral("trace") ||
+       method.LowerCaseEqualsLiteral("track")) {
+     return NS_ERROR_INVALID_ARG;
+   }
+ 
+   // sync request is not allowed using withCredential or responseType

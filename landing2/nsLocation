@@ -1,0 +1,158 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsLocation.cpp b/dom/base/nsLocation.cpp
+--- a/dom/base/nsLocation.cpp
++++ b/dom/base/nsLocation.cpp
+@@ -500,33 +500,18 @@ nsLocation::GetHref(nsAString& aHref)
+       AppendUTF8toUTF16(uriString, aHref);
+     }
+   }
+ 
+   return result;
+ }
+ 
+ NS_IMETHODIMP
+-nsLocation::SetHref(const nsAString& aHref)
++nsLocation::SetHref(JSContext* aCx, const nsAString& aHref)
+ {
+-  nsAutoString oldHref;
+-  nsresult rv = NS_OK;
+-
+-  // Get JSContext from stack.
+-  nsCOMPtr<nsIJSContextStack>
+-    stack(do_GetService("@mozilla.org/js/xpc/ContextStack;1", &rv));
+-
+-  if (NS_FAILED(rv))
+-    return NS_ERROR_FAILURE;
+-
+-  JSContext *cx;
+-
+-  if (NS_FAILED(GetContextFromStack(stack, &cx)))
+-    return NS_ERROR_FAILURE;
+-
+   // According to HTML5 spec, |location.href = ...| must act as if
+   // it were |location.replace(...)| before the page load finishes.
+   //
+   // http://www.w3.org/TR/2011/WD-html5-20110113/history.html#location
+   //
+   // > The href attribute must return the current address of the
+   // > associated Document object, as an absolute URL.
+   // >
+@@ -544,16 +529,18 @@ nsLocation::SetHref(const nsAString& aHr
+   //       if the loading has not finished yet.
+   //
+   //       https://www.w3.org/Bugs/Public/show_bug.cgi?id=17041 
+   //
+   // See bug 39938, bug 72197, bug 178729 and bug 754029.
+   // About other browsers:
+   // http://lists.whatwg.org/pipermail/whatwg-whatwg.org/2010-July/027372.html
+ 
++  nsAutoString oldHref;
++  nsresult rv = NS_OK;
+   bool replace = false;
+   if (!nsEventStateManager::IsHandlingUserInput()) {
+     // "completely loaded" is defined at:
+     //
+     // http://www.w3.org/TR/2012/WD-html5-20120329/the-end.html#completely-loaded
+     //
+     // > 7.  document readiness to "complete", and fire "load".
+     // >
+@@ -580,33 +567,17 @@ nsLocation::SetHref(const nsAString& aHr
+       //
+       // Maybe this API property needs a better name.
+       if (!replace) {
+         docShell->GetIsExecutingOnLoadHandler(&replace);
+       }
+     }
+   }
+ 
+-  if (cx) {
+-    rv = SetHrefWithContext(cx, aHref, replace);
+-  } else {
+-    rv = GetHref(oldHref);
+-
+-    if (NS_SUCCEEDED(rv)) {
+-      nsCOMPtr<nsIURI> oldUri;
+-
+-      rv = NS_NewURI(getter_AddRefs(oldUri), oldHref);
+-
+-      if (oldUri) {
+-        rv = SetHrefWithBase(aHref, oldUri, replace);
+-      }
+-    }
+-  }
+-
+-  return rv;
++  return SetHrefWithContext(cx, aHref, replace);
+ }
+ 
+ nsresult
+ nsLocation::SetHrefWithContext(JSContext* cx, const nsAString& aHref,
+                                bool aReplace)
+ {
+   nsCOMPtr<nsIURI> base;
+ 
+@@ -925,16 +896,17 @@ NS_IMETHODIMP
+ nsLocation::ToString(nsAString& aReturn)
+ {
+   return GetHref(aReturn);
+ }
+ 
+ nsresult
+ nsLocation::GetSourceDocument(JSContext* cx, nsIDocument** aDocument)
+ {
++  *aDocument = nullptr;
+   // XXX Code duplicated from nsHTMLDocument
+   // XXX Tom said this reminded him of the "Six Degrees of
+   // Kevin Bacon" game. We try to get from here to there using
+   // whatever connections possible. The problem is that this
+   // could break if any of the connections along the way change.
+   // I wish there were a better way.
+ 
+   nsresult rv = NS_ERROR_FAILURE;
+@@ -943,23 +915,22 @@ nsLocation::GetSourceDocument(JSContext*
+   // current JSContext is a DOM context with a nsIScriptGlobalObject so
+   // that we can get the url of the caller.
+   // XXX This will fail on non-DOM contexts :(
+ 
+   nsCOMPtr<nsIDOMWindow> window =
+     do_QueryInterface(nsJSUtils::GetDynamicScriptGlobal(cx), &rv);
+ 
+   if (window) {
+-    nsCOMPtr<nsIDOMDocument> domDoc;
++    nsCOMPtr<nsIDocument> document =;
+     rv = window->GetDocument(getter_AddRefs(domDoc));
+     if (domDoc) {
+       return CallQueryInterface(domDoc, aDocument);
+     }
+   } else {
+-    *aDocument = nullptr;
+   }
+ 
+   return rv;
+ }
+ 
+ nsresult
+ nsLocation::GetSourceBaseURL(JSContext* cx, nsIURI** sourceURL)
+ {
+diff --git a/dom/interfaces/base/nsIDOMLocation.idl b/dom/interfaces/base/nsIDOMLocation.idl
+--- a/dom/interfaces/base/nsIDOMLocation.idl
++++ b/dom/interfaces/base/nsIDOMLocation.idl
+@@ -11,16 +11,17 @@ interface nsIDOMLocation : nsISupports
+            /**
+             * These properties refer to the current location of the document.
+             * This will correspond to the URI shown in the location bar, which
+             * can be different from the documentURI of the document.
+             */
+            attribute DOMString        hash;
+            attribute DOMString        host;
+            attribute DOMString        hostname;
++  [implicit_jscontext]
+            attribute DOMString        href;
+            attribute DOMString        pathname;
+            attribute DOMString        port;
+            attribute DOMString        protocol;
+            attribute DOMString        search;
+ 
+   void                      reload([optional] in boolean forceget);
+   void                      replace(in DOMString url);

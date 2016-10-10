@@ -1,0 +1,193 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -1831,23 +1831,22 @@ nsGlobalWindow::SetNewDocument(nsIDocume
+   mDoc = aDocument;
+ 
+ #ifdef DEBUG
+   mLastOpenedURI = aDocument->GetDocumentURI();
+ #endif
+ 
+   mContext->WillInitializeContext();
+ 
+-  nsGlobalWindow *currentInner = GetCurrentInnerWindowInternal();
++  nsRefPtr<nsGlobalWindow> currentInner = GetCurrentInnerWindowInternal();
+ 
+   if (currentInner && currentInner->mNavigator) {
+     currentInner->mNavigator->OnNavigation();
+   }
+ 
+-  nsRefPtr<nsGlobalWindow> newInnerWindow;
+   bool createdInnerWindow = false;
+ 
+   bool thisChrome = IsChromeWindow();
+ 
+   bool isChrome = false;
+ 
+   nsCxPusher cxPusher;
+   if (!cxPusher.Push(cx)) {
+@@ -1858,17 +1857,16 @@ nsGlobalWindow::SetNewDocument(nsIDocume
+ 
+   nsCOMPtr<WindowStateHolder> wsh = do_QueryInterface(aState);
+   NS_ASSERTION(!aState || wsh, "What kind of weird state are you giving me here?");
+ 
+   if (reUseInnerWindow) {
+     // We're reusing the current inner window.
+     NS_ASSERTION(!currentInner->IsFrozen(),
+                  "We should never be reusing a shared inner window");
+-    newInnerWindow = currentInner;
+ 
+     if (documentChanged) {
+       xpc_UnmarkGrayObject(currentInner->mJSObject);
+       nsWindowSH::InvalidateGlobalScopePolluter(cx, currentInner->mJSObject);
+     }
+ 
+     // We're reusing the inner window, but this still counts as a navigation,
+     // so all expandos and such defined on the outer window should go away. Force
+@@ -1881,16 +1879,17 @@ nsGlobalWindow::SetNewDocument(nsIDocume
+     // Inner windows are only reused for same-origin principals, but the principals
+     // don't necessarily match exactly. Update the principal on the compartment to
+     // match the new document.
+     // NB: We don't just call currentInner->RefreshCompartmentPrincipals() here
+     // because we haven't yet set its mDoc to aDocument.
+     JS_SetCompartmentPrincipals(js::GetObjectCompartment(currentInner->mJSObject),
+                                 nsJSPrincipals::get(aDocument->NodePrincipal()));
+   } else {
++    nsRefPtr<nsGlobalWindow> newInnerWindow;
+     if (aState) {
+       newInnerWindow = wsh->GetInnerWindow();
+       mInnerWindowHolder = wsh->GetInnerWindowHolder();
+ 
+       NS_ASSERTION(newInnerWindow, "Got a state without inner window");
+     } else if (thisChrome) {
+       newInnerWindow = new nsGlobalChromeWindow(this);
+       isChrome = true;
+@@ -1957,17 +1956,17 @@ nsGlobalWindow::SetNewDocument(nsIDocume
+ 
+       // Don't free objects on our current inner window if it's going to be
+       // held in the bfcache.
+       if (!currentInner->IsFrozen()) {
+         currentInner->FreeInnerObjects();
+       }
+     }
+ 
+-    mInnerWindow = newInnerWindow;
++    mInnerWindow = currentInner = newInnerWindow;
+ 
+     if (!mJSObject) {
+       CreateOuterObject(newInnerWindow);
+       mContext->DidInitializeContext();
+ 
+       mJSObject = mContext->GetNativeGlobal();
+       SetWrapper(mJSObject);
+     } else {
+@@ -2052,17 +2051,17 @@ nsGlobalWindow::SetNewDocument(nsIDocume
+ 
+   if (!aState && !reUseInnerWindow) {
+     // Loading a new page and creating a new inner window, *not*
+     // restoring from session history.
+ 
+     // Now that both the the inner and outer windows are initialized
+     // let the script context do its magic to hook them together.
+ #ifdef DEBUG
+-    JSObject* newInnerJSObject = newInnerWindow->FastGetGlobalJSObject();
++    JSObject* newInnerJSObject = currentInner->FastGetGlobalJSObject();
+ #endif
+ 
+     // Now that we're connecting the outer global to the inner one,
+     // we must have transplanted it. The JS engine tries to maintain
+     // the global object's compartment as its default compartment,
+     // so update that now since it might have changed.
+     JS_SetGlobalObject(cx, mJSObject);
+     NS_ASSERTION(JS_GetPrototype(mJSObject) ==
+@@ -2089,74 +2088,73 @@ nsGlobalWindow::SetNewDocument(nsIDocume
+   // XPConnect's internal marking of wrapper prototypes) as long as
+   // the inner window was around, and if the GSP had properties on
+   // it that held an element alive we'd hold the document alive,
+   // which could hold event handlers alive, which hold the context
+   // alive etc.
+ 
+   if ((!reUseInnerWindow || documentChanged) && !aState) {
+     nsCOMPtr<nsIHTMLDocument> html_doc(do_QueryInterface(mDocument));
+-    nsWindowSH::InstallGlobalScopePolluter(cx, newInnerWindow->mJSObject,
++    nsWindowSH::InstallGlobalScopePolluter(cx, currentInner->mJSObject,
+                                            html_doc);
+   }
+ 
+-  aDocument->SetScriptGlobalObject(newInnerWindow);
++  aDocument->SetScriptGlobalObject(currentInner);
+ 
+   if (!aState) {
+     if (reUseInnerWindow) {
+-      if (newInnerWindow->mDoc != aDocument) {
+-        newInnerWindow->mDocument = do_QueryInterface(aDocument);
+-        newInnerWindow->mDoc = aDocument;
++      if (currentInner->mDoc != aDocument) {
++        currentInner->mDocument = do_QueryInterface(aDocument);
++        currentInner->mDoc = aDocument;
+ 
+         // We're reusing the inner window for a new document. In this
+         // case we don't clear the inner window's scope, but we must
+         // make sure the cached document property gets updated.
+ 
+-        // XXXmarkh - tell other languages about this?
+-        ::JS_DeleteProperty(cx, currentInner->mJSObject, "document");
++        JS_DeleteProperty(cx, currentInner->mJSObject, "document");
+       }
+     } else {
+-      newInnerWindow->InnerSetNewDocument(aDocument);
++      currentInner->InnerSetNewDocument(aDocument);
+ 
+       // Initialize DOM classes etc on the inner window.
+-      rv = mContext->InitClasses(newInnerWindow->mJSObject);
++      rv = mContext->InitClasses(currentInner->mJSObject);
+       NS_ENSURE_SUCCESS(rv, rv);
+     }
+ 
+     if (mArguments) {
+-      newInnerWindow->DefineArgumentsProperty(mArguments);
+-      newInnerWindow->mArguments = mArguments;
+-      newInnerWindow->mArgumentsOrigin = mArgumentsOrigin;
++      currentInner->DefineArgumentsProperty(mArguments);
++      currentInner->mArguments = mArguments;
++      currentInner->mArgumentsOrigin = mArgumentsOrigin;
+ 
+       mArguments = nullptr;
+       mArgumentsOrigin = nullptr;
+     }
+ 
+     // Give the new inner window our chrome event handler (since it
+     // doesn't have one).
+-    newInnerWindow->mChromeEventHandler = mChromeEventHandler;
++    currentInner->mChromeEventHandler = mChromeEventHandler;
+   }
+ 
+   mContext->GC(js::gcreason::SET_NEW_DOCUMENT);
+   mContext->DidInitializeContext();
+ 
+-  if (newInnerWindow && !newInnerWindow->mHasNotifiedGlobalCreated && mDoc) {
++  if (currentInner && !currentInner->mHasNotifiedGlobalCreated && mDoc) {
+     // We should probably notify. However if this is the, arguably bad,
+     // situation when we're creating a temporary non-chrome-about-blank
+     // document in a chrome docshell, don't notify just yet. Instead wait
+     // until we have a real chrome doc.
+     nsCOMPtr<nsIDocShellTreeItem> treeItem(do_QueryInterface(mDocShell));
+     int32_t itemType = nsIDocShellTreeItem::typeContent;
+     if (treeItem) {
+       treeItem->GetItemType(&itemType);
+     }
+ 
+     if (itemType != nsIDocShellTreeItem::typeChrome ||
+         nsContentUtils::IsSystemPrincipal(mDoc->NodePrincipal())) {
+-      newInnerWindow->mHasNotifiedGlobalCreated = true;
++      currentInner->mHasNotifiedGlobalCreated = true;
+       nsContentUtils::AddScriptRunner(
+         NS_NewRunnableMethod(this, &nsGlobalWindow::DispatchDOMWindowCreated));
+     }
+   }
+ 
+   return NS_OK;
+ }
+ 

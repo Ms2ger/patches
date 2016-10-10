@@ -1,0 +1,215 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCNativeInterface.h b/js/xpconnect/src/XPCNativeInterface.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCNativeInterface.h
+@@ -0,0 +1,82 @@
++#ifndef XPCNativeInterface_h
++#define XPCNativeInterface_h
++
++#include "nsIInterfaceInfo.h"
++#include "XPCNativeMember.h"
++
++#include "prtypes.h"
++
++#include "nsCOMPtr.h"
++
++#include "jspubtd.h"
++
++class XPCCallContext;
++
++// XPCNativeInterface represents a single idl declared interface. This is
++// primarily the set of XPCNativeMembers.
++
++// Tight. No virtual methods.
++
++class XPCNativeInterface
++{
++public:
++    static XPCNativeInterface* GetNewOrUsed(XPCCallContext& ccx,
++                                            const nsIID* iid);
++    static XPCNativeInterface* GetNewOrUsed(XPCCallContext& ccx,
++                                            nsIInterfaceInfo* info);
++    static XPCNativeInterface* GetNewOrUsed(XPCCallContext& ccx,
++                                            const char* name);
++    static XPCNativeInterface* GetISupports(XPCCallContext& ccx);
++
++    inline nsIInterfaceInfo* GetInterfaceInfo() const {return mInfo.get();}
++    inline jsid              GetName()          const {return mName;}
++
++    inline const nsIID* GetIID() const;
++    inline const char*  GetNameString() const;
++    inline XPCNativeMember* FindMember(jsid name) const;
++
++    inline JSBool HasAncestor(const nsIID* iid) const;
++
++    uint16_t GetMemberCount() const
++        {NS_ASSERTION(!IsMarked(), "bad"); return mMemberCount;}
++    XPCNativeMember* GetMemberAt(uint16_t i)
++        {NS_ASSERTION(i < mMemberCount, "bad index"); return &mMembers[i];}
++
++    void DebugDump(int16_t depth);
++
++#define XPC_NATIVE_IFACE_MARK_FLAG ((uint16_t)JS_BIT(15)) // only high bit of 16 is set
++
++    void Mark()     {mMemberCount |= XPC_NATIVE_IFACE_MARK_FLAG;}
++    void Unmark()   {mMemberCount &= ~XPC_NATIVE_IFACE_MARK_FLAG;}
++    JSBool IsMarked() const
++                    {return 0 != (mMemberCount & XPC_NATIVE_IFACE_MARK_FLAG);}
++
++    // NOP. This is just here to make the AutoMarkingPtr code compile.
++    inline void TraceJS(JSTracer* trc) {}
++    inline void AutoTrace(JSTracer* trc) {}
++
++    static void DestroyInstance(XPCNativeInterface* inst);
++
++protected:
++    static XPCNativeInterface* NewInstance(XPCCallContext& ccx,
++                                           nsIInterfaceInfo* aInfo);
++
++    XPCNativeInterface();   // not implemented
++    XPCNativeInterface(nsIInterfaceInfo* aInfo, jsid aName)
++        : mInfo(aInfo), mName(aName), mMemberCount(0)
++                          {MOZ_COUNT_CTOR(XPCNativeInterface);}
++    ~XPCNativeInterface() {MOZ_COUNT_DTOR(XPCNativeInterface);}
++
++    void* operator new(size_t, void* p) CPP_THROW_NEW {return p;}
++
++    XPCNativeInterface(const XPCNativeInterface& r); // not implemented
++    XPCNativeInterface& operator= (const XPCNativeInterface& r); // not implemented
++
++private:
++    nsCOMPtr<nsIInterfaceInfo> mInfo;
++    jsid                       mName;
++    uint16_t          mMemberCount;
++    XPCNativeMember   mMembers[1]; // always last - object sized for array
++};
++
++#endif // XPCNativeInterface_h
+diff --git a/js/xpconnect/src/XPCWrappedNativeInfo.cpp b/js/xpconnect/src/XPCWrappedNativeInfo.cpp
+--- a/js/xpconnect/src/XPCWrappedNativeInfo.cpp
++++ b/js/xpconnect/src/XPCWrappedNativeInfo.cpp
+@@ -38,16 +38,17 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* Manage the shared info about interfaces for use by wrappedNatives. */
+ 
+ #include "XPCNativeSet.h"
+ #include "XPCNativeMember.h"
++#include "XPCNativeInterface.h"
+ 
+ #include "xpcprivate.h"
+ 
+ /***************************************************************************/
+ 
+ // XPCNativeMember
+ 
+ // static
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -150,16 +150,17 @@
+ #include "nsXPConnect.h"
+ #include "XPCJSRuntime.h"
+ #include "XPCContext.h"
+ #include "XPCReadableJSStringWrapper.h"
+ #include "XPCCallContext.h"
+ #include "XPCLazyCallContext.h"
+ #include "XPCWrappedNativeScope.h"
+ #include "XPCNativeMember.h"
++#include "XPCNativeInterface.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -448,83 +449,16 @@ enum WrapperType {
+     COW             = 1 << 4,
+     SOW             = 1 << 5
+ };
+ 
+ }
+ 
+ /***************************************************************************/
+ /***************************************************************************/
+-// XPCNativeInterface represents a single idl declared interface. This is
+-// primarily the set of XPCNativeMembers.
+-
+-// Tight. No virtual methods.
+-
+-class XPCNativeInterface
+-{
+-public:
+-    static XPCNativeInterface* GetNewOrUsed(XPCCallContext& ccx,
+-                                            const nsIID* iid);
+-    static XPCNativeInterface* GetNewOrUsed(XPCCallContext& ccx,
+-                                            nsIInterfaceInfo* info);
+-    static XPCNativeInterface* GetNewOrUsed(XPCCallContext& ccx,
+-                                            const char* name);
+-    static XPCNativeInterface* GetISupports(XPCCallContext& ccx);
+-
+-    inline nsIInterfaceInfo* GetInterfaceInfo() const {return mInfo.get();}
+-    inline jsid              GetName()          const {return mName;}
+-
+-    inline const nsIID* GetIID() const;
+-    inline const char*  GetNameString() const;
+-    inline XPCNativeMember* FindMember(jsid name) const;
+-
+-    inline JSBool HasAncestor(const nsIID* iid) const;
+-
+-    uint16_t GetMemberCount() const
+-        {NS_ASSERTION(!IsMarked(), "bad"); return mMemberCount;}
+-    XPCNativeMember* GetMemberAt(uint16_t i)
+-        {NS_ASSERTION(i < mMemberCount, "bad index"); return &mMembers[i];}
+-
+-    void DebugDump(int16_t depth);
+-
+-#define XPC_NATIVE_IFACE_MARK_FLAG ((uint16_t)JS_BIT(15)) // only high bit of 16 is set
+-
+-    void Mark()     {mMemberCount |= XPC_NATIVE_IFACE_MARK_FLAG;}
+-    void Unmark()   {mMemberCount &= ~XPC_NATIVE_IFACE_MARK_FLAG;}
+-    JSBool IsMarked() const
+-                    {return 0 != (mMemberCount & XPC_NATIVE_IFACE_MARK_FLAG);}
+-
+-    // NOP. This is just here to make the AutoMarkingPtr code compile.
+-    inline void TraceJS(JSTracer* trc) {}
+-    inline void AutoTrace(JSTracer* trc) {}
+-
+-    static void DestroyInstance(XPCNativeInterface* inst);
+-
+-protected:
+-    static XPCNativeInterface* NewInstance(XPCCallContext& ccx,
+-                                           nsIInterfaceInfo* aInfo);
+-
+-    XPCNativeInterface();   // not implemented
+-    XPCNativeInterface(nsIInterfaceInfo* aInfo, jsid aName)
+-        : mInfo(aInfo), mName(aName), mMemberCount(0)
+-                          {MOZ_COUNT_CTOR(XPCNativeInterface);}
+-    ~XPCNativeInterface() {MOZ_COUNT_DTOR(XPCNativeInterface);}
+-
+-    void* operator new(size_t, void* p) CPP_THROW_NEW {return p;}
+-
+-    XPCNativeInterface(const XPCNativeInterface& r); // not implemented
+-    XPCNativeInterface& operator= (const XPCNativeInterface& r); // not implemented
+-
+-private:
+-    nsCOMPtr<nsIInterfaceInfo> mInfo;
+-    jsid                       mName;
+-    uint16_t          mMemberCount;
+-    XPCNativeMember   mMembers[1]; // always last - object sized for array
+-};
+-
+ /***************************************************************************/
+ // XPCNativeSetKey is used to key a XPCNativeSet in a NativeSetMap.
+ 
+ class XPCNativeSetKey
+ {
+ public:
+     XPCNativeSetKey(XPCNativeSet*       BaseSet  = nsnull,
+                     XPCNativeInterface* Addition = nsnull,

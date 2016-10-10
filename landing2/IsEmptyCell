@@ -1,0 +1,145 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -4863,20 +4863,31 @@ nsHTMLEditor::IsVisTextNode(nsIContent* 
+ nsresult
+ nsHTMLEditor::IsEmptyNode( nsIDOMNode *aNode, 
+                            bool *outIsEmptyNode, 
+                            bool aSingleBRDoesntCount,
+                            bool aListOrCellNotEmpty,
+                            bool aSafeToAskFrames)
+ {
+   nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
+-  NS_ENSURE_TRUE(node && outIsEmptyNode, NS_ERROR_NULL_POINTER);
++  return IsEmptyNode(node, outIsEmptyNode, aSingleBRDoesntCount,
++                     aListOrCellNotEmpty, aSafeToAskFrames);
++}
++
++nsresult
++nsHTMLEditor::IsEmptyNode(nsINode* aNode,
++                          bool* outIsEmptyNode,
++                          bool aSingleBRDoesntCount,
++                          bool aListOrCellNotEmpty,
++                          bool aSafeToAskFrames)
++{
++  NS_ENSURE_TRUE(aNode && outIsEmptyNode, NS_ERROR_NULL_POINTER);
+   *outIsEmptyNode = true;
+   bool seenBR = false;
+-  return IsEmptyNodeImpl(node, outIsEmptyNode, aSingleBRDoesntCount,
++  return IsEmptyNodeImpl(aNode, outIsEmptyNode, aSingleBRDoesntCount,
+                          aListOrCellNotEmpty, aSafeToAskFrames, &seenBR);
+ }
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // IsEmptyNodeImpl: workhorse for IsEmptyNode.
+ //                  
+ nsresult
+ nsHTMLEditor::IsEmptyNodeImpl(nsINode* aNode,
+diff --git a/editor/libeditor/html/nsHTMLEditor.h b/editor/libeditor/html/nsHTMLEditor.h
+--- a/editor/libeditor/html/nsHTMLEditor.h
++++ b/editor/libeditor/html/nsHTMLEditor.h
+@@ -390,16 +390,20 @@ public:
+ 
+   nsresult IsVisTextNode(nsIContent* aNode,
+                          bool* outIsEmptyNode,
+                          bool aSafeToAskFrames);
+   nsresult IsEmptyNode(nsIDOMNode *aNode, bool *outIsEmptyBlock, 
+                        bool aMozBRDoesntCount = false,
+                        bool aListOrCellNotEmpty = false,
+                        bool aSafeToAskFrames = false);
++  nsresult IsEmptyNode(nsINode* aNode, bool* outIsEmptyBlock,
++                       bool aMozBRDoesntCount = false,
++                       bool aListOrCellNotEmpty = false,
++                       bool aSafeToAskFrames = false);
+   nsresult IsEmptyNodeImpl(nsINode* aNode,
+                            bool *outIsEmptyBlock, 
+                            bool aMozBRDoesntCount,
+                            bool aListOrCellNotEmpty,
+                            bool aSafeToAskFrames,
+                            bool *aSeenBR);
+ 
+   // Returns TRUE if sheet was loaded, false if it wasn't
+diff --git a/editor/libeditor/html/nsTableEditor.cpp b/editor/libeditor/html/nsTableEditor.cpp
+--- a/editor/libeditor/html/nsTableEditor.cpp
++++ b/editor/libeditor/html/nsTableEditor.cpp
+@@ -57,17 +57,19 @@
+ #include "nsISelectionPrivate.h"  // For nsISelectionPrivate::TABLESELECTION_ defines
+ #include "nsTArray.h"
+ 
+ #include "nsEditorUtils.h"
+ #include "nsTextEditUtils.h"
+ #include "nsHTMLEditUtils.h"
+ #include "nsLayoutErrors.h"
+ 
+-
++#include "mozilla/dom/Element.h"
++
++using namespace mozilla;
+ 
+ /***************************************************************************
+  * stack based helper class for restoring selection after table edit
+  */
+ class NS_STACK_CLASS nsSetSelectionAfterTableEdit
+ {
+   private:
+     nsCOMPtr<nsITableEditor> mEd;
+@@ -3436,36 +3438,33 @@ nsHTMLEditor::AllCellsInColumnSelected(n
+     NS_ENSURE_TRUE(isSelected, false);
+   }
+   return true;
+ }
+ 
+ bool 
+ nsHTMLEditor::IsEmptyCell(nsIDOMElement *aCell)
+ {
+-  nsCOMPtr<nsIDOMNode> cellChild;
++  nsCOMPtr<dom::Element> cell = do_QueryInterface(aCell);
+ 
+   // Check if target only contains empty text node or <br>
+-  nsresult res = aCell->GetFirstChild(getter_AddRefs(cellChild));
+-  NS_ENSURE_SUCCESS(res, false);
+-
+-  if (cellChild)
+-  {
+-    nsCOMPtr<nsIDOMNode> nextChild;
+-    res = cellChild->GetNextSibling(getter_AddRefs(nextChild));
+-    NS_ENSURE_SUCCESS(res, false);
+-    if (!nextChild)
+-    {
+-      // We insert a single break into a cell by default
+-      //   to have some place to locate a cursor -- it is dispensable
+-      bool isEmpty = nsTextEditUtils::IsBreak(cellChild);
+-      // Or check if no real content
+-      if (!isEmpty)
+-      {
+-        res = IsEmptyNode(cellChild, &isEmpty, false, false);
+-        NS_ENSURE_SUCCESS(res, false);
+-      }
+-
+-      return isEmpty;
+-    }
++  nsCOMPtr<nsINode> cellChild = cell->GetFirstChild();
++  if (!cellChild) {
++    return false;
+   }
+-  return false;
++
++  nsCOMPtr<nsINode> nextChild = cellChild->GetNextSibling();
++  if (nextChild) {
++    return false;
++  }
++
++  // We insert a single break into a cell by default
++  //   to have some place to locate a cursor -- it is dispensable
++  if (cellChild->IsElement() && cellChild->AsElement()->IsHTML(nsGkAtoms::br)) {
++    return true;
++  }
++
++  bool isEmpty;
++  // Or check if no real content
++  nsresult rv = IsEmptyNode(cellChild, &isEmpty, false, false);
++  NS_ENSURE_SUCCESS(rv, false);
++  return isEmpty;
+ }

@@ -1,0 +1,635 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -1,17 +1,15 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* vim: set ts=2 sw=2 et tw=78: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "mozilla/Util.h"
+-// On top because they include basictypes.h:
+-#include "mozilla/dom/SmsFilter.h"
+ 
+ #ifdef XP_WIN
+ #undef GetClassName
+ #endif
+ 
+ // JavaScript includes
+ #include "jsapi.h"
+ #include "jsfriendapi.h"
+@@ -252,17 +250,16 @@ using mozilla::dom::workers::ResolveWork
+ 
+ #include "BatteryManager.h"
+ #include "nsIDOMPowerManager.h"
+ #include "nsIDOMWakeLock.h"
+ #include "nsIDOMSmsManager.h"
+ #include "nsIDOMMobileMessageManager.h"
+ #include "nsIDOMMozSmsMessage.h"
+ #include "nsIDOMMozMmsMessage.h"
+-#include "nsIDOMSmsFilter.h"
+ #include "nsIDOMSmsSegmentInfo.h"
+ #include "nsIDOMMozMobileMessageThread.h"
+ #include "nsIDOMConnection.h"
+ #include "mozilla/dom/network/Utils.h"
+ 
+ #ifdef MOZ_B2G_RIL
+ #include "Telephony.h"
+ #include "TelephonyCall.h"
+@@ -680,19 +677,16 @@ static nsDOMClassInfoData sClassInfoData
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+ 
+   NS_DEFINE_CLASSINFO_DATA(MozSmsMessage, nsDOMGenericSH,
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+ 
+   NS_DEFINE_CLASSINFO_DATA(MozMmsMessage, nsDOMGenericSH,
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+ 
+-  NS_DEFINE_CLASSINFO_DATA(MozSmsFilter, nsDOMGenericSH,
+-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
+-
+   NS_DEFINE_CLASSINFO_DATA(MozSmsSegmentInfo, nsDOMGenericSH,
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+ 
+   NS_DEFINE_CLASSINFO_DATA(MozMobileMessageThread, nsDOMGenericSH,
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+ 
+   NS_DEFINE_CLASSINFO_DATA(MozConnection, nsDOMGenericSH,
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+@@ -843,17 +837,16 @@ static const nsConstructorFuncMapData kC
+ {
+   NS_DEFINE_CONSTRUCTOR_FUNC_DATA(Blob, nsDOMMultipartFile::NewBlob)
+   NS_DEFINE_CONSTRUCTOR_FUNC_DATA(File, nsDOMMultipartFile::NewFile)
+ #define MOZ_GENERATED_EVENT_LIST
+ #define MOZ_GENERATED_EVENT(_event_interface) \
+   NS_DEFINE_EVENT_CONSTRUCTOR_FUNC_DATA(_event_interface)
+ #include "GeneratedEvents.h"
+ #undef MOZ_GENERATED_EVENT_LIST
+-  NS_DEFINE_CONSTRUCTOR_FUNC_DATA(MozSmsFilter, SmsFilter::NewSmsFilter)
+   NS_DEFINE_CONSTRUCTOR_FUNC_DATA(XSLTProcessor, XSLTProcessorCtor)
+ };
+ #undef NS_DEFINE_CONSTRUCTOR_FUNC_DATA
+ #undef NS_DEFINE_EVENT_CONSTRUCTOR_FUNC_DATA
+ 
+ nsIXPConnect *nsDOMClassInfo::sXPConnect = nullptr;
+ nsIScriptSecurityManager *nsDOMClassInfo::sSecMan = nullptr;
+ bool nsDOMClassInfo::sIsInitialized = false;
+@@ -1714,20 +1707,16 @@ nsDOMClassInfo::Init()
+   DOM_CLASSINFO_MAP_BEGIN(MozSmsMessage, nsIDOMMozSmsMessage)
+      DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozSmsMessage)
+   DOM_CLASSINFO_MAP_END
+ 
+   DOM_CLASSINFO_MAP_BEGIN(MozMmsMessage, nsIDOMMozMmsMessage)
+      DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozMmsMessage)
+   DOM_CLASSINFO_MAP_END
+ 
+-  DOM_CLASSINFO_MAP_BEGIN(MozSmsFilter, nsIDOMMozSmsFilter)
+-     DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozSmsFilter)
+-  DOM_CLASSINFO_MAP_END
+-
+   DOM_CLASSINFO_MAP_BEGIN(MozSmsSegmentInfo, nsIDOMMozSmsSegmentInfo)
+      DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozSmsSegmentInfo)
+   DOM_CLASSINFO_MAP_END
+ 
+   DOM_CLASSINFO_MAP_BEGIN(MozMobileMessageThread, nsIDOMMozMobileMessageThread)
+      DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozMobileMessageThread)
+   DOM_CLASSINFO_MAP_END
+ 
+diff --git a/dom/base/nsDOMClassInfoClasses.h b/dom/base/nsDOMClassInfoClasses.h
+--- a/dom/base/nsDOMClassInfoClasses.h
++++ b/dom/base/nsDOMClassInfoClasses.h
+@@ -119,17 +119,16 @@ DOMCI_CLASS(GeoPositionCoords)
+ 
+ DOMCI_CLASS(MozPowerManager)
+ DOMCI_CLASS(MozWakeLock)
+ 
+ DOMCI_CLASS(MozSmsManager)
+ DOMCI_CLASS(MozMobileMessageManager)
+ DOMCI_CLASS(MozSmsMessage)
+ DOMCI_CLASS(MozMmsMessage)
+-DOMCI_CLASS(MozSmsFilter)
+ DOMCI_CLASS(MozSmsSegmentInfo)
+ DOMCI_CLASS(MozMobileMessageThread)
+ 
+ DOMCI_CLASS(MozConnection)
+ #ifdef MOZ_B2G_RIL
+ DOMCI_CLASS(MozMobileConnection)
+ DOMCI_CLASS(MozCellBroadcast)
+ #endif
+diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
+--- a/dom/bindings/Bindings.conf
++++ b/dom/bindings/Bindings.conf
+@@ -650,16 +650,20 @@ DOMInterfaces = {
+ {
+     'workers': True,
+ }],
+ 
+ 'MozNamedAttrMap': {
+     'nativeType': 'nsDOMAttributeMap',
+ },
+ 
++'MozSmsFilter': {
++    'nativeType': 'mozilla::dom::SmsFilter',
++},
++
+ 'MozTimeManager': {
+     'nativeType': 'mozilla::dom::time::TimeManager',
+ },
+ 
+ 'MozStkCommandEvent' : {
+     'nativeType': 'mozilla::dom::icc::StkCommandEvent',
+     'headerFile': 'StkCommandEvent.h',
+ },
+diff --git a/dom/mobilemessage/interfaces/nsIDOMSmsFilter.idl b/dom/mobilemessage/interfaces/nsIDOMSmsFilter.idl
+--- a/dom/mobilemessage/interfaces/nsIDOMSmsFilter.idl
++++ b/dom/mobilemessage/interfaces/nsIDOMSmsFilter.idl
+@@ -2,32 +2,9 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "nsISupports.idl"
+ 
+ [scriptable, builtinclass, uuid(17890b60-0367-45c6-9729-62e5bf349b2b)]
+ interface nsIDOMMozSmsFilter : nsISupports
+ {
+-  // A date that can return null.
+-  [implicit_jscontext]
+-  attribute jsval startDate;
+-
+-  // A date that can return null.
+-  [implicit_jscontext]
+-  attribute jsval endDate;
+-
+-  // An array of DOMString that can return null.
+-  [implicit_jscontext]
+-  attribute jsval numbers;
+-
+-  // A DOMString that can return and be set to "sent", "received" or null.
+-  [Null(Empty)]
+-  attribute DOMString delivery;
+-
+-  // A read flag that can return and be set to a boolean or null.
+-  [implicit_jscontext]
+-  attribute jsval read;
+-
+-  // A thread id that can return and be set to a numeric value or null.
+-  [implicit_jscontext]
+-  attribute jsval threadId;
+ };
+diff --git a/dom/mobilemessage/src/SmsFilter.cpp b/dom/mobilemessage/src/SmsFilter.cpp
+--- a/dom/mobilemessage/src/SmsFilter.cpp
++++ b/dom/mobilemessage/src/SmsFilter.cpp
+@@ -11,25 +11,22 @@
+ #include "jsapi.h"
+ #include "jsfriendapi.h" // For js_DateGetMsecSinceEpoch.
+ #include "js/Utility.h"
+ #include "nsJSUtils.h"
+ #include "nsDOMString.h"
+ 
+ using namespace mozilla::dom::mobilemessage;
+ 
+-DOMCI_DATA(MozSmsFilter, mozilla::dom::SmsFilter)
+-
+ namespace mozilla {
+ namespace dom {
+ 
+ NS_INTERFACE_MAP_BEGIN(SmsFilter)
+   NS_INTERFACE_MAP_ENTRY(nsIDOMMozSmsFilter)
+   NS_INTERFACE_MAP_ENTRY(nsISupports)
+-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(MozSmsFilter)
+ NS_INTERFACE_MAP_END
+ 
+ NS_IMPL_ADDREF(SmsFilter)
+ NS_IMPL_RELEASE(SmsFilter)
+ 
+ SmsFilter::SmsFilter()
+ {
+   mData.startDate() = 0;
+@@ -46,264 +43,163 @@ SmsFilter::SmsFilter(const SmsFilterData
+ 
+ /* static */ nsresult
+ SmsFilter::NewSmsFilter(nsISupports** aSmsFilter)
+ {
+   NS_ADDREF(*aSmsFilter = new SmsFilter());
+   return NS_OK;
+ }
+ 
+-NS_IMETHODIMP
+-SmsFilter::GetStartDate(JSContext* aCx, JS::Value* aStartDate)
++/* static */ already_AddRefed<SmsFilter>
++SmsFilter::Constructor(const GlobalObject& aGlobal, ErrorResult& aRv)
++{
++  nsRefPtr<SmsFilter> filter = new SmsFilter();
++  return filter.forget();
++}
++
++Nullable<Date>
++SmsFilter::GetStartDate()
+ {
+   if (mData.startDate() == 0) {
+-    *aStartDate = JSVAL_NULL;
+-    return NS_OK;
++    return Nullable<Date>();
+   }
+ 
+-  aStartDate->setObjectOrNull(JS_NewDateObjectMsec(aCx, mData.startDate()));
+-  NS_ENSURE_TRUE(aStartDate->isObject(), NS_ERROR_FAILURE);
+-
+-  return NS_OK;
++  return Nullable<Date>(mData.startDate());
+ }
+ 
+-NS_IMETHODIMP
+-SmsFilter::SetStartDate(JSContext* aCx, const JS::Value& aStartDate)
++void
++SmsFilter::SetStartDate(const Nullable<Date>& aStartDate)
+ {
+-  if (aStartDate == JSVAL_NULL) {
++  if (aStartDate.IsNull()) {
+     mData.startDate() = 0;
+-    return NS_OK;
++    return;
+   }
+ 
+-  if (!aStartDate.isObject()) {
+-    return NS_ERROR_INVALID_ARG;
++  mData.startDate() = aStartDate.TimeStamp();
++}
++
++Nullable<Date>
++SmsFilter::GetEndDate()
++{
++  if (mData.endDate() == 0) {
++    return Nullable<Date>();
+   }
+ 
+-  JS::Rooted<JSObject*> obj(aCx, &aStartDate.toObject());
+-  if (!JS_ObjectIsDate(aCx, obj)) {
+-    return NS_ERROR_INVALID_ARG;
++  return Nullable<Date>(mData.endDate());
++}
++
++void
++SmsFilter::SetEndDate(const Nullable<Date>& aEndDate)
++{
++  if (aEndDate.IsNull()) {
++    mData.endDate() = 0;
++    return;
+   }
+ 
+-  mData.startDate() = js_DateGetMsecSinceEpoch(obj);
+-  return NS_OK;
++  mData.endDate() = aEndDate.TimeStamp();
+ }
+ 
+-NS_IMETHODIMP
+-SmsFilter::GetEndDate(JSContext* aCx, JS::Value* aEndDate)
++Nullable< Sequence<nsString> >
++SmsFilter::GetNumbers()
+ {
+-  if (mData.endDate() == 0) {
+-    *aEndDate = JSVAL_NULL;
+-    return NS_OK;
++  const nsTArray<nsString>& numbers = mData.numbers();
++
++  if (numbers.IsEmpty()) {
++    return Nullable< Sequence<nsString> >();
+   }
+ 
+-  aEndDate->setObjectOrNull(JS_NewDateObjectMsec(aCx, mData.endDate()));
+-  NS_ENSURE_TRUE(aEndDate->isObject(), NS_ERROR_FAILURE);
+-
+-  return NS_OK;
++  return Nullable< Sequence<nsString> >(numbers);
+ }
+ 
+-NS_IMETHODIMP
+-SmsFilter::SetEndDate(JSContext* aCx, const JS::Value& aEndDate)
++void
++SmsFilter::SetNumbers(const Nullable< Sequence<nsString> >& aNumbers)
+ {
+-  if (aEndDate == JSVAL_NULL) {
+-    mData.endDate() = 0;
+-    return NS_OK;
++  mData.numbers().Clear();
++  if (!aNumbers.IsNull()) {
++    mData.numbers().AppendElements(aNumbers.Value());
+   }
+-
+-  if (!aEndDate.isObject()) {
+-    return NS_ERROR_INVALID_ARG;
+-  }
+-
+-  JS::Rooted<JSObject*> obj(aCx, &aEndDate.toObject());
+-  if (!JS_ObjectIsDate(aCx, obj)) {
+-    return NS_ERROR_INVALID_ARG;
+-  }
+-
+-  mData.endDate() = js_DateGetMsecSinceEpoch(obj);
+-  return NS_OK;
+ }
+ 
+-NS_IMETHODIMP
+-SmsFilter::GetNumbers(JSContext* aCx, JS::Value* aNumbers)
+-{
+-  uint32_t length = mData.numbers().Length();
+-
+-  if (length == 0) {
+-    *aNumbers = JSVAL_NULL;
+-    return NS_OK;
+-  }
+-
+-  JS::AutoValueVector numbers(aCx);
+-  if (!numbers.resize(length)) {
+-    return NS_ERROR_FAILURE;
+-  }
+-
+-  for (uint32_t i = 0; i < length; ++i) {
+-    JSString* str = JS_NewUCStringCopyN(aCx, mData.numbers()[i].get(),
+-                                        mData.numbers()[i].Length());
+-    if (!str) {
+-      return NS_ERROR_FAILURE;
+-    }
+-
+-    numbers[i].setString(str);
+-  }
+-
+-  JSObject* obj = JS_NewArrayObject(aCx, numbers.length(), numbers.begin());
+-  if (!obj) {
+-    return NS_ERROR_FAILURE;
+-  }
+-
+-  aNumbers->setObject(*obj);
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+-SmsFilter::SetNumbers(JSContext* aCx, const JS::Value& aNumbers)
+-{
+-  if (aNumbers == JSVAL_NULL) {
+-    mData.numbers().Clear();
+-    return NS_OK;
+-  }
+-
+-  if (!aNumbers.isObject()) {
+-    return NS_ERROR_INVALID_ARG;
+-  }
+-
+-  JS::Rooted<JSObject*> obj(aCx, &aNumbers.toObject());
+-  if (!JS_IsArrayObject(aCx, obj)) {
+-    return NS_ERROR_INVALID_ARG;
+-  }
+-
+-  uint32_t size;
+-  JS_ALWAYS_TRUE(JS_GetArrayLength(aCx, obj, &size));
+-
+-  nsTArray<nsString> numbers;
+-
+-  for (uint32_t i=0; i<size; ++i) {
+-    JS::Rooted<JS::Value> jsNumber(aCx);
+-    if (!JS_GetElement(aCx, obj, i, jsNumber.address())) {
+-      return NS_ERROR_INVALID_ARG;
+-    }
+-
+-    if (!jsNumber.isString()) {
+-      return NS_ERROR_INVALID_ARG;
+-    }
+-
+-    nsDependentJSString number;
+-    number.init(aCx, jsNumber.toString());
+-
+-    numbers.AppendElement(number);
+-  }
+-
+-  mData.numbers().Clear();
+-  mData.numbers().AppendElements(numbers);
+-
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
++void
+ SmsFilter::GetDelivery(nsAString& aDelivery)
+ {
+   switch (mData.delivery()) {
+     case eDeliveryState_Received:
+       aDelivery = DELIVERY_RECEIVED;
+       break;
+     case eDeliveryState_Sent:
+       aDelivery = DELIVERY_SENT;
+       break;
+     case eDeliveryState_Unknown:
+       SetDOMStringToNull(aDelivery);
+       break;
+     default:
+-      NS_ASSERTION(false, "We shouldn't get another delivery state!");
+-      return NS_ERROR_UNEXPECTED;
++      MOZ_NOT_REACHED("We shouldn't get another delivery state!");
+   }
+-
+-  return NS_OK;
+ }
+ 
+-NS_IMETHODIMP
+-SmsFilter::SetDelivery(const nsAString& aDelivery)
++void
++SmsFilter::SetDelivery(const nsAString& aDelivery, ErrorResult& aRv)
+ {
+-  if (aDelivery.IsEmpty()) {
++  if (DOMStringIsNull(aDelivery)) {
+     mData.delivery() = eDeliveryState_Unknown;
+-    return NS_OK;
++    return;
+   }
+ 
+   if (aDelivery.Equals(DELIVERY_RECEIVED)) {
+     mData.delivery() = eDeliveryState_Received;
+-    return NS_OK;
++    return;
+   }
+ 
+   if (aDelivery.Equals(DELIVERY_SENT)) {
+     mData.delivery() = eDeliveryState_Sent;
+-    return NS_OK;
++    return;
+   }
+ 
+-  return NS_ERROR_INVALID_ARG;
++  aRv.Throw(NS_ERROR_INVALID_ARG);
+ }
+ 
+-NS_IMETHODIMP
+-SmsFilter::GetRead(JSContext* aCx, JS::Value* aRead)
++Nullable<bool>
++SmsFilter::Read()
+ {
+   if (mData.read() == eReadState_Unknown) {
+-    *aRead = JSVAL_NULL;
+-    return NS_OK;
++    return Nullable<bool>();
+   }
+ 
+-  aRead->setBoolean(mData.read());
+-
+-  return NS_OK;
++  return Nullable<bool>(mData.read());
+ }
+ 
+-NS_IMETHODIMP
+-SmsFilter::SetRead(JSContext* aCx, const JS::Value& aRead)
++void
++SmsFilter::SetRead(Nullable<bool> aRead)
+ {
+-  if (aRead == JSVAL_NULL) {
+-    mData.read() = eReadState_Unknown;
+-    return NS_OK;
++  mData.read() = aRead.IsNull()
++               ? eReadState_Unknown
++               : aRead.Value() ? eReadState_Read : eReadState_Unread;
++}
++
++Nullable<uint64_t>
++SmsFilter::ThreadId()
++{
++  if (!mData.threadId()) {
++    return Nullable<uint64_t>();
+   }
+ 
+-  if (!aRead.isBoolean()) {
+-    return NS_ERROR_INVALID_ARG;
++  return Nullable<uint64_t>(mData.threadId());
++}
++
++void
++SmsFilter::SetThreadId(Nullable<uint64_t> aThreadId, ErrorResult& aRv)
++{
++  if (aThreadId.IsNull()) {
++    mData.threadId() = 0;
++    return;
+   }
+ 
+-  mData.read() = aRead.toBoolean() ? eReadState_Read : eReadState_Unread;
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+-SmsFilter::GetThreadId(JSContext* aCx, JS::Value* aThreadId)
+-{
+-  if (!mData.threadId()) {
+-    *aThreadId = JSVAL_NULL;
+-    return NS_OK;
+-  }
+-
+-  aThreadId->setNumber(static_cast<double>(mData.threadId()));
+-
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+-SmsFilter::SetThreadId(JSContext* aCx, const JS::Value& aThreadId)
+-{
+-  if (aThreadId == JSVAL_NULL) {
+-    mData.threadId() = 0;
+-    return NS_OK;
+-  }
+-
+-  if (!aThreadId.isNumber()) {
+-    return NS_ERROR_INVALID_ARG;
+-  }
+-
+-  double number = aThreadId.toNumber();
+-  uint64_t integer = static_cast<uint64_t>(number);
+-  if (integer == 0 || integer != number) {
+-    return NS_ERROR_INVALID_ARG;
++  uint64_t integer = aThreadId.Value();
++  if (integer == 0) {
++    aRv.Throw(NS_ERROR_INVALID_ARG);
++    return;
+   }
+   mData.threadId() = integer;
+-
+-  return NS_OK;
+ }
+ 
+ } // namespace dom
+ } // namespace mozilla
+diff --git a/dom/mobilemessage/src/SmsFilter.h b/dom/mobilemessage/src/SmsFilter.h
+--- a/dom/mobilemessage/src/SmsFilter.h
++++ b/dom/mobilemessage/src/SmsFilter.h
+@@ -22,16 +22,32 @@ public:
+ 
+   SmsFilter();
+   SmsFilter(const mobilemessage::SmsFilterData& aData);
+ 
+   const mobilemessage::SmsFilterData& GetData() const;
+ 
+   static nsresult NewSmsFilter(nsISupports** aSmsFilter);
+ 
++  static already_AddRefed<SmsFilter>
++  Constructor(const GlobalObject& aGlobal, ErrorResult& aRv);
++
++  Nullable<Date> GetStartDate();
++  void SetStartDate(const Nullable<Date>& aStartDate);
++  Nullable<Date> GetEndDate();
++  void SetEndDate(const Nullable<Date>& aEndDate);
++  Nullable< Sequence<nsString> > GetNumbers();
++  void SetNumbers(const Nullable< Sequence<nsString> >& aNumbers);
++  void GetDelivery(nsAString& aDelivery);
++  void SetDelivery(const nsAString& aDelivery, ErrorResult& aRv);
++  Nullable<bool> Read();
++  void SetRead(Nullable<bool> aRead);
++  Nullable<uint64_t> ThreadId();
++  void SetThreadId(Nullable<uint64_t> aThreadId, ErrorResult& aRv);
++
+ private:
+   mobilemessage::SmsFilterData mData;
+ };
+ 
+ inline const mobilemessage::SmsFilterData&
+ SmsFilter::GetData() const {
+   return mData;
+ }
+diff --git a/dom/webidl/MozSmsFilter.webidl b/dom/webidl/MozSmsFilter.webidl
+new file mode 100644
+--- /dev/null
++++ b/dom/webidl/MozSmsFilter.webidl
+@@ -0,0 +1,15 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++[Constructor]
++interface MozSmsFilter {
++  attribute Date? startDate;
++  attribute Date? endDate;
++  attribute sequence<DOMString>? numbers;
++  // A DOMString that can return and be set to "sent", "received" or null.
++  attribute DOMString? delivery;
++  attribute boolean? read;
++  [SetterThrows]
++  attribute unsigned long long? threadId;
++};
+diff --git a/dom/webidl/WebIDL.mk b/dom/webidl/WebIDL.mk
+--- a/dom/webidl/WebIDL.mk
++++ b/dom/webidl/WebIDL.mk
+@@ -176,16 +176,17 @@ webidl_files = \
+   MediaStreamTrack.webidl \
+   MessageEvent.webidl \
+   MobileMessageManager.webidl \
+   MouseEvent.webidl \
+   MouseScrollEvent.webidl \
+   MozActivity.webidl \
+   MozMmsMessage.webidl \
+   MozNamedAttrMap.webidl \
++  MozSmsFilter.webidl \
+   MozTimeManager.webidl \
+   MutationEvent.webidl \
+   MutationObserver.webidl \
+   NetDashboard.webidl \
+   Node.webidl \
+   NodeFilter.webidl \
+   NodeIterator.webidl \
+   NodeList.webidl \

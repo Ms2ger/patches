@@ -1,0 +1,289 @@
+From: Ms2ger <ms2ger@gmail.com>
+TODO: Also remove nsDOMClassInfoExternalConstructorFnc definition.
+
+diff --git a/dom/base/nsDOMScriptObjectFactory.cpp b/dom/base/nsDOMScriptObjectFactory.cpp
+--- a/dom/base/nsDOMScriptObjectFactory.cpp
++++ b/dom/base/nsDOMScriptObjectFactory.cpp
+@@ -148,38 +148,16 @@ nsDOMScriptObjectFactory::Observe(nsISup
+ 
+       NS_RELEASE(gExceptionProvider);
+     }
+   }
+ 
+   return NS_OK;
+ }
+ 
+-NS_IMETHODIMP
+-nsDOMScriptObjectFactory::RegisterDOMClassInfo(const char *aName,
+-					       nsDOMClassInfoExternalConstructorFnc aConstructorFptr,
+-					       const nsIID *aProtoChainInterface,
+-					       const nsIID **aInterfaces,
+-					       uint32_t aScriptableFlags,
+-					       bool aHasClassInterface,
+-					       const nsCID *aConstructorCID)
+-{
+-  nsScriptNameSpaceManager *nameSpaceManager = nsJSRuntime::GetNameSpaceManager();
+-  NS_ENSURE_TRUE(nameSpaceManager, NS_ERROR_NOT_INITIALIZED);
+-
+-  return nameSpaceManager->RegisterDOMCIData(aName,
+-                                             aConstructorFptr,
+-                                             aProtoChainInterface,
+-                                             aInterfaces,
+-                                             aScriptableFlags,
+-                                             aHasClassInterface,
+-                                             aConstructorCID);
+-}
+-
+-
+ // Factories
+ nsresult
+ NS_GetJSRuntime(nsIScriptRuntime** aLanguage)
+ {
+   nsCOMPtr<nsIDOMScriptObjectFactory> factory =
+     do_GetService(kDOMScriptObjectFactoryCID);
+   NS_ENSURE_TRUE(factory, NS_ERROR_FAILURE);
+ 
+diff --git a/dom/base/nsDOMScriptObjectFactory.h b/dom/base/nsDOMScriptObjectFactory.h
+--- a/dom/base/nsDOMScriptObjectFactory.h
++++ b/dom/base/nsDOMScriptObjectFactory.h
+@@ -34,24 +34,16 @@ public:
+   NS_DECL_ISUPPORTS
+ 
+   // nsIObserver
+   NS_DECL_NSIOBSERVER
+ 
+   // nsIDOMScriptObjectFactory
+   NS_IMETHOD_(nsISupports *) GetClassInfoInstance(nsDOMClassInfoID aID);
+   NS_IMETHOD_(nsISupports *) GetExternalClassInfoInstance(const nsAString& aName);
+-
+-  NS_IMETHOD RegisterDOMClassInfo(const char *aName,
+-                                  nsDOMClassInfoExternalConstructorFnc aConstructorFptr,
+-                                  const nsIID *aProtoChainInterface,
+-                                  const nsIID **aInterfaces,
+-                                  uint32_t aScriptableFlags,
+-                                  bool aHasClassInterface,
+-                                  const nsCID *aConstructorCID);
+ };
+ 
+ class nsDOMExceptionProvider MOZ_FINAL : public nsIExceptionProvider
+ {
+ public:
+   NS_DECL_ISUPPORTS
+   NS_DECL_NSIEXCEPTIONPROVIDER
+ };
+diff --git a/dom/base/nsIDOMClassInfo.h b/dom/base/nsIDOMClassInfo.h
+--- a/dom/base/nsIDOMClassInfo.h
++++ b/dom/base/nsIDOMClassInfo.h
+@@ -105,81 +105,9 @@ public:
+   NS_DECLARE_STATIC_IID_ACCESSOR(NS_IDOMCI_EXTENSION_IID)
+ 
+   NS_IMETHOD RegisterDOMCI(const char* aName,
+                            nsIDOMScriptObjectFactory* aDOMSOFactory) = 0;
+ };
+ 
+ NS_DEFINE_STATIC_IID_ACCESSOR(nsIDOMCIExtension, NS_IDOMCI_EXTENSION_IID)
+ 
+-#define NS_DOMCI_EXTENSION_NAME(_module) ns##_module##DOMCIExtension
+-#define NS_DOMCI_EXTENSION_CONSTRUCTOR(_module) \
+-  ns##_module##DOMCIExtensionConstructor
+-#define NS_DOMCI_EXTENSION_CONSTRUCTOR_IMP(_extension) \
+-  NS_GENERIC_FACTORY_CONSTRUCTOR(_extension)
+-
+-#define NS_DOMCI_EXTENSION(_module)                                       \
+-class NS_DOMCI_EXTENSION_NAME(_module) : public nsIDOMCIExtension         \
+-{                                                                         \
+-public:                                                                   \
+-  NS_DOMCI_EXTENSION_NAME(_module)();                                     \
+-  virtual ~NS_DOMCI_EXTENSION_NAME(_module)();                            \
+-                                                                          \
+-  NS_DECL_ISUPPORTS                                                       \
+-                                                                          \
+-  NS_IMETHOD RegisterDOMCI(const char* aName,                             \
+-                           nsIDOMScriptObjectFactory* aDOMSOFactory);     \
+-};                                                                        \
+-                                                                          \
+-NS_DOMCI_EXTENSION_CONSTRUCTOR_IMP(NS_DOMCI_EXTENSION_NAME(_module))      \
+-                                                                          \
+-NS_DOMCI_EXTENSION_NAME(_module)::NS_DOMCI_EXTENSION_NAME(_module)()      \
+-{                                                                         \
+-}                                                                         \
+-                                                                          \
+-NS_DOMCI_EXTENSION_NAME(_module)::~NS_DOMCI_EXTENSION_NAME(_module)()     \
+-{                                                                         \
+-}                                                                         \
+-                                                                          \
+-NS_IMPL_ISUPPORTS1(NS_DOMCI_EXTENSION_NAME(_module), nsIDOMCIExtension)   \
+-                                                                          \
+-NS_IMETHODIMP                                                             \
+-NS_DOMCI_EXTENSION_NAME(_module)::RegisterDOMCI(const char* aName,        \
+-                                                nsIDOMScriptObjectFactory* aDOMSOFactory) \
+-{
+-
+-#define NS_DOMCI_EXTENSION_ENTRY_BEGIN(_class)                            \
+-  if (nsCRT::strcmp(aName, #_class) == 0) {                               \
+-    static const nsIID* interfaces[] = {
+-
+-#define NS_DOMCI_EXTENSION_ENTRY_INTERFACE(_interface)                    \
+-      &NS_GET_IID(_interface),
+-
+-// Don't forget to register the primary interface (_proto) in the 
+-// JAVASCRIPT_DOM_INTERFACE category, or prototypes for this class
+-// won't work (except if the interface name starts with nsIDOM).
+-#define NS_DOMCI_EXTENSION_ENTRY_END_HELPER(_class, _proto, _hasclassif,  \
+-                                            _constructorcid)              \
+-      nsnull                                                              \
+-    };                                                                    \
+-    aDOMSOFactory->RegisterDOMClassInfo(#_class, nsnull, _proto,          \
+-                                        interfaces,                       \
+-                                        DOM_DEFAULT_SCRIPTABLE_FLAGS,     \
+-                                        _hasclassif, _constructorcid);    \
+-    return NS_OK;                                                         \
+-  }
+-
+-#define NS_DOMCI_EXTENSION_ENTRY_END(_class, _proto, _hasclassif,         \
+-                                     _constructorcid)                     \
+-  NS_DOMCI_EXTENSION_ENTRY_END_HELPER(_class, &NS_GET_IID(_proto),        \
+-                                      _hasclassif, _constructorcid)
+-
+-#define NS_DOMCI_EXTENSION_ENTRY_END_NO_PRIMARY_IF(_class, _hasclassif,   \
+-                                                   _constructorcid)       \
+-  NS_DOMCI_EXTENSION_ENTRY_END_HELPER(_class, nsnull, _hasclassif,        \
+-                                      _constructorcid)
+-
+-#define NS_DOMCI_EXTENSION_END                                            \
+-  return NS_ERROR_FAILURE;                                                \
+-}
+-
+-
+ #endif /* nsIDOMClassInfo_h___ */
+diff --git a/dom/base/nsIDOMScriptObjectFactory.h b/dom/base/nsIDOMScriptObjectFactory.h
+--- a/dom/base/nsIDOMScriptObjectFactory.h
++++ b/dom/base/nsIDOMScriptObjectFactory.h
+@@ -24,29 +24,16 @@ typedef nsXPCClassInfo* (*nsDOMClassInfo
+ 
+ class nsIDOMScriptObjectFactory : public nsISupports {
+ public:  
+   NS_DECLARE_STATIC_IID_ACCESSOR(NS_IDOM_SCRIPT_OBJECT_FACTORY_IID)
+ 
+   NS_IMETHOD_(nsISupports *) GetClassInfoInstance(nsDOMClassInfoID aID) = 0;
+   NS_IMETHOD_(nsISupports *) GetExternalClassInfoInstance(const nsAString& aName) = 0;
+ 
+-  // Register the info for an external class. aName must be static
+-  // data, it will not be deleted by the DOM code. aProtoChainInterface
+-  // must be registered in the JAVASCRIPT_DOM_INTERFACE category, or
+-  // prototypes for this class won't work (except if the interface
+-  // name starts with nsIDOM).
+-  NS_IMETHOD RegisterDOMClassInfo(const char *aName,
+-                                  nsDOMClassInfoExternalConstructorFnc aConstructorFptr,
+-                                  const nsIID *aProtoChainInterface,
+-                                  const nsIID **aInterfaces,
+-                                  uint32_t aScriptableFlags,
+-                                  bool aHasClassInterface,
+-                                  const nsCID *aConstructorCID) = 0;
+-
+   nsIScriptRuntime* GetJSRuntime()
+   {
+     return mJSRuntime;
+   }
+ 
+ protected:
+   nsCOMPtr<nsIScriptRuntime> mJSRuntime;
+ };
+diff --git a/dom/base/nsScriptNameSpaceManager.cpp b/dom/base/nsScriptNameSpaceManager.cpp
+--- a/dom/base/nsScriptNameSpaceManager.cpp
++++ b/dom/base/nsScriptNameSpaceManager.cpp
+@@ -593,64 +593,16 @@ nsScriptNameSpaceManager::RegisterExtern
+ 
+   s->mType = nsGlobalNameStruct::eTypeExternalClassInfoCreator;
+   s->mCID = aCID;
+ 
+   return NS_OK;
+ }
+ 
+ nsresult
+-nsScriptNameSpaceManager::RegisterDOMCIData(const char *aName,
+-                                            nsDOMClassInfoExternalConstructorFnc aConstructorFptr,
+-                                            const nsIID *aProtoChainInterface,
+-                                            const nsIID **aInterfaces,
+-                                            uint32_t aScriptableFlags,
+-                                            bool aHasClassInterface,
+-                                            const nsCID *aConstructorCID)
+-{
+-  const PRUnichar* className;
+-  nsGlobalNameStruct *s = AddToHash(&mGlobalNames, aName, &className);
+-  NS_ENSURE_TRUE(s, NS_ERROR_OUT_OF_MEMORY);
+-
+-  // If an external constructor is already defined with aClassName we
+-  // won't overwrite it.
+-
+-  if (s->mType == nsGlobalNameStruct::eTypeClassConstructor ||
+-      s->mType == nsGlobalNameStruct::eTypeExternalClassInfo) {
+-    return NS_OK;
+-  }
+-
+-  // XXX Should we bail out here?
+-  NS_ASSERTION(s->mType == nsGlobalNameStruct::eTypeNotInitialized ||
+-               s->mType == nsGlobalNameStruct::eTypeNewDOMBinding ||
+-               s->mType == nsGlobalNameStruct::eTypeExternalClassInfoCreator,
+-               "Someone tries to register classinfo data for a class that isn't new or external!");
+-
+-  s->mData = new nsExternalDOMClassInfoData;
+-  NS_ENSURE_TRUE(s->mData, NS_ERROR_OUT_OF_MEMORY);
+-
+-  s->mType = nsGlobalNameStruct::eTypeExternalClassInfo;
+-  s->mData->mName = aName;
+-  s->mData->mNameUTF16 = className;
+-  if (aConstructorFptr)
+-    s->mData->u.mExternalConstructorFptr = aConstructorFptr;
+-  else
+-    // null constructor will cause us to use nsDOMGenericSH::doCreate
+-    s->mData->u.mExternalConstructorFptr = nsnull;
+-  s->mData->mCachedClassInfo = nsnull;
+-  s->mData->mProtoChainInterface = aProtoChainInterface;
+-  s->mData->mInterfaces = aInterfaces;
+-  s->mData->mScriptableFlags = aScriptableFlags;
+-  s->mData->mHasClassInterface = aHasClassInterface;
+-  s->mData->mConstructorCID = aConstructorCID;
+-
+-  return NS_OK;
+-}
+-
+-nsresult
+ nsScriptNameSpaceManager::AddCategoryEntryToHash(nsICategoryManager* aCategoryManager,
+                                                  const char* aCategory,
+                                                  nsISupports* aEntry)
+ {
+   // Get the type from the category name.
+   // NOTE: we could have passed the type in FillHash() and guessed it in
+   // Observe() but this way, we have only one place to update and this is
+   // not performance sensitive.
+diff --git a/dom/base/nsScriptNameSpaceManager.h b/dom/base/nsScriptNameSpaceManager.h
+--- a/dom/base/nsScriptNameSpaceManager.h
++++ b/dom/base/nsScriptNameSpaceManager.h
+@@ -121,26 +121,16 @@ public:
+                               const nsIID *aConstructorProtoIID,
+                               bool *aFoundOld);
+ 
+   nsresult RegisterExternalInterfaces(bool aAsProto);
+ 
+   nsresult RegisterExternalClassName(const char *aClassName,
+                                      nsCID& aCID);
+ 
+-  // Register the info for an external class. aName must be static
+-  // data, it will not be deleted by the DOM code.
+-  nsresult RegisterDOMCIData(const char *aName,
+-                             nsDOMClassInfoExternalConstructorFnc aConstructorFptr,
+-                             const nsIID *aProtoChainInterface,
+-                             const nsIID **aInterfaces,
+-                             uint32_t aScriptableFlags,
+-                             bool aHasClassInterface,
+-                             const nsCID *aConstructorCID);
+-
+   nsGlobalNameStruct* GetConstructorProto(const nsGlobalNameStruct* aStruct);
+ 
+   void RegisterDefineDOMInterface(const nsAFlatString& aName,
+     mozilla::dom::binding::DefineInterface aDefineDOMInterface);
+ 
+ private:
+   // Adds a new entry to the hash and returns the nsGlobalNameStruct
+   // that aKey will be mapped to. If mType in the returned

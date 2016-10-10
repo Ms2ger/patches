@@ -1,0 +1,1910 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsFrameMessageManager.cpp b/content/base/src/nsFrameMessageManager.cpp
+--- a/content/base/src/nsFrameMessageManager.cpp
++++ b/content/base/src/nsFrameMessageManager.cpp
+@@ -420,17 +420,17 @@ GetParamsForMessage(JSContext* aCx,
+   JS_ClearPendingException(aCx);
+ 
+   // Not clonable, try JSON
+   //XXX This is ugly but currently structured cloning doesn't handle
+   //    properly cases when interface is implemented in JS and used
+   //    as a dictionary.
+   nsAutoString json;
+   JS::Rooted<JS::Value> v(aCx, aJSON);
+-  NS_ENSURE_TRUE(JS_Stringify(aCx, v.address(), nullptr, JSVAL_NULL,
++  NS_ENSURE_TRUE(JS_Stringify(aCx, v.address(), nullptr, JS::NullValue(),
+                               JSONCreator, &json), false);
+   NS_ENSURE_TRUE(!json.IsEmpty(), false);
+ 
+   JS::Rooted<JS::Value> val(aCx, JS::NullValue());
+   NS_ENSURE_TRUE(JS_ParseJSON(aCx, static_cast<const jschar*>(json.get()),
+                               json.Length(), &val), false);
+ 
+   return WriteStructuredClone(aCx, val, aBuffer, aClosure);
+@@ -446,29 +446,29 @@ nsFrameMessageManager::SendSyncMessage(c
+                                        JSContext* aCx,
+                                        uint8_t aArgc,
+                                        JS::Value* aRetval)
+ {
+   NS_ASSERTION(!IsGlobal(), "Should not call SendSyncMessage in chrome");
+   NS_ASSERTION(!IsWindowLevel(), "Should not call SendSyncMessage in chrome");
+   NS_ASSERTION(!mParentManager, "Should not have parent manager in content!");
+ 
+-  *aRetval = JSVAL_VOID;
++  aRetval->setUndefined();
+   NS_ENSURE_TRUE(mCallback, NS_ERROR_NOT_INITIALIZED);
+ 
+   StructuredCloneData data;
+   JSAutoStructuredCloneBuffer buffer;
+   if (aArgc >= 2 &&
+       !GetParamsForMessage(aCx, aJSON, buffer, data.mClosure)) {
+     return NS_ERROR_DOM_DATA_CLONE_ERR;
+   }
+   data.mData = buffer.data();
+   data.mDataLength = buffer.nbytes();
+ 
+-  JS::RootedObject objects(aCx);
++  JS::Rooted<JSObject*> objects(aCx);
+   if (aArgc >= 3 && aObjects.isObject()) {
+     objects = &aObjects.toObject();
+   }
+ 
+   InfallibleTArray<nsString> retval;
+   if (mCallback->DoSendSyncMessage(aCx, aMessageName, data, objects, &retval)) {
+     uint32_t len = retval.Length();
+     JS::Rooted<JSObject*> dataArray(aCx, JS_NewArrayObject(aCx, len, nullptr));
+@@ -483,17 +483,17 @@ nsFrameMessageManager::SendSyncMessage(c
+       if (!JS_ParseJSON(aCx, static_cast<const jschar*>(retval[i].get()),
+                         retval[i].Length(), &ret)) {
+         return NS_ERROR_UNEXPECTED;
+       }
+       NS_ENSURE_TRUE(JS_SetElement(aCx, dataArray, i, &ret),
+                      NS_ERROR_OUT_OF_MEMORY);
+     }
+ 
+-    *aRetval = OBJECT_TO_JSVAL(dataArray);
++    aRetval->setObject(*dataArray);
+   }
+   return NS_OK;
+ }
+ 
+ nsresult
+ nsFrameMessageManager::DispatchAsyncMessageInternal(JSContext* aCx,
+                                                     const nsAString& aMessage,
+                                                     const StructuredCloneData& aData,
+@@ -525,17 +525,17 @@ nsFrameMessageManager::DispatchAsyncMess
+   StructuredCloneData data;
+   JSAutoStructuredCloneBuffer buffer;
+ 
+   if (aArgc >= 2 &&
+       !GetParamsForMessage(aCx, aJSON, buffer, data.mClosure)) {
+     return NS_ERROR_DOM_DATA_CLONE_ERR;
+   }
+ 
+-  JS::RootedObject objects(aCx);
++  JS::Rooted<JSObject*> objects(aCx);
+   if (aArgc >= 3 && aObjects.isObject()) {
+     objects = &aObjects.toObject();
+   }
+ 
+   data.mData = buffer.data();
+   data.mDataLength = buffer.nbytes();
+ 
+   return DispatchAsyncMessageInternal(aCx, aMessageName, data, objects);
+@@ -785,20 +785,21 @@ nsFrameMessageManager::ReceiveMessage(ns
+ 
+         // The parameter for the listener function.
+         JS::Rooted<JSObject*> param(ctx,
+           JS_NewObject(ctx, nullptr, nullptr, nullptr));
+         NS_ENSURE_TRUE(param, NS_ERROR_OUT_OF_MEMORY);
+ 
+         JS::Rooted<JS::Value> targetv(ctx);
+         JS::Rooted<JSObject*> global(ctx, JS_GetGlobalForObject(ctx, object));
++        // XXX Should check for failure.
+         nsContentUtils::WrapNative(ctx, global, aTarget, targetv.address(),
+                                    nullptr, true);
+ 
+-        JS::RootedObject cpows(ctx);
++        JS::Rooted<JSObject*> cpows(ctx);
+         if (aCpows) {
+           if (!aCpows->ToObject(ctx, cpows.address())) {
+             return NS_ERROR_UNEXPECTED;
+           }
+         }
+ 
+         if (!cpows) {
+           cpows = JS_NewObject(ctx, nullptr, nullptr, nullptr);
+@@ -815,21 +816,22 @@ nsFrameMessageManager::ReceiveMessage(ns
+           JS_ClearPendingException(ctx);
+           return NS_OK;
+         }
+         JS::Rooted<JSString*> jsMessage(ctx,
+           JS_NewUCStringCopyN(ctx,
+                               static_cast<const jschar*>(aMessage.BeginReading()),
+                               aMessage.Length()));
+         NS_ENSURE_TRUE(jsMessage, NS_ERROR_OUT_OF_MEMORY);
++        // XXX Should check for failure.
+         JS_DefineProperty(ctx, param, "target", targetv, nullptr, nullptr, JSPROP_ENUMERATE);
+         JS_DefineProperty(ctx, param, "name",
+-                          STRING_TO_JSVAL(jsMessage), nullptr, nullptr, JSPROP_ENUMERATE);
++                          JS::StringValue(jsMessage), nullptr, nullptr, JSPROP_ENUMERATE);
+         JS_DefineProperty(ctx, param, "sync",
+-                          BOOLEAN_TO_JSVAL(aSync), nullptr, nullptr, JSPROP_ENUMERATE);
++                          JS::BooleanValue(aSync), nullptr, nullptr, JSPROP_ENUMERATE);
+         JS_DefineProperty(ctx, param, "json", json, nullptr, nullptr, JSPROP_ENUMERATE); // deprecated
+         JS_DefineProperty(ctx, param, "data", json, nullptr, nullptr, JSPROP_ENUMERATE);
+         JS_DefineProperty(ctx, param, "objects", cpowsv, nullptr, nullptr, JSPROP_ENUMERATE);
+ 
+         JS::Rooted<JS::Value> thisValue(ctx, JS::UndefinedValue());
+ 
+         JS::Rooted<JS::Value> funval(ctx);
+         if (JS_ObjectIsCallable(ctx, object)) {
+@@ -853,31 +855,31 @@ nsFrameMessageManager::ReceiveMessage(ns
+               !funval.isObject())
+             return NS_ERROR_UNEXPECTED;
+ 
+           // Check if the object is even callable.
+           NS_ENSURE_STATE(JS_ObjectIsCallable(ctx, &funval.toObject()));
+           thisValue.setObject(*object);
+         }
+ 
+-        JS::Rooted<JS::Value> rval(ctx, JSVAL_VOID);
++        JS::Rooted<JS::Value> rval(ctx, JS::UndefinedValue());
+         JS::Rooted<JS::Value> argv(ctx, JS::ObjectValue(*param));
+ 
+         {
+           JS::Rooted<JSObject*> thisObject(ctx, thisValue.toObjectOrNull());
+ 
+           JSAutoCompartment tac(ctx, thisObject);
+           if (!JS_WrapValue(ctx, argv.address()))
+             return NS_ERROR_UNEXPECTED;
+ 
+           JS_CallFunctionValue(ctx, thisObject,
+                                funval, 1, argv.address(), rval.address());
+           if (aJSONRetVal) {
+             nsString json;
+-            if (JS_Stringify(ctx, rval.address(), nullptr, JSVAL_NULL,
++            if (JS_Stringify(ctx, rval.address(), nullptr, JS::NullValue(),
+                              JSONCreator, &json)) {
+               aJSONRetVal->AppendElement(json);
+             }
+           }
+         }
+       }
+     }
+   }
+@@ -1093,17 +1095,17 @@ nsFrameScriptExecutor::TryCacheLoadAndCo
+     AutoSafeJSContext cx;
+     JS::Rooted<JSObject*> global(cx, mGlobal->GetJSObject());
+     if (global) {
+       JSAutoCompartment ac(cx, global);
+       JS::CompileOptions options(cx);
+       options.setNoScriptRval(true)
+              .setFileAndLine(url.get(), 1)
+              .setPrincipals(nsJSPrincipals::get(mPrincipal));
+-      JS::RootedObject empty(cx, nullptr);
++      JS::Rooted<JSObject*> empty(cx, nullptr);
+       JS::Rooted<JSScript*> script(cx,
+         JS::Compile(cx, empty, options, dataString.get(),
+                     dataString.Length()));
+ 
+       if (script) {
+         nsAutoCString scheme;
+         uri->GetScheme(scheme);
+         // We don't cache data: scripts!
+diff --git a/content/base/src/nsXMLHttpRequest.cpp b/content/base/src/nsXMLHttpRequest.cpp
+--- a/content/base/src/nsXMLHttpRequest.cpp
++++ b/content/base/src/nsXMLHttpRequest.cpp
+@@ -293,17 +293,17 @@ nsXMLHttpRequest::nsXMLHttpRequest()
+     mProgressTimerIsActive(false),
+     mIsHtml(false),
+     mWarnAboutSyncHtml(false),
+     mLoadLengthComputable(false), mLoadTotal(0),
+     mIsSystem(false),
+     mIsAnon(false),
+     mFirstStartRequestSeen(false),
+     mInLoadProgressEvent(false),
+-    mResultJSON(JSVAL_VOID),
++    mResultJSON(JS::UndefinedValue()),
+     mResultArrayBuffer(nullptr),
+     mXPCOMifier(nullptr)
+ {
+   SetIsDOMBinding();
+ #ifdef DEBUG
+   StaticAssertions();
+ #endif
+ }
+@@ -315,17 +315,17 @@ nsXMLHttpRequest::~nsXMLHttpRequest()
+   if (mState & (XML_HTTP_REQUEST_SENT |
+                 XML_HTTP_REQUEST_LOADING)) {
+     Abort();
+   }
+ 
+   NS_ABORT_IF_FALSE(!(mState & XML_HTTP_REQUEST_SYNCLOOPING), "we rather crash than hang");
+   mState &= ~XML_HTTP_REQUEST_SYNCLOOPING;
+ 
+-  mResultJSON = JSVAL_VOID;
++  mResultJSON.setUndefined();
+   mResultArrayBuffer = nullptr;
+   mozilla::DropJSObjects(this);
+ }
+ 
+ void
+ nsXMLHttpRequest::RootJSResultObjects()
+ {
+   mozilla::HoldJSObjects(this);
+@@ -421,17 +421,17 @@ nsXMLHttpRequest::ResetResponse()
+   mResponseXML = nullptr;
+   mResponseBody.Truncate();
+   mResponseText.Truncate();
+   mResponseBlob = nullptr;
+   mDOMFile = nullptr;
+   mBlobSet = nullptr;
+   mResultArrayBuffer = nullptr;
+   mArrayBufferBuilder.reset();
+-  mResultJSON = JSVAL_VOID;
++  mResultJSON.setUndefined();
+   mLoadTransferred = 0;
+   mResponseBodyDecodedPos = 0;
+ }
+ 
+ void
+ nsXMLHttpRequest::SetRequestObserver(nsIRequestObserver* aObserver)
+ {
+   mRequestObserver = aObserver;
+@@ -475,17 +475,17 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_
+ 
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mUpload)
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+ 
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsXMLHttpRequest,
+                                                 nsXHREventTarget)
+   tmp->mResultArrayBuffer = nullptr;
+   tmp->mArrayBufferBuilder.reset();
+-  tmp->mResultJSON = JSVAL_VOID;
++  tmp->mResultJSON.setUndefined();
+   NS_IMPL_CYCLE_COLLECTION_UNLINK(mContext)
+   NS_IMPL_CYCLE_COLLECTION_UNLINK(mChannel)
+   NS_IMPL_CYCLE_COLLECTION_UNLINK(mResponseXML)
+   NS_IMPL_CYCLE_COLLECTION_UNLINK(mCORSPreflightChannel)
+ 
+   NS_IMPL_CYCLE_COLLECTION_UNLINK(mXMLParserStreamListener)
+ 
+   NS_IMPL_CYCLE_COLLECTION_UNLINK(mChannelEventSink)
+@@ -959,107 +959,107 @@ nsXMLHttpRequest::GetResponse(JSContext*
+   switch (mResponseType) {
+   case XML_HTTP_RESPONSE_TYPE_DEFAULT:
+   case XML_HTTP_RESPONSE_TYPE_TEXT:
+   case XML_HTTP_RESPONSE_TYPE_CHUNKED_TEXT:
+   {
+     nsString str;
+     aRv = GetResponseText(str);
+     if (aRv.Failed()) {
+-      return JSVAL_NULL;
++      return JS::NullValue();
+     }
+     JS::Value result;
+     if (!xpc::StringToJsval(aCx, str, &result)) {
+       aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+-      return JSVAL_NULL;
++      return JS::NullValue();
+     }
+     return result;
+   }
+ 
+   case XML_HTTP_RESPONSE_TYPE_ARRAYBUFFER:
+   case XML_HTTP_RESPONSE_TYPE_CHUNKED_ARRAYBUFFER:
+   {
+     if (!(mResponseType == XML_HTTP_RESPONSE_TYPE_ARRAYBUFFER &&
+           mState & XML_HTTP_REQUEST_DONE) &&
+         !(mResponseType == XML_HTTP_RESPONSE_TYPE_CHUNKED_ARRAYBUFFER &&
+           mInLoadProgressEvent)) {
+-      return JSVAL_NULL;
++      return JS::NullValue();
+     }
+ 
+     if (!mResultArrayBuffer) {
+       RootJSResultObjects();
+ 
+       mResultArrayBuffer = mArrayBufferBuilder.getArrayBuffer(aCx);
+       if (!mResultArrayBuffer) {
+         aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+-        return JSVAL_NULL;
++        return JS::NullValue();
+       }
+     }
+-    return OBJECT_TO_JSVAL(mResultArrayBuffer);
++    return JS::ObjectValue(*mResultArrayBuffer);
+   }
+   case XML_HTTP_RESPONSE_TYPE_BLOB:
+   case XML_HTTP_RESPONSE_TYPE_MOZ_BLOB:
+   {
+     if (!(mState & XML_HTTP_REQUEST_DONE)) {
+       if (mResponseType != XML_HTTP_RESPONSE_TYPE_MOZ_BLOB) {
+-        return JSVAL_NULL;
++        return JS::NullValue();
+       }
+ 
+       if (!mResponseBlob) {
+         CreatePartialBlob();
+       }
+     }
+ 
+     if (!mResponseBlob) {
+-      return JSVAL_NULL;
++      return JS::NullValue();
+     }
+ 
+-    JS::Rooted<JS::Value> result(aCx, JSVAL_NULL);
++    JS::Rooted<JS::Value> result(aCx, JS::NullValue());
+     JS::Rooted<JSObject*> scope(aCx, JS::CurrentGlobalOrNull(aCx));
+     aRv = nsContentUtils::WrapNative(aCx, scope, mResponseBlob, result.address(),
+                                      nullptr, true);
+     return result;
+   }
+   case XML_HTTP_RESPONSE_TYPE_DOCUMENT:
+   {
+     if (!(mState & XML_HTTP_REQUEST_DONE) || !mResponseXML) {
+-      return JSVAL_NULL;
++      return JS::NullValue();
+     }
+ 
+     JS::Rooted<JSObject*> scope(aCx, JS::CurrentGlobalOrNull(aCx));
+-    JS::Rooted<JS::Value> result(aCx, JSVAL_NULL);
++    JS::Rooted<JS::Value> result(aCx, JS::NullValue());
+     aRv = nsContentUtils::WrapNative(aCx, scope, mResponseXML, result.address(),
+                                      nullptr, true);
+     return result;
+   }
+   case XML_HTTP_RESPONSE_TYPE_JSON:
+   {
+     if (!(mState & XML_HTTP_REQUEST_DONE)) {
+-      return JSVAL_NULL;
++      return JS::NullValue();
+     }
+ 
+-    if (mResultJSON == JSVAL_VOID) {
++    if (mResultJSON.isUndefined()) {
+       aRv = CreateResponseParsedJSON(aCx);
+       mResponseText.Truncate();
+       if (aRv.Failed()) {
+         // Per spec, errors aren't propagated. null is returned instead.
+         aRv = NS_OK;
+         // It would be nice to log the error to the console. That's hard to
+         // do without calling window.onerror as a side effect, though.
+         JS_ClearPendingException(aCx);
+-        mResultJSON = JSVAL_NULL;
++        mResultJSON.setNull();
+       }
+     }
+     return mResultJSON;
+   }
+   default:
+     NS_ERROR("Should not happen");
+   }
+ 
+-  return JSVAL_NULL;
++  return JS::NullValue();
+ }
+ 
+ /* readonly attribute unsigned long status; */
+ NS_IMETHODIMP
+ nsXMLHttpRequest::GetStatus(uint32_t *aStatus)
+ {
+   *aStatus = Status();
+   return NS_OK;
+@@ -2423,18 +2423,18 @@ GetRequestBody(nsIVariant* aBody, nsIInp
+       return GetRequestBody(sendable, aResult, aContentLength, aContentType, aCharset);
+     }
+ 
+     // ArrayBuffer?
+     AutoSafeJSContext cx;
+     JS::Rooted<JS::Value> realVal(cx);
+ 
+     nsresult rv = aBody->GetAsJSVal(realVal.address());
+-    if (NS_SUCCEEDED(rv) && !JSVAL_IS_PRIMITIVE(realVal)) {
+-      JS::Rooted<JSObject*> obj(cx, JSVAL_TO_OBJECT(realVal));
++    if (NS_SUCCEEDED(rv) && realVal.isObject()) {
++      JS::Rooted<JSObject*> obj(cx, &realVal.toObject());
+       if (JS_IsArrayBufferObject(obj)) {
+           ArrayBuffer buf(obj);
+           return GetRequestBody(buf.Data(), buf.Length(), aResult,
+                                 aContentLength, aContentType, aCharset);
+       }
+     }
+   }
+   else if (dataType == nsIDataType::VTYPE_VOID ||
+@@ -3647,25 +3647,26 @@ nsXMLHttpRequest::GetInterface(const nsI
+   return QueryInterface(aIID, aResult);
+ }
+ 
+ JS::Value
+ nsXMLHttpRequest::GetInterface(JSContext* aCx, nsIJSID* aIID, ErrorResult& aRv)
+ {
+   const nsID* iid = aIID->GetID();
+   nsCOMPtr<nsISupports> result;
+-  JS::Rooted<JS::Value> v(aCx, JSVAL_NULL);
++  JS::Rooted<JS::Value> v(aCx, JS::NullValue());
+   aRv = GetInterface(*iid, getter_AddRefs(result));
+-  NS_ENSURE_FALSE(aRv.Failed(), JSVAL_NULL);
++  NS_ENSURE_FALSE(aRv.Failed(), JS::NullValue());
+ 
+   JS::Rooted<JSObject*> wrapper(aCx, GetWrapper());
+   JSAutoCompartment ac(aCx, wrapper);
+   JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForObject(aCx, wrapper));
+   aRv = nsContentUtils::WrapNative(aCx, global, result, iid, v.address());
+-  return aRv.Failed() ? JSVAL_NULL : v;
++  NS_ENSURE_FALSE(aRv.Failed(), JS::NullValue());
++  return v;
+ }
+ 
+ nsXMLHttpRequestUpload*
+ nsXMLHttpRequest::Upload()
+ {
+   if (!mUpload) {
+     mUpload = new nsXMLHttpRequestUpload(this);
+   }
+diff --git a/content/events/src/nsDOMMessageEvent.cpp b/content/events/src/nsDOMMessageEvent.cpp
+--- a/content/events/src/nsDOMMessageEvent.cpp
++++ b/content/events/src/nsDOMMessageEvent.cpp
+@@ -9,17 +9,17 @@
+ #include "jsapi.h"
+ 
+ using namespace mozilla;
+ using namespace mozilla::dom;
+ 
+ NS_IMPL_CYCLE_COLLECTION_CLASS(nsDOMMessageEvent)
+ 
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsDOMMessageEvent, nsDOMEvent)
+-  tmp->mData = JSVAL_VOID;
++  tmp->mData.setUndefined();
+   NS_IMPL_CYCLE_COLLECTION_UNLINK(mSource)
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+ 
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsDOMMessageEvent, nsDOMEvent)
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSource)
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+ 
+ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(nsDOMMessageEvent, nsDOMEvent)
+@@ -32,23 +32,23 @@ NS_INTERFACE_MAP_END_INHERITING(nsDOMEve
+ 
+ NS_IMPL_ADDREF_INHERITED(nsDOMMessageEvent, nsDOMEvent)
+ NS_IMPL_RELEASE_INHERITED(nsDOMMessageEvent, nsDOMEvent)
+ 
+ nsDOMMessageEvent::nsDOMMessageEvent(mozilla::dom::EventTarget* aOwner,
+                                      nsPresContext* aPresContext,
+                                      nsEvent* aEvent)
+   : nsDOMEvent(aOwner, aPresContext, aEvent),
+-    mData(JSVAL_VOID)
++    mData(JS::UndefinedValue())
+ {
+ }
+ 
+ nsDOMMessageEvent::~nsDOMMessageEvent()
+ {
+-  mData = JSVAL_VOID;
++  mData.setUndefined();
+   mozilla::DropJSObjects(this);
+ }
+ 
+ NS_IMETHODIMP
+ nsDOMMessageEvent::GetData(JSContext* aCx, JS::Value* aData)
+ {
+   ErrorResult rv;
+   *aData = GetData(aCx, rv);
+diff --git a/content/xbl/src/nsXBLProtoImplProperty.cpp b/content/xbl/src/nsXBLProtoImplProperty.cpp
+--- a/content/xbl/src/nsXBLProtoImplProperty.cpp
++++ b/content/xbl/src/nsXBLProtoImplProperty.cpp
+@@ -151,17 +151,17 @@ nsXBLProtoImplProperty::InstallMember(JS
+     // Now, enter the content compartment, wrap the getter/setter, and define
+     // them on the class object.
+     JSAutoCompartment ac2(aCx, aTargetClassObject);
+     nsDependentString name(mName);
+     if (!JS_WrapObject(aCx, getter.address()) ||
+         !JS_WrapObject(aCx, setter.address()) ||
+         !::JS_DefineUCProperty(aCx, aTargetClassObject,
+                                static_cast<const jschar*>(mName),
+-                               name.Length(), JSVAL_VOID,
++                               name.Length(), JS::UndefinedValue(),
+                                JS_DATA_TO_FUNC_PTR(JSPropertyOp, getter.get()),
+                                JS_DATA_TO_FUNC_PTR(JSStrictPropertyOp, setter.get()),
+                                mJSAttributes))
+       return NS_ERROR_OUT_OF_MEMORY;
+   }
+   return NS_OK;
+ }
+ 
+diff --git a/dom/base/nsJSEnvironment.cpp b/dom/base/nsJSEnvironment.cpp
+--- a/dom/base/nsJSEnvironment.cpp
++++ b/dom/base/nsJSEnvironment.cpp
+@@ -1537,60 +1537,64 @@ CheckUniversalXPConnectForTraceMalloc(JS
+         return true;
+     JS_ReportError(cx, "trace-malloc functions require UniversalXPConnect");
+     return false;
+ }
+ 
+ static bool
+ TraceMallocDisable(JSContext *cx, unsigned argc, JS::Value *vp)
+ {
++    JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
++
+     if (!CheckUniversalXPConnectForTraceMalloc(cx))
+         return false;
+ 
+     NS_TraceMallocDisable();
+-    JS_SET_RVAL(cx, vp, JSVAL_VOID);
++    args.rval().setUndefined();
+     return true;
+ }
+ 
+ static bool
+ TraceMallocEnable(JSContext *cx, unsigned argc, JS::Value *vp)
+ {
++    JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
++
+     if (!CheckUniversalXPConnectForTraceMalloc(cx))
+         return false;
+ 
+     NS_TraceMallocEnable();
+-    JS_SET_RVAL(cx, vp, JSVAL_VOID);
++    args.rval().setUndefined();
+     return true;
+ }
+ 
+ static bool
+ TraceMallocOpenLogFile(JSContext *cx, unsigned argc, JS::Value *vp)
+ {
+-    int fd;
+-    JSString *str;
++    JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+ 
+     if (!CheckUniversalXPConnectForTraceMalloc(cx))
+         return false;
+ 
+-    if (argc == 0) {
++    int fd;
++    if (args.length() == 0) {
+         fd = -1;
+     } else {
+-        str = JS_ValueToString(cx, JS_ARGV(cx, vp)[0]);
++        JSString* str = JS_ValueToString(cx, args[0]);
+         if (!str)
+             return false;
+         JSAutoByteString filename(cx, str);
+         if (!filename)
+             return false;
+         fd = open(filename.ptr(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
+         if (fd < 0) {
+             JS_ReportError(cx, "can't open %s: %s", filename.ptr(), strerror(errno));
+             return false;
+         }
+     }
+-    JS_SET_RVAL(cx, vp, INT_TO_JSVAL(fd));
++    args.rval().setInt32(fd);
+     return true;
+ }
+ 
+ static bool
+ TraceMallocChangeLogFD(JSContext *cx, unsigned argc, JS::Value *vp)
+ {
+     JS::CallArgs args = CallArgsFromVp(argc, vp);
+ 
+@@ -1631,47 +1635,51 @@ TraceMallocCloseLogFD(JSContext *cx, uns
+     NS_TraceMallocCloseLogFD((int) fd);
+     args.rval().setInt32(fd);
+     return true;
+ }
+ 
+ static bool
+ TraceMallocLogTimestamp(JSContext *cx, unsigned argc, JS::Value *vp)
+ {
++    JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
++
+     if (!CheckUniversalXPConnectForTraceMalloc(cx))
+         return false;
+ 
+-    JSString *str = JS_ValueToString(cx, argc ? JS_ARGV(cx, vp)[0] : JSVAL_VOID);
++    JSString* str = JS_ValueToString(cx, args.get(0));
+     if (!str)
+         return false;
+     JSAutoByteString caption(cx, str);
+     if (!caption)
+         return false;
+     NS_TraceMallocLogTimestamp(caption.ptr());
+-    JS_SET_RVAL(cx, vp, JSVAL_VOID);
++    args.rval().setUndefined();
+     return true;
+ }
+ 
+ static bool
+ TraceMallocDumpAllocations(JSContext *cx, unsigned argc, JS::Value *vp)
+ {
++    JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
++
+     if (!CheckUniversalXPConnectForTraceMalloc(cx))
+         return false;
+ 
+-    JSString *str = JS_ValueToString(cx, argc ? JS_ARGV(cx, vp)[0] : JSVAL_VOID);
++    JSString* str = JS_ValueToString(cx, args.get(0));
+     if (!str)
+         return false;
+     JSAutoByteString pathname(cx, str);
+     if (!pathname)
+         return false;
+     if (NS_TraceMallocDumpAllocations(pathname.ptr()) < 0) {
+         JS_ReportError(cx, "can't dump to %s: %s", pathname.ptr(), strerror(errno));
+         return false;
+     }
+-    JS_SET_RVAL(cx, vp, JSVAL_VOID);
++    args.rval().setUndefined();
+     return true;
+ }
+ 
+ static const JSFunctionSpec TraceMallocFunctions[] = {
+     JS_FS("TraceMallocDisable",         TraceMallocDisable,         0, 0),
+     JS_FS("TraceMallocEnable",          TraceMallocEnable,          0, 0),
+     JS_FS("TraceMallocOpenLogFile",     TraceMallocOpenLogFile,     1, 0),
+     JS_FS("TraceMallocChangeLogFD",     TraceMallocChangeLogFD,     1, 0),
+@@ -1691,17 +1699,19 @@ namespace mozilla {
+ namespace dmd {
+ 
+ // See https://wiki.mozilla.org/Performance/MemShrink/DMD for instructions on
+ // how to use DMD.
+ 
+ static bool
+ ReportAndDump(JSContext *cx, unsigned argc, JS::Value *vp)
+ {
+-  JSString *str = JS_ValueToString(cx, argc ? JS_ARGV(cx, vp)[0] : JSVAL_VOID);
++  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
++
++  JSString* str = JS_ValueToString(cx, args.get(0));
+   if (!str)
+     return false;
+   JSAutoByteString pathname(cx, str);
+   if (!pathname)
+     return false;
+ 
+   FILE* fp = fopen(pathname.ptr(), "w");
+   if (!fp) {
+@@ -1713,17 +1723,17 @@ ReportAndDump(JSContext *cx, unsigned ar
+   dmd::ClearReports();
+   fprintf(stderr, "DMD: running reporters...\n");
+   dmd::RunReporters();
+   dmd::Writer writer(FpWrite, fp);
+   dmd::Dump(writer);
+ 
+   fclose(fp);
+ 
+-  JS_SET_RVAL(cx, vp, JSVAL_VOID);
++  args.rval().setUndefined();
+   return true;
+ }
+ 
+ } // namespace dmd
+ } // namespace mozilla
+ 
+ static const JSFunctionSpec DMDFunctions[] = {
+     JS_FS("DMDReportAndDump", dmd::ReportAndDump, 1, 0),
+diff --git a/dom/base/nsJSUtils.cpp b/dom/base/nsJSUtils.cpp
+--- a/dom/base/nsJSUtils.cpp
++++ b/dom/base/nsJSUtils.cpp
+@@ -230,17 +230,17 @@ nsJSUtils::EvaluateString(JSContext* aCx
+   MOZ_ASSERT_IF(!aEvaluateOptions.reportUncaught, aRetValue);
+   MOZ_ASSERT(aCx == nsContentUtils::GetCurrentJSContext());
+ 
+   // Unfortunately, the JS engine actually compiles scripts with a return value
+   // in a different, less efficient way.  Furthermore, it can't JIT them in many
+   // cases.  So we need to be explicitly told whether the caller cares about the
+   // return value.  Callers use null to indicate they don't care.
+   if (aRetValue) {
+-    *aRetValue = JSVAL_VOID;
++    aRetValue->setUndefined();
+   }
+ 
+   xpc_UnmarkGrayObject(aScopeObject);
+   nsAutoMicroTask mt;
+ 
+   JSPrincipals* p = JS_GetCompartmentPrincipals(js::GetObjectCompartment(aScopeObject));
+   aCompileOptions.setPrincipals(p);
+ 
+diff --git a/dom/base/nsStructuredCloneContainer.cpp b/dom/base/nsStructuredCloneContainer.cpp
+--- a/dom/base/nsStructuredCloneContainer.cpp
++++ b/dom/base/nsStructuredCloneContainer.cpp
+@@ -47,17 +47,18 @@ nsStructuredCloneContainer::InitFromJSVa
+ 
+   // Make sure that we serialize in the right context.
+   MOZ_ASSERT(aCx == nsContentUtils::GetCurrentJSContext());
+   JS::Rooted<JS::Value> jsData(aCx, aData);
+   JS_WrapValue(aCx, jsData.address());
+ 
+   uint64_t* jsBytes = nullptr;
+   bool success = JS_WriteStructuredClone(aCx, jsData, &jsBytes, &mSize,
+-                                         nullptr, nullptr, JSVAL_VOID);
++                                         nullptr, nullptr,
++                                         JS::UndefinedValue());
+   NS_ENSURE_STATE(success);
+   NS_ENSURE_STATE(jsBytes);
+ 
+   // Copy jsBytes into our own buffer.
+   mData = (uint64_t*) malloc(mSize);
+   if (!mData) {
+     mSize = 0;
+     mVersion = 0;
+diff --git a/dom/bindings/BindingUtils.cpp b/dom/bindings/BindingUtils.cpp
+--- a/dom/bindings/BindingUtils.cpp
++++ b/dom/bindings/BindingUtils.cpp
+@@ -311,31 +311,32 @@ DefineUnforgeableAttributes(JSContext* c
+ enum {
+   TOSTRING_CLASS_RESERVED_SLOT = 0,
+   TOSTRING_NAME_RESERVED_SLOT = 1
+ };
+ 
+ bool
+ InterfaceObjectToString(JSContext* cx, unsigned argc, JS::Value *vp)
+ {
+-  JS::Rooted<JSObject*> callee(cx, JSVAL_TO_OBJECT(JS_CALLEE(cx, vp)));
++  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
++  JS::Rooted<JSObject*> callee(cx, &args.callee());
+ 
+-  JS::Rooted<JSObject*> obj(cx, JS_THIS_OBJECT(cx, vp));
++  JS::Rooted<JSObject*> obj(cx, args.computeThis(cx).toObjectOrNull());
+   if (!obj) {
+     JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_CANT_CONVERT_TO,
+                          "null", "object");
+     return false;
+   }
+ 
+   JS::Value v = js::GetFunctionNativeReserved(callee,
+                                               TOSTRING_CLASS_RESERVED_SLOT);
+-  JSClass* clasp = static_cast<JSClass*>(JSVAL_TO_PRIVATE(v));
++  JSClass* clasp = static_cast<JSClass*>(v.toPrivate());
+ 
+   v = js::GetFunctionNativeReserved(callee, TOSTRING_NAME_RESERVED_SLOT);
+-  JSString* jsname = static_cast<JSString*>(JSVAL_TO_STRING(v));
++  JSString* jsname = v.toString();
+   size_t length;
+   const jschar* name = JS_GetInternedStringCharsAndLength(jsname, &length);
+ 
+   if (js::GetObjectJSClass(obj) != clasp) {
+     JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_INCOMPATIBLE_PROTO,
+                          NS_ConvertUTF16toUTF8(name).get(), "toString",
+                          "object");
+     return false;
+@@ -345,29 +346,30 @@ InterfaceObjectToString(JSContext* cx, u
+   str.AppendLiteral("function ");
+   str.Append(name, length);
+   str.AppendLiteral("() {");
+   str.Append('\n');
+   str.AppendLiteral("    [native code]");
+   str.Append('\n');
+   str.AppendLiteral("}");
+ 
+-  return xpc::NonVoidStringToJsval(cx, str, vp);
++  return xpc::NonVoidStringToJsval(cx, str, args.rval().address());
+ }
+ 
+ bool
+ Constructor(JSContext* cx, unsigned argc, JS::Value* vp)
+ {
+-  JSObject* callee = JSVAL_TO_OBJECT(JS_CALLEE(cx, vp));
++  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
++  JSObject* callee = &args.callee();
+   const JS::Value& v =
+     js::GetFunctionNativeReserved(callee,
+                                   CONSTRUCTOR_NATIVE_HOLDER_RESERVED_SLOT);
+   const JSNativeHolder* nativeHolder =
+     static_cast<const JSNativeHolder*>(v.toPrivate());
+-  return (nativeHolder->mNative)(cx, argc, vp);
++  return (nativeHolder->mNative)(cx, argc, args.rval().address());
+ }
+ 
+ static JSObject*
+ CreateConstructor(JSContext* cx, JS::Handle<JSObject*> global, const char* name,
+                   const JSNativeHolder* nativeHolder, unsigned ctorNargs)
+ {
+   JSFunction* fun = js::NewFunctionWithReserved(cx, Constructor, ctorNargs,
+                                                 JSFUN_CONSTRUCTOR, global,
+@@ -389,17 +391,18 @@ DefineConstructor(JSContext* cx, JS::Han
+ {
+   bool alreadyDefined;
+   if (!JS_AlreadyHasOwnProperty(cx, global, name, &alreadyDefined)) {
+     return false;
+   }
+ 
+   // This is Enumerable: False per spec.
+   return alreadyDefined ||
+-         JS_DefineProperty(cx, global, name, OBJECT_TO_JSVAL(constructor),
++         JS_DefineProperty(cx, global, name,
++                           JS::ObjectOrNullValue(constructor),
+                            nullptr, nullptr, 0);
+ }
+ 
+ static JSObject*
+ CreateInterfaceObject(JSContext* cx, JS::Handle<JSObject*> global,
+                       JS::Handle<JSObject*> constructorProto,
+                       JSClass* constructorClass,
+                       const JSNativeHolder* constructorNative,
+@@ -436,20 +439,20 @@ CreateInterfaceObject(JSContext* cx, JS:
+     }
+ 
+     JSString *str = ::JS_InternString(cx, name);
+     if (!str) {
+       return NULL;
+     }
+     JSObject* toStringObj = JS_GetFunctionObject(toString);
+     js::SetFunctionNativeReserved(toStringObj, TOSTRING_CLASS_RESERVED_SLOT,
+-                                  PRIVATE_TO_JSVAL(constructorClass));
++                                  JS::PrivateValue(constructorClass));
+ 
+     js::SetFunctionNativeReserved(toStringObj, TOSTRING_NAME_RESERVED_SLOT,
+-                                  STRING_TO_JSVAL(str));
++                                  JS::StringValue(str));
+ 
+     if (!JS_DefineProperty(cx, constructor, "length", JS::Int32Value(ctorNargs),
+                            nullptr, nullptr, JSPROP_READONLY | JSPROP_PERMANENT)) {
+       return NULL;
+     }
+   }
+ 
+   if (properties) {
+@@ -725,17 +728,17 @@ XPCOMObjectToJsval(JSContext* cx, JS::Ha
+                    bool allowNativeWrapper, JS::Value* rval)
+ {
+   if (!NativeInterface2JSObjectAndThrowIfFailed(cx, scope, rval, helper, iid,
+                                                 allowNativeWrapper)) {
+     return false;
+   }
+ 
+ #ifdef DEBUG
+-  JSObject* jsobj = JSVAL_TO_OBJECT(*rval);
++  JSObject* jsobj = rval->toObjectOrNull();
+   if (jsobj && !js::GetObjectParent(jsobj))
+     NS_ASSERTION(js::GetObjectClass(jsobj)->flags & JSCLASS_IS_GLOBAL,
+                  "Why did we recreate this wrapper?");
+ #endif
+ 
+   return true;
+ }
+ 
+@@ -1429,17 +1432,17 @@ GetXrayExpandoChain(JSObject* obj)
+     v = js::GetFunctionNativeReserved(obj, CONSTRUCTOR_XRAY_EXPANDO_SLOT);
+   }
+   return v.isUndefined() ? nullptr : &v.toObject();
+ }
+ 
+ void
+ SetXrayExpandoChain(JSObject* obj, JSObject* chain)
+ {
+-  JS::Value v = chain ? JS::ObjectValue(*chain) : JSVAL_VOID;
++  JS::Value v = chain ? JS::ObjectValue(*chain) : JS::UndefinedValue();
+   js::Class* clasp = js::GetObjectClass(obj);
+   if (IsDOMClass(clasp) || IsDOMIfaceAndProtoClass(clasp)) {
+     js::SetReservedSlot(obj, DOM_XRAY_EXPANDO_SLOT, v);
+   } else if (js::IsProxyClass(clasp)) {
+     MOZ_ASSERT(js::GetProxyHandler(obj)->family() == ProxyFamily());
+     js::SetProxyExtra(obj, JSPROXYSLOT_XRAY_EXPANDO, v);
+   } else {
+     MOZ_ASSERT(JS_IsNativeFunction(obj, Constructor));
+diff --git a/dom/bindings/Codegen.py b/dom/bindings/Codegen.py
+--- a/dom/bindings/Codegen.py
++++ b/dom/bindings/Codegen.py
+@@ -2110,17 +2110,17 @@ def CreateBindingJSObject(descriptor, pr
+ 
+ """
+     else:
+         create = """  obj = JS_NewObject(aCx, &Class.mBase, proto, %s);
+   if (!obj) {
+     return nullptr;
+   }
+ 
+-  js::SetReservedSlot(obj, DOM_OBJECT_SLOT, PRIVATE_TO_JSVAL(aObject));
++  js::SetReservedSlot(obj, DOM_OBJECT_SLOT, JS::PrivateValue(aObject));
+ """
+     create = objDecl + create
+ 
+     if descriptor.nativeOwnership == 'refcounted':
+         create += """  NS_ADDREF(aObject);
+ """
+     else:
+         create += """  // Make sure the native objects inherit from NonRefcountedDOMObject so that we
+@@ -3842,29 +3842,29 @@ def instantiateJSToNativeConversion(info
+     result.append(conversion)
+     # Add an empty CGGeneric to get an extra newline after the argument
+     # conversion.
+     result.append(CGGeneric(""))
+     return result
+ 
+ def convertConstIDLValueToJSVal(value):
+     if isinstance(value, IDLNullValue):
+-        return "JSVAL_NULL"
++        return "JS::NullValue()"
+     tag = value.type.tag()
+     if tag in [IDLType.Tags.int8, IDLType.Tags.uint8, IDLType.Tags.int16,
+                IDLType.Tags.uint16, IDLType.Tags.int32]:
+-        return "INT_TO_JSVAL(%s)" % (value.value)
++        return "JS::Int32Value(%s)" % (value.value)
+     if tag == IDLType.Tags.uint32:
+-        return "UINT_TO_JSVAL(%sU)" % (value.value)
++        return "JS::NumberValue(%sU)" % (value.value)
+     if tag in [IDLType.Tags.int64, IDLType.Tags.uint64]:
+-        return "DOUBLE_TO_JSVAL(%s)" % numericValue(tag, value.value)
++        return "JS::DoubleValue(%s)" % numericValue(tag, value.value)
+     if tag == IDLType.Tags.bool:
+-        return "JSVAL_TRUE" if value.value else "JSVAL_FALSE"
++        return "JS::BooleanValue(%s)" % toStringBool(value.value)
+     if tag in [IDLType.Tags.float, IDLType.Tags.double]:
+-        return "DOUBLE_TO_JSVAL(%s)" % (value.value)
++        return "JS::DoubleValue(%s)" % (value.value)
+     raise TypeError("Const value of unhandled type: %s" % value.type)
+ 
+ class CGArgumentConverter(CGThing):
+     """
+     A class that takes an IDL argument object and its index in the
+     argument list and generates code to unwrap the argument to the
+     right native type.
+ 
+@@ -4057,33 +4057,33 @@ def getWrapTemplateForType(type, descrip
+             failureCode = exceptionCode
+         str = ("if (!%s) {\n" +
+                CGIndenter(CGGeneric(failureCode)).define() + "\n" +
+                "}\n" +
+                successCode) % (wrapCall)
+         return str
+ 
+     if type is None or type.isVoid():
+-        return (setValue("JSVAL_VOID"), True)
++        return (setValue("JS::UndefinedValue()"), True)
+ 
+     if type.isArray():
+         raise TypeError("Can't handle array return values yet")
+ 
+     if type.isSequence():
+         if type.nullable():
+             # Nullable sequences are Nullable< nsTArray<T> >
+             (recTemplate, recInfall) = getWrapTemplateForType(type.inner, descriptorProvider,
+                                                               "%s.Value()" % result, successCode,
+                                                               isCreator, exceptionCode,
+                                                               typedArraysAreStructs)
+             return ("""
+ if (%s.IsNull()) {
+ %s
+ }
+-%s""" % (result, CGIndenter(CGGeneric(setValue("JSVAL_NULL"))).define(), recTemplate), recInfall)
++%s""" % (result, CGIndenter(CGGeneric(setValue("JS::NullValue()"))).define(), recTemplate), recInfall)
+ 
+         # Now do non-nullable sequences.  Our success code is just to break to
+         # where we set the element in the array.  Note that we bump the
+         # sequenceWrapLevel around this call so that nested sequence conversions
+         # will use different iteration variables.
+         global sequenceWrapLevel
+         index = "sequenceIdx%d" % sequenceWrapLevel
+         sequenceWrapLevel += 1
+@@ -4128,17 +4128,17 @@ if (!returnArray) {
+                 setValue("JS::ObjectValue(*returnArray)"), False)
+ 
+     if (type.isGeckoInterface() and
+         (not type.isCallbackInterface() or
+          type.unroll().inner.identifier.name == "EventListener")):
+         descriptor = descriptorProvider.getDescriptor(type.unroll().inner.identifier.name)
+         if type.nullable():
+             wrappingCode = ("if (!%s) {\n" % (result) +
+-                            CGIndenter(CGGeneric(setValue("JSVAL_NULL"))).define() + "\n" +
++                            CGIndenter(CGGeneric(setValue("JS::NullValue()"))).define() + "\n" +
+                             "}\n")
+         else:
+             wrappingCode = ""
+ 
+         if not descriptor.interface.isExternal() and not descriptor.skipGen:
+             if descriptor.wrapperCache:
+                 assert descriptor.nativeOwnership != 'owned'
+                 wrapMethod = "WrapNewBindingObject"
+@@ -4263,17 +4263,17 @@ if (!returnArray) {
+         raise TypeError("Need to learn to wrap %s" % type)
+ 
+     if type.nullable():
+         (recTemplate, recInfal) = getWrapTemplateForType(type.inner, descriptorProvider,
+                                                          "%s.Value()" % result, successCode,
+                                                          isCreator, exceptionCode,
+                                                          typedArraysAreStructs)
+         return ("if (%s.IsNull()) {\n" % result +
+-                CGIndenter(CGGeneric(setValue("JSVAL_NULL"))).define() + "\n" +
++                CGIndenter(CGGeneric(setValue("JS::NullValue()"))).define() + "\n" +
+                 "}\n" + recTemplate, recInfal)
+ 
+     if type.isSpiderMonkeyInterface():
+         assert typedArraysAreStructs
+         # See comments in WrapNewBindingObject explaining why we need
+         # to wrap here.
+         # NB: setValue(..., True) calls JS_WrapValue(), so is fallible
+         return (setValue("JS::ObjectValue(*%s.Obj())" % result,
+@@ -4290,30 +4290,30 @@ if (!returnArray) {
+     if type.isDate():
+         return (wrapAndSetPtr("%s.ToDateObject(cx, ${jsvalHandle})" % result),
+                 False)
+ 
+     tag = type.tag()
+ 
+     if tag in [IDLType.Tags.int8, IDLType.Tags.uint8, IDLType.Tags.int16,
+                IDLType.Tags.uint16, IDLType.Tags.int32]:
+-        return (setValue("INT_TO_JSVAL(int32_t(%s))" % result), True)
++        return (setValue("JS::Int32Value(int32_t(%s))" % result), True)
+ 
+     elif tag in [IDLType.Tags.int64, IDLType.Tags.uint64,
+                  IDLType.Tags.unrestricted_float, IDLType.Tags.float,
+                  IDLType.Tags.unrestricted_double, IDLType.Tags.double]:
+         # XXXbz will cast to double do the "even significand" thing that webidl
+         # calls for for 64-bit ints?  Do we care?
+         return (setValue("JS_NumberValue(double(%s))" % result), True)
+ 
+     elif tag == IDLType.Tags.uint32:
+-        return (setValue("UINT_TO_JSVAL(%s)" % result), True)
++        return (setValue("JS::NumberValue(%s)" % result), True)
+ 
+     elif tag == IDLType.Tags.bool:
+-        return (setValue("BOOLEAN_TO_JSVAL(%s)" % result), True)
++        return (setValue("JS::BooleanValue(%s)" % result), True)
+ 
+     else:
+         raise TypeError("Need to learn to wrap primitive: %s" % type)
+ 
+ def wrapForType(type, descriptorProvider, templateValues):
+     """
+     Reflect a C++ value of IDL type "type" into JS.  TemplateValues is a dict
+     that should contain:
+@@ -4780,17 +4780,17 @@ class CGPerSignatureCall(CGThing):
+         self.arguments = arguments
+         self.argCount = len(arguments)
+         cgThings = []
+         lenientFloatCode = None
+         if idlNode.getExtendedAttribute('LenientFloat') is not None:
+             if setter:
+                 lenientFloatCode = "return true;"
+             elif idlNode.isMethod():
+-                lenientFloatCode = ("args.rval().set(JSVAL_VOID);\n"
++                lenientFloatCode = ("args.rval().setUndefined();\n"
+                                     "return true;")
+ 
+         argsPre = []
+         if static:
+             nativeMethodName = "%s::%s" % (descriptor.nativeType,
+                                            nativeMethodName)
+             cgThings.append(CGGeneric("""GlobalObject global(cx, obj);
+ if (global.Failed()) {
+@@ -5732,17 +5732,17 @@ class CGGenericSetter(CGAbstractBindingM
+                 '  return ThrowErrorMessage(cx, MSG_MISSING_ARGUMENTS, "%s attribute setter");\n'
+                 "}\n"
+                 "const JSJitInfo *info = FUNCTION_VALUE_TO_JITINFO(JS_CALLEE(cx, vp));\n"
+                 "MOZ_ASSERT(info->type == JSJitInfo::Setter);\n"
+                 "JSJitSetterOp setter = info->setter;\n"
+                 "if (!setter(cx, obj, self, JSJitSetterCallArgs(args))) {\n"
+                 "  return false;\n"
+                 "}\n"
+-                "args.rval().set(JSVAL_VOID);\n"
++                "args.rval().setUndefined();\n"
+                 "return true;" % self.descriptor.interface.identifier.name))
+ 
+ class CGSpecializedSetter(CGAbstractStaticMethod):
+     """
+     A class for generating the code for a specialized attribute setter
+     that the JIT can call with lower overhead.
+     """
+     def __init__(self, descriptor, attr):
+@@ -7307,25 +7307,25 @@ MOZ_ASSERT_IF(desc.object(), desc.object
+             if indexedSetter:
+                 setOrIndexedGet += ("  if (IsArrayIndex(index)) {\n")
+                 if not 'IndexedCreator' in self.descriptor.operations:
+                     # FIXME need to check that this is a 'supported property
+                     # index'.  But if that happens, watch out for the assumption
+                     # below that the name setter always returns for
+                     # IsArrayIndex(index).
+                     assert False
+-                setOrIndexedGet += ("    FillPropertyDescriptor(desc, proxy, JSVAL_VOID, false);\n" +
++                setOrIndexedGet += ("    FillPropertyDescriptor(desc, proxy, JS::UndefinedValue(), false);\n" +
+                                     "    return true;\n" +
+                                     "  }\n")
+             setOrIndexedGet += CGIndenter(CGGeneric(getUnforgeable)).define()
+             if self.descriptor.operations['NamedSetter']:
+                 if not 'NamedCreator' in self.descriptor.operations:
+                     # FIXME need to check that this is a 'supported property name'
+                     assert False
+-                create = CGGeneric("FillPropertyDescriptor(desc, proxy, JSVAL_VOID, false);\n"
++                create = CGGeneric("FillPropertyDescriptor(desc, proxy, JS::UndefinedValue(), false);\n"
+                                    "return true;")
+                 # If we have an indexed setter we've already returned
+                 if (self.descriptor.supportsIndexedProperties() and
+                     not indexedSetter):
+                     create = CGIfWrapper(create, "!IsArrayIndex(index)")
+                 setOrIndexedGet += CGIndenter(create).define() + "\n"
+             setOrIndexedGet += "}"
+             if indexedGetter:
+@@ -7763,17 +7763,17 @@ class CGDOMJSProxyHandler_getElementIfPr
+         if self.descriptor.supportsIndexedProperties():
+             get = (CGProxyIndexedGetter(self.descriptor, templateValues).define() + "\n"
+                    "// We skip the expando object and any named getters if\n"
+                    "// there is an indexed getter.\n" +
+                    "\n") % (self.descriptor.nativeType)
+         else:
+             if self.descriptor.supportsNamedProperties():
+                 get = CGProxyNamedGetter(self.descriptor, templateValues,
+-                                         "UINT_TO_JSVAL(index)").define()
++                                         "JS::NumberValue(index)").define()
+             get += """
+ 
+ JS::Rooted<JSObject*> expando(cx, GetExpandoObject(proxy));
+ if (expando) {
+   bool isPresent;
+   if (!JS_GetElementIfPresent(cx, expando, index, expando, vp, &isPresent)) {
+     return false;
+   }
+diff --git a/dom/bluetooth/BluetoothAdapter.cpp b/dom/bluetooth/BluetoothAdapter.cpp
+--- a/dom/bluetooth/BluetoothAdapter.cpp
++++ b/dom/bluetooth/BluetoothAdapter.cpp
+@@ -64,17 +64,17 @@ public:
+     BluetoothReplyRunnable(aReq),
+     mAdapterPtr(aAdapterPtr)
+   {
+     MOZ_ASSERT(aReq && aAdapterPtr);
+   }
+ 
+   virtual bool ParseSuccessfulReply(JS::Value* aValue)
+   {
+-    *aValue = JSVAL_VOID;
++    aValue->setUndefined();
+ 
+     const BluetoothValue& v = mReply->get_BluetoothReplySuccess().value();
+     if (v.type() != BluetoothValue::TArrayOfBluetoothNamedValue) {
+       NS_WARNING("Not a BluetoothNamedValue array!");
+       SetError(NS_LITERAL_STRING("BluetoothReplyTypeError"));
+       return false;
+     }
+ 
+@@ -133,17 +133,17 @@ public:
+   GetScoConnectionStatusTask(nsIDOMDOMRequest* aReq) :
+     BluetoothReplyRunnable(aReq)
+   {
+     MOZ_ASSERT(aReq);
+   }
+ 
+   virtual bool ParseSuccessfulReply(JS::Value* aValue)
+   {
+-    *aValue = JSVAL_VOID;
++    aValue->setUndefined();
+ 
+     const BluetoothValue& v = mReply->get_BluetoothReplySuccess().value();
+     if (v.type() != BluetoothValue::Tbool) {
+       NS_WARNING("Not a boolean!");
+       SetError(NS_LITERAL_STRING("BluetoothReplyTypeError"));
+       return false;
+     }
+ 
+diff --git a/dom/bluetooth/BluetoothManager.cpp b/dom/bluetooth/BluetoothManager.cpp
+--- a/dom/bluetooth/BluetoothManager.cpp
++++ b/dom/bluetooth/BluetoothManager.cpp
+@@ -39,17 +39,17 @@ public:
+     BluetoothReplyRunnable(aReq),
+     mManagerPtr(aManager)
+   {
+   }
+ 
+   bool
+   ParseSuccessfulReply(JS::Value* aValue)
+   {
+-    *aValue = JSVAL_VOID;
++    aValue->setUndefined();
+ 
+     const BluetoothValue& v = mReply->get_BluetoothReplySuccess().value();
+     if (v.type() != BluetoothValue::TArrayOfBluetoothNamedValue) {
+       NS_WARNING("Not a BluetoothNamedValue array!");
+       SetError(NS_LITERAL_STRING("BluetoothReplyTypeError"));
+       return false;
+     }
+ 
+diff --git a/dom/bluetooth/BluetoothReplyRunnable.cpp b/dom/bluetooth/BluetoothReplyRunnable.cpp
+--- a/dom/bluetooth/BluetoothReplyRunnable.cpp
++++ b/dom/bluetooth/BluetoothReplyRunnable.cpp
+@@ -57,17 +57,17 @@ BluetoothReplyRunnable::Run()
+ {
+   MOZ_ASSERT(NS_IsMainThread());
+   MOZ_ASSERT(mDOMRequest);
+   MOZ_ASSERT(mReply);
+ 
+   nsresult rv;
+ 
+   if (mReply->type() != BluetoothReply::TBluetoothReplySuccess) {
+-    rv = FireReply(JSVAL_VOID);
++    rv = FireReply(JS::UndefinedValue());
+   } else {
+     JS::Value v; 
+     if (!ParseSuccessfulReply(&v)) {
+       rv = FireErrorString();
+     } else {
+       rv = FireReply(v);
+     }
+   }
+diff --git a/dom/bluetooth/BluetoothReplyRunnable.h b/dom/bluetooth/BluetoothReplyRunnable.h
+--- a/dom/bluetooth/BluetoothReplyRunnable.h
++++ b/dom/bluetooth/BluetoothReplyRunnable.h
+@@ -56,16 +56,16 @@ class BluetoothVoidReplyRunnable : publi
+ {
+ public:
+   BluetoothVoidReplyRunnable(nsIDOMDOMRequest* aReq);
+  ~BluetoothVoidReplyRunnable();
+ 
+ protected:
+   virtual bool ParseSuccessfulReply(JS::Value* aValue) MOZ_OVERRIDE
+   {
+-    *aValue = JSVAL_VOID;
++    aValue->setUndefined();
+     return true;
+   }
+ };
+ 
+ END_BLUETOOTH_NAMESPACE
+ 
+ #endif
+diff --git a/dom/plugins/base/nsJSNPRuntime.cpp b/dom/plugins/base/nsJSNPRuntime.cpp
+--- a/dom/plugins/base/nsJSNPRuntime.cpp
++++ b/dom/plugins/base/nsJSNPRuntime.cpp
+@@ -300,95 +300,92 @@ static NPP
+ LookupNPP(NPObject *npobj);
+ 
+ 
+ static JS::Value
+ NPVariantToJSVal(NPP npp, JSContext *cx, const NPVariant *variant)
+ {
+   switch (variant->type) {
+   case NPVariantType_Void :
+-    return JSVAL_VOID;
++    return JS::UndefinedValue();
+   case NPVariantType_Null :
+-    return JSVAL_NULL;
++    return JS::NullValue();
+   case NPVariantType_Bool :
+-    return BOOLEAN_TO_JSVAL(NPVARIANT_TO_BOOLEAN(*variant));
++    return JS::BooleanValue(NPVARIANT_TO_BOOLEAN(*variant));
+   case NPVariantType_Int32 :
+     {
+-      // Don't use INT_TO_JSVAL directly to prevent bugs when dealing
+-      // with ints larger than what fits in a integer JS::Value.
+-      return ::JS_NumberValue(NPVARIANT_TO_INT32(*variant));
++      return JS::Int32Value(NPVARIANT_TO_INT32(*variant));
+     }
+   case NPVariantType_Double :
+     {
+       return ::JS_NumberValue(NPVARIANT_TO_DOUBLE(*variant));
+     }
+   case NPVariantType_String :
+     {
+       const NPString *s = &NPVARIANT_TO_STRING(*variant);
+       NS_ConvertUTF8toUTF16 utf16String(s->UTF8Characters, s->UTF8Length);
+ 
+       JSString *str =
+-        ::JS_NewUCStringCopyN(cx, reinterpret_cast<const jschar*>
+-                                                  (utf16String.get()),
++        ::JS_NewUCStringCopyN(cx, static_cast<const jschar*>(utf16String.get()),
+                               utf16String.Length());
+ 
+       if (str) {
+-        return STRING_TO_JSVAL(str);
++        return JS::StringValue(str);
+       }
+ 
+       break;
+     }
+   case NPVariantType_Object:
+     {
+       if (npp) {
+         JSObject *obj =
+           nsNPObjWrapper::GetNewOrUsed(npp, cx, NPVARIANT_TO_OBJECT(*variant));
+ 
+         if (obj) {
+-          return OBJECT_TO_JSVAL(obj);
++          return JS::ObjectValue(*obj);
+         }
+       }
+ 
+       NS_ERROR("Error wrapping NPObject!");
+ 
+       break;
+     }
+   default:
+     NS_ERROR("Unknown NPVariant type!");
+   }
+ 
+   NS_ERROR("Unable to convert NPVariant to jsval!");
+ 
+-  return JSVAL_VOID;
++  return JS::UndefinedValue();
+ }
+ 
+ bool
+ JSValToNPVariant(NPP npp, JSContext *cx, JS::Value val, NPVariant *variant)
+ {
+   NS_ASSERTION(npp, "Must have an NPP to wrap a jsval!");
+ 
+-  if (JSVAL_IS_PRIMITIVE(val)) {
+-    if (val == JSVAL_VOID) {
++  if (val.isPrimitive()) {
++    if (val.isUndefined()) {
+       VOID_TO_NPVARIANT(*variant);
+-    } else if (JSVAL_IS_NULL(val)) {
++    } else if (val.isNull()) {
+       NULL_TO_NPVARIANT(*variant);
+-    } else if (JSVAL_IS_BOOLEAN(val)) {
+-      BOOLEAN_TO_NPVARIANT(JSVAL_TO_BOOLEAN(val), *variant);
+-    } else if (JSVAL_IS_INT(val)) {
+-      INT32_TO_NPVARIANT(JSVAL_TO_INT(val), *variant);
+-    } else if (JSVAL_IS_DOUBLE(val)) {
+-      double d = JSVAL_TO_DOUBLE(val);
++    } else if (val.isBoolean()) {
++      BOOLEAN_TO_NPVARIANT(val.toBoolean(), *variant);
++    } else if (val.isInt32()) {
++      INT32_TO_NPVARIANT(val.toInt32(), *variant);
++    } else if (val.isDouble()) {
++      double d = val.toDouble();
+       int i;
+       if (JS_DoubleIsInt32(d, &i)) {
+         INT32_TO_NPVARIANT(i, *variant);
+       } else {
+         DOUBLE_TO_NPVARIANT(d, *variant);
+       }
+-    } else if (JSVAL_IS_STRING(val)) {
+-      JSString *jsstr = JSVAL_TO_STRING(val);
++    } else if (val.isString()) {
++      JSString *jsstr = val.toString();
+       size_t length;
+       const jschar *chars = ::JS_GetStringCharsZAndLength(cx, jsstr, &length);
+       if (!chars) {
+           return false;
+       }
+ 
+       nsDependentString str(chars, length);
+ 
+@@ -414,17 +411,17 @@ JSValToNPVariant(NPP npp, JSContext *cx,
+   // transplanting the plugin objects, and just do a unwrap with security
+   // checks if we encounter one of them as an argument. If the unwrap fails,
+   // we run with the original wrapped object, since sometimes there are
+   // legitimate cases where a security wrapper ends up here (for example,
+   // Location objects, which are _always_ behind security wrappers).
+   JS::Rooted<JSObject*> obj(cx, val.toObjectOrNull());
+   obj = js::CheckedUnwrap(obj);
+   if (!obj) {
+-    obj = JSVAL_TO_OBJECT(val);
++    obj = val.toObject();
+   }
+ 
+   NPObject *npobj = nsJSObjWrapper::GetNewOrUsed(npp, cx, obj);
+   if (!npobj) {
+     return false;
+   }
+ 
+   // Pass over ownership of npobj to *variant
+@@ -452,17 +449,17 @@ ThrowJSException(JSContext *cx, const ch
+     if (message) {
+       AppendASCIItoUTF16("].", ucex);
+     }
+ 
+     JSString *str = ::JS_NewUCStringCopyN(cx, (jschar *)ucex.get(),
+                                           ucex.Length());
+ 
+     if (str) {
+-      ::JS_SetPendingException(cx, STRING_TO_JSVAL(str));
++      ::JS_SetPendingException(cx, JS::StringValue(str));
+     }
+ 
+     PopException();
+   } else {
+     ::JS_ReportError(cx, message);
+   }
+ }
+ 
+@@ -570,18 +567,17 @@ nsJSObjWrapper::NP_HasMethod(NPObject *n
+   pusher.Push(cx);
+   JSAutoCompartment ac(cx, npjsobj->mJSObj);
+ 
+   AutoJSExceptionReporter reporter(cx);
+ 
+   JS::Rooted<JS::Value> v(cx);
+   bool ok = GetProperty(cx, npjsobj->mJSObj, id, &v);
+ 
+-  return ok && !JSVAL_IS_PRIMITIVE(v) &&
+-    ::JS_ObjectIsFunction(cx, JSVAL_TO_OBJECT(v));
++  return ok && v.isObject() && JS_ObjectIsFunction(cx, &v.toObject());
+ }
+ 
+ static bool
+ doInvoke(NPObject *npobj, NPIdentifier method, const NPVariant *args,
+          uint32_t argCount, bool ctorCall, NPVariant *result)
+ {
+   NPP npp = NPPStack::Peek();
+   JSContext *cx = GetJSContext(npp);
+@@ -609,17 +605,17 @@ doInvoke(NPObject *npobj, NPIdentifier m
+   AutoJSExceptionReporter reporter(cx);
+ 
+   if (method != NPIdentifier_VOID) {
+     if (!GetProperty(cx, npjsobj->mJSObj, method, &fv) ||
+         ::JS_TypeOfValue(cx, fv) != JSTYPE_FUNCTION) {
+       return false;
+     }
+   } else {
+-    fv = OBJECT_TO_JSVAL(npjsobj->mJSObj);
++    fv = JS::ObjectOrNullValue(npjsobj->mJSObj);
+   }
+ 
+   JS::Value jsargs_buf[8];
+   JS::Value *jsargs = jsargs_buf;
+ 
+   if (argCount > (sizeof(jsargs_buf) / sizeof(JS::Value))) {
+     // Our stack buffer isn't large enough to hold all arguments,
+     // malloc a buffer.
+@@ -643,17 +639,17 @@ doInvoke(NPObject *npobj, NPIdentifier m
+       tvr.changeLength(i + 1);
+     }
+ 
+     if (ctorCall) {
+       JSObject *newObj =
+         ::JS_New(cx, npjsobj->mJSObj, argCount, jsargs);
+ 
+       if (newObj) {
+-        v = OBJECT_TO_JSVAL(newObj);
++        v = JS::ObjectValue(*newObj);
+         ok = true;
+       } else {
+         ok = false;
+       }
+     } else {
+       ok = ::JS_CallFunctionValue(cx, npjsobj->mJSObj, fv, argCount, jsargs, v.address());
+     }
+ 
+@@ -881,27 +877,27 @@ nsJSObjWrapper::NP_Enumerate(NPObject *n
+   for (uint32_t i = 0; i < *count; i++) {
+     JS::Rooted<JS::Value> v(cx);
+     if (!JS_IdToValue(cx, ida[i], v.address())) {
+       PR_Free(*idarray);
+       return false;
+     }
+ 
+     NPIdentifier id;
+-    if (JSVAL_IS_STRING(v)) {
+-      JSString *str = JS_InternJSString(cx, JSVAL_TO_STRING(v));
++    if (v.isString()) {
++      JSString *str = JS_InternJSString(cx, v.toString());
+       if (!str) {
+         PR_Free(*idarray);
+         return false;
+       }
+       id = StringToNPIdentifier(cx, str);
+     } else {
+-      NS_ASSERTION(JSVAL_IS_INT(v),
++      NS_ASSERTION(v.isInt32(),
+                    "The element in ida must be either string or int!\n");
+-      id = IntToNPIdentifier(JSVAL_TO_INT(v));
++      id = IntToNPIdentifier(v.toInt32());
+     }
+ 
+     (*idarray)[i] = id;
+   }
+ 
+   return true;
+ }
+ 
+@@ -1316,18 +1312,18 @@ NPObjWrapper_GetProperty(JSContext *cx, 
+     if (!ReportExceptionIfPending(cx))
+       return false;
+   }
+ 
+   return true;
+ }
+ 
+ static bool
+-CallNPMethodInternal(JSContext *cx, JS::Handle<JSObject*> obj, unsigned argc,
+-                     JS::Value *argv, JS::Value *rval, bool ctorCall)
++CallNPMethodInternal(JSContext* cx, JS::Handle<JSObject*> obj,
++                     const JS::CallArgs& args, bool ctorCall)
+ {
+   NPObject *npobj = GetNPObject(cx, obj);
+ 
+   if (!npobj || !npobj->_class) {
+     ThrowJSException(cx, "Bad NPObject as private data!");
+ 
+     return false;
+   }
+@@ -1342,46 +1338,45 @@ CallNPMethodInternal(JSContext *cx, JS::
+     return false;
+   }
+ 
+   PluginDestructionGuard pdg(npp);
+ 
+   NPVariant npargs_buf[8];
+   NPVariant *npargs = npargs_buf;
+ 
+-  if (argc > (sizeof(npargs_buf) / sizeof(NPVariant))) {
++  if (args.length() > (sizeof(npargs_buf) / sizeof(NPVariant))) {
+     // Our stack buffer isn't large enough to hold all arguments,
+     // malloc a buffer.
+     npargs = (NPVariant *)PR_Malloc(argc * sizeof(NPVariant));
+ 
+     if (!npargs) {
+       ThrowJSException(cx, "Out of memory!");
+ 
+       return false;
+     }
+   }
+ 
+   // Convert arguments
+-  uint32_t i;
+-  for (i = 0; i < argc; ++i) {
+-    if (!JSValToNPVariant(npp, cx, argv[i], npargs + i)) {
++  for (uint32_t i = 0; i < args.length(); ++i) {
++    if (!JSValToNPVariant(npp, cx, args[i], npargs + i)) {
+       ThrowJSException(cx, "Error converting jsvals to NPVariants!");
+ 
+       if (npargs != npargs_buf) {
+         PR_Free(npargs);
+       }
+ 
+       return false;
+     }
+   }
+ 
+   NPVariant v;
+   VOID_TO_NPVARIANT(v);
+ 
+-  JSObject *funobj = JSVAL_TO_OBJECT(argv[-2]);
++  JSObject *funobj = &args.callee();
+   bool ok;
+   const char *msg = "Error calling method on NPObject!";
+ 
+   if (ctorCall) {
+     // construct a new NPObject based on the NPClass in npobj. Fail if
+     // no construct method is available.
+ 
+     if (NP_CLASS_STRUCT_VERSION_HAS_CTOR(npobj->_class) &&
+@@ -1407,59 +1402,60 @@ CallNPMethodInternal(JSContext *cx, JS::
+ 
+       msg = "Attempt to call a method on object with no invoke method.";
+     }
+   } else {
+     if (npobj->_class->invokeDefault) {
+       // obj is a callable object that is being called, no method name
+       // available then. Invoke the default method.
+ 
+-      ok = npobj->_class->invokeDefault(npobj, npargs, argc, &v);
++      ok = npobj->_class->invokeDefault(npobj, npargs, args.length(), &v);
+     } else {
+       ok = false;
+ 
+       msg = "Attempt to call a default method on object with no "
+         "invokeDefault method.";
+     }
+   }
+ 
+   // Release arguments.
+-  for (i = 0; i < argc; ++i) {
++  for (uint32_t i = 0; i < args.length(); ++i) {
+     _releasevariantvalue(npargs + i);
+   }
+ 
+   if (npargs != npargs_buf) {
+     PR_Free(npargs);
+   }
+ 
+   if (!ok) {
+     // ReportExceptionIfPending returns a return value, which is true
+     // if no exception was thrown. In that case, throw our own.
+     if (ReportExceptionIfPending(cx))
+       ThrowJSException(cx, msg);
+ 
+     return false;
+   }
+ 
+-  *rval = NPVariantToJSVal(npp, cx, &v);
++  args.rval().set(NPVariantToJSVal(npp, cx, &v));
+ 
+   // *rval now owns the value, release our reference.
+   _releasevariantvalue(&v);
+ 
+   return ReportExceptionIfPending(cx);
+ }
+ 
+ static bool
+ CallNPMethod(JSContext *cx, unsigned argc, JS::Value *vp)
+ {
+-  JS::Rooted<JSObject*> obj(cx, JS_THIS_OBJECT(cx, vp));
++  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
++  JS::Rooted<JSObject*> obj(cx, args.computeThis(cx).toObjectOrNull());
+   if (!obj)
+       return false;
+ 
+-  return CallNPMethodInternal(cx, obj, argc, JS_ARGV(cx, vp), vp, false);
++  return CallNPMethodInternal(cx, obj, args, false);
+ }
+ 
+ struct NPObjectEnumerateState {
+   uint32_t     index;
+   uint32_t     length;
+   NPIdentifier *value;
+ };
+ 
+@@ -1507,40 +1503,40 @@ NPObjWrapper_newEnumerate(JSContext *cx,
+       }
+ 
+       return false;
+     }
+ 
+     state->value = enum_value;
+     state->length = length;
+     state->index = 0;
+-    *statep = PRIVATE_TO_JSVAL(state);
++    statep->setPrivate(state);
+     if (idp) {
+       *idp = INT_TO_JSID(length);
+     }
+ 
+     break;
+ 
+   case JSENUMERATE_NEXT:
+-    state = (NPObjectEnumerateState *)JSVAL_TO_PRIVATE(*statep);
++    state = static_cast<NPObjectEnumerateState*>(statep->toPrivate());
+     enum_value = state->value;
+     length = state->length;
+     if (state->index != length) {
+       *idp = NPIdentifierToJSId(enum_value[state->index++]);
+       return true;
+     }
+ 
+     // FALL THROUGH
+ 
+   case JSENUMERATE_DESTROY:
+-    state = (NPObjectEnumerateState *)JSVAL_TO_PRIVATE(*statep);
++    state = static_cast<NPObjectEnumerateState*>(statep->toPrivate());
+     if (state->value)
+       PR_Free(state->value);
+     delete state;
+-    *statep = JSVAL_NULL;
++    statep->setNull();
+ 
+     break;
+   }
+ 
+   return true;
+ }
+ 
+ static bool
+@@ -1562,17 +1558,17 @@ NPObjWrapper_NewResolve(JSContext *cx, J
+ 
+   bool hasProperty = npobj->_class->hasProperty(npobj, identifier);
+   if (!ReportExceptionIfPending(cx))
+     return false;
+ 
+   if (hasProperty) {
+     NS_ASSERTION(JSID_IS_STRING(id) || JSID_IS_INT(id),
+                  "id must be either string or int!\n");
+-    if (!::JS_DefinePropertyById(cx, obj, id, JSVAL_VOID, nullptr,
++    if (!::JS_DefinePropertyById(cx, obj, id, JS::UndefinedValue(), nullptr,
+                                  nullptr, JSPROP_ENUMERATE | JSPROP_SHARED)) {
+         return false;
+     }
+ 
+     objp.set(obj);
+ 
+     return true;
+   }
+@@ -1608,23 +1604,23 @@ NPObjWrapper_Convert(JSContext *cx, JS::
+   // be a problem, because the absence of either property, or the presence of
+   // either property with a value that isn't callable, will cause that property
+   // to simply be ignored.  But there is a problem in one specific case: Java,
+   // specifically java.lang.Integer.  The Integer class has static valueOf
+   // methods, none of which are nullary, so the JS-reflected method will behave
+   // poorly when called with no arguments.  We work around this problem by
+   // giving plugins a [[DefaultValue]] which uses only toString and not valueOf.
+ 
+-  JS::Rooted<JS::Value> v(cx, JSVAL_VOID);
++  JS::Rooted<JS::Value> v(cx, JS::UndefinedValue());
+   if (!JS_GetProperty(cx, obj, "toString", &v))
+     return false;
+-  if (!JSVAL_IS_PRIMITIVE(v) && JS_ObjectIsCallable(cx, JSVAL_TO_OBJECT(v))) {
++  if (v.isObject() && JS_ObjectIsCallable(cx, &v.toObject())) {
+     if (!JS_CallFunctionValue(cx, obj, v, 0, NULL, vp.address()))
+       return false;
+-    if (JSVAL_IS_PRIMITIVE(vp))
++    if (vp.isPrimitive())
+       return true;
+   }
+ 
+   JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_CANT_CONVERT_TO,
+                        JS_GetClass(obj)->name,
+                        hint == JSTYPE_VOID
+                        ? "primitive type"
+                        : hint == JSTYPE_NUMBER
+@@ -1646,25 +1642,27 @@ NPObjWrapper_Finalize(JSFreeOp *fop, JSO
+   if (!sDelayedReleases)
+     sDelayedReleases = new nsTArray<NPObject*>;
+   sDelayedReleases->AppendElement(npobj);
+ }
+ 
+ static bool
+ NPObjWrapper_Call(JSContext *cx, unsigned argc, JS::Value *vp)
+ {
+-  JS::Rooted<JSObject*> obj(cx, JSVAL_TO_OBJECT(JS_CALLEE(cx, vp)));
+-  return CallNPMethodInternal(cx, obj, argc, JS_ARGV(cx, vp), vp, false);
++  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
++  JS::Rooted<JSObject*> obj(cx, &args.callee());
++  return CallNPMethodInternal(cx, obj, args, false);
+ }
+ 
+ static bool
+ NPObjWrapper_Construct(JSContext *cx, unsigned argc, JS::Value *vp)
+ {
+-  JS::Rooted<JSObject*> obj(cx, JSVAL_TO_OBJECT(JS_CALLEE(cx, vp)));
+-  return CallNPMethodInternal(cx, obj, argc, JS_ARGV(cx, vp), vp, true);
++  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
++  JS::Rooted<JSObject*> obj(cx, &args.callee());
++  return CallNPMethodInternal(cx, obj, args, true);
+ }
+ 
+ class NPObjWrapperHashEntry : public PLDHashEntryHdr
+ {
+ public:
+   NPObject *mNPObj; // Must be the first member for the PLDHash stubs to work
+   JSObject *mJSObj;
+   NPP mNpp;
+@@ -1962,17 +1960,17 @@ CreateNPObjectMember(NPP npp, JSContext 
+   memset(memberPrivate, 0, sizeof(NPObjectMemberPrivate));
+ 
+   JSObject *memobj = ::JS_NewObject(cx, &sNPObjectMemberClass, nullptr, nullptr);
+   if (!memobj) {
+     PR_Free(memberPrivate);
+     return false;
+   }
+ 
+-  *vp = OBJECT_TO_JSVAL(memobj);
++  vp->setObject(memobj);
+   ::JS_AddValueRoot(cx, vp);
+ 
+   ::JS_SetPrivate(memobj, (void *)memberPrivate);
+ 
+   NPIdentifier identifier = JSIdToNPIdentifier(id);
+ 
+   JS::Rooted<JS::Value> fieldValue(cx);
+   NPVariant npv;
+@@ -2027,18 +2025,18 @@ NPObjectMember_Convert(JSContext *cx, JS
+     return false;
+   }
+ 
+   switch (type) {
+   case JSTYPE_VOID:
+   case JSTYPE_STRING:
+   case JSTYPE_NUMBER:
+     vp.set(memberPrivate->fieldValue);
+-    if (!JSVAL_IS_PRIMITIVE(vp)) {
+-      return JS_DefaultValue(cx, JSVAL_TO_OBJECT(vp), type, vp.address());
++    if (vp.isObject()) {
++      return JS_DefaultValue(cx, vp.toObject(), type, vp.address());
+     }
+     return true;
+   case JSTYPE_BOOLEAN:
+   case JSTYPE_OBJECT:
+     vp.set(memberPrivate->fieldValue);
+     return true;
+   case JSTYPE_FUNCTION:
+     // Leave this to NPObjectMember_Call.
+@@ -2059,88 +2057,87 @@ NPObjectMember_Finalize(JSFreeOp *fop, J
+     return;
+ 
+   PR_Free(memberPrivate);
+ }
+ 
+ static bool
+ NPObjectMember_Call(JSContext *cx, unsigned argc, JS::Value *vp)
+ {
+-  JSObject *memobj = JSVAL_TO_OBJECT(JS_CALLEE(cx, vp));
+-  NS_ENSURE_TRUE(memobj, false);
++  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
++
++  JSObject *memobj = &args.callee();
+ 
+   NPObjectMemberPrivate *memberPrivate =
+     (NPObjectMemberPrivate *)::JS_GetInstancePrivate(cx, memobj,
+                                                      &sNPObjectMemberClass,
+-                                                     JS_ARGV(cx, vp));
++                                                     args.array());
+   if (!memberPrivate || !memberPrivate->npobjWrapper)
+     return false;
+ 
+   NPObject *npobj = GetNPObject(cx, memberPrivate->npobjWrapper);
+   if (!npobj) {
+     ThrowJSException(cx, "Call on invalid member object");
+ 
+     return false;
+   }
+ 
+   NPVariant npargs_buf[8];
+   NPVariant *npargs = npargs_buf;
+ 
+-  if (argc > (sizeof(npargs_buf) / sizeof(NPVariant))) {
++  if (args.length() > (sizeof(npargs_buf) / sizeof(NPVariant))) {
+     // Our stack buffer isn't large enough to hold all arguments,
+     // malloc a buffer.
+     npargs = (NPVariant *)PR_Malloc(argc * sizeof(NPVariant));
+ 
+     if (!npargs) {
+       ThrowJSException(cx, "Out of memory!");
+ 
+       return false;
+     }
+   }
+ 
+   // Convert arguments
+-  uint32_t i;
+-  JS::Value *argv = JS_ARGV(cx, vp);
+-  for (i = 0; i < argc; ++i) {
+-    if (!JSValToNPVariant(memberPrivate->npp, cx, argv[i], npargs + i)) {
++  for (uint32_t i = 0; i < args.length(); ++i) {
++    if (!JSValToNPVariant(memberPrivate->npp, cx, args[i], npargs + i)) {
+       ThrowJSException(cx, "Error converting jsvals to NPVariants!");
+ 
+       if (npargs != npargs_buf) {
+         PR_Free(npargs);
+       }
+ 
+       return false;
+     }
+   }
+ 
+ 
+   NPVariant npv;
+   bool ok;
+   ok = npobj->_class->invoke(npobj, JSIdToNPIdentifier(memberPrivate->methodName),
+-                             npargs, argc, &npv);
++                             npargs, args.length(), &npv);
+ 
+   // Release arguments.
+-  for (i = 0; i < argc; ++i) {
++  for (uint32_t i = 0; i < args.length(); ++i) {
+     _releasevariantvalue(npargs + i);
+   }
+ 
+   if (npargs != npargs_buf) {
+     PR_Free(npargs);
+   }
+ 
+   if (!ok) {
+     // ReportExceptionIfPending returns a return value, which is true
+     // if no exception was thrown. In that case, throw our own.
+     if (ReportExceptionIfPending(cx))
+       ThrowJSException(cx, "Error calling method on NPObject!");
+ 
+     return false;
+   }
+ 
+-  JS_SET_RVAL(cx, vp, NPVariantToJSVal(memberPrivate->npp, cx, &npv));
++  args.rval().set(NPVariantToJSVal(memberPrivate->npp, cx, &npv));
+ 
+   // *vp now owns the value, release our reference.
+   _releasevariantvalue(&npv);
+ 
+   return ReportExceptionIfPending(cx);
+ }
+ 
+ static void
+@@ -2149,17 +2146,17 @@ NPObjectMember_Trace(JSTracer *trc, JSOb
+   NPObjectMemberPrivate *memberPrivate =
+     (NPObjectMemberPrivate *)::JS_GetPrivate(obj);
+   if (!memberPrivate)
+     return;
+ 
+   // Our NPIdentifier is not always interned, so we must root it explicitly.
+   JS_CallHeapIdTracer(trc, &memberPrivate->methodName, "NPObjectMemberPrivate.methodName");
+ 
+-  if (!JSVAL_IS_PRIMITIVE(memberPrivate->fieldValue)) {
++  if (memberPrivate->fieldValue.isObject()) {
+     JS_CallHeapValueTracer(trc, &memberPrivate->fieldValue,
+                            "NPObject Member => fieldValue");
+   }
+ 
+   // There's no strong reference from our private data to the
+   // NPObject, so make sure to mark the NPObject wrapper to keep the
+   // NPObject alive as long as this NPObjectMember is alive.
+   if (memberPrivate->npobjWrapper) {

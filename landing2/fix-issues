@@ -1,0 +1,109 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/python/mozbuild/mozbuild/backend/recursivemake.py b/python/mozbuild/mozbuild/backend/recursivemake.py
+--- a/python/mozbuild/mozbuild/backend/recursivemake.py
++++ b/python/mozbuild/mozbuild/backend/recursivemake.py
+@@ -1,14 +1,15 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ from __future__ import unicode_literals
+ 
++import errno
+ import itertools
+ import logging
+ import os
+ import re
+ import types
+ 
+ from collections import namedtuple
+ from StringIO import StringIO
+@@ -892,23 +893,22 @@ class RecursiveMakeBackend(CommonBackend
+         for tier in set(self._may_skip.keys()) - affected_tiers:
+             self._may_skip[tier].add(backend_file.relobjdir)
+ 
+     def _add_to_dist_manifest(self, path):
+         dist = mozpath.join(self.environment.topobjdir, 'dist')
+         if path.startswith(dist):
+             path = path[len(dist)+1:]
+ 
+-        offset = path.index('/')
+-        prefix = path[0:offset]
++        prefix, subpath = path.split('/', 1)
+ 
+         key = 'dist_%s' % prefix
+ 
+         manifest = self._install_manifests[key]
+-        manifest.add_optional_exists(path[offset+1:])
++        manifest.add_optional_exists(subpath)
+ 
+     def _process_exports(self, obj, exports, backend_file, namespace=""):
+         # This may not be needed, but is present for backwards compatibility
+         # with the old make rules, just in case.
+         if not obj.dist_install:
+             return
+ 
+         strings = exports.get_strings()
+@@ -959,17 +959,16 @@ class RecursiveMakeBackend(CommonBackend
+ 
+         for module in manager.modules:
+             build_files.add_optional_exists(mozpath.join('.deps',
+                 '%s.pp' % module))
+ 
+         modules = manager.modules
+         xpt_modules = sorted(modules.keys())
+         xpt_files = set()
+-        dist = mozpath.join(self.environment.topobjdir, 'dist')
+ 
+         mk = Makefile()
+ 
+         for module in xpt_modules:
+             install_target, sources = modules[module]
+             deps = sorted(sources)
+ 
+             # It may seem strange to have the .idl files listed as
+@@ -977,17 +976,17 @@ class RecursiveMakeBackend(CommonBackend
+             # It is necessary to list them here to handle the case where a
+             # new .idl is added to an xpt. If we add a new .idl and nothing
+             # else has changed, the new .idl won't be referenced anywhere
+             # except in the command invocation. Therefore, the .xpt won't
+             # be rebuilt because the dependencies say it is up to date. By
+             # listing the .idls here, we ensure the make file has a
+             # reference to the new .idl. Since the new .idl presumably has
+             # an mtime newer than the .xpt, it will trigger xpt generation.
+-            xpt_path = '%s/%s/components/%s.xpt' % (dist, install_target, module)
++            xpt_path = '%s/%s/components/%s.xpt' % (self.environment.topobjdir, install_target, module)
+             xpt_files.add(xpt_path)
+             rule = mk.create_rule([xpt_path])
+             rule.add_dependencies('$(dist_idl_dir)/%s.idl' % dep for dep in deps)
+             rule.add_commands([
+                 '@echo "$(notdir $@)"',
+                 '$(idlprocess) $(basename $(notdir $@)) %s' % ' '.join(deps),
+             ])
+ 
+diff --git a/python/mozbuild/mozbuild/frontend/data.py b/python/mozbuild/mozbuild/frontend/data.py
+--- a/python/mozbuild/mozbuild/frontend/data.py
++++ b/python/mozbuild/mozbuild/frontend/data.py
+@@ -71,20 +71,17 @@ class SandboxDerived(TreeMetadata):
+         # Basic directory state.
+         self.topsrcdir = sandbox['TOPSRCDIR']
+         self.topobjdir = sandbox['TOPOBJDIR']
+ 
+         self.relativedir = sandbox['RELATIVEDIR']
+         self.srcdir = sandbox['SRCDIR']
+         self.objdir = sandbox['OBJDIR']
+ 
+-        # We strip 'dist' because most consumers don't care about that part.
+-        install_target = sandbox['FINAL_TARGET']
+-        offset = install_target.find('/')
+-        self.install_target = install_target[offset+1:]
++        self.install_target = sandbox['FINAL_TARGET']
+ 
+ 
+ class DirectoryTraversal(SandboxDerived):
+     """Describes how directory traversal for building should work.
+ 
+     This build object is likely only of interest to the recursive make backend.
+     Other build backends should (ideally) not attempt to mimic the behavior of
+     the recursive make backend. The only reason this exists is to support the

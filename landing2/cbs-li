@@ -1,0 +1,347 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/caps/include/Makefile.in b/caps/include/Makefile.in
+--- a/caps/include/Makefile.in
++++ b/caps/include/Makefile.in
+@@ -39,14 +39,15 @@ DEPTH		= ../..
+ topsrcdir	= @top_srcdir@
+ srcdir		= @srcdir@
+ VPATH		= @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ MODULE		= caps
+ 
+-EXPORTS		= \
+-            nsJSPrincipals.h \
+-            $(NULL)
++EXPORTS = \
++  nsJSPrincipals.h \
++  nsScriptSecurityManager.h \
++  $(NULL)
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+diff --git a/content/base/src/Makefile.in b/content/base/src/Makefile.in
+--- a/content/base/src/Makefile.in
++++ b/content/base/src/Makefile.in
+@@ -194,32 +194,28 @@ EXTRA_JS_MODULES = \
+ 		$(NULL)
+ 
+ include $(topsrcdir)/config/config.mk
+ include $(topsrcdir)/ipc/chromium/chromium-config.mk
+ include $(topsrcdir)/config/rules.mk
+ 
+ INCLUDES	+= \
+ 		-I$(srcdir)/../../events/src \
++		-I$(srcdir)/../../xbl/src \
+ 		-I$(srcdir)/../../xml/content/src \
+-		-I$(srcdir)/../../../layout/xul/base/src \
++		-I$(srcdir)/../../xml/document/src \
+ 		-I$(srcdir)/../../xul/content/src \
+ 		-I$(srcdir)/../../xul/document/src \
+-		-I$(srcdir)/../../html/content/src \
+-		-I$(srcdir)/../../base/src \
+-		-I$(srcdir)/../../xbl/src \
+-		-I$(srcdir)/../../../layout/generic \
+-		-I$(srcdir)/../../../layout/style \
+-		-I$(srcdir)/../../../dom/base \
+-		-I$(srcdir)/../../xml/document/src \
+-		-I$(topsrcdir)/xpcom/io \
++		-I$(topsrcdir)/dom/base \
+ 		-I$(topsrcdir)/dom/ipc \
+ 		-I$(topsrcdir)/js/xpconnect/src \
+-		-I$(topsrcdir)/caps/include \
+-		-I$(topsrcdir)/netwerk/base/src \
++		-I$(topsrcdir)/layout/generic \
++		-I$(topsrcdir)/layout/style \
++		-I$(topsrcdir)/layout/xul/base/src \
++		-I$(topsrcdir)/xpcom/io \
+ 		$(NULL)
+ 
+ DEFINES += -D_IMPL_NS_LAYOUT
+ DEFINES += -DHB_DONT_DEFINE_STDINT
+ 
+ # gcc requires -msse2 for this file since it uses SSE2 intrinsics.  (See bug
+ # 585538 comment 12.)
+ ifneq (,$(INTEL_ARCHITECTURE))
+diff --git a/content/base/src/nsContentUtils.cpp b/content/base/src/nsContentUtils.cpp
+--- a/content/base/src/nsContentUtils.cpp
++++ b/content/base/src/nsContentUtils.cpp
+@@ -142,17 +142,16 @@ static NS_DEFINE_CID(kXTFServiceCID, NS_
+ #include "nsContentErrors.h"
+ #include "nsUnicharUtilCIID.h"
+ #include "nsINativeKeyBindings.h"
+ #include "nsIDOMNSEvent.h"
+ #include "nsXULPopupManager.h"
+ #include "nsIPermissionManager.h"
+ #include "nsIContentPrefService.h"
+ #include "nsIScriptObjectPrincipal.h"
+-#include "nsNullPrincipal.h"
+ #include "nsIRunnable.h"
+ #include "nsDOMJSUtils.h"
+ #include "nsGenericHTMLElement.h"
+ #include "nsAttrValue.h"
+ #include "nsReferencedElement.h"
+ #include "nsIDragService.h"
+ #include "nsIChannelEventSink.h"
+ #include "nsIAsyncVerifyRedirectCallback.h"
+@@ -166,17 +165,16 @@ static NS_DEFINE_CID(kXTFServiceCID, NS_
+ #include "nsDOMDataTransfer.h"
+ #include "nsHtml5Module.h"
+ #include "nsPresContext.h"
+ #include "nsLayoutStatics.h"
+ #include "nsLayoutUtils.h"
+ #include "nsFrameManager.h"
+ #include "BasicLayers.h"
+ #include "nsFocusManager.h"
+-#include "nsTextEditorState.h"
+ #include "nsIPluginHost.h"
+ #include "nsICategoryManager.h"
+ #include "nsIViewManager.h"
+ #include "nsEventStateManager.h"
+ #include "nsIDOMHTMLInputElement.h"
+ #include "nsParserConstants.h"
+ #include "nsIWebNavigation.h"
+ 
+@@ -1449,18 +1447,16 @@ nsContentUtils::Shutdown()
+   delete sMetaText;  
+   sMetaText = nsnull;
+   delete sAltText;  
+   sAltText = nsnull;
+   delete sModifierSeparator;
+   sModifierSeparator = nsnull;
+ 
+   NS_IF_RELEASE(sSameOriginChecker);
+-  
+-  nsTextEditorState::ShutDown();
+ }
+ 
+ // static
+ bool
+ nsContentUtils::CallerHasUniversalXPConnect()
+ {
+   bool hasCap;
+   if (NS_FAILED(sSecurityManager->IsCapabilityEnabled("UniversalXPConnect",
+@@ -4093,17 +4089,17 @@ nsresult
+ nsContentUtils::ConvertToPlainText(const nsAString& aSourceBuffer,
+                                    nsAString& aResultBuffer,
+                                    uint32_t aFlags,
+                                    uint32_t aWrapCol)
+ {
+   nsCOMPtr<nsIURI> uri;
+   NS_NewURI(getter_AddRefs(uri), "about:blank");
+   nsCOMPtr<nsIPrincipal> principal =
+-    do_CreateInstance(NS_NULLPRINCIPAL_CONTRACTID);
++    do_CreateInstance("@mozilla.org/nullprincipal;1");
+   nsCOMPtr<nsIDOMDocument> domDocument;
+   nsresult rv = nsContentUtils::CreateDocument(EmptyString(),
+                                                EmptyString(),
+                                                nsnull,
+                                                uri,
+                                                uri,
+                                                principal,
+                                                nsnull,
+diff --git a/content/base/src/nsFormData.cpp b/content/base/src/nsFormData.cpp
+--- a/content/base/src/nsFormData.cpp
++++ b/content/base/src/nsFormData.cpp
+@@ -169,21 +169,20 @@ nsFormData::Initialize(nsISupports* aOwn
+ {
+   if (aArgc > 0) {
+     if (JSVAL_IS_PRIMITIVE(aArgv[0])) {
+       return NS_ERROR_UNEXPECTED;
+     }
+     nsCOMPtr<nsIContent> formCont = do_QueryInterface(
+       nsContentUtils::XPConnect()->
+         GetNativeOfWrapper(aCx, JSVAL_TO_OBJECT(aArgv[0])));
+-    
+-    if (!formCont || !formCont->IsHTML(nsGkAtoms::form)) {
++
++    nsHTMLFormElement* form = nsHTMLFormElement::FromContent(formCont);
++    if (!form) {
+       return NS_ERROR_UNEXPECTED;
+     }
+ 
+-    nsresult rv = static_cast<nsHTMLFormElement*>(formCont.get())->
+-      WalkFormElements(this);
+-    NS_ENSURE_SUCCESS(rv, rv);
++    return form->WalkFormElements(this);
+   }
+ 
+ 
+   return NS_OK;
+ }
+diff --git a/content/base/src/nsTreeSanitizer.cpp b/content/base/src/nsTreeSanitizer.cpp
+--- a/content/base/src/nsTreeSanitizer.cpp
++++ b/content/base/src/nsTreeSanitizer.cpp
+@@ -48,17 +48,16 @@
+ #include "mozilla/css/Rule.h"
+ #include "nsUnicharInputStream.h"
+ #include "nsCSSStyleSheet.h"
+ #include "nsIDOMCSSRule.h"
+ #include "nsAttrName.h"
+ #include "nsIScriptSecurityManager.h"
+ #include "nsNetUtil.h"
+ #include "nsComponentManagerUtils.h"
+-#include "nsNullPrincipal.h"
+ #include "nsContentUtils.h"
+ #include "nsIParserUtils.h"
+ 
+ using namespace mozilla;
+ 
+ //
+ // Thanks to Mark Pilgrim and Sam Ruby for the initial whitelist
+ //
+@@ -1591,17 +1590,17 @@ nsTreeSanitizer::InitializeStatics()
+ 
+   sAttributesMathML = new nsTHashtable<nsISupportsHashKey> ();
+   sAttributesMathML->Init(ArrayLength(kAttributesMathML));
+   for (uint32_t i = 0; kAttributesMathML[i]; i++) {
+     sAttributesMathML->PutEntry(*kAttributesMathML[i]);
+   }
+ 
+   nsCOMPtr<nsIPrincipal> principal =
+-      do_CreateInstance(NS_NULLPRINCIPAL_CONTRACTID);
++      do_CreateInstance("@mozilla.org/nullprincipal;1");
+   principal.forget(&sNullPrincipal);
+ }
+ 
+ void
+ nsTreeSanitizer::ReleaseStatics()
+ {
+   delete sElementsHTML;
+   sElementsHTML = nsnull;
+diff --git a/content/html/content/src/Makefile.in b/content/html/content/src/Makefile.in
+--- a/content/html/content/src/Makefile.in
++++ b/content/html/content/src/Makefile.in
+@@ -48,16 +48,17 @@ LIBXUL_LIBRARY	= 1
+ FAIL_ON_WARNINGS = 1
+ 
+ 
+ EXPORTS		= \
+ 		nsGenericHTMLElement.h \
+ 		nsClientRect.h \
+ 		nsHTMLDNSPrefetch.h \
+ 		nsTimeRanges.h \
++		nsHTMLFormElement.h \
+ 		$(NULL)
+ 
+ CPPSRCS		= \
+ 		nsClientRect.cpp \
+ 		nsHTMLDNSPrefetch.cpp \
+ 		nsGenericHTMLElement.cpp \
+ 		nsGenericHTMLFrameElement.cpp \
+ 		nsFormSubmission.cpp \
+diff --git a/content/html/content/src/nsHTMLFormElement.h b/content/html/content/src/nsHTMLFormElement.h
+--- a/content/html/content/src/nsHTMLFormElement.h
++++ b/content/html/content/src/nsHTMLFormElement.h
+@@ -61,16 +61,24 @@ class nsHTMLFormElement : public nsGener
+                           public nsIWebProgressListener,
+                           public nsIForm,
+                           public nsIRadioGroupContainer
+ {
+ public:
+   nsHTMLFormElement(already_AddRefed<nsINodeInfo> aNodeInfo);
+   virtual ~nsHTMLFormElement();
+ 
++  static nsHTMLFormElement* FromContent(nsIContent* aPossibleForm)
++  {
++    if (!aPossibleForm || !aPossibleForm->IsHTML(nsGkAtoms::form)) {
++      return NULL;
++    }
++    return static_cast<nsHTMLFormElement*>(aPossibleForm);
++  }
++
+   nsresult Init();
+ 
+   // nsISupports
+   NS_DECL_ISUPPORTS_INHERITED
+ 
+   // nsIDOMNode
+   NS_FORWARD_NSIDOMNODE(nsGenericHTMLElement::)
+ 
+diff --git a/layout/build/nsLayoutStatics.cpp b/layout/build/nsLayoutStatics.cpp
+--- a/layout/build/nsLayoutStatics.cpp
++++ b/layout/build/nsLayoutStatics.cpp
+@@ -56,16 +56,17 @@
+ #include "nsDOMAttribute.h"
+ #include "nsDOMClassInfo.h"
+ #include "nsEventListenerManager.h"
+ #include "nsFrame.h"
+ #include "nsGlobalWindow.h"
+ #include "nsGkAtoms.h"
+ #include "nsImageFrame.h"
+ #include "nsLayoutStylesheetCache.h"
++#include "nsTextEditorState.h"
+ #include "nsNodeInfo.h"
+ #include "nsRange.h"
+ #include "nsRegion.h"
+ #include "nsRepeatService.h"
+ #include "nsFloatManager.h"
+ #include "nsSprocketLayout.h"
+ #include "nsStackLayout.h"
+ #include "nsStyleSet.h"
+@@ -322,16 +323,17 @@ nsLayoutStatics::Shutdown()
+   nsImageFrame::ReleaseGlobals();
+ 
+   nsCSSScanner::ReleaseGlobals();
+ 
+   nsTextFragment::Shutdown();
+ 
+   nsAttrValue::Shutdown();
+   nsContentUtils::Shutdown();
++  nsTextEditorState::ShutDown();
+   nsNodeInfo::ClearCache();
+   nsLayoutStylesheetCache::Shutdown();
+   NS_NameSpaceManagerShutdown();
+ 
+   nsJSRuntime::Shutdown();
+   nsGlobalWindow::ShutDown();
+   nsDOMClassInfo::ShutDown();
+   nsListControlFrame::Shutdown();
+diff --git a/netwerk/base/src/Makefile.in b/netwerk/base/src/Makefile.in
+--- a/netwerk/base/src/Makefile.in
++++ b/netwerk/base/src/Makefile.in
+@@ -42,17 +42,20 @@ srcdir		= @srcdir@
+ VPATH		= @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ MODULE		= necko
+ LIBRARY_NAME	= neckobase_s
+ LIBXUL_LIBRARY  = 1
+ 
+-EXPORTS = nsURLHelper.h
++EXPORTS = \
++  nsSimpleURI.h \
++  nsURLHelper.h \
++  $(NULL)
+ 
+ CPPSRCS		= \
+ 		nsTransportUtils.cpp \
+ 		nsAsyncStreamCopier.cpp \
+ 		nsAsyncRedirectVerifyHelper.cpp \
+ 		nsAuthInformationHolder.cpp \
+ 		nsBaseChannel.cpp \
+ 		nsBaseContentStream.cpp \
+diff --git a/netwerk/base/src/nsSimpleURI.h b/netwerk/base/src/nsSimpleURI.h
+--- a/netwerk/base/src/nsSimpleURI.h
++++ b/netwerk/base/src/nsSimpleURI.h
+@@ -34,17 +34,16 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #ifndef nsSimpleURI_h__
+ #define nsSimpleURI_h__
+ 
+ #include "nsIURL.h"
+-#include "nsAgg.h"
+ #include "nsISerializable.h"
+ #include "nsIIPCSerializable.h"
+ #include "nsString.h"
+ #include "nsIClassInfo.h"
+ #include "nsIMutable.h"
+ #include "nsISizeOf.h"
+ 
+ #define NS_THIS_SIMPLEURI_IMPLEMENTATION_CID         \

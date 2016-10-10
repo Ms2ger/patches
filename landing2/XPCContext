@@ -1,0 +1,328 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCContext.cpp b/js/xpconnect/src/XPCContext.cpp
+--- a/js/xpconnect/src/XPCContext.cpp
++++ b/js/xpconnect/src/XPCContext.cpp
+@@ -35,19 +35,28 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* Per JSContext object. */
+ 
++#include "XPCContext.h"
++
+ #include "xpcprivate.h"
+ 
+-/***************************************************************************/
++#include "jscntxt.h"
++
++XPCContext*
++XPCContext::GetXPCContext(JSContext* aJSContext)
++{
++    NS_ASSERTION(aJSContext->data2, "should already have XPCContext");
++    return static_cast<XPCContext *>(aJSContext->data2);
++}
+ 
+ XPCContext::XPCContext(XPCJSRuntime* aRuntime,
+                        JSContext* aJSContext)
+     :   mRuntime(aRuntime),
+         mJSContext(aJSContext),
+         mLastResult(NS_OK),
+         mPendingResult(NS_OK),
+         mSecurityManager(nsnull),
+diff --git a/js/xpconnect/src/XPCContext.h b/js/xpconnect/src/XPCContext.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCContext.h
+@@ -0,0 +1,128 @@
++#ifndef XPCContext_h
++#define XPCContext_h
++
++#include "nsIXPCSecurityManager.h"
++#include "nsXPConnect.h"
++#include "XPCJSRuntime.h"
++
++#include "prclist.h"
++
++#include "nsIException.h"
++
++#include "jspubtd.h"
++
++// XPCContext is mostly a dumb class to hold JSContext specific data and
++// maps that let us find wrappers created for the given JSContext.
++
++// no virtuals
++class XPCContext
++{
++    friend class XPCJSRuntime;
++public:
++    static XPCContext* GetXPCContext(JSContext* aJSContext);
++
++    XPCJSRuntime* GetRuntime() const {return mRuntime;}
++    JSContext* GetJSContext() const {return mJSContext;}
++
++    enum LangType {LANG_UNKNOWN, LANG_JS, LANG_NATIVE};
++
++    LangType GetCallingLangType() const
++        {
++            return mCallingLangType;
++        }
++    LangType SetCallingLangType(LangType lt)
++        {
++            LangType tmp = mCallingLangType;
++            mCallingLangType = lt;
++            return tmp;
++        }
++    JSBool CallerTypeIsJavaScript() const
++        {
++            return LANG_JS == mCallingLangType;
++        }
++    JSBool CallerTypeIsNative() const
++        {
++            return LANG_NATIVE == mCallingLangType;
++        }
++    JSBool CallerTypeIsKnown() const
++        {
++            return LANG_UNKNOWN != mCallingLangType;
++        }
++
++    nsresult GetException(nsIException** e)
++        {
++            NS_IF_ADDREF(mException);
++            *e = mException;
++            return NS_OK;
++        }
++    void SetException(nsIException* e)
++        {
++            NS_IF_ADDREF(e);
++            NS_IF_RELEASE(mException);
++            mException = e;
++        }
++
++    nsresult GetLastResult() {return mLastResult;}
++    void SetLastResult(nsresult rc) {mLastResult = rc;}
++
++    nsresult GetPendingResult() {return mPendingResult;}
++    void SetPendingResult(nsresult rc) {mPendingResult = rc;}
++
++    nsIXPCSecurityManager* GetSecurityManager() const
++        {return mSecurityManager;}
++    void SetSecurityManager(nsIXPCSecurityManager* aSecurityManager)
++        {mSecurityManager = aSecurityManager;}
++
++    uint16_t GetSecurityManagerFlags() const
++        {return mSecurityManagerFlags;}
++    void SetSecurityManagerFlags(uint16_t f)
++        {mSecurityManagerFlags = f;}
++
++    nsIXPCSecurityManager* GetAppropriateSecurityManager(uint16_t flags) const
++        {
++            NS_ASSERTION(CallerTypeIsKnown(),"missing caller type set somewhere");
++            if (!CallerTypeIsJavaScript())
++                return nsnull;
++            if (mSecurityManager) {
++                if (flags & mSecurityManagerFlags)
++                    return mSecurityManager;
++            } else {
++                nsIXPCSecurityManager* mgr;
++                nsXPConnect* xpc = mRuntime->GetXPConnect();
++                mgr = xpc->GetDefaultSecurityManager();
++                if (mgr && (flags & xpc->GetDefaultSecurityManagerFlags()))
++                    return mgr;
++            }
++            return nsnull;
++        }
++
++    void DebugDump(int16_t depth);
++    void AddScope(PRCList *scope) { PR_INSERT_AFTER(scope, &mScopes); }
++    void RemoveScope(PRCList *scope) { PR_REMOVE_LINK(scope); }
++
++    ~XPCContext();
++
++private:
++    XPCContext();    // no implementation
++    XPCContext(XPCJSRuntime* aRuntime, JSContext* aJSContext);
++
++    static XPCContext* newXPCContext(XPCJSRuntime* aRuntime,
++                                     JSContext* aJSContext);
++private:
++    XPCJSRuntime* mRuntime;
++    JSContext*  mJSContext;
++    nsresult mLastResult;
++    nsresult mPendingResult;
++    nsIXPCSecurityManager* mSecurityManager;
++    nsIException* mException;
++    LangType mCallingLangType;
++    uint16_t mSecurityManagerFlags;
++
++    // A linked list of scopes to notify when we are destroyed.
++    PRCList mScopes;
++};
++
++#define NATIVE_CALLER  XPCContext::LANG_NATIVE
++#define JS_CALLER      XPCContext::LANG_JS
++
++#endif // XPCContext_h
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -144,16 +144,17 @@
+ #endif
+ #endif /* XP_WIN */
+ 
+ #include "nsINode.h"
+ #include "XPCNativeSet.h"
+ #include "XPCLock.h"
+ #include "nsXPConnect.h"
+ #include "XPCJSRuntime.h"
++#include "XPCContext.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -288,138 +289,17 @@ AddToCCKind(JSGCTraceKind kind)
+ {
+     return kind == JSTRACE_OBJECT || kind == JSTRACE_XML || kind == JSTRACE_SCRIPT;
+ }
+ 
+ const bool OBJ_IS_GLOBAL = true;
+ const bool OBJ_IS_NOT_GLOBAL = false;
+ 
+ 
+-
+ /***************************************************************************/
+-/***************************************************************************/
+-// XPCContext is mostly a dumb class to hold JSContext specific data and
+-// maps that let us find wrappers created for the given JSContext.
+-
+-// no virtuals
+-class XPCContext
+-{
+-    friend class XPCJSRuntime;
+-public:
+-    static XPCContext* GetXPCContext(JSContext* aJSContext)
+-        {
+-            NS_ASSERTION(aJSContext->data2, "should already have XPCContext");
+-            return static_cast<XPCContext *>(aJSContext->data2);
+-        }
+-
+-    XPCJSRuntime* GetRuntime() const {return mRuntime;}
+-    JSContext* GetJSContext() const {return mJSContext;}
+-
+-    enum LangType {LANG_UNKNOWN, LANG_JS, LANG_NATIVE};
+-
+-    LangType GetCallingLangType() const
+-        {
+-            return mCallingLangType;
+-        }
+-    LangType SetCallingLangType(LangType lt)
+-        {
+-            LangType tmp = mCallingLangType;
+-            mCallingLangType = lt;
+-            return tmp;
+-        }
+-    JSBool CallerTypeIsJavaScript() const
+-        {
+-            return LANG_JS == mCallingLangType;
+-        }
+-    JSBool CallerTypeIsNative() const
+-        {
+-            return LANG_NATIVE == mCallingLangType;
+-        }
+-    JSBool CallerTypeIsKnown() const
+-        {
+-            return LANG_UNKNOWN != mCallingLangType;
+-        }
+-
+-    nsresult GetException(nsIException** e)
+-        {
+-            NS_IF_ADDREF(mException);
+-            *e = mException;
+-            return NS_OK;
+-        }
+-    void SetException(nsIException* e)
+-        {
+-            NS_IF_ADDREF(e);
+-            NS_IF_RELEASE(mException);
+-            mException = e;
+-        }
+-
+-    nsresult GetLastResult() {return mLastResult;}
+-    void SetLastResult(nsresult rc) {mLastResult = rc;}
+-
+-    nsresult GetPendingResult() {return mPendingResult;}
+-    void SetPendingResult(nsresult rc) {mPendingResult = rc;}
+-
+-    nsIXPCSecurityManager* GetSecurityManager() const
+-        {return mSecurityManager;}
+-    void SetSecurityManager(nsIXPCSecurityManager* aSecurityManager)
+-        {mSecurityManager = aSecurityManager;}
+-
+-    uint16_t GetSecurityManagerFlags() const
+-        {return mSecurityManagerFlags;}
+-    void SetSecurityManagerFlags(uint16_t f)
+-        {mSecurityManagerFlags = f;}
+-
+-    nsIXPCSecurityManager* GetAppropriateSecurityManager(uint16_t flags) const
+-        {
+-            NS_ASSERTION(CallerTypeIsKnown(),"missing caller type set somewhere");
+-            if (!CallerTypeIsJavaScript())
+-                return nsnull;
+-            if (mSecurityManager) {
+-                if (flags & mSecurityManagerFlags)
+-                    return mSecurityManager;
+-            } else {
+-                nsIXPCSecurityManager* mgr;
+-                nsXPConnect* xpc = mRuntime->GetXPConnect();
+-                mgr = xpc->GetDefaultSecurityManager();
+-                if (mgr && (flags & xpc->GetDefaultSecurityManagerFlags()))
+-                    return mgr;
+-            }
+-            return nsnull;
+-        }
+-
+-    void DebugDump(int16_t depth);
+-    void AddScope(PRCList *scope) { PR_INSERT_AFTER(scope, &mScopes); }
+-    void RemoveScope(PRCList *scope) { PR_REMOVE_LINK(scope); }
+-
+-    ~XPCContext();
+-
+-private:
+-    XPCContext();    // no implementation
+-    XPCContext(XPCJSRuntime* aRuntime, JSContext* aJSContext);
+-
+-    static XPCContext* newXPCContext(XPCJSRuntime* aRuntime,
+-                                     JSContext* aJSContext);
+-private:
+-    XPCJSRuntime* mRuntime;
+-    JSContext*  mJSContext;
+-    nsresult mLastResult;
+-    nsresult mPendingResult;
+-    nsIXPCSecurityManager* mSecurityManager;
+-    nsIException* mException;
+-    LangType mCallingLangType;
+-    uint16_t mSecurityManagerFlags;
+-
+-    // A linked list of scopes to notify when we are destroyed.
+-    PRCList mScopes;
+-};
+-
+-/***************************************************************************/
+-
+-#define NATIVE_CALLER  XPCContext::LANG_NATIVE
+-#define JS_CALLER      XPCContext::LANG_JS
+ 
+ // class to export a JSString as an const nsAString, no refcounting :(
+ class XPCReadableJSStringWrapper : public nsDependentString
+ {
+ public:
+     typedef nsDependentString::char_traits char_traits;
+ 
+     XPCReadableJSStringWrapper(const PRUnichar *chars, size_t length) :

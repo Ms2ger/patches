@@ -1,0 +1,93 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/src/jsapi.cpp b/js/src/jsapi.cpp
+--- a/js/src/jsapi.cpp
++++ b/js/src/jsapi.cpp
+@@ -5734,26 +5734,35 @@ JS_CompareStrings(JSContext *cx, JSStrin
+ }
+ 
+ JS_PUBLIC_API(JSBool)
+ JS_StringEqualsAscii(JSContext *cx, JSString *str, const char *asciiBytes, JSBool *match)
+ {
+     AssertNoGC(cx);
+     CHECK_REQUEST(cx);
+ 
++    if (strlen(asciiBytes) != str->length()) {
++        *match = false;
++        return true;
++    }
++
+     JSLinearString *linearStr = str->ensureLinear(cx);
+     if (!linearStr)
+         return false;
++
+     *match = StringEqualsAscii(linearStr, asciiBytes);
+     return true;
+ }
+ 
+ JS_PUBLIC_API(JSBool)
+ JS_FlatStringEqualsAscii(JSFlatString *str, const char *asciiBytes)
+ {
++    if (strlen(asciiBytes) != str->length())
++        return false;
++
+     return StringEqualsAscii(str, asciiBytes);
+ }
+ 
+ JS_PUBLIC_API(size_t)
+ JS_PutEscapedFlatString(char *buffer, size_t size, JSFlatString *str, char quote)
+ {
+     return PutEscapedString(buffer, size, str, quote);
+ }
+diff --git a/js/src/jsstr.cpp b/js/src/jsstr.cpp
+--- a/js/src/jsstr.cpp
++++ b/js/src/jsstr.cpp
+@@ -3410,23 +3410,24 @@ CompareStrings(JSContext *cx, JSString *
+ 
+ }  /* namespace js */
+ 
+ namespace js {
+ 
+ bool
+ StringEqualsAscii(JSLinearString *str, const char *asciiBytes)
+ {
+-    size_t length = strlen(asciiBytes);
++    size_t length = str->length();
++
+ #ifdef DEBUG
++    JS_ASSERT(strlen(asciiBytes) == length);
+     for (size_t i = 0; i != length; ++i)
+         JS_ASSERT(unsigned(asciiBytes[i]) <= 127);
+ #endif
+-    if (length != str->length())
+-        return false;
++
+     const jschar *chars = str->chars();
+     for (size_t i = 0; i != length; ++i) {
+         if (unsigned(asciiBytes[i]) != unsigned(chars[i]))
+             return false;
+     }
+     return true;
+ }
+ 
+diff --git a/js/src/jsstr.h b/js/src/jsstr.h
+--- a/js/src/jsstr.h
++++ b/js/src/jsstr.h
+@@ -199,16 +199,17 @@ EqualStrings(JSLinearString *str1, JSLin
+  * Return less than, equal to, or greater than zero depending on whether
+  * str1 is less than, equal to, or greater than str2.
+  */
+ extern bool
+ CompareStrings(JSContext *cx, JSString *str1, JSString *str2, int32_t *result);
+ 
+ /*
+  * Return true if the string matches the given sequence of ASCII bytes.
++ * The lengths are required to match.
+  */
+ extern bool
+ StringEqualsAscii(JSLinearString *str, const char *asciiBytes);
+ 
+ } /* namespace js */
+ 
+ extern size_t
+ js_strlen(const jschar *s);

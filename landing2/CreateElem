@@ -1,0 +1,110 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsDocument.cpp b/content/base/src/nsDocument.cpp
+--- a/content/base/src/nsDocument.cpp
++++ b/content/base/src/nsDocument.cpp
+@@ -6817,17 +6817,17 @@ nsDocument::RetrieveRelevantHeaders(nsIC
+                     prtime.tm_hour     ,  prtime.tm_min,  prtime.tm_sec)) {
+       CopyASCIItoUTF16(nsDependentCString(formatedTime), mLastModified);
+     }
+   }
+ }
+ 
+ nsresult
+ nsDocument::CreateElem(const nsAString& aName, nsIAtom *aPrefix, int32_t aNamespaceID,
+-                       nsIContent **aResult)
++                       Element** aResult)
+ {
+ #ifdef DEBUG
+   nsAutoString qName;
+   if (aPrefix) {
+     aPrefix->ToString(qName);
+     qName.Append(':');
+   }
+   qName.Append(aName);
+@@ -6844,17 +6844,18 @@ nsDocument::CreateElem(const nsAString& 
+   *aResult = nsnull;
+   
+   nsCOMPtr<nsINodeInfo> nodeInfo;
+   mNodeInfoManager->GetNodeInfo(aName, aPrefix, aNamespaceID,
+                                 nsIDOMNode::ELEMENT_NODE,
+                                 getter_AddRefs(nodeInfo));
+   NS_ENSURE_TRUE(nodeInfo, NS_ERROR_OUT_OF_MEMORY);
+ 
+-  return NS_NewElement(aResult, nodeInfo.forget(), NOT_FROM_PARSER);
++  return NS_NewElement(static_cast<nsIContent**>(aResult), nodeInfo.forget(),
++                       NOT_FROM_PARSER);
+ }
+ 
+ bool
+ nsDocument::IsSafeToFlush() const
+ {
+   nsIPresShell* shell = GetShell();
+   if (!shell)
+     return true;
+diff --git a/content/xslt/src/xslt/txEXSLTFunctions.cpp b/content/xslt/src/xslt/txEXSLTFunctions.cpp
+--- a/content/xslt/src/xslt/txEXSLTFunctions.cpp
++++ b/content/xslt/src/xslt/txEXSLTFunctions.cpp
+@@ -53,16 +53,17 @@
+ #include "nsComponentManagerUtils.h"
+ #include "nsContentCID.h"
+ #include "nsContentCreatorFunctions.h"
+ #include "nsIContent.h"
+ #include "nsIDOMDocumentFragment.h"
+ #include "txMozillaXMLOutput.h"
+ 
+ using namespace mozilla;
++using namespace mozilla::dom;
+ 
+ class txStylesheetCompilerState;
+ 
+ // ------------------------------------------------------------------
+ // Utility functions
+ // ------------------------------------------------------------------
+ 
+ static nsresult
+@@ -156,17 +157,17 @@ static nsresult
+ createAndAddToResult(nsIAtom* aName, const nsSubstring& aValue,
+                      txNodeSet* aResultSet, nsIContent* aResultHolder)
+ {
+     NS_ASSERTION(aResultHolder->IsNodeOfType(nsINode::eDOCUMENT_FRAGMENT) &&
+                  aResultHolder->OwnerDoc(),
+                  "invalid result-holder");
+ 
+     nsIDocument* doc = aResultHolder->OwnerDoc();
+-    nsCOMPtr<nsIContent> elem;
++    nsCOMPtr<Element> elem;
+     nsresult rv = doc->CreateElem(nsDependentAtomString(aName),
+                                   nsnull, kNameSpaceID_None,
+                                   getter_AddRefs(elem));
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     nsCOMPtr<nsIContent> text;
+     rv = NS_NewTextNode(getter_AddRefs(text), doc->NodeInfoManager());
+     NS_ENSURE_SUCCESS(rv, rv);
+diff --git a/editor/libeditor/base/nsEditor.cpp b/editor/libeditor/base/nsEditor.cpp
+--- a/editor/libeditor/base/nsEditor.cpp
++++ b/editor/libeditor/base/nsEditor.cpp
+@@ -5012,17 +5012,21 @@ nsEditor::CreateHTMLContent(const nsAStr
+   // XXX Wallpaper over editor bug (editor tries to create elements with an
+   //     empty nodename).
+   if (aTag.IsEmpty()) {
+     NS_ERROR("Don't pass an empty tag to nsEditor::CreateHTMLContent, "
+              "check caller.");
+     return NS_ERROR_FAILURE;
+   }
+ 
+-  return doc->CreateElem(aTag, nsnull, kNameSpaceID_XHTML, aContent);
++  nsCOMPtr<Element> element;
++  nsresult rv = doc->CreateElem(aTag, nsnull, kNameSpaceID_XHTML,
++                                getter_AddRefs(element));
++  element.forget(aContent);
++  return rv;
+ }
+ 
+ nsresult
+ nsEditor::SetAttributeOrEquivalent(nsIDOMElement * aElement,
+                                    const nsAString & aAttribute,
+                                    const nsAString & aValue,
+                                    bool aSuppressTransaction)
+ {

@@ -1,0 +1,125 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/src/jsapi.cpp b/js/src/jsapi.cpp
+--- a/js/src/jsapi.cpp
++++ b/js/src/jsapi.cpp
+@@ -382,66 +382,83 @@ JS_ConvertArgumentsVA(JSContext *cx, uns
+             JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_BAD_CHAR, format);
+             return JS_FALSE;
+         }
+         sp++;
+     }
+     return JS_TRUE;
+ }
+ 
++namespace js {
++bool
++ConvertValue(JSContext *cx, HandleValue value, JSType type, MutableHandleValue vp);
++}
++
+ JS_PUBLIC_API(JSBool)
+ JS_ConvertValue(JSContext *cx, jsval valueArg, JSType type, jsval *vp)
+ {
+     RootedValue value(cx, valueArg);
+-    JSBool ok;
+-    RootedObject obj(cx);
+-    JSString *str;
+-    double d;
+-
++    RootedValue rval(cx);
++    if (!ConvertValue(cx, value, type, &rval))
++        return false;
++    *vp = rval;
++    return true;
++}
++
++bool
++js::ConvertValue(JSContext *cx, HandleValue value, JSType type, MutableHandleValue vp)
++{
+     AssertHeapIsIdle(cx);
+     CHECK_REQUEST(cx);
+     assertSameCompartment(cx, value);
+     switch (type) {
+-      case JSTYPE_VOID:
+-        *vp = JSVAL_VOID;
+-        ok = JS_TRUE;
+-        break;
+-      case JSTYPE_OBJECT:
+-        ok = js_ValueToObjectOrNull(cx, value, &obj);
+-        if (ok)
+-            *vp = OBJECT_TO_JSVAL(obj);
+-        break;
+-      case JSTYPE_FUNCTION:
+-        *vp = value;
+-        obj = ReportIfNotFunction(cx, *vp);
+-        ok = (obj != NULL);
+-        break;
+-      case JSTYPE_STRING:
+-        str = ToString(cx, value);
+-        ok = (str != NULL);
+-        if (ok)
+-            *vp = STRING_TO_JSVAL(str);
+-        break;
+-      case JSTYPE_NUMBER:
+-        ok = JS_ValueToNumber(cx, value, &d);
+-        if (ok)
+-            *vp = DOUBLE_TO_JSVAL(d);
+-        break;
+-      case JSTYPE_BOOLEAN:
+-        *vp = BooleanValue(ToBoolean(value));
+-        return JS_TRUE;
++      case JSTYPE_VOID: {
++        vp.setUndefined();
++        return true;
++      }
++      case JSTYPE_OBJECT: {
++        RootedObject obj(cx);
++        if (!js_ValueToObjectOrNull(cx, value, &obj))
++            return false;
++        vp.setObjectOrNull(obj);
++        return true;
++      }
++      case JSTYPE_FUNCTION: {
++        UnrootedObject obj = ReportIfNotFunction(cx, value);
++        if (!obj)
++            return false;
++        vp.setObject(*obj);
++        return true;
++      }
++      case JSTYPE_STRING: {
++        UnrootedString str = ToString(cx, value);
++        if (!str)
++            return false;
++        vp.setString(str);
++        return true;
++      }
++      case JSTYPE_NUMBER: {
++        double d;
++        if (!ToNumber(cx, value, &d))
++            return false;
++        vp.setDouble(d);
++        return true;
++      }
++      case JSTYPE_BOOLEAN: {
++        vp.setBoolean(ToBoolean(value));
++        return true;
++      }
+       default: {
+         char numBuf[12];
+         JS_snprintf(numBuf, sizeof numBuf, "%d", (int)type);
+         JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_BAD_TYPE, numBuf);
+-        ok = JS_FALSE;
+-        break;
++        return false;
+       }
+     }
+-    return ok;
++    MOZ_NOT_REACHED("Switch has a default case");
+ }
+ 
+ JS_PUBLIC_API(JSBool)
+ JS_ValueToObject(JSContext *cx, jsval valueArg, JSObject **objpArg)
+ {
+     RootedValue value(cx, valueArg);
+     RootedObject objp(cx, *objpArg);
+     AssertHeapIsIdle(cx);

@@ -1,0 +1,760 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/public/nsIDocument.h b/content/base/public/nsIDocument.h
+--- a/content/base/public/nsIDocument.h
++++ b/content/base/public/nsIDocument.h
+@@ -91,16 +91,17 @@ class Comment;
+ class DocumentFragment;
+ class DocumentType;
+ class DOMImplementation;
+ class Element;
+ class GlobalObject;
+ class HTMLBodyElement;
+ class Link;
+ class ProcessingInstruction;
++class StyleSheetList;
+ class UndoManager;
+ template<typename> class Sequence;
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #define NS_IDOCUMENT_IID \
+ { 0x2df7f766, 0xf70b, 0x4de4, \
+  { 0xb0, 0xba, 0x78, 0x25, 0x07, 0x41, 0xd6, 0xce } }
+@@ -1918,17 +1919,17 @@ public:
+   {
+     return mVisibilityState;
+   }
+   mozilla::dom::VisibilityState MozVisibilityState()
+   {
+     WarnOnceAbout(ePrefixedVisibilityAPI);
+     return VisibilityState();
+   }
+-  virtual nsIDOMStyleSheetList* StyleSheets() = 0;
++  virtual mozilla::dom::StyleSheetList* StyleSheets() = 0;
+   void GetSelectedStyleSheetSet(nsAString& aSheetSet);
+   virtual void SetSelectedStyleSheetSet(const nsAString& aSheetSet) = 0;
+   virtual void GetLastStyleSheetSet(nsString& aSheetSet) = 0;
+   void GetPreferredStyleSheetSet(nsAString& aSheetSet);
+   virtual nsIDOMDOMStringList* StyleSheetSets() = 0;
+   virtual void EnableStyleSheetsForSet(const nsAString& aSheetSet) = 0;
+   Element* ElementFromPoint(float aX, float aY);
+ 
+diff --git a/content/base/src/StyleSheetList.cpp b/content/base/src/StyleSheetList.cpp
+--- a/content/base/src/StyleSheetList.cpp
++++ b/content/base/src/StyleSheetList.cpp
+@@ -5,28 +5,29 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ /*
+  * A list of StyleSheet objects.
+  */
+ 
+ #include "mozilla/dom/StyleSheetList.h"
+ 
++#include "mozilla/dom/StyleSheetListBinding.h"
++#include "nsContentUtils.h"
+ #include "nsDOMClassInfoID.h" // DOMCI_DATA
+ #include "nsIDocument.h"
+ #include "nsIDOMStyleSheet.h"
+ #include "nsIStyleSheet.h"
+ 
+-DOMCI_DATA(StyleSheetList, mozilla::dom::StyleSheetList)
+-
+ namespace mozilla {
+ namespace dom {
+ 
+ StyleSheetList::StyleSheetList(nsIDocument* aDocument)
+ {
++  SetIsDOMBinding();
+   mLength = -1;
+   // Not reference counted to avoid circular references.
+   // The document will tell us when its going away.
+   mDocument = aDocument;
+   mDocument->AddObserver(this);
+ }
+ 
+ StyleSheetList::~StyleSheetList()
+@@ -34,82 +35,86 @@ StyleSheetList::~StyleSheetList()
+   if (mDocument) {
+     mDocument->RemoveObserver(this);
+   }
+ }
+ 
+ 
+ // XXX couldn't we use the GetIIDs method from CSSStyleSheetList here?
+ // QueryInterface implementation for StyleSheetList
+-NS_INTERFACE_TABLE_HEAD(StyleSheetList)
+-  NS_INTERFACE_TABLE3(StyleSheetList,
+-                      nsIDOMStyleSheetList,
+-                      nsIDocumentObserver,
+-                      nsIMutationObserver)
+-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
+-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(StyleSheetList)
++NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_0(StyleSheetList)
++NS_IMPL_CYCLE_COLLECTING_ADDREF(StyleSheetList)
++NS_IMPL_CYCLE_COLLECTING_RELEASE(StyleSheetList)
++NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(StyleSheetList)
++  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
++  NS_INTERFACE_MAP_ENTRY(nsIDocumentObserver)
++  NS_INTERFACE_MAP_ENTRY(nsIMutationObserver)
++  NS_INTERFACE_MAP_ENTRY(nsISupports)
+ NS_INTERFACE_MAP_END
+ 
+ 
+-NS_IMPL_ADDREF(StyleSheetList)
+-NS_IMPL_RELEASE(StyleSheetList)
++/* virtual */ JSObject*
++StyleSheetList::WrapObject(JSContext* aCx, JSObject* aScope,
++                           bool* aTriedToWrap)
++{
++  return StyleSheetListBinding::Wrap(aCx, aScope, this, aTriedToWrap);
++}
+ 
+ 
+-NS_IMETHODIMP
+-StyleSheetList::GetLength(uint32_t* aLength)
++uint32_t
++StyleSheetList::Length()
+ {
+-  if (mDocument) {
+-    // XXX Find the number and then cache it. We'll use the
+-    // observer notification to figure out if new ones have
+-    // been added or removed.
+-    if (-1 == mLength) {
+-      mLength = mDocument->GetNumberOfStyleSheets();
++  if (!mDocument) {
++    return 0;
++  }
++
++  // XXX Find the number and then cache it. We'll use the
++  // observer notification to figure out if new ones have
++  // been added or removed.
++  if (-1 == mLength) {
++    mLength = mDocument->GetNumberOfStyleSheets();
+ 
+ #ifdef DEBUG
+-      int32_t i;
+-      for (i = 0; i < mLength; i++) {
+-        nsIStyleSheet *sheet = mDocument->GetStyleSheetAt(i);
+-        nsCOMPtr<nsIDOMStyleSheet> domss(do_QueryInterface(sheet));
+-        NS_ASSERTION(domss, "All \"normal\" sheets implement nsIDOMStyleSheet");
+-      }
++    int32_t i;
++    for (i = 0; i < mLength; i++) {
++      nsIStyleSheet *sheet = mDocument->GetStyleSheetAt(i);
++      nsCOMPtr<nsIDOMStyleSheet> domss(do_QueryInterface(sheet));
++      NS_ASSERTION(domss, "All \"normal\" sheets implement nsIDOMStyleSheet");
++    }
+ #endif
+-    }
+-    *aLength = mLength;
+   }
+-  else {
+-    *aLength = 0;
+-  }
+-
+-  return NS_OK;
++  return mLength;
+ }
+ 
+ nsIStyleSheet*
+ StyleSheetList::GetItemAt(uint32_t aIndex)
+ {
+   if (!mDocument || aIndex >= (uint32_t)mDocument->GetNumberOfStyleSheets()) {
+     return nullptr;
+   }
+ 
+   nsIStyleSheet *sheet = mDocument->GetStyleSheetAt(aIndex);
+   NS_ASSERTION(sheet, "Must have a sheet");
+ 
+   return sheet;
+ }
+ 
+-NS_IMETHODIMP
+-StyleSheetList::Item(uint32_t aIndex, nsIDOMStyleSheet** aReturn)
++already_AddRefed<nsIDOMStyleSheet>
++StyleSheetList::IndexedGetter(uint32_t aIndex, bool& aFound)
+ {
+-  nsIStyleSheet *sheet = GetItemAt(aIndex);
+-  if (!sheet) {
+-      *aReturn = nullptr;
++  nsCOMPtr<nsIDOMStyleSheet> sheet = Item(aIndex);
++  aFound = !!sheet;
++  return sheet.forget();
++}
+ 
+-      return NS_OK;
+-  }
+-
+-  return CallQueryInterface(sheet, aReturn);
++already_AddRefed<nsIDOMStyleSheet>
++StyleSheetList::Item(uint32_t aIndex)
++{
++  nsCOMPtr<nsIDOMStyleSheet> sheet = do_QueryInterface(GetItemAt(aIndex));
++  return sheet.forget();
+ }
+ 
+ void
+ StyleSheetList::NodeWillBeDestroyed(const nsINode *aNode)
+ {
+   mDocument = nullptr;
+ }
+ 
+diff --git a/content/base/src/StyleSheetList.h b/content/base/src/StyleSheetList.h
+--- a/content/base/src/StyleSheetList.h
++++ b/content/base/src/StyleSheetList.h
+@@ -5,63 +5,64 @@
+ 
+ /*
+  * A list of StyleSheet objects.
+  */
+ 
+ #ifndef mozilla_dom_StyleSheetList_h
+ #define mozilla_dom_StyleSheetList_h
+ 
+-#include "nsIDOMStyleSheetList.h"
++#include "nsWrapperCache.h"
+ #include "nsStubDocumentObserver.h"
+ 
++#include "mozilla/Attributes.h"
+ #include "nsCOMPtr.h"
++#include "nsIDocument.h"
+ 
+-class nsIDocument;
++class nsIDOMStyleSheet;
++class nsIStyleSheet;
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+-class StyleSheetList : public nsIDOMStyleSheetList,
+-                       public nsStubDocumentObserver
++class StyleSheetList MOZ_FINAL : public nsWrapperCache
++                               , public nsStubDocumentObserver
+ {
+ public:
+   StyleSheetList(nsIDocument *aDocument);
+-  virtual ~StyleSheetList();
++  ~StyleSheetList();
+ 
+-  NS_DECL_ISUPPORTS
++  nsIDocument* GetParentObject() const
++  {
++    return mDocument;
++  }
++  virtual JSObject*
++  WrapObject(JSContext* aCx, JSObject* aScope, bool* aTriedToWrap) MOZ_OVERRIDE;
+ 
+-  NS_DECL_NSIDOMSTYLESHEETLIST
++  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
++  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(StyleSheetList)
+ 
+   // nsIDocumentObserver
+   NS_DECL_NSIDOCUMENTOBSERVER_STYLESHEETADDED
+   NS_DECL_NSIDOCUMENTOBSERVER_STYLESHEETREMOVED
+ 
+   // nsIMutationObserver
+   NS_DECL_NSIMUTATIONOBSERVER_NODEWILLBEDESTROYED
+ 
++  // WebIDL
++  uint32_t
++  Length();
++  already_AddRefed<nsIDOMStyleSheet>
++  IndexedGetter(uint32_t aIndex, bool& aFound);
++  already_AddRefed<nsIDOMStyleSheet>
++  Item(uint32_t aIndex);
++
++protected:
+   nsIStyleSheet* GetItemAt(uint32_t aIndex);
+ 
+-  static StyleSheetList* FromSupports(nsISupports* aSupports)
+-  {
+-    nsIDOMStyleSheetList* list = static_cast<nsIDOMStyleSheetList*>(aSupports);
+-#ifdef DEBUG
+-    {
+-      nsCOMPtr<nsIDOMStyleSheetList> list_qi = do_QueryInterface(aSupports);
+-
+-      // If this assertion fires the QI implementation for the object in
+-      // question doesn't use the nsIDOMStyleSheetList pointer as the
+-      // nsISupports pointer. That must be fixed, or we'll crash...
+-      NS_ASSERTION(list_qi == list, "Uh, fix QI!");
+-    }
+-#endif
+-    return static_cast<StyleSheetList*>(list);
+-  }
+-
+-protected:
+   int32_t       mLength;
+   nsIDocument*  mDocument;
+ };
+ 
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #endif // mozilla_dom_StyleSheetList_h
+diff --git a/content/base/src/nsDocument.cpp b/content/base/src/nsDocument.cpp
+--- a/content/base/src/nsDocument.cpp
++++ b/content/base/src/nsDocument.cpp
+@@ -4804,23 +4804,23 @@ NS_IMETHODIMP
+ nsDocument::Load(const nsAString& aUrl, bool *aReturn)
+ {
+   NS_ERROR("nsDocument::Load() should be overriden by subclass!");
+ 
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 
+ NS_IMETHODIMP
+-nsDocument::GetStyleSheets(nsIDOMStyleSheetList** aStyleSheets)
++nsDocument::GetStyleSheets(nsISupports** aStyleSheets)
+ {
+   NS_ADDREF(*aStyleSheets = StyleSheets());
+   return NS_OK;
+ }
+ 
+-nsIDOMStyleSheetList*
++StyleSheetList*
+ nsDocument::StyleSheets()
+ {
+   if (!mDOMStyleSheets) {
+     mDOMStyleSheets = new StyleSheetList(this);
+   }
+   return mDOMStyleSheets;
+ }
+ 
+diff --git a/content/base/src/nsDocument.h b/content/base/src/nsDocument.h
+--- a/content/base/src/nsDocument.h
++++ b/content/base/src/nsDocument.h
+@@ -16,17 +16,16 @@
+ #include "nsIDocument.h"
+ #include "nsWeakReference.h"
+ #include "nsWeakPtr.h"
+ #include "nsVoidArray.h"
+ #include "nsTArray.h"
+ #include "nsIDOMXMLDocument.h"
+ #include "nsIDOMDocumentXBL.h"
+ #include "nsStubDocumentObserver.h"
+-#include "nsIDOMStyleSheetList.h"
+ #include "nsIScriptGlobalObject.h"
+ #include "nsIDOMEventTarget.h"
+ #include "nsIContent.h"
+ #include "nsEventListenerManager.h"
+ #include "nsIDOMNodeSelector.h"
+ #include "nsIPrincipal.h"
+ #include "nsIParser.h"
+ #include "nsBindingManager.h"
+@@ -966,17 +965,17 @@ public:
+   virtual void DocSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const;
+   // DocSizeOfIncludingThis is inherited from nsIDocument.
+ 
+   virtual nsIDOMNode* AsDOMNode() { return this; }
+ 
+   // WebIDL bits
+   virtual mozilla::dom::DOMImplementation*
+     GetImplementation(mozilla::ErrorResult& rv);
+-  virtual nsIDOMStyleSheetList* StyleSheets();
++  virtual mozilla::dom::StyleSheetList* StyleSheets();
+   virtual void SetSelectedStyleSheetSet(const nsAString& aSheetSet);
+   virtual void GetLastStyleSheetSet(nsString& aSheetSet);
+   virtual nsIDOMDOMStringList* StyleSheetSets();
+   virtual void EnableStyleSheetsForSet(const nsAString& aSheetSet);
+ 
+ protected:
+   friend class nsNodeUtils;
+   friend class nsDocumentOnStack;
+@@ -1142,17 +1141,17 @@ protected:
+   static nsWeakPtr sPendingPointerLockElement;
+ 
+   // Stack of full-screen elements. When we request full-screen we push the
+   // full-screen element onto this stack, and when we cancel full-screen we
+   // pop one off this stack, restoring the previous full-screen state
+   nsTArray<nsWeakPtr> mFullScreenStack;
+ 
+   nsRefPtr<nsEventListenerManager> mListenerManager;
+-  nsCOMPtr<nsIDOMStyleSheetList> mDOMStyleSheets;
++  nsRefPtr<mozilla::dom::StyleSheetList> mDOMStyleSheets;
+   nsRefPtr<nsDOMStyleSheetSetList> mStyleSheetSetList;
+   nsRefPtr<nsScriptLoader> mScriptLoader;
+   nsDocHeaderData* mHeaderData;
+   /* mIdentifierMap works as follows for IDs:
+    * 1) Attribute changes affect the table immediately (removing and adding
+    *    entries as needed).
+    * 2) Removals from the DOM affect the table immediately
+    * 3) Additions to the DOM always update existing entries for names, and add
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -130,18 +130,16 @@
+ 
+ // Event related includes
+ #include "nsEventListenerManager.h"
+ #include "nsIDOMEventTarget.h"
+ 
+ // CSS related includes
+ #include "nsCSSRules.h"
+ #include "nsIDOMStyleSheet.h"
+-#include "nsIDOMStyleSheetList.h"
+-#include "mozilla/dom/StyleSheetList.h"
+ #include "nsIDOMCSSRule.h"
+ #include "nsICSSRuleList.h"
+ #include "nsIDOMRect.h"
+ #include "nsIDOMCSSValueList.h"
+ #include "nsDOMCSSAttrDeclaration.h"
+ 
+ // XBL related includes.
+ #include "nsXBLService.h"
+@@ -970,18 +968,16 @@ static nsDOMClassInfoData sClassInfoData
+   NS_DEFINE_CLASSINFO_DATA(CSSNameSpaceRule, nsDOMGenericSH,
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+   NS_DEFINE_CLASSINFO_DATA(CSSRuleList, nsCSSRuleListSH,
+                            ARRAY_SCRIPTABLE_FLAGS)
+   NS_DEFINE_CLASSINFO_DATA(CSSGroupRuleRuleList, nsCSSRuleListSH,
+                            ARRAY_SCRIPTABLE_FLAGS)
+   NS_DEFINE_CLASSINFO_DATA(MediaList, nsMediaListSH,
+                            ARRAY_SCRIPTABLE_FLAGS)
+-  NS_DEFINE_CLASSINFO_DATA(StyleSheetList, nsStyleSheetListSH,
+-                           ARRAY_SCRIPTABLE_FLAGS)
+   NS_DEFINE_CLASSINFO_DATA(CSSStyleSheet, nsDOMGenericSH,
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+   NS_DEFINE_CLASSINFO_DATA(CSSValueList, nsDOMGenericSH,
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+ 
+   // Range classes
+   NS_DEFINE_CLASSINFO_DATA(Range, nsDOMGenericSH,
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+@@ -2831,20 +2827,16 @@ nsDOMClassInfo::Init()
+   DOM_CLASSINFO_MAP_BEGIN_NO_CLASS_IF(CSSGroupRuleRuleList, nsIDOMCSSRuleList)
+     DOM_CLASSINFO_MAP_ENTRY(nsIDOMCSSRuleList)
+   DOM_CLASSINFO_MAP_END
+ 
+   DOM_CLASSINFO_MAP_BEGIN(MediaList, nsIDOMMediaList)
+     DOM_CLASSINFO_MAP_ENTRY(nsIDOMMediaList)
+   DOM_CLASSINFO_MAP_END
+ 
+-  DOM_CLASSINFO_MAP_BEGIN(StyleSheetList, nsIDOMStyleSheetList)
+-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMStyleSheetList)
+-  DOM_CLASSINFO_MAP_END
+-
+   DOM_CLASSINFO_MAP_BEGIN(CSSStyleSheet, nsIDOMCSSStyleSheet)
+     DOM_CLASSINFO_MAP_ENTRY(nsIDOMCSSStyleSheet)
+   DOM_CLASSINFO_MAP_END
+ 
+   DOM_CLASSINFO_MAP_BEGIN(CSSValueList, nsIDOMCSSValueList)
+     DOM_CLASSINFO_MAP_ENTRY(nsIDOMCSSValueList)
+   DOM_CLASSINFO_MAP_END
+ 
+@@ -9425,28 +9417,16 @@ nsMediaListSH::GetStringAt(nsISupports *
+     media_list->GetLength(&length);
+     NS_ASSERTION(uint32_t(aIndex) >= length, "Item should only return null for out-of-bounds access");
+   }
+ #endif
+   return rv;
+ }
+ 
+ 
+-// StyleSheetList helper
+-
+-nsISupports*
+-nsStyleSheetListSH::GetItemAt(nsISupports *aNative, uint32_t aIndex,
+-                              nsWrapperCache **aCache, nsresult *rv)
+-{
+-  StyleSheetList* list = StyleSheetList::FromSupports(aNative);
+-
+-  return list->GetItemAt(aIndex);
+-}
+-
+-
+ // CSSRuleList scriptable helper
+ 
+ nsISupports*
+ nsCSSRuleListSH::GetItemAt(nsISupports *aNative, uint32_t aIndex,
+                            nsWrapperCache **aCache, nsresult *aResult)
+ {
+   nsICSSRuleList* list = static_cast<nsICSSRuleList*>(aNative);
+ #ifdef DEBUG
+diff --git a/dom/base/nsDOMClassInfo.h b/dom/base/nsDOMClassInfo.h
+--- a/dom/base/nsDOMClassInfo.h
++++ b/dom/base/nsDOMClassInfo.h
+@@ -1003,40 +1003,16 @@ protected:
+ public:
+   static nsIClassInfo *doCreate(nsDOMClassInfoData* aData)
+   {
+     return new nsMediaListSH(aData);
+   }
+ };
+ 
+ 
+-// StyleSheetList helper
+-
+-class nsStyleSheetListSH : public nsArraySH
+-{
+-protected:
+-  nsStyleSheetListSH(nsDOMClassInfoData* aData) : nsArraySH(aData)
+-  {
+-  }
+-
+-  virtual ~nsStyleSheetListSH()
+-  {
+-  }
+-
+-  virtual nsISupports* GetItemAt(nsISupports *aNative, uint32_t aIndex,
+-                                 nsWrapperCache **aCache, nsresult *aResult);
+-
+-public:
+-  static nsIClassInfo *doCreate(nsDOMClassInfoData* aData)
+-  {
+-    return new nsStyleSheetListSH(aData);
+-  }
+-};
+-
+-
+ // CSSRuleList helper
+ 
+ class nsCSSRuleListSH : public nsArraySH
+ {
+ protected:
+   nsCSSRuleListSH(nsDOMClassInfoData* aData) : nsArraySH(aData)
+   {
+   }
+diff --git a/dom/base/nsDOMClassInfoClasses.h b/dom/base/nsDOMClassInfoClasses.h
+--- a/dom/base/nsDOMClassInfoClasses.h
++++ b/dom/base/nsDOMClassInfoClasses.h
+@@ -119,17 +119,16 @@ DOMCI_CLASS(ValidityState)
+ DOMCI_CLASS(CSSStyleRule)
+ DOMCI_CLASS(CSSCharsetRule)
+ DOMCI_CLASS(CSSImportRule)
+ DOMCI_CLASS(CSSMediaRule)
+ DOMCI_CLASS(CSSNameSpaceRule)
+ DOMCI_CLASS(CSSRuleList)
+ DOMCI_CLASS(CSSGroupRuleRuleList)
+ DOMCI_CLASS(MediaList)
+-DOMCI_CLASS(StyleSheetList)
+ DOMCI_CLASS(CSSStyleSheet)
+ 
+ // CSSValueList object that represents an nsIDOMCSSValueList, used
+ // by DOM CSS
+ DOMCI_CLASS(CSSValueList)
+ 
+ // Range classes
+ DOMCI_CLASS(Range)
+diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
+--- a/dom/bindings/Bindings.conf
++++ b/dom/bindings/Bindings.conf
+@@ -1221,17 +1221,17 @@ addExternalIface('NodeIterator')
+ addExternalIface('nsIStreamListener', nativeType='nsIStreamListener', notflattened=True)
+ addExternalIface('nsISupports', nativeType='nsISupports')
+ addExternalIface('OutputStream', nativeType='nsIOutputStream',
+                  notflattened=True)
+ addExternalIface('Principal', nativeType='nsIPrincipal',
+                  headerFile='nsIPrincipal.h', notflattened=True)
+ addExternalIface('Range', nativeType='nsRange')
+ addExternalIface('Selection', nativeType='nsISelection')
+-addExternalIface('StyleSheetList')
++addExternalIface('StyleSheet')
+ addExternalIface('SVGAnimatedEnumeration', headerFile='nsIDOMSVGAnimatedEnum.h')
+ addExternalIface('SVGAnimatedNumber')
+ addExternalIface('SVGAnimatedString')
+ addExternalIface('SVGLength')
+ addExternalIface('SVGNumber')
+ addExternalIface('TextMetrics', headerFile='nsIDOMCanvasRenderingContext2D.h')
+ addExternalIface('TreeWalker')
+ addExternalIface('Touch', headerFile='nsIDOMTouchEvent.h')
+diff --git a/dom/interfaces/core/nsIDOMDocument.idl b/dom/interfaces/core/nsIDOMDocument.idl
+--- a/dom/interfaces/core/nsIDOMDocument.idl
++++ b/dom/interfaces/core/nsIDOMDocument.idl
+@@ -153,17 +153,17 @@ interface nsIDOMDocument : nsIDOMNode
+    */
+   nsIDOMNodeList getElementsByClassName(in DOMString classes);
+ 
+ 
+   // CSSOM
+   /**
+    * @see <http://dev.w3.org/csswg/cssom/#dom-document-stylesheets>
+    */
+-  readonly attribute nsIDOMStyleSheetList   styleSheets;
++  readonly attribute nsISupports /* StyleSheetList */ styleSheets;
+ 
+   /**
+    * This attribute must return the preferred style sheet set as set by the
+    * author. It is determined from the order of style sheet declarations and
+    * the Default-Style HTTP headers, as eventually defined elsewhere in the Web
+    * Apps 1.0 specification. If there is no preferred style sheet set, this
+    * attribute must return the empty string. The case of this attribute must
+    * exactly match the case given by the author where the preferred style sheet
+diff --git a/dom/interfaces/stylesheets/Makefile.in b/dom/interfaces/stylesheets/Makefile.in
+--- a/dom/interfaces/stylesheets/Makefile.in
++++ b/dom/interfaces/stylesheets/Makefile.in
+@@ -12,17 +12,16 @@ include $(DEPTH)/config/autoconf.mk
+ 
+ MODULE		= dom
+ XPIDL_MODULE	= dom_stylesheets
+ GRE_MODULE	= 1
+ 
+ SDK_XPIDLSRCS =                                 \
+ 	nsIDOMMediaList.idl			\
+ 	nsIDOMStyleSheet.idl			\
+-	nsIDOMStyleSheetList.idl		\
+ 	$(NULL)
+ 
+ XPIDLSRCS = 					\
+ 	nsIDOMLinkStyle.idl			\
+ 	$(NULL)
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+diff --git a/dom/interfaces/stylesheets/nsIDOMStyleSheetList.idl b/dom/interfaces/stylesheets/nsIDOMStyleSheetList.idl
+deleted file mode 100644
+--- a/dom/interfaces/stylesheets/nsIDOMStyleSheetList.idl
++++ /dev/null
+@@ -1,21 +0,0 @@
+-/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+-/* This Source Code Form is subject to the terms of the Mozilla Public
+- * License, v. 2.0. If a copy of the MPL was not distributed with this
+- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+-
+-#include "domstubs.idl"
+-
+-/**
+- * The nsIDOMStyleSheetList interface is a datatype for a style sheet
+- * list in the Document Object Model.
+- *
+- * For more information on this interface please see
+- * http://www.w3.org/TR/DOM-Level-2-Style
+- */
+-
+-[scriptable, uuid(a6cf9081-15b3-11d2-932e-00805f8add32)]
+-interface nsIDOMStyleSheetList : nsISupports
+-{
+-  readonly attribute unsigned long    length;
+-  nsIDOMStyleSheet         item(in unsigned long index);
+-};
+diff --git a/dom/webidl/Document.webidl b/dom/webidl/Document.webidl
+--- a/dom/webidl/Document.webidl
++++ b/dom/webidl/Document.webidl
+@@ -14,17 +14,16 @@
+  *
+  * http://mxr.mozilla.org/mozilla-central/source/dom/interfaces/core/nsIDOMDocument.idl
+  */
+ 
+ interface Attr;
+ interface Comment;
+ interface NodeIterator;
+ interface Range;
+-interface StyleSheetList;
+ interface Touch;
+ interface TouchList;
+ interface TreeWalker;
+ interface WindowProxy;
+ interface nsISupports;
+ 
+ enum VisibilityState { "hidden", "visible" };
+ 
+diff --git a/dom/webidl/StyleSheetList.webidl b/dom/webidl/StyleSheetList.webidl
+new file mode 100644
+--- /dev/null
++++ b/dom/webidl/StyleSheetList.webidl
+@@ -0,0 +1,10 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++interface StyleSheet;
++
++interface StyleSheetList {
++  readonly attribute unsigned long length;
++  getter StyleSheet? item(unsigned long index);
++};
+diff --git a/dom/webidl/WebIDL.mk b/dom/webidl/WebIDL.mk
+--- a/dom/webidl/WebIDL.mk
++++ b/dom/webidl/WebIDL.mk
+@@ -167,16 +167,17 @@ webidl_files = \
+   SVGTransformableElement.webidl \
+   SVGTransformList.webidl \
+   SVGTSpanElement.webidl \
+   SVGUnitTypes.webidl \
+   SVGUseElement.webidl \
+   SVGURIReference.webidl \
+   SVGViewElement.webidl \
+   SVGZoomAndPan.webidl \
++  StyleSheetList.webidl \
+   Text.webidl \
+   TextDecoder.webidl \
+   TextEncoder.webidl \
+   URL.webidl \
+   ValidityState.webidl \
+   WebSocket.webidl \
+   UndoManager.webidl \
+   USSDReceivedEvent.webidl \
+diff --git a/layout/inspector/src/inCSSValueSearch.cpp b/layout/inspector/src/inCSSValueSearch.cpp
+--- a/layout/inspector/src/inCSSValueSearch.cpp
++++ b/layout/inspector/src/inCSSValueSearch.cpp
+@@ -4,28 +4,30 @@
+ 
+ #include "inCSSValueSearch.h"
+ 
+ #include "nsIComponentManager.h"
+ #include "nsIServiceManager.h"
+ #include "nsVoidArray.h"
+ #include "nsReadableUtils.h"
+ #include "nsIDOMDocument.h"
+-#include "nsIDOMStyleSheetList.h"
++#include "mozilla/dom/StyleSheetList.h"
+ #include "nsIDOMCSSStyleSheet.h"
+ #include "nsIDOMCSSRuleList.h"
+ #include "nsIDOMCSSStyleRule.h"
+ #include "nsIDOMCSSStyleDeclaration.h"
+ #include "nsIDOMCSSImportRule.h"
+ #include "nsIDOMCSSMediaRule.h"
+ #include "nsIDOMCSSSupportsRule.h"
+ #include "nsIURI.h"
+ #include "nsIDocument.h"
+ #include "nsNetUtil.h"
+ 
++using namespace mozilla;
++
+ ///////////////////////////////////////////////////////////////////////////////
+ inCSSValueSearch::inCSSValueSearch()
+   : mResults(nullptr),
+     mProperties(nullptr),
+     mResultCount(0),
+     mPropertyCount(0),
+     mIsActive(false),
+     mHoldResults(true),
+@@ -80,31 +82,26 @@ NS_IMETHODIMP
+ inCSSValueSearch::SearchSync()
+ {
+   InitSearch();
+ 
+   if (!mDocument) {
+     return NS_OK;
+   }
+ 
+-  nsCOMPtr<nsIURI> baseURI;
+   nsCOMPtr<nsIDocument> idoc = do_QueryInterface(mDocument);
+-  if (idoc) {
+-    baseURI = idoc->GetBaseURI();
+-  }
++  NS_ENSURE_STATE(idoc);
+ 
+-  nsCOMPtr<nsIDOMStyleSheetList> sheets;
+-  nsresult rv = mDocument->GetStyleSheets(getter_AddRefs(sheets));
+-  NS_ENSURE_SUCCESS(rv, NS_OK);
++  nsCOMPtr<nsIURI> baseURI = idoc->GetBaseURI();
+ 
+-  uint32_t length;
+-  sheets->GetLength(&length);
++  nsRefPtr<dom::StyleSheetList> sheets = idoc->StyleSheets();
++
++  uint32_t length = sheets->Length();
+   for (uint32_t i = 0; i < length; ++i) {
+-    nsCOMPtr<nsIDOMStyleSheet> sheet;
+-    sheets->Item(i, getter_AddRefs(sheet));
++    nsCOMPtr<nsIDOMStyleSheet> sheet = sheets->Item(i);
+     nsCOMPtr<nsIDOMCSSStyleSheet> cssSheet = do_QueryInterface(sheet);
+     if (cssSheet)
+       SearchStyleSheet(cssSheet, baseURI);
+   }
+ 
+   // XXX would be nice to search inline style as well.
+ 
+   return NS_OK;

@@ -1,0 +1,233 @@
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -4992,51 +4992,16 @@ nsDOMClassInfo::OuterObject(nsIXPConnect
+                             JSObject * obj, JSObject * *_retval)
+ {
+   NS_WARNING("nsDOMClassInfo::OuterObject Don't call me!");
+ 
+   return NS_ERROR_UNEXPECTED;
+ }
+ 
+ static nsresult
+-GetExternalClassInfo(nsScriptNameSpaceManager *aNameSpaceManager,
+-                     const nsString &aName,
+-                     const nsGlobalNameStruct *aStruct,
+-                     const nsGlobalNameStruct **aResult)
+-{
+-  NS_ASSERTION(aStruct->mType ==
+-                 nsGlobalNameStruct::eTypeExternalClassInfoCreator,
+-               "Wrong type!");
+-
+-  nsresult rv;
+-  nsCOMPtr<nsIDOMCIExtension> creator(do_CreateInstance(aStruct->mCID, &rv));
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  nsCOMPtr<nsIDOMScriptObjectFactory> sof(do_GetService(kDOMSOF_CID));
+-  NS_ENSURE_TRUE(sof, NS_ERROR_FAILURE);
+-
+-  rv = creator->RegisterDOMCI(NS_ConvertUTF16toUTF8(aName).get(), sof);
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  const nsGlobalNameStruct *name_struct = aNameSpaceManager->LookupName(aName);
+-  if (name_struct &&
+-      name_struct->mType == nsGlobalNameStruct::eTypeExternalClassInfo) {
+-    *aResult = name_struct;
+-  }
+-  else {
+-    NS_ERROR("Couldn't get the DOM ClassInfo data.");
+-
+-    *aResult = nsnull;
+-  }
+-
+-  return NS_OK;
+-}
+-
+-
+-static nsresult
+ ResolvePrototype(nsIXPConnect *aXPConnect, nsGlobalWindow *aWin, JSContext *cx,
+                  JSObject *obj, const PRUnichar *name,
+                  const nsDOMClassInfoData *ci_data,
+                  const nsGlobalNameStruct *name_struct,
+                  nsScriptNameSpaceManager *nameSpaceManager,
+                  JSObject *dot_prototype, bool install, bool *did_resolve);
+ 
+ 
+@@ -6759,21 +6724,17 @@ nsWindowSH::GlobalResolve(nsGlobalWindow
+     return NS_OK;
+   }
+ 
+   NS_ENSURE_TRUE(class_name, NS_ERROR_UNEXPECTED);
+ 
+   nsresult rv = NS_OK;
+ 
+   if (name_struct->mType == nsGlobalNameStruct::eTypeExternalClassInfoCreator) {
+-    rv = GetExternalClassInfo(nameSpaceManager, name, name_struct,
+-                              &name_struct);
+-    if (NS_FAILED(rv) || !name_struct) {
+-      return rv;
+-    }
++    return NS_ERROR_FAILURE;
+   }
+ 
+   if (name_struct->mType == nsGlobalNameStruct::eTypeNewDOMBinding ||
+       name_struct->mType == nsGlobalNameStruct::eTypeInterface ||
+       name_struct->mType == nsGlobalNameStruct::eTypeClassProto ||
+       name_struct->mType == nsGlobalNameStruct::eTypeClassConstructor) {
+     // Lookup new DOM bindings.
+     mozilla::dom::binding::DefineInterface define =
+diff --git a/dom/base/nsDOMScriptObjectFactory.cpp b/dom/base/nsDOMScriptObjectFactory.cpp
+--- a/dom/base/nsDOMScriptObjectFactory.cpp
++++ b/dom/base/nsDOMScriptObjectFactory.cpp
+@@ -77,45 +77,16 @@ NS_IMPL_ADDREF(nsDOMScriptObjectFactory)
+ NS_IMPL_RELEASE(nsDOMScriptObjectFactory)
+ 
+ NS_IMETHODIMP_(nsISupports *)
+ nsDOMScriptObjectFactory::GetClassInfoInstance(nsDOMClassInfoID aID)
+ {
+   return NS_GetDOMClassInfoInstance(aID);
+ }
+ 
+-NS_IMETHODIMP_(nsISupports *)
+-nsDOMScriptObjectFactory::GetExternalClassInfoInstance(const nsAString& aName)
+-{
+-  nsScriptNameSpaceManager *nameSpaceManager = nsJSRuntime::GetNameSpaceManager();
+-  NS_ENSURE_TRUE(nameSpaceManager, nsnull);
+-
+-  const nsGlobalNameStruct *globalStruct = nameSpaceManager->LookupName(aName);
+-  if (globalStruct) {
+-    if (globalStruct->mType == nsGlobalNameStruct::eTypeExternalClassInfoCreator) {
+-      nsresult rv;
+-      nsCOMPtr<nsIDOMCIExtension> creator(do_CreateInstance(globalStruct->mCID, &rv));
+-      NS_ENSURE_SUCCESS(rv, nsnull);
+-
+-      rv = creator->RegisterDOMCI(NS_ConvertUTF16toUTF8(aName).get(), this);
+-      NS_ENSURE_SUCCESS(rv, nsnull);
+-
+-      globalStruct = nameSpaceManager->LookupName(aName);
+-      NS_ENSURE_TRUE(globalStruct, nsnull);
+-
+-      NS_ASSERTION(globalStruct->mType == nsGlobalNameStruct::eTypeExternalClassInfo,
+-                   "The classinfo data for this class didn't get registered.");
+-    }
+-    if (globalStruct->mType == nsGlobalNameStruct::eTypeExternalClassInfo) {
+-      return nsDOMClassInfo::GetClassInfoInstance(globalStruct->mData);
+-    }
+-  }
+-  return nsnull;
+-}
+-
+ NS_IMETHODIMP
+ nsDOMScriptObjectFactory::Observe(nsISupports *aSubject,
+                                   const char *aTopic,
+                                   const PRUnichar *someData)
+ {
+   if (!nsCRT::strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID)) {
+ #ifdef MOZ_XUL
+     // Flush the XUL cache since it holds JS roots, and we're about to
+diff --git a/dom/base/nsDOMScriptObjectFactory.h b/dom/base/nsDOMScriptObjectFactory.h
+--- a/dom/base/nsDOMScriptObjectFactory.h
++++ b/dom/base/nsDOMScriptObjectFactory.h
+@@ -33,17 +33,16 @@ public:
+ 
+   NS_DECL_ISUPPORTS
+ 
+   // nsIObserver
+   NS_DECL_NSIOBSERVER
+ 
+   // nsIDOMScriptObjectFactory
+   NS_IMETHOD_(nsISupports *) GetClassInfoInstance(nsDOMClassInfoID aID);
+-  NS_IMETHOD_(nsISupports *) GetExternalClassInfoInstance(const nsAString& aName);
+ };
+ 
+ class nsDOMExceptionProvider MOZ_FINAL : public nsIExceptionProvider
+ {
+ public:
+   NS_DECL_ISUPPORTS
+   NS_DECL_NSIEXCEPTIONPROVIDER
+ };
+diff --git a/dom/base/nsIDOMClassInfo.h b/dom/base/nsIDOMClassInfo.h
+--- a/dom/base/nsIDOMClassInfo.h
++++ b/dom/base/nsIDOMClassInfo.h
+@@ -54,60 +54,9 @@
+     }                                                                      \
+                                                                            \
+     foundInterface =                                                       \
+       sof->GetClassInfoInstance(eDOMClassInfo_##_class##_id);              \
+   } else
+ 
+ #endif /* _IMPL_NS_LAYOUT */
+ 
+-// Looks up the nsIClassInfo for a class name registered with the 
+-// nsScriptNamespaceManager. Remember to release NS_CLASSINFO_NAME(_class)
+-// (eg. when your module unloads).
+-#define NS_INTERFACE_MAP_ENTRY_EXTERNAL_DOM_CLASSINFO(_class)              \
+-  if (aIID.Equals(NS_GET_IID(nsIClassInfo)) ||                             \
+-      aIID.Equals(NS_GET_IID(nsXPCClassInfo))) {                           \
+-    extern nsISupports *NS_CLASSINFO_NAME(_class);                         \
+-    if (NS_CLASSINFO_NAME(_class)) {                                       \
+-      foundInterface = NS_CLASSINFO_NAME(_class);                          \
+-    } else {                                                               \
+-      static NS_DEFINE_CID(kDOMSOF_CID, NS_DOM_SCRIPT_OBJECT_FACTORY_CID); \
+-                                                                           \
+-      nsresult rv;                                                         \
+-      nsCOMPtr<nsIDOMScriptObjectFactory> sof(do_GetService(kDOMSOF_CID,   \
+-                                                            &rv));         \
+-      if (NS_FAILED(rv)) {                                                 \
+-        *aInstancePtr = nsnull;                                            \
+-        return rv;                                                         \
+-      }                                                                    \
+-                                                                           \
+-      foundInterface =                                                     \
+-        sof->GetExternalClassInfoInstance(NS_LITERAL_STRING(#_class));     \
+-                                                                           \
+-      if (foundInterface) {                                                \
+-        NS_CLASSINFO_NAME(_class) = foundInterface;                        \
+-        NS_CLASSINFO_NAME(_class)->AddRef();                               \
+-      }                                                                    \
+-    }                                                                      \
+-  } else
+-
+-
+-#define NS_DECL_DOM_CLASSINFO(_class) \
+-  nsISupports *NS_CLASSINFO_NAME(_class) = nsnull;
+-
+-// {891a7b01-1b61-11d6-a7f2-f690b638899c}
+-#define NS_IDOMCI_EXTENSION_IID  \
+-{ 0x891a7b01, 0x1b61, 0x11d6, \
+-{ 0xa7, 0xf2, 0xf6, 0x90, 0xb6, 0x38, 0x89, 0x9c } }
+-
+-class nsIDOMScriptObjectFactory;
+-
+-class nsIDOMCIExtension : public nsISupports {
+-public:  
+-  NS_DECLARE_STATIC_IID_ACCESSOR(NS_IDOMCI_EXTENSION_IID)
+-
+-  NS_IMETHOD RegisterDOMCI(const char* aName,
+-                           nsIDOMScriptObjectFactory* aDOMSOFactory) = 0;
+-};
+-
+-NS_DEFINE_STATIC_IID_ACCESSOR(nsIDOMCIExtension, NS_IDOMCI_EXTENSION_IID)
+-
+ #endif /* nsIDOMClassInfo_h___ */
+diff --git a/dom/base/nsIDOMScriptObjectFactory.h b/dom/base/nsIDOMScriptObjectFactory.h
+--- a/dom/base/nsIDOMScriptObjectFactory.h
++++ b/dom/base/nsIDOMScriptObjectFactory.h
+@@ -22,17 +22,16 @@ class nsIDOMEventListener;
+ typedef nsXPCClassInfo* (*nsDOMClassInfoExternalConstructorFnc)
+   (const char* aName);
+ 
+ class nsIDOMScriptObjectFactory : public nsISupports {
+ public:  
+   NS_DECLARE_STATIC_IID_ACCESSOR(NS_IDOM_SCRIPT_OBJECT_FACTORY_IID)
+ 
+   NS_IMETHOD_(nsISupports *) GetClassInfoInstance(nsDOMClassInfoID aID) = 0;
+-  NS_IMETHOD_(nsISupports *) GetExternalClassInfoInstance(const nsAString& aName) = 0;
+ 
+   nsIScriptRuntime* GetJSRuntime()
+   {
+     return mJSRuntime;
+   }
+ 
+ protected:
+   nsCOMPtr<nsIScriptRuntime> mJSRuntime;

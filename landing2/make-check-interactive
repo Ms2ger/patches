@@ -1,0 +1,112 @@
+# HG changeset patch
+# User Gregory Szorc <gps@mozilla.com>
+# Date 1383853946 28800
+#      Thu Nov 07 11:52:26 2013 -0800
+# Node ID bcf5a07a2731bb86607158c6d16d0c493372d4ad
+# Parent b2a53fcd0ec20f94aaf5ed07ee1fadefc5f641cb
+Bug 928195 - Part b: Provide a mach command to run WebIDL parser tests to replace a make target
+
+diff --git a/build/mach_bootstrap.py b/build/mach_bootstrap.py
+--- a/build/mach_bootstrap.py
++++ b/build/mach_bootstrap.py
+@@ -30,16 +30,18 @@ SEARCH_PATHS = [
+     'python/mozbuild',
+     'python/mozversioncontrol',
+     'python/blessings',
+     'python/configobj',
+     'python/psutil',
+     'python/which',
+     'build/pymake',
+     'config',
++    'dom/bindings',
++    'dom/bindings/parser',
+     'other-licenses/ply',
+     'xpcom/idl-parser',
+     'testing',
+     'testing/xpcshell',
+     'testing/marionette/client',
+     'testing/marionette/client/marionette',
+     'testing/mozbase/mozcrash',
+     'testing/mozbase/mozdevice',
+@@ -55,16 +57,17 @@ SEARCH_PATHS = [
+     'testing/mozbase/moztest',
+     'testing/mozbase/manifestdestiny',
+     'xpcom/idl-parser',
+ ]
+ 
+ # Individual files providing mach commands.
+ MACH_MODULES = [
+     'addon-sdk/mach_commands.py',
++    'dom/bindings/mach_commands.py',
+     'layout/tools/reftest/mach_commands.py',
+     'python/mach_commands.py',
+     'python/mach/mach/commands/commandinfo.py',
+     'python/mozboot/mozboot/mach_commands.py',
+     'python/mozbuild/mozbuild/config.py',
+     'python/mozbuild/mozbuild/mach_commands.py',
+     'python/mozbuild/mozbuild/frontend/mach_commands.py',
+     'testing/mach_commands.py',
+diff --git a/dom/bindings/mach_commands.py b/dom/bindings/mach_commands.py
+new file mode 100644
+--- /dev/null
++++ b/dom/bindings/mach_commands.py
+@@ -0,0 +1,35 @@
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, # You can obtain one at http://mozilla.org/MPL/2.0/.
++
++from __future__ import unicode_literals
++
++import os
++import sys
++
++from mach.decorators import (
++    CommandArgument,
++    CommandProvider,
++    Command,
++)
++
++from mozbuild.base import MachCommandBase
++
++
++@CommandProvider
++class WebIDLProvider(MachCommandBase):
++    @Command('webidl-test', category='testing',
++        description='Run WebIDL tests.')
++    @CommandArgument('--verbose', '-v', action='store_true',
++        help='Run tests in verbose mode.')
++    def webidl_test(self, verbose=False):
++        sys.path.insert(0, os.path.join(self.topsrcdir, 'other-licenses',
++            'ply'))
++        sys.path.insert(0, os.path.join(self.topsrcdir, 'dom', 'bindings',
++            'parser'))
++
++        # Ensure code generation is up to date.
++        self._run_make(directory='dom/bindings', target='export')
++
++        from runtests import run_tests
++        return run_tests(None, verbose=verbose)
+diff --git a/dom/bindings/test/Makefile.in b/dom/bindings/test/Makefile.in
+--- a/dom/bindings/test/Makefile.in
++++ b/dom/bindings/test/Makefile.in
+@@ -60,20 +60,16 @@ include $(topsrcdir)/config/rules.mk
+ 	# $(CPPSRCS) in dom/bindings/Makefile.in.
+ 	$(MAKE) -C .. export TestExampleInterface-example TestExampleProxyInterface-example
+ 	@$(TOUCH) $@
+ 
+ check::
+ 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) $(topsrcdir)/config/pythonpath.py \
+ 	  $(PLY_INCLUDE) $(srcdir)/../parser/runtests.py
+ 
+-check-interactive:
+-	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) $(topsrcdir)/config/pythonpath.py \
+-	  $(PLY_INCLUDE) $(srcdir)/../parser/runtests.py -q
+-
+ # Since we define MOCHITEST_FILES, config/makefiles/mochitest.mk goes ahead and
+ # sets up a rule with libs:: in itm which makes our .DEFAULT_TARGET be "libs".
+ # Then ruls.mk does |.DEFAULT_TARGET ?= default| which leaves it as "libs".  So
+ # if we make without an explicit target in this directory, we try to make
+ # "libs", but with a $(MAKECMDGOALS) of empty string.  And then rules.mk
+ # helpfully does not include our *.o.pp files, since it includes them only if
+ # filtering some stuff out from $(MAKECMDGOALS) leaves it nonempty.  The upshot
+ # is that if some headers change and we run make in this dir without an explicit

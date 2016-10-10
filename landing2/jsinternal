@@ -1,0 +1,132 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/public/Utility.h b/js/public/Utility.h
+--- a/js/public/Utility.h
++++ b/js/public/Utility.h
+@@ -118,16 +118,24 @@ JS_BEGIN_EXTERN_C
+         typedef int JS_STATIC_ASSERT_GLUE(js_static_assert, __COUNTER__)[(cond) ? 1 : -1]
+ # else
+ #  define JS_STATIC_ASSERT(cond) extern void js_static_assert(int arg[(cond) ? 1 : -1])
+ # endif
+ #endif
+ 
+ #define JS_STATIC_ASSERT_IF(cond, expr) JS_STATIC_ASSERT(!(cond) || (expr))
+ 
++#ifdef JS_ENGINE
++# define JS_IS_INTERNAL true
++#else
++# define JS_IS_INTERNAL false
++#endif
++
++#define JS_INTERNAL_HEADER JS_STATIC_ASSERT(JS_IS_INTERNAL);
++
+ /*
+  * Abort the process in a non-graceful manner. This will cause a core file,
+  * call to the debugger or other moral equivalent as well as causing the
+  * entire process to stop.
+  */
+ extern JS_PUBLIC_API(void) JS_Abort(void);
+ 
+ /*
+diff --git a/js/src/Makefile.in b/js/src/Makefile.in
+--- a/js/src/Makefile.in
++++ b/js/src/Makefile.in
+@@ -696,17 +696,17 @@ endif
+ DIST_GARBAGE = config.cache config.log config.status \
+    config/autoconf.mk \
+    unallmakefiles js-config js-config.h js-confdefs.h
+ 
+ distclean::
+ 	cat unallmakefiles | $(XARGS) rm -f
+ 	$(RM) $(DIST_GARBAGE)
+ 
+-DEFINES		+= -DEXPORT_JS_API
++DEFINES += -DEXPORT_JS_API -DJS_ENGINE
+ 
+ # mfbt is always packed with us, so if we're building a shared object,
+ # we need to declare "exported" mfbt symbols on its behalf when we use
+ # its headers.
+ DEFINES		+= -DIMPL_MFBT
+ 
+ INCLUDES	+= -I$(srcdir)
+ 
+diff --git a/js/src/jsapi-tests/Makefile.in b/js/src/jsapi-tests/Makefile.in
+--- a/js/src/jsapi-tests/Makefile.in
++++ b/js/src/jsapi-tests/Makefile.in
+@@ -99,17 +99,17 @@ CSRCS = \
+ # Disabled: an entirely unrelated test seems to cause this to fail.  Moreover,
+ # given the test's dependence on interactions between the compiler, the GC, and
+ # conservative stack scanning, the fix isn't obvious: more investigation
+ # needed.
+ #CPPSRCS += \
+ #  testRegExpInstanceProperties.cpp \
+ #  $(NULL)
+ 
+-DEFINES         += -DEXPORT_JS_API
++DEFINES += -DEXPORT_JS_API -DJS_ENGINE
+ 
+ LIBS      = $(DEPTH)/$(LIB_PREFIX)js_static.$(LIB_SUFFIX) $(NSPR_LIBS)
+ 
+ LOCAL_INCLUDES += -I$(topsrcdir) -I..
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+ check::
+diff --git a/js/src/jscompartment.h b/js/src/jscompartment.h
+--- a/js/src/jscompartment.h
++++ b/js/src/jscompartment.h
+@@ -44,16 +44,18 @@
+ #include "jscntxt.h"
+ #include "jsfun.h"
+ #include "jsgc.h"
+ #include "jsgcstats.h"
+ #include "jsobj.h"
+ #include "jsscope.h"
+ #include "vm/GlobalObject.h"
+ 
++JS_INTERNAL_HEADER
++
+ #ifdef _MSC_VER
+ #pragma warning(push)
+ #pragma warning(disable:4251) /* Silence warning about JS_FRIEND_API and data members. */
+ #endif
+ 
+ namespace js {
+ 
+ typedef HashMap<JSFunction *,
+diff --git a/js/src/jsutil.h b/js/src/jsutil.h
+--- a/js/src/jsutil.h
++++ b/js/src/jsutil.h
+@@ -1,9 +1,9 @@
+-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+  *
+  * ***** BEGIN LICENSE BLOCK *****
+  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+  *
+  * The contents of this file are subject to the Mozilla Public License Version
+  * 1.1 (the "License"); you may not use this file except in compliance with
+  * the License. You may obtain a copy of the License at
+  * http://www.mozilla.org/MPL/
+diff --git a/js/src/shell/Makefile.in b/js/src/shell/Makefile.in
+--- a/js/src/shell/Makefile.in
++++ b/js/src/shell/Makefile.in
+@@ -47,17 +47,17 @@ include $(DEPTH)/config/autoconf.mk
+ PROGRAM         = js$(BIN_SUFFIX)
+ CPPSRCS		= \
+   js.cpp \
+   jsworkers.cpp \
+   jsoptparse.cpp \
+   jsheaptools.cpp \
+   $(NULL)
+ 
+-DEFINES         += -DEXPORT_JS_API
++DEFINES += -DEXPORT_JS_API -DJS_ENGINE
+ 
+ LIBS      = $(NSPR_LIBS) $(EDITLINE_LIBS) $(DEPTH)/$(LIB_PREFIX)js_static.$(LIB_SUFFIX)
+ ifdef MOZ_NATIVE_FFI
+ EXTRA_LIBS += $(MOZ_FFI_LIBS)
+ endif
+ 
+ LOCAL_INCLUDES += -I$(topsrcdir) -I..
+ 

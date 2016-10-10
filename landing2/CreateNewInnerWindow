@@ -1,0 +1,271 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -1735,16 +1735,101 @@ CreateNativeGlobalForInner(JSContext* aC
+   // about:memory may use that information
+   MOZ_ASSERT(*aNativeGlobal);
+   xpc::SetLocationForGlobal(*aNativeGlobal, aURI);
+ 
+   return NS_OK;
+ }
+ 
+ nsresult
++nsGlobalWindow::CreateNewInnerWindow(nsGlobalWindow** aCurrentInner,
++                                     bool* aIsChrome,
++                                     bool* aCreatedInnerWindow)
++{
++  nsRefPtr<nsGlobalWindow> newInnerWindow;
++  if (aState) {
++    newInnerWindow = wsh->GetInnerWindow();
++    mInnerWindowHolder = wsh->GetInnerWindowHolder();
++
++    NS_ASSERTION(newInnerWindow, "Got a state without inner window");
++  } else if (thisChrome) {
++    newInnerWindow = new nsGlobalChromeWindow(this);
++    *aIsChrome = true;
++  } else if (mIsModalContentWindow) {
++    newInnerWindow = new nsGlobalModalWindow(this);
++  } else {
++    newInnerWindow = new nsGlobalWindow(this);
++  }
++
++  if (!aState) {
++    // Freeze the outer window and null out the inner window so
++    // that initializing classes on the new inner doesn't end up
++    // reaching into the old inner window for classes etc.
++    //
++    // [This happens with Object.prototype when XPConnect creates
++    // a temporary global while initializing classes; the reason
++    // being that xpconnect creates the temp global w/o a parent
++    // and proto, which makes the JS engine look up classes in
++    // cx->globalObject, i.e. this outer window].
++
++    mInnerWindow = nullptr;
++
++    Freeze();
++    mCreatingInnerWindow = true;
++    // Every script context we are initialized with must create a
++    // new global.
++    nsresult rv = CreateNativeGlobalForInner(cx, newInnerWindow,
++                                    aDocument->GetDocumentURI(), isChrome,
++                                    aDocument->NodePrincipal(),
++                                    &newInnerWindow->mJSObject,
++                                    getter_AddRefs(mInnerWindowHolder));
++    NS_ASSERTION(NS_SUCCEEDED(rv) && newInnerWindow->mJSObject && mInnerWindowHolder,
++                 "Failed to get script global and holder");
++
++    mCreatingInnerWindow = false;
++    *aCreatedInnerWindow = true;
++    Thaw();
++
++    NS_ENSURE_SUCCESS(rv, rv);
++  }
++
++  if (currentInner && currentInner->mJSObject) {
++    if (!documentChanged) {
++      // Move the navigator from the old inner window to the new one since
++      // this is a document.write. This is safe from a same-origin point of
++      // view because document.write can only be used by the same origin.
++      newInnerWindow->mNavigator = currentInner->mNavigator;
++      currentInner->mNavigator = nullptr;
++      if (newInnerWindow->mNavigator) {
++        newInnerWindow->mNavigator->SetWindow(newInnerWindow);
++      }
++
++      // Make a copy of the old window's performance object on document.open.
++      // Note that we have to force eager creation of it here, because we need
++      // to grab the current document channel and whatnot before that changes.
++      currentInner->CreatePerformanceObjectIfNeeded();
++      if (currentInner->mPerformance) {
++        newInnerWindow->mPerformance =
++          new nsPerformance(newInnerWindow,
++                            currentInner->mPerformance->GetDOMTiming(),
++                            currentInner->mPerformance->GetChannel());
++      }
++    }
++
++    // Don't free objects on our current inner window if it's going to be
++    // held in the bfcache.
++    if (!currentInner->IsFrozen()) {
++      currentInner->FreeInnerObjects();
++    }
++  }
++  currentInner.forget(aCurrentInner);
++  return NS_OK;
++}
++
++nsresult
+ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
+                                nsISupports* aState,
+                                bool aForceReuseInnerWindow)
+ {
+   NS_TIME_FUNCTION;
+ 
+   NS_PRECONDITION(mDocumentPrincipal == nullptr,
+                   "mDocumentPrincipal prematurely set!");
+@@ -1880,102 +1965,27 @@ nsGlobalWindow::SetNewDocument(nsIDocume
+     // don't necessarily match exactly. Update the principal on the compartment to
+     // match the new document.
+     // NB: We don't just call currentInner->RefreshCompartmentPrincipals() here
+     // because we haven't yet set its mDoc to aDocument.
+     JS_SetCompartmentPrincipals(js::GetObjectCompartment(currentInner->mJSObject),
+                                 nsJSPrincipals::get(aDocument->NodePrincipal()));
+   } else {
+     nsRefPtr<nsGlobalWindow> newInnerWindow;
+-    if (aState) {
+-      newInnerWindow = wsh->GetInnerWindow();
+-      mInnerWindowHolder = wsh->GetInnerWindowHolder();
+-
+-      NS_ASSERTION(newInnerWindow, "Got a state without inner window");
+-    } else if (thisChrome) {
+-      newInnerWindow = new nsGlobalChromeWindow(this);
+-      isChrome = true;
+-    } else if (mIsModalContentWindow) {
+-      newInnerWindow = new nsGlobalModalWindow(this);
+-    } else {
+-      newInnerWindow = new nsGlobalWindow(this);
+-    }
+-
+-    if (!aState) {
+-      // Freeze the outer window and null out the inner window so
+-      // that initializing classes on the new inner doesn't end up
+-      // reaching into the old inner window for classes etc.
+-      //
+-      // [This happens with Object.prototype when XPConnect creates
+-      // a temporary global while initializing classes; the reason
+-      // being that xpconnect creates the temp global w/o a parent
+-      // and proto, which makes the JS engine look up classes in
+-      // cx->globalObject, i.e. this outer window].
+-
+-      mInnerWindow = nullptr;
+-
+-      Freeze();
+-      mCreatingInnerWindow = true;
+-      // Every script context we are initialized with must create a
+-      // new global.
+-      rv = CreateNativeGlobalForInner(cx, newInnerWindow,
+-                                      aDocument->GetDocumentURI(), isChrome,
+-                                      aDocument->NodePrincipal(),
+-                                      &newInnerWindow->mJSObject,
+-                                      getter_AddRefs(mInnerWindowHolder));
+-      NS_ASSERTION(NS_SUCCEEDED(rv) && newInnerWindow->mJSObject && mInnerWindowHolder,
+-                   "Failed to get script global and holder");
+-
+-      mCreatingInnerWindow = false;
+-      createdInnerWindow = true;
+-      Thaw();
+-
+-      NS_ENSURE_SUCCESS(rv, rv);
+-    }
+-
+-    if (currentInner && currentInner->mJSObject) {
+-      if (!documentChanged) {
+-        // Move the navigator from the old inner window to the new one since
+-        // this is a document.write. This is safe from a same-origin point of
+-        // view because document.write can only be used by the same origin.
+-        newInnerWindow->mNavigator = currentInner->mNavigator;
+-        currentInner->mNavigator = nullptr;
+-        if (newInnerWindow->mNavigator) {
+-          newInnerWindow->mNavigator->SetWindow(newInnerWindow);
+-        }
+-
+-        // Make a copy of the old window's performance object on document.open.
+-        // Note that we have to force eager creation of it here, because we need
+-        // to grab the current document channel and whatnot before that changes.
+-        currentInner->CreatePerformanceObjectIfNeeded();
+-        if (currentInner->mPerformance) {
+-          newInnerWindow->mPerformance =
+-            new nsPerformance(newInnerWindow,
+-                              currentInner->mPerformance->GetDOMTiming(),
+-                              currentInner->mPerformance->GetChannel());
+-        }
+-      }
+-
+-      // Don't free objects on our current inner window if it's going to be
+-      // held in the bfcache.
+-      if (!currentInner->IsFrozen()) {
+-        currentInner->FreeInnerObjects();
+-      }
+-    }
+-
++    rv = CreateNewInnerWindow(getter_AddRefs(newInnerWindow), &isChrome, &createdInnerWindow);
+     mInnerWindow = currentInner = newInnerWindow;
+ 
+     if (!mJSObject) {
+-      CreateOuterObject(newInnerWindow);
++      CreateOuterObject(currentInner);
+       mContext->DidInitializeContext();
+ 
+       mJSObject = mContext->GetNativeGlobal();
+       SetWrapper(mJSObject);
+     } else {
+-      JSObject *outerObject = NewOuterWindowProxy(cx, xpc_UnmarkGrayObject(newInnerWindow->mJSObject));
++      JSObject *outerObject = NewOuterWindowProxy(cx, xpc_UnmarkGrayObject(currentInner->mJSObject));
+       if (!outerObject) {
+         NS_ERROR("out of memory");
+         return NS_ERROR_FAILURE;
+       }
+ 
+       js::SetProxyExtra(mJSObject, 0, js::PrivateValue(NULL));
+ 
+       outerObject = xpc::TransplantObject(cx, mJSObject, outerObject);
+@@ -1992,53 +2002,53 @@ nsGlobalWindow::SetNewDocument(nsIDocume
+ 
+       {
+         JSAutoEnterCompartment ac;
+         if (!ac.enter(cx, mJSObject)) {
+           NS_ERROR("unable to enter a compartment");
+           return NS_ERROR_FAILURE;
+         }
+ 
+-        JS_SetParent(cx, mJSObject, newInnerWindow->mJSObject);
++        JS_SetParent(cx, mJSObject, currentInner->mJSObject);
+ 
+         SetOuterObject(cx, mJSObject);
+ 
+         JSCompartment *compartment = js::GetObjectCompartment(mJSObject);
+         xpc::CompartmentPrivate *priv =
+           static_cast<xpc::CompartmentPrivate*>(JS_GetCompartmentPrivate(compartment));
+         if (priv && priv->waiverWrapperMap) {
+           NS_ASSERTION(!JS_IsExceptionPending(cx),
+                        "We might overwrite a pending exception!");
+-          priv->waiverWrapperMap->Reparent(cx, newInnerWindow->mJSObject);
++          priv->waiverWrapperMap->Reparent(cx, currentInner->mJSObject);
+         }
+       }
+     }
+ 
+     // Enter the new global's compartment.
+     JSAutoEnterCompartment ac;
+     if (!ac.enter(cx, mJSObject)) {
+       NS_ERROR("unable to enter a compartment");
+       return NS_ERROR_FAILURE;
+     }
+ 
+     // If we created a new inner window above, we need to do the last little bit
+     // of initialization now that the dust has settled.
+     if (createdInnerWindow) {
+       nsIXPConnect *xpc = nsContentUtils::XPConnect();
+       nsCOMPtr<nsIXPConnectWrappedNative> wrapper;
+-      nsresult rv = xpc->GetWrappedNativeOfJSObject(cx, newInnerWindow->mJSObject,
++      nsresult rv = xpc->GetWrappedNativeOfJSObject(cx, currentInner->mJSObject,
+                                                     getter_AddRefs(wrapper));
+       NS_ENSURE_SUCCESS(rv, rv);
+       NS_ABORT_IF_FALSE(wrapper, "bad wrapper");
+       rv = wrapper->FinishInitForWrappedGlobal();
+       NS_ENSURE_SUCCESS(rv, rv);
+     }
+ 
+     if (!aState) {
+-      if (!JS_DefineProperty(cx, newInnerWindow->mJSObject, "window",
++      if (!JS_DefineProperty(cx, currentInner->mJSObject, "window",
+                              OBJECT_TO_JSVAL(mJSObject),
+                              JS_PropertyStub, JS_StrictPropertyStub,
+                              JSPROP_ENUMERATE | JSPROP_READONLY | JSPROP_PERMANENT)) {
+         NS_ERROR("can't create the 'window' property");
+         return NS_ERROR_FAILURE;
+       }
+     }
+   }

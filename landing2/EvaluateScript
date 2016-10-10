@@ -1,0 +1,100 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsScriptLoader.cpp b/content/base/src/nsScriptLoader.cpp
+--- a/content/base/src/nsScriptLoader.cpp
++++ b/content/base/src/nsScriptLoader.cpp
+@@ -839,18 +839,16 @@ nsScriptLoader::FireScriptEvaluated(nsre
+ 
+   aRequest->FireScriptEvaluated(aResult);
+ }
+ 
+ nsresult
+ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest,
+                                const nsAFlatString& aScript)
+ {
+-  nsresult rv = NS_OK;
+-
+   // We need a document to evaluate scripts.
+   if (!mDocument) {
+     return NS_ERROR_FAILURE;
+   }
+ 
+   nsCOMPtr<nsIContent> scriptContent(do_QueryInterface(aRequest->mElement));
+   nsIDocument* ownerDoc = scriptContent->OwnerDoc();
+   if (ownerDoc != mDocument) {
+@@ -860,32 +858,25 @@ nsScriptLoader::EvaluateScript(nsScriptL
+ 
+   nsPIDOMWindow *pwin = mDocument->GetInnerWindow();
+   if (!pwin || !pwin->IsInnerWindow()) {
+     return NS_ERROR_FAILURE;
+   }
+   nsCOMPtr<nsIScriptGlobalObject> globalObject = do_QueryInterface(pwin);
+   NS_ASSERTION(globalObject, "windows must be global objects");
+ 
+-  // Get the script-type to be used by this element.
+-  NS_ASSERTION(scriptContent, "no content - what is default script-type?");
+-  uint32_t stid = scriptContent ? scriptContent->GetScriptTypeID() :
+-                                  nsIProgrammingLanguage::JAVASCRIPT;
+-  // and make sure we are setup for this type of script.
+-  rv = globalObject->EnsureScriptEnvironment(stid);
+-  if (NS_FAILED(rv))
+-    return rv;
++  nsresult rv =
++    globalObject->EnsureScriptEnvironment(nsIProgrammingLanguage::JAVASCRIPT);
++  NS_ENSURE_SUCCESS(rv, rv);
+ 
+   // Make sure context is a strong reference since we access it after
+   // we've executed a script, which may cause all other references to
+   // the context to go away.
+-  nsCOMPtr<nsIScriptContext> context = globalObject->GetScriptContext(stid);
+-  if (!context) {
+-    return NS_ERROR_FAILURE;
+-  }
++  nsCOMPtr<nsIScriptContext> context = globalObject->GetContext();
++  NS_ENSURE_TRUE(context, NS_ERROR_FAILURE);
+ 
+   bool oldProcessingScriptTag = context->GetProcessingScriptTag();
+   context->SetProcessingScriptTag(true);
+ 
+   // Update our current script.
+   nsCOMPtr<nsIScriptElement> oldCurrent = mCurrentScript;
+   mCurrentScript = aRequest->mElement;
+ 
+@@ -899,31 +890,25 @@ nsScriptLoader::EvaluateScript(nsScriptL
+                                mDocument->NodePrincipal(),
+                                aRequest->mOriginPrincipal,
+                                url.get(), aRequest->mLineNo,
+                                aRequest->mJSVersion, nsnull, &isUndefined);
+ 
+   // Put the old script back in case it wants to do anything else.
+   mCurrentScript = oldCurrent;
+ 
+-  JSContext *cx = nsnull; // Initialize this to keep GCC happy.
+-  if (stid == nsIProgrammingLanguage::JAVASCRIPT) {
+-    cx = context->GetNativeContext();
+-    ::JS_BeginRequest(cx);
+-    NS_ASSERTION(!::JS_IsExceptionPending(cx),
+-                 "JS_ReportPendingException wasn't called in EvaluateString");
+-  }
++  JSContext* cx = context->GetNativeContext();
++  JSAutoRequest ar(cx);
++  NS_ASSERTION(!JS_IsExceptionPending(cx),
++               "JS_ReportPendingException wasn't called in EvaluateString");
+ 
+   context->SetProcessingScriptTag(oldProcessingScriptTag);
+ 
+-  if (stid == nsIProgrammingLanguage::JAVASCRIPT) {
+-    NS_ASSERTION(!::JS_IsExceptionPending(cx),
+-                 "JS_ReportPendingException wasn't called");
+-    ::JS_EndRequest(cx);
+-  }
++  NS_ASSERTION(!JS_IsExceptionPending(cx),
++               "JS_ReportPendingException wasn't called");
+   return rv;
+ }
+ 
+ void
+ nsScriptLoader::ProcessPendingRequestsAsync()
+ {
+   if (mParserBlockingRequest || !mPendingChildLoaders.IsEmpty()) {
+     nsCOMPtr<nsIRunnable> ev = NS_NewRunnableMethod(this,

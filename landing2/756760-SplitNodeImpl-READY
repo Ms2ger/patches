@@ -1,0 +1,233 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 756760 - Cleanup nsEditor::SplitNodeImpl a bit; r=ehsan
+
+diff --git a/editor/libeditor/base/nsEditor.cpp b/editor/libeditor/base/nsEditor.cpp
+--- a/editor/libeditor/base/nsEditor.cpp
++++ b/editor/libeditor/base/nsEditor.cpp
+@@ -2811,133 +2811,115 @@ nsEditor::SplitNodeImpl(nsIDOMNode * aEx
+                         int32_t      aOffset,
+                         nsIDOMNode*  aNewLeftNode,
+                         nsIDOMNode*  aParent)
+ {
+ #ifdef NS_DEBUG_EDITOR
+   if (gNoisy) { printf("SplitNodeImpl: left=%p, right=%p, offset=%d\n", (void*)aNewLeftNode, (void*)aExistingRightNode, aOffset); }
+ #endif
+ 
+-  NS_ASSERTION(((nsnull!=aExistingRightNode) &&
+-                (nsnull!=aNewLeftNode) &&
+-                (nsnull!=aParent)),
+-                "null arg");
+-  nsresult result;
+-  if ((nsnull!=aExistingRightNode) &&
+-      (nsnull!=aNewLeftNode) &&
+-      (nsnull!=aParent))
++  MOZ_ASSERT(aExistingRightNode);
++  MOZ_ASSERT(aNewLeftNode);
++  MOZ_ASSERT(aParent);
++
++  // get selection
++  nsCOMPtr<nsISelection> selection;
++  nsresult result = GetSelection(getter_AddRefs(selection));
++  NS_ENSURE_SUCCESS(result, result);
++  NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
++
++  // remember some selection points
++  nsCOMPtr<nsIDOMNode> selStartNode, selEndNode;
++  int32_t selStartOffset, selEndOffset;
++  result = GetStartNodeAndOffset(selection, getter_AddRefs(selStartNode), &selStartOffset);
++  if (NS_FAILED(result)) selStartNode = nsnull;  // if selection is cleared, remember that
++  result = GetEndNodeAndOffset(selection, getter_AddRefs(selEndNode), &selEndOffset);
++  if (NS_FAILED(result)) selStartNode = nsnull;  // if selection is cleared, remember that
++
++  nsCOMPtr<nsIDOMNode> resultNode;
++  result = aParent->InsertBefore(aNewLeftNode, aExistingRightNode, getter_AddRefs(resultNode));
++  NS_ENSURE_SUCCESS(result, result);
++
++  // split the children between the 2 nodes
++  // at this point, aExistingRightNode has all the children
++  // move all the children whose index is < aOffset to aNewLeftNode
++  if (aOffset < 0) {
++    // don't bother unless we're going to move at least one child
++    return NS_OK;
++  }
++
++  // if it's a text node, just shuffle around some text
++  nsCOMPtr<nsIDOMCharacterData> rightNodeAsText( do_QueryInterface(aExistingRightNode) );
++  nsCOMPtr<nsIDOMCharacterData> leftNodeAsText( do_QueryInterface(aNewLeftNode) );
++  if (leftNodeAsText && rightNodeAsText)
+   {
+-    // get selection
+-    nsCOMPtr<nsISelection> selection;
+-    result = GetSelection(getter_AddRefs(selection));
+-    NS_ENSURE_SUCCESS(result, result);
+-    NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
+-
+-    // remember some selection points
+-    nsCOMPtr<nsIDOMNode> selStartNode, selEndNode;
+-    int32_t selStartOffset, selEndOffset;
+-    result = GetStartNodeAndOffset(selection, getter_AddRefs(selStartNode), &selStartOffset);
+-    if (NS_FAILED(result)) selStartNode = nsnull;  // if selection is cleared, remember that
+-    result = GetEndNodeAndOffset(selection, getter_AddRefs(selEndNode), &selEndOffset);
+-    if (NS_FAILED(result)) selStartNode = nsnull;  // if selection is cleared, remember that
+-
+-    nsCOMPtr<nsIDOMNode> resultNode;
+-    result = aParent->InsertBefore(aNewLeftNode, aExistingRightNode, getter_AddRefs(resultNode));
+-    //printf("  after insert\n"); content->List();  // DEBUG
+-    if (NS_SUCCEEDED(result))
++    // fix right node
++    nsAutoString leftText;
++    rightNodeAsText->SubstringData(0, aOffset, leftText);
++    rightNodeAsText->DeleteData(0, aOffset);
++    // fix left node
++    leftNodeAsText->SetData(leftText);
++    // moose          
++  } else {
++    // otherwise it's an interior node, so shuffle around the children
++    // go through list backwards so deletes don't interfere with the iteration
++    nsCOMPtr<nsINode> existingRightNode = do_QueryInterface(aExistingRightNode);
++    nsIContent* child = existingRightNode->GetChildAt(aOffset - 1);
++    while (child) {
++      nsIContent* next = child->GetPreviousSibling();
++
++      nsIDOMNode* childNode = child->AsDOMNode();
++      result = aExistingRightNode->RemoveChild(childNode, getter_AddRefs(resultNode));
++      if (NS_SUCCEEDED(result)) {
++        nsCOMPtr<nsIDOMNode> firstChild;
++        aNewLeftNode->GetFirstChild(getter_AddRefs(firstChild));
++        result = aNewLeftNode->InsertBefore(childNode, firstChild, getter_AddRefs(resultNode));
++      }
++
++      child = next;
++    }
++  }
++
++  // handle selection
++  nsCOMPtr<nsIPresShell> ps = GetPresShell();
++  if (ps) {
++    ps->FlushPendingNotifications(Flush_Frames);
++  }
++
++  if (GetShouldTxnSetSelection()) {
++    // editor wants us to set selection at split point
++    selection->Collapse(aNewLeftNode, aOffset);
++  } else if (selStartNode) {
++    // else adjust the selection if needed.  if selStartNode is null, then there was no selection.
++    // HACK: this is overly simplified - multi-range selections need more work than this
++    if (selStartNode.get() == aExistingRightNode)
+     {
+-      // split the children between the 2 nodes
+-      // at this point, aExistingRightNode has all the children
+-      // move all the children whose index is < aOffset to aNewLeftNode
+-      if (0<=aOffset) // don't bother unless we're going to move at least one child
++      if (selStartOffset < aOffset)
+       {
+-        // if it's a text node, just shuffle around some text
+-        nsCOMPtr<nsIDOMCharacterData> rightNodeAsText( do_QueryInterface(aExistingRightNode) );
+-        nsCOMPtr<nsIDOMCharacterData> leftNodeAsText( do_QueryInterface(aNewLeftNode) );
+-        if (leftNodeAsText && rightNodeAsText)
+-        {
+-          // fix right node
+-          nsAutoString leftText;
+-          rightNodeAsText->SubstringData(0, aOffset, leftText);
+-          rightNodeAsText->DeleteData(0, aOffset);
+-          // fix left node
+-          leftNodeAsText->SetData(leftText);
+-          // moose          
+-        }
+-        else
+-        {  // otherwise it's an interior node, so shuffle around the children
+-           // go through list backwards so deletes don't interfere with the iteration
+-          nsCOMPtr<nsIDOMNodeList> childNodes;
+-          result = aExistingRightNode->GetChildNodes(getter_AddRefs(childNodes));
+-          if ((NS_SUCCEEDED(result)) && (childNodes))
+-          {
+-            int32_t i=aOffset-1;
+-            for ( ; ((NS_SUCCEEDED(result)) && (0<=i)); i--)
+-            {
+-              nsCOMPtr<nsIDOMNode> childNode;
+-              result = childNodes->Item(i, getter_AddRefs(childNode));
+-              if ((NS_SUCCEEDED(result)) && (childNode))
+-              {
+-                result = aExistingRightNode->RemoveChild(childNode, getter_AddRefs(resultNode));
+-                //printf("  after remove\n"); content->List();  // DEBUG
+-                if (NS_SUCCEEDED(result))
+-                {
+-                  nsCOMPtr<nsIDOMNode> firstChild;
+-                  aNewLeftNode->GetFirstChild(getter_AddRefs(firstChild));
+-                  result = aNewLeftNode->InsertBefore(childNode, firstChild, getter_AddRefs(resultNode));
+-                  //printf("  after append\n"); content->List();  // DEBUG
+-                }
+-              }
+-            }
+-          }        
+-        }
+-        // handle selection
+-        nsCOMPtr<nsIPresShell> ps = GetPresShell();
+-        if (ps)
+-          ps->FlushPendingNotifications(Flush_Frames);
+-
+-        if (GetShouldTxnSetSelection())
+-        {
+-          // editor wants us to set selection at split point
+-          selection->Collapse(aNewLeftNode, aOffset);
+-        }
+-        else if (selStartNode)   
+-        {
+-          // else adjust the selection if needed.  if selStartNode is null, then there was no selection.
+-          // HACK: this is overly simplified - multi-range selections need more work than this
+-          if (selStartNode.get() == aExistingRightNode)
+-          {
+-            if (selStartOffset < aOffset)
+-            {
+-              selStartNode = aNewLeftNode;
+-            }
+-            else
+-            {
+-              selStartOffset -= aOffset;
+-            }
+-          }
+-          if (selEndNode.get() == aExistingRightNode)
+-          {
+-            if (selEndOffset < aOffset)
+-            {
+-              selEndNode = aNewLeftNode;
+-            }
+-            else
+-            {
+-              selEndOffset -= aOffset;
+-            }
+-          }
+-          selection->Collapse(selStartNode,selStartOffset);
+-          selection->Extend(selEndNode,selEndOffset);
+-        }
++        selStartNode = aNewLeftNode;
++      }
++      else
++      {
++        selStartOffset -= aOffset;
+       }
+     }
++    if (selEndNode.get() == aExistingRightNode)
++    {
++      if (selEndOffset < aOffset)
++      {
++        selEndNode = aNewLeftNode;
++      }
++      else
++      {
++        selEndOffset -= aOffset;
++      }
++    }
++    selection->Collapse(selStartNode,selStartOffset);
++    selection->Extend(selEndNode,selEndOffset);
+   }
+-  else
+-    result = NS_ERROR_INVALID_ARG;
+ 
+   return result;
+ }
+ 
+ nsresult
+ nsEditor::JoinNodesImpl(nsIDOMNode * aNodeToKeep,
+                         nsIDOMNode * aNodeToJoin,
+                         nsIDOMNode * aParent,

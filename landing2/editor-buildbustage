@@ -1,0 +1,131 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/html/nsHTMLEditRules.cpp b/editor/libeditor/html/nsHTMLEditRules.cpp
+--- a/editor/libeditor/html/nsHTMLEditRules.cpp
++++ b/editor/libeditor/html/nsHTMLEditRules.cpp
+@@ -6128,17 +6128,17 @@ nsHTMLEditRules::LookInsideDivBQandList(
+     return NS_OK;
+   }
+ 
+   nsCOMPtr<nsINode> curNode = do_QueryInterface(aNodeArray[0]);
+   
+   while (curNode->IsElement() &&
+          (curNode->AsElement()->IsHTML(nsGkAtoms::div) ||
+           nsHTMLEditUtils::IsList(curNode->AsElement()) ||
+-          curNode->AsElement()->IsHTML(nsGkAtoms::blockquote))
++          curNode->AsElement()->IsHTML(nsGkAtoms::blockquote)))
+   {
+     // dive as long as there is only one child, and it is a list, div, blockquote
+     uint32_t numChildren = mHTMLEditor->CountEditableChildren(curNode);
+     if (numChildren != 1) {
+       break;
+     }
+ 
+     // keep diving
+@@ -6154,26 +6154,28 @@ nsHTMLEditRules::LookInsideDivBQandList(
+         !element->IsHTML(nsGkAtoms::blockquote)) {
+       break;
+     }
+ 
+     // check editablility XXX floppy moose
+     curNode = tmp;
+   }
+ 
++  nsCOMPtr<nsIDOMNode> curDOMNode = do_QueryInterface(curNode);
+   // we've found innermost list/blockquote/div: 
+   // replace the one node in the array with these nodes
+   aNodeArray.RemoveObjectAt(0);
+-  if (curNode->IsHTML(nsGkAtoms::div) ||
+-      curNode->IsHTML(nsGkAtoms::blockquote)) {
++  if (curNode->IsElement() &&
++      (curNode->AsElement()->IsHTML(nsGkAtoms::div) ||
++       curNode->AsElement()->IsHTML(nsGkAtoms::blockquote))) {
+     int32_t j = 0;
+-    return GetInnerContent(curNode, aNodeArray, &j, false, false);
+-  }
+-
+-  aNodeArray.AppendObject(curNode);
++    return GetInnerContent(curDOMNode, aNodeArray, &j, false, false);
++  }
++
++  aNodeArray.AppendObject(curDOMNode);
+   return NS_OK;
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // GetDefinitionListItemTypes: 
+ //                       
+ nsresult 
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -2559,29 +2559,29 @@ nsHTMLEditor::GetElementOrParentByTagNam
+   else
+   {
+     // If no node supplied, get it from anchor node of current selection
+     nsCOMPtr<nsISelection>selection;
+     res = GetSelection(getter_AddRefs(selection));
+     NS_ENSURE_SUCCESS(res, res);
+     NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
+ 
+-    nsINode* anchorNode = selection->GetNativeAnchorNode()
++    nsINode* anchorNode = selection->GetNativeAnchorNode();
+     NS_ENSURE_TRUE(anchorNode, NS_ERROR_FAILURE);
+ 
+     // Try to get the actual selected node
+     if (anchorNode->HasChildren()) {
+       int32_t offset;
+       res = selection->GetAnchorOffset(&offset);
+       if(NS_FAILED(res)) return res;
+       currentNode = do_QueryInterface(anchorNode->GetChildAt(offset));
+     }
+     // anchor node is probably a text node - just use that
+     if (!currentNode)
+-      currentNode = anchorNode;
++      currentNode = do_QueryInterface(anchorNode);
+   }
+    
+   nsAutoString TagName(aTagName);
+   ToLowerCase(TagName);
+   bool getLink = IsLinkTag(TagName);
+   bool getNamedAnchor = IsNamedAnchorTag(TagName);
+   if ( getLink || getNamedAnchor)
+   {
+diff --git a/editor/libeditor/html/nsTableEditor.cpp b/editor/libeditor/html/nsTableEditor.cpp
+--- a/editor/libeditor/html/nsTableEditor.cpp
++++ b/editor/libeditor/html/nsTableEditor.cpp
+@@ -3250,30 +3250,31 @@ nsHTMLEditor::GetSelectedOrParentTableEl
+     if (nsIContent* selectedNode = anchorNode->GetChildAt(anchorOffset)) {
+       if (selectedNode->IsHTML(nsGkAtoms::td)) {
+         tableOrCellElement = do_QueryInterface(selectedNode);
+         aTagName = tdName;
+         // Each cell is in its own selection range,
+         //  so count signals multiple-cell selection
+         res = selection->GetRangeCount(aSelectedCount);
+         NS_ENSURE_SUCCESS(res, res);
+-      } else if (selectedNode->IsHTML(nsGkAtoms::table) {
++      } else if (selectedNode->IsHTML(nsGkAtoms::table)) {
+         tableOrCellElement = do_QueryInterface(selectedNode);
+         aTagName.AssignLiteral("table");
+         *aSelectedCount = 1;
+       } else if (selectedNode->IsHTML(nsGkAtoms::tr)) {
+         tableOrCellElement = do_QueryInterface(selectedNode);
+         aTagName.AssignLiteral("tr");
+         *aSelectedCount = 1;
+       }
+     }
+   }
+   if (!tableOrCellElement) {
+     // Didn't find a table element -- find a cell parent
+-    res = GetElementOrParentByTagName(tdName, anchorNode, getter_AddRefs(tableOrCellElement));
++    nsCOMPtr<nsIDOMNode> anchorDOMNode = do_QueryInterface(anchorNode);
++    res = GetElementOrParentByTagName(tdName, anchorDOMNode, getter_AddRefs(tableOrCellElement));
+     NS_ENSURE_SUCCESS(res, res);
+     if (tableOrCellElement)
+       aTagName = tdName;
+   }
+   tableOrCellElement.forget(aTableElement);
+   return NS_OK;
+ }
+ 

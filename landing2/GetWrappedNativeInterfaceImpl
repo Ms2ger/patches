@@ -1,0 +1,112 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/nsXPConnect.cpp b/js/xpconnect/src/nsXPConnect.cpp
+--- a/js/xpconnect/src/nsXPConnect.cpp
++++ b/js/xpconnect/src/nsXPConnect.cpp
+@@ -3054,34 +3054,43 @@ ReparentWrappers(JSContext *cx, JSObject
+ // This function duplicates code from nsDOMClassInfo::GetNative.
+ nsISupports*
+ GetNative(nsIXPConnectWrappedNative *aWrapper, JSObject *aObject)
+ {
+     return aWrapper ? aWrapper->Native()
+                     : static_cast<nsISupports*>(js::GetObjectPrivate(aObject));
+ }
+ 
+-template<class Interface>
+ nsresult
+-GetWrappedNativeInterfaceImpl(JSContext *aCx, JSObject *aObject, Interface **aRetVal)
++GetWrappedNativeInterfaceImpl(JSContext *aCx, JSObject *aObject, const nsIID &aIID, void **aRetVal)
+ {
++    MOZ_ASSERT(aCx);
++    MOZ_ASSERT(aObject);
++    MOZ_ASSERT(aRetVal);
++
+     // This function duplicates some of the logic in XPC_WN_HelperSetProperty
+     XPCWrappedNative *wrapper =
+         XPCWrappedNative::GetWrappedNativeOfJSObject(aCx, aObject);
+ 
+     // The error checks duplicates code in THROW_AND_RETURN_IF_BAD_WRAPPER
+     NS_ENSURE_TRUE(!wrapper || wrapper->IsValid(), NS_ERROR_XPC_HAS_BEEN_SHUTDOWN);
+ 
+-    nsCOMPtr<Interface> xpcomObj = do_QueryInterface(GetNative(wrapper, aObject));
+-    NS_ENSURE_TRUE(xpcomObj, NS_ERROR_UNEXPECTED);
+-
+-    xpcomObj.forget(aRetVal);
++    nsISupports *supports = GetNative(wrapper, aObject);
++    NS_ENSURE_TRUE(supports, NS_ERROR_UNEXPECTED);
++
++    if (NS_FAILED(supports->QueryInterface(aIID, aRetVal))) {
++        *aRetVal = NULL;
++        return NS_ERROR_UNEXPECTED;
++    }
++
++    MOZ_ASSERT(*aRetVal);
+     return NS_OK;
+ }
+ 
++#if 0
+ nsresult
+ GetWrappedNativeInterface(JSContext *aCx, JSObject *aObject, nsINode **aRetVal)
+ {
+     return GetWrappedNativeInterfaceImpl(aCx, aObject, aRetVal);
+ }
+ 
+ nsresult
+ GetWrappedNativeInterface(JSContext *aCx, JSObject *aObject, nsIDocument **aRetVal)
+@@ -3095,10 +3104,11 @@ GetWrappedNativeInterface(JSContext *aCx
+     return GetWrappedNativeInterfaceImpl(aCx, aObject, aRetVal);
+ }
+ 
+ nsresult
+ GetWrappedNativeInterface(JSContext *aCx, JSObject *aObject, nsIDOMWindow **aRetVal)
+ {
+     return GetWrappedNativeInterfaceImpl(aCx, aObject, aRetVal);
+ }
++#endif
+ 
+ } // namespace xpc
+diff --git a/js/xpconnect/src/xpcpublic.h b/js/xpconnect/src/xpcpublic.h
+--- a/js/xpconnect/src/xpcpublic.h
++++ b/js/xpconnect/src/xpcpublic.h
+@@ -368,27 +368,39 @@ void RemoveDOMExpandoObject(JSObject *ob
+  * current inner.
+  *
+  * Not for casual consumers.
+  */
+ void ReparentWrappers(JSContext *cx, JSObject *oldInner, JSObject *newInner);
+ 
+ JSObject *UnsafeUnwrapSecurityWrapper(JSObject*);
+ 
++#if 0
+ nsresult
+ GetWrappedNativeInterface(JSContext *aCx, JSObject *aObject, nsINode **aRetVal);
+ nsresult
+ GetWrappedNativeInterface(JSContext *aCx, JSObject *aObject, nsIDocument **aRetVal);
+ nsresult
+ GetWrappedNativeInterface(JSContext *aCx, JSObject *aObject, nsIDOMDocument **aRetVal);
+ nsresult
+ GetWrappedNativeInterface(JSContext *aCx, JSObject *aObject, nsIDOMWindow **aRetVal);
++#endif
+ 
+-nsISupports*
+-GetNative(nsIXPConnectWrappedNative *aWrapper, JSObject *aObject);
++nsresult
++GetWrappedNativeInterfaceImpl(JSContext *aCx, JSObject *aObject,
++                              const nsIID &aIID, void **aRetVal);
++
++template<class Interface>
++nsresult
++GetWrappedNativeInterface(JSContext *aCx, JSObject *aObject,
++                          nsGetterAddRefs<Interface> aRetVal)
++{
++    return GetWrappedNativeInterfaceImpl(
++        aCx, aObject, NS_GET_TEMPLATE_IID(Interface), aRetVal);
++}
+ 
+ } // namespace xpc
+ 
+ nsCycleCollectionParticipant *
+ xpc_JSCompartmentParticipant();
+ 
+ namespace mozilla {
+ namespace dom {

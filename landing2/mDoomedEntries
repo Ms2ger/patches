@@ -1,0 +1,417 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/netwerk/cache/nsCacheEntry.cpp b/netwerk/cache/nsCacheEntry.cpp
+--- a/netwerk/cache/nsCacheEntry.cpp
++++ b/netwerk/cache/nsCacheEntry.cpp
+@@ -32,17 +32,17 @@ nsCacheEntry::nsCacheEntry(const nsACStr
+       mFlags(0),
+       mPredictedDataSize(-1),
+       mDataSize(0),
+       mCacheDevice(nullptr),
+       mCustomDevice(nullptr),
+       mData(nullptr)
+ {
+     MOZ_COUNT_CTOR(nsCacheEntry);
+-    PR_INIT_CLIST(this);
++    PR_INIT_CLIST(static_cast<PRCList*>(this));
+     PR_INIT_CLIST(&mRequestQ);
+     PR_INIT_CLIST(&mDescriptorQ);
+ 
+     if (streamBased) MarkStreamBased();
+     SetStoragePolicy(storagePolicy);
+ 
+     MarkPublic();
+ 
+diff --git a/netwerk/cache/nsCacheEntry.h b/netwerk/cache/nsCacheEntry.h
+--- a/netwerk/cache/nsCacheEntry.h
++++ b/netwerk/cache/nsCacheEntry.h
+@@ -7,16 +7,17 @@
+ #ifndef _nsCacheEntry_h_
+ #define _nsCacheEntry_h_
+ 
+ #include "nsICache.h"
+ #include "nsICacheEntryDescriptor.h"
+ #include "nsIThread.h"
+ #include "nsCacheMetaData.h"
+ 
++#include "mozilla/LinkedList.h"
+ #include "nspr.h"
+ #include "pldhash.h"
+ #include "nsAutoPtr.h"
+ #include "nscore.h"
+ #include "nsCOMPtr.h"
+ #include "nsString.h"
+ #include "nsAString.h"
+ 
+@@ -24,16 +25,17 @@ class nsCacheDevice;
+ class nsCacheMetaData;
+ class nsCacheRequest;
+ class nsCacheEntryDescriptor;
+ 
+ /******************************************************************************
+ * nsCacheEntry
+ *******************************************************************************/
+ class nsCacheEntry : public PRCList
++                   , public mozilla::LinkedListElement<nsCacheEntry>
+ {
+ public:
+ 
+     nsCacheEntry(const nsACString &   key,
+                  bool                 streamBased,
+                  nsCacheStoragePolicy storagePolicy);
+     ~nsCacheEntry();
+ 
+diff --git a/netwerk/cache/nsCacheService.cpp b/netwerk/cache/nsCacheService.cpp
+--- a/netwerk/cache/nsCacheService.cpp
++++ b/netwerk/cache/nsCacheService.cpp
+@@ -1093,18 +1093,16 @@ nsCacheService::nsCacheService()
+       mMaxDataSize(0),
+       mMaxMetaSize(0),
+       mDeactivateFailures(0),
+       mDeactivatedUnboundEntries(0)
+ {
+     NS_ASSERTION(gService==nullptr, "multiple nsCacheService instances!");
+     gService = this;
+ 
+-    // create list of cache devices
+-    PR_INIT_CLIST(&mDoomedEntries);
+     mCustomOfflineDevices.Init();
+ }
+ 
+ nsCacheService::~nsCacheService()
+ {
+     if (mInitialized) // Shutdown hasn't been called yet.
+         (void) Shutdown();
+ 
+@@ -2340,18 +2338,19 @@ nsCacheService::DoomEntry_Internal(nsCac
+     if (entry->IsActive()) {
+         // remove from active entries
+         mActiveEntries.RemoveEntry(entry);
+         CACHE_LOG_DEBUG(("Removed entry %p from mActiveEntries\n", entry));
+         entry->MarkInactive();
+      }
+ 
+     // put on doom list to wait for descriptors to close
+-    NS_ASSERTION(PR_CLIST_IS_EMPTY(entry), "doomed entry still on device list");
+-    PR_APPEND_LINK(entry, &mDoomedEntries);
++    NS_ASSERTION(PR_CLIST_IS_EMPTY(static_cast<PRCList*>(entry)),
++                 "doomed entry still on device list");
++    mDoomedEntries.insertBack(entry);
+ 
+     // handle pending requests only if we're supposed to
+     if (doProcessPendingRequests) {
+         // tell pending requests to get on with their lives...
+         rv = ProcessPendingRequests(entry);
+ 
+         // All requests have been removed, but there may still be open descriptors
+         if (entry->IsNotInUse()) {
+@@ -2755,17 +2754,17 @@ nsCacheService::DeactivateEntry(nsCacheE
+     NS_ASSERTION(entry->IsNotInUse(), "### deactivating an entry while in use!");
+     nsCacheDevice * device = nullptr;
+ 
+     if (mMaxDataSize < entry->DataSize() )     mMaxDataSize = entry->DataSize();
+     if (mMaxMetaSize < entry->MetaDataSize() ) mMaxMetaSize = entry->MetaDataSize();
+ 
+     if (entry->IsDoomed()) {
+         // remove from Doomed list
+-        PR_REMOVE_AND_INIT_LINK(entry);
++        entry->remove();
+     } else if (entry->IsActive()) {
+         // remove from active entries
+         mActiveEntries.RemoveEntry(entry);
+         CACHE_LOG_DEBUG(("Removed deactivated entry %p from mActiveEntries\n",
+                          entry));
+         entry->MarkInactive();
+ 
+         // bind entry if necessary to store meta-data
+@@ -2914,42 +2913,43 @@ nsCacheService::ProcessPendingRequests(n
+     }
+ 
+     return NS_OK;
+ }
+ 
+ bool
+ nsCacheService::IsDoomListEmpty()
+ {
+-    nsCacheEntry * entry = (nsCacheEntry *)PR_LIST_HEAD(&mDoomedEntries);
+-    return &mDoomedEntries == entry;
++    return mDoomedEntries.isEmpty();
+ }
+ 
+ void
+ nsCacheService::ClearDoomList()
+ {
+-    nsCacheEntry * entry = (nsCacheEntry *)PR_LIST_HEAD(&mDoomedEntries);
+-
+-    while (entry != &mDoomedEntries) {
+-        nsCacheEntry * next = (nsCacheEntry *)PR_NEXT_LINK(entry);
++    nsCacheEntry* entry = mDoomedEntries.getFirst();
++
++    while (entry) {
++        nsCacheEntry * next = entry->getNext();
+ 
+         entry->DetachDescriptors();
+         DeactivateEntry(entry);
+         entry = next;
+     }
+ }
+ 
+ PLDHashOperator
+ nsCacheService::GetActiveEntries(PLDHashTable *    table,
+                                  PLDHashEntryHdr * hdr,
+                                  uint32_t          number,
+                                  void *            arg)
+ {
+-    static_cast<nsVoidArray *>(arg)->AppendElement(
+-        ((nsCacheEntryHashTableEntry *)hdr)->cacheEntry);
++    nsTArray<nsCacheEntry*>* array = static_cast<nsTArray<nsCacheEntry*>*>(arg);
++    nsCacheEntryHashTableEntry* header =
++        reinterpret_cast<nsCacheEntryHashTableEntry*>(hdr);
++    array->AppendElement(header->cacheEntry);
+     return PL_DHASH_NEXT;
+ }
+ 
+ struct ActiveEntryArgs
+ {
+     nsTArray<nsCacheEntry*>* mActiveArray;
+     nsCacheService::DoomCheckFn mCheckFn;
+ };
+@@ -2993,35 +2993,34 @@ void
+ nsCacheService::CloseAllStreams()
+ {
+     nsTArray<nsRefPtr<nsCacheEntryDescriptor::nsInputStreamWrapper> > inputs;
+     nsTArray<nsRefPtr<nsCacheEntryDescriptor::nsOutputStreamWrapper> > outputs;
+ 
+     {
+         nsCacheServiceAutoLock lock(LOCK_TELEM(NSCACHESERVICE_CLOSEALLSTREAMS));
+ 
+-        nsVoidArray entries;
++        nsTArray<nsCacheEntry*> entries;
+ 
+ #if DEBUG
+         // make sure there is no active entry
+         mActiveEntries.VisitEntries(GetActiveEntries, &entries);
+-        NS_ASSERTION(entries.Count() == 0, "Bad state");
++        NS_ASSERTION(entries.IsEmpty(), "Bad state");
+ #endif
+ 
+         // Get doomed entries
+-        nsCacheEntry * entry = (nsCacheEntry *)PR_LIST_HEAD(&mDoomedEntries);
+-        while (entry != &mDoomedEntries) {
+-            nsCacheEntry * next = (nsCacheEntry *)PR_NEXT_LINK(entry);
++        for (nsCacheEntry* entry = mDoomedEntries.getFirst();
++             entry;
++             entry = entry->getNext()) {
+             entries.AppendElement(entry);
+-            entry = next;
+         }
+ 
+         // Iterate through all entries and collect input and output streams
+-        for (int32_t i = 0 ; i < entries.Count() ; i++) {
+-            entry = static_cast<nsCacheEntry *>(entries.ElementAt(i));
++        for (uint32_t i = 0 ; i < entries.Length() ; i++) {
++            nsCacheEntry* entry = entries[i];
+ 
+             nsTArray<nsRefPtr<nsCacheEntryDescriptor> > descs;
+             entry->GetDescriptors(descs);
+ 
+             for (uint32_t j = 0 ; j < descs.Length() ; j++) {
+                 if (descs[j]->mOutputWrapper)
+                     outputs.AppendElement(descs[j]->mOutputWrapper);
+ 
+diff --git a/netwerk/cache/nsCacheService.h b/netwerk/cache/nsCacheService.h
+--- a/netwerk/cache/nsCacheService.h
++++ b/netwerk/cache/nsCacheService.h
+@@ -15,16 +15,17 @@
+ #include "nsICacheListener.h"
+ 
+ #include "prthread.h"
+ #include "nsIObserver.h"
+ #include "nsString.h"
+ #include "nsTArray.h"
+ #include "nsRefPtrHashtable.h"
+ #include "mozilla/CondVar.h"
++#include "mozilla/LinkedList.h"
+ #include "mozilla/Mutex.h"
+ #include "mozilla/Telemetry.h"
+ 
+ class nsCacheRequest;
+ class nsCacheProfilePrefObserver;
+ class nsDiskCacheDevice;
+ class nsMemoryCacheDevice;
+ class nsOfflineCacheDevice;
+@@ -345,17 +346,17 @@ private:
+ 
+     nsMemoryCacheDevice *           mMemoryDevice;
+     nsDiskCacheDevice *             mDiskDevice;
+     nsOfflineCacheDevice *          mOfflineDevice;
+ 
+     nsRefPtrHashtable<nsStringHashKey, nsOfflineCacheDevice> mCustomOfflineDevices;
+ 
+     nsCacheEntryHashTable           mActiveEntries;
+-    PRCList                         mDoomedEntries;
++    mozilla::LinkedList<nsCacheEntry> mDoomedEntries;
+ 
+     // stats
+ 
+     uint32_t                        mTotalEntries;
+     uint32_t                        mCacheHits;
+     uint32_t                        mCacheMisses;
+     uint32_t                        mMaxKeyLength;
+     uint32_t                        mMaxDataSize;
+diff --git a/netwerk/cache/nsMemoryCacheDevice.cpp b/netwerk/cache/nsMemoryCacheDevice.cpp
+--- a/netwerk/cache/nsMemoryCacheDevice.cpp
++++ b/netwerk/cache/nsMemoryCacheDevice.cpp
+@@ -95,18 +95,18 @@ nsMemoryCacheDevice::Shutdown()
+ 
+     // evict all entries
+     nsCacheEntry * entry, * next;
+ 
+     for (int i = kQueueCount - 1; i >= 0; --i) {
+         entry = (nsCacheEntry *)PR_LIST_HEAD(&mEvictionList[i]);
+         while (entry != &mEvictionList[i]) {
+             NS_ASSERTION(!entry->IsInUse(), "### shutting down with active entries");
+-            next = (nsCacheEntry *)PR_NEXT_LINK(entry);
+-            PR_REMOVE_AND_INIT_LINK(entry);
++            next = (nsCacheEntry *)PR_NEXT_LINK(static_cast<PRCList*>(entry));
++            PR_REMOVE_AND_INIT_LINK(static_cast<PRCList*>(entry));
+         
+             // update statistics
+             int32_t memoryRecovered = (int32_t)entry->DataSize();
+             mTotalSize    -= memoryRecovered;
+             mInactiveSize -= memoryRecovered;
+             --mEntryCount;
+ 
+             delete entry;
+@@ -137,18 +137,19 @@ nsMemoryCacheDevice::GetDeviceID()
+ nsCacheEntry *
+ nsMemoryCacheDevice::FindEntry(nsCString * key, bool *collision)
+ {
+     mozilla::Telemetry::AutoTimer<mozilla::Telemetry::CACHE_MEMORY_SEARCH_2> timer;
+     nsCacheEntry * entry = mMemCacheEntries.GetEntry(key);
+     if (!entry)  return nullptr;
+ 
+     // move entry to the tail of an eviction list
+-    PR_REMOVE_AND_INIT_LINK(entry);
+-    PR_APPEND_LINK(entry, &mEvictionList[EvictionList(entry, 0)]);
++    PR_REMOVE_AND_INIT_LINK(static_cast<PRCList*>(entry));
++    PR_APPEND_LINK(static_cast<PRCList*>(entry),
++                   &mEvictionList[EvictionList(entry, 0)]);
+     
+     mInactiveSize -= entry->DataSize();
+ 
+     return entry;
+ }
+ 
+ 
+ nsresult
+@@ -179,25 +180,27 @@ nsMemoryCacheDevice::DeactivateEntry(nsC
+     return NS_OK;
+ }
+ 
+ 
+ nsresult
+ nsMemoryCacheDevice::BindEntry(nsCacheEntry * entry)
+ {
+     if (!entry->IsDoomed()) {
+-        NS_ASSERTION(PR_CLIST_IS_EMPTY(entry),"entry is already on a list!");
++        NS_ASSERTION(PR_CLIST_IS_EMPTY(static_cast<PRCList*>(entry)),
++                     "entry is already on a list!");
+ 
+         // append entry to the eviction list
+-        PR_APPEND_LINK(entry, &mEvictionList[EvictionList(entry, 0)]);
++        PR_APPEND_LINK(static_cast<PRCList*>(entry),
++                       &mEvictionList[EvictionList(entry, 0)]);
+ 
+         // add entry to hashtable of mem cache entries
+         nsresult  rv = mMemCacheEntries.AddEntry(entry);
+         if (NS_FAILED(rv)) {
+-            PR_REMOVE_AND_INIT_LINK(entry);
++            PR_REMOVE_AND_INIT_LINK(static_cast<PRCList*>(entry));
+             return rv;
+         }
+ 
+         // add size of entry to memory totals
+         ++mEntryCount;
+         if (mMaxEntryCount < mEntryCount) mMaxEntryCount = mEntryCount;
+ 
+         mTotalSize += entry->DataSize();
+@@ -321,18 +324,18 @@ nsMemoryCacheDevice::OnDataSizeChange( n
+         }
+     }
+ 
+     // adjust our totals
+     mTotalSize    += deltaSize;
+     
+     if (!entry->IsDoomed()) {
+         // move entry to the tail of the appropriate eviction list
+-        PR_REMOVE_AND_INIT_LINK(entry);
+-        PR_APPEND_LINK(entry, &mEvictionList[EvictionList(entry, deltaSize)]);
++        PR_REMOVE_AND_INIT_LINK(static_cast<PRCList*>(entry));
++        PR_APPEND_LINK(static_cast<PRCList*>(entry), &mEvictionList[EvictionList(entry, deltaSize)]);
+     }
+ 
+     EvictEntriesIfNecessary();
+     return NS_OK;
+ }
+ 
+ 
+ void
+@@ -350,17 +353,17 @@ void
+ nsMemoryCacheDevice::EvictEntry(nsCacheEntry * entry, bool deleteEntry)
+ {
+     CACHE_LOG_DEBUG(("Evicting entry 0x%p from memory cache, deleting: %d\n",
+                      entry, deleteEntry));
+     // remove entry from our hashtable
+     mMemCacheEntries.RemoveEntry(entry);
+     
+     // remove entry from the eviction list
+-    PR_REMOVE_AND_INIT_LINK(entry);
++    PR_REMOVE_AND_INIT_LINK(static_cast<PRCList*>(entry));
+     
+     // update statistics
+     int32_t memoryRecovered = (int32_t)entry->DataSize();
+     mTotalSize    -= memoryRecovered;
+     if (!entry->IsDoomed())
+         mInactiveSize -= memoryRecovered;
+     --mEntryCount;
+     
+@@ -389,17 +392,17 @@ nsMemoryCacheDevice::EvictEntriesIfNeces
+         // entry for eviction. Cost is time-since-accessed * size / nref.
+         maxEntry = 0;
+         for (int i = kQueueCount - 1; i >= 0; --i) {
+             entry = (nsCacheEntry *)PR_LIST_HEAD(&mEvictionList[i]);
+ 
+             // If the head of a list is in use, check the next available entry
+             while ((entry != &mEvictionList[i]) &&
+                    (entry->IsInUse())) {
+-                entry = (nsCacheEntry *)PR_NEXT_LINK(entry);
++                entry = (nsCacheEntry *)PR_NEXT_LINK(static_cast<PRCList*>(entry));
+             }
+ 
+             if (entry != &mEvictionList[i]) {
+                 entryCost = (uint64_t)
+                     (now - entry->LastFetched()) * entry->DataSize() / 
+                     std::max(1, entry->FetchCount());
+                 if (!maxEntry || (entryCost > maxCost)) {
+                     maxEntry = entry;
+@@ -457,17 +460,18 @@ nsMemoryCacheDevice::Visit(nsICacheVisit
+             if (!entryInfo) return NS_ERROR_OUT_OF_MEMORY;
+             entryRef = entryInfo;
+ 
+             rv = visitor->VisitEntry(gMemoryDeviceID, entryInfo, &keepGoing);
+             entryInfo->DetachEntry();
+             if (NS_FAILED(rv)) return rv;
+             if (!keepGoing) break;
+ 
+-            entry = (nsCacheEntry *)PR_NEXT_LINK(entry);
++            // XXX multiple lists?
++            entry = (nsCacheEntry *)PR_NEXT_LINK(static_cast<PRCList*>(entry));
+         }
+     }
+     return NS_OK;
+ }
+ 
+ 
+ static bool
+ IsEntryPrivate(nsCacheEntry* entry, void* args)

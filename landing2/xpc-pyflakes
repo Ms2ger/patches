@@ -1,0 +1,102 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/testing/xpcshell/remotexpcshelltests.py b/testing/xpcshell/remotexpcshelltests.py
+--- a/testing/xpcshell/remotexpcshelltests.py
++++ b/testing/xpcshell/remotexpcshelltests.py
+@@ -1,19 +1,19 @@
+ #!/usr/bin/env python
+ #
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+-import re, sys, os
++import sys, os
+ import subprocess
+ import runxpcshelltests as xpcshell
+-from automationutils import *
+-import devicemanager, devicemanagerADB, devicemanagerSUT
++from automationutils import replaceBackSlashes
++import devicemanagerADB, devicemanagerSUT
+ 
+ # A specialization of XPCShellTests that runs tests on an Android device
+ # via devicemanager.
+ class XPCShellRemote(xpcshell.XPCShellTests, object):
+ 
+     def __init__(self, devmgr, options, args):
+         xpcshell.XPCShellTests.__init__(self)
+         self.options = options
+diff --git a/testing/xpcshell/runtestsb2g.py b/testing/xpcshell/runtestsb2g.py
+--- a/testing/xpcshell/runtestsb2g.py
++++ b/testing/xpcshell/runtestsb2g.py
+@@ -3,17 +3,16 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ import sys
+ import os
+ import traceback
+ from remotexpcshelltests import XPCShellRemote, RemoteXPCShellOptions
+-from automationutils import *
+ import devicemanagerADB
+ 
+ DEVICE_TEST_ROOT = '/data/local/tests'
+ 
+ sys.path.insert(0, os.path.abspath(os.path.realpath(os.path.dirname(sys.argv[0]))))
+ 
+ from marionette import Marionette
+ 
+@@ -132,17 +131,17 @@ def main():
+         kwargs['homedir'] = options.emu_path or options.b2g_path
+     if options.address:
+         host, port = options.address.split(':')
+         kwargs['host'] = host
+         kwargs['port'] = int(port)
+         kwargs['baseurl'] = 'http://%s:%d/' % (host, int(port))
+         if options.emulator:
+             kwargs['connectToRunningEmulator'] = True
+-    marionette = Marionette(**kwargs)
++    Marionette(**kwargs)
+ 
+     # Create the DeviceManager instance
+     kwargs = {'adbPath': options.adb_path}
+     if options.deviceIP:
+         kwargs['host'] = options.deviceIP
+         kwargs['port'] = options.devicePort
+     kwargs['deviceRoot'] = DEVICE_TEST_ROOT
+     dm = devicemanagerADB.DeviceManagerADB(**kwargs)
+diff --git a/testing/xpcshell/runxpcshelltests.py b/testing/xpcshell/runxpcshelltests.py
+--- a/testing/xpcshell/runxpcshelltests.py
++++ b/testing/xpcshell/runxpcshelltests.py
+@@ -1,27 +1,27 @@
+ #!/usr/bin/env python
+ #
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+-import re, sys, os, os.path, logging, shutil, signal, math, time, traceback
++import re, sys, os, logging, shutil, signal, math, time, traceback
+ import xml.dom.minidom
+ from glob import glob
+ from optparse import OptionParser
+ from subprocess import Popen, PIPE, STDOUT
+ from tempfile import mkdtemp, gettempdir
+ import manifestparser
+ import mozinfo
+ import random
+ import socket
+-import time
+ 
+-from automationutils import *
++from automationutils import replaceBackSlashes, wrapCommand, getDebuggerInfo
++from automationutils import checkForCrashes, addCommonOptions, dumpLeakLog
+ 
+ #TODO: replace this with json.loads when Python 2.6 is required.
+ def parse_json(j):
+     """
+     Awful hack to parse a restricted subset of JSON strings into Python dicts.
+     """
+     return eval(j, {'true':True,'false':False,'null':None})
+ 

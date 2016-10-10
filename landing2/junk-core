@@ -1,0 +1,1833 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/imptests/failures/webapps/XMLHttpRequest/tests/submissions/Ms2ger/test_interfaces.html.json b/dom/imptests/failures/webapps/XMLHttpRequest/tests/submissions/Ms2ger/test_interfaces.html.json
+--- a/dom/imptests/failures/webapps/XMLHttpRequest/tests/submissions/Ms2ger/test_interfaces.html.json
++++ b/dom/imptests/failures/webapps/XMLHttpRequest/tests/submissions/Ms2ger/test_interfaces.html.json
+@@ -1,12 +1,10 @@
+ {
+-  "XMLHttpRequestUpload interface: existence and properties of interface prototype object": true,
+   "XMLHttpRequest interface constructor": true,
+-  "XMLHttpRequest interface: existence and properties of interface prototype object": true,
+   "XMLHttpRequest interface: attribute onreadystatechange": true,
+   "XMLHttpRequest interface: attribute readyState": true,
+   "XMLHttpRequest interface: operation open(DOMString,DOMString,boolean,DOMString,DOMString)": true,
+   "XMLHttpRequest interface: attribute timeout": true,
+   "XMLHttpRequest interface: attribute withCredentials": true,
+   "XMLHttpRequest interface: attribute upload": true,
+   "XMLHttpRequest interface: operation send(union)": true,
+   "XMLHttpRequest interface: attribute status": true,
+diff --git a/dom/imptests/webapps/DOMCore/tests/approved/Makefile.in b/dom/imptests/webapps/DOMCore/tests/approved/Makefile.in
+--- a/dom/imptests/webapps/DOMCore/tests/approved/Makefile.in
++++ b/dom/imptests/webapps/DOMCore/tests/approved/Makefile.in
+@@ -8,17 +8,19 @@ VPATH := @srcdir@
+ relativesrcdir := @relativesrcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ DIRS := \
+   $(NULL)
+ 
+ MOCHITEST_FILES := \
++  test_exceptions.html \
+   test_interfaces.html \
++  test_Node-properties.html \
+   test_Range-cloneContents.html \
+   test_Range-cloneRange.html \
+   test_Range-collapse.html \
+   test_Range-commonAncestorContainer.html \
+   test_Range-compareBoundaryPoints.html \
+   test_Range-comparePoint.html \
+   test_Range-deleteContents.html \
+   test_Range-extractContents.html \
+diff --git a/dom/imptests/webapps/DOMCore/tests/approved/test_Node-properties.html b/dom/imptests/webapps/DOMCore/tests/approved/test_Node-properties.html
+new file mode 100644
+--- /dev/null
++++ b/dom/imptests/webapps/DOMCore/tests/approved/test_Node-properties.html
+@@ -0,0 +1,659 @@
++<!doctype html>
++<title>Node assorted property tests</title>
++<link rel=author title="Aryeh Gregor" href=ayg@aryeh.name>
++<meta charset=utf-8>
++<div id=log></div>
++<script src=/resources/testharness.js></script>
++<script src=/resources/testharnessreport.js></script>
++<script src=common.js></script>
++<script>
++"use strict";
++/**
++ * This tests various properties like parentNode, nodeName, etc. for each of
++ * the hardcoded nodes in common.js.
++ */
++// TODO: Test paras (it's an array, so I need to use eval() or parse it or
++// something).  Also things like document.body, document.documentElement, etc.
++var expected = {
++	testDiv: {
++		// Node
++		nodeType: Node.ELEMENT_NODE,
++		nodeName: "DIV",
++		ownerDocument: document,
++		parentNode: document.body,
++		parentElement: document.body,
++		firstChild: paras[0],
++		lastChild: comment,
++		previousSibling: null,
++		// nextSibling isn't explicitly set
++		//nextSibling: ,
++		nodeValue: null,
++		// textContent here really depends on innerHTML behavior.  TODO: Fix.
++		//textContent: ,
++
++		// Element
++		namespaceURI: "http://www.w3.org/1999/xhtml",
++		prefix: null,
++		localName: "div",
++		tagName: "DIV",
++		firstElementChild: paras[0],
++		lastElementChild: paras[4],
++		previousElementSibling: null,
++		// nextSibling isn't explicitly set
++		//nextElementSibling: ,
++		childElementCount: 5,
++	},
++	detachedDiv: {
++		// Node
++		nodeType: Node.ELEMENT_NODE,
++		nodeName: "DIV",
++		ownerDocument: document,
++		parentNode: null,
++		parentElement: null,
++		firstChild: detachedPara1,
++		lastChild: detachedPara2,
++		previousSibling: null,
++		nextSibling: null,
++		nodeValue: null,
++		textContent: "OpqrstuvWxyzabcd",
++
++		// Element
++		namespaceURI: "http://www.w3.org/1999/xhtml",
++		prefix: null,
++		localName: "div",
++		tagName: "DIV",
++		firstElementChild: detachedPara1,
++		lastElementChild: detachedPara2,
++		previousElementSibling: null,
++		nextElementSibling: null,
++		childElementCount: 2,
++	},
++	detachedPara1: {
++		// Node
++		nodeType: Node.ELEMENT_NODE,
++		nodeName: "P",
++		ownerDocument: document,
++		parentNode: detachedDiv,
++		parentElement: detachedDiv,
++		// No independent reference to the child
++		//firstChild: ,
++		//lastChild: ,
++		previousSibling: null,
++		nextSibling: detachedPara2,
++		nodeValue: null,
++		textContent: "Opqrstuv",
++
++		// Element
++		namespaceURI: "http://www.w3.org/1999/xhtml",
++		prefix: null,
++		localName: "p",
++		tagName: "P",
++		firstElementChild: null,
++		lastElementChild: null,
++		previousElementSibling: null,
++		nextElementSibling: detachedPara2,
++		childElementCount: 0,
++	},
++	detachedPara2: {
++		// Node
++		nodeType: Node.ELEMENT_NODE,
++		nodeName: "P",
++		ownerDocument: document,
++		parentNode: detachedDiv,
++		parentElement: detachedDiv,
++		// No independent reference to the child
++		//firstChild: ,
++		//lastChild: ,
++		previousSibling: detachedPara1,
++		nextSibling: null,
++		nodeValue: null,
++		textContent: "Wxyzabcd",
++
++		// Element
++		namespaceURI: "http://www.w3.org/1999/xhtml",
++		prefix: null,
++		localName: "p",
++		tagName: "P",
++		firstElementChild: null,
++		lastElementChild: null,
++		previousElementSibling: detachedPara1,
++		nextElementSibling: null,
++		childElementCount: 0,
++	},
++	document: {
++		// Node
++		nodeType: Node.DOCUMENT_NODE,
++		nodeName: "#document",
++		ownerDocument: null,
++		parentNode: null,
++		parentElement: null,
++		firstChild: document.doctype,
++		lastChild: document.documentElement,
++		previousSibling: null,
++		nextSibling: null,
++		nodeValue: null,
++		textContent: null,
++
++		// Document
++		URL: String(location),
++		documentURI: String(location),
++		compatMode: "CSS1Compat",
++		characterSet: "utf-8",
++		contentType: "text/html",
++		doctype: doctype,
++		//documentElement: ,
++	},
++	foreignDoc: {
++		// Node
++		nodeType: Node.DOCUMENT_NODE,
++		nodeName: "#document",
++		ownerDocument: null,
++		parentNode: null,
++		parentElement: null,
++		firstChild: foreignDoc.doctype,
++		lastChild: foreignComment,
++		previousSibling: null,
++		nextSibling: null,
++		nodeValue: null,
++		textContent: null,
++
++		// Document
++		URL: "about:blank",
++		documentURI: "about:blank",
++		compatMode: "CSS1Compat",
++		characterSet: "utf-8",
++		contentType: "text/html",
++		//doctype: ,
++		//documentElement: ,
++	},
++	foreignPara1: {
++		// Node
++		nodeType: Node.ELEMENT_NODE,
++		nodeName: "P",
++		ownerDocument: foreignDoc,
++		parentNode: foreignDoc.body,
++		parentElement: foreignDoc.body,
++		// No independent reference to the child
++		//firstChild: ,
++		//lastChild: ,
++		previousSibling: null,
++		nextSibling: foreignPara2,
++		nodeValue: null,
++		textContent: "Efghijkl",
++
++		// Element
++		namespaceURI: "http://www.w3.org/1999/xhtml",
++		prefix: null,
++		localName: "p",
++		tagName: "P",
++		firstElementChild: null,
++		lastElementChild: null,
++		previousElementSibling: null,
++		nextElementSibling: foreignPara2,
++		childElementCount: 0,
++	},
++	foreignPara2: {
++		// Node
++		nodeType: Node.ELEMENT_NODE,
++		nodeName: "P",
++		ownerDocument: foreignDoc,
++		parentNode: foreignDoc.body,
++		parentElement: foreignDoc.body,
++		// No independent reference to the child
++		//firstChild: ,
++		//lastChild: ,
++		previousSibling: foreignPara1,
++		nextSibling: foreignTextNode,
++		nodeValue: null,
++		textContent: "Mnopqrst",
++
++		// Element
++		namespaceURI: "http://www.w3.org/1999/xhtml",
++		prefix: null,
++		localName: "p",
++		tagName: "P",
++		firstElementChild: null,
++		lastElementChild: null,
++		previousElementSibling: foreignPara1,
++		nextElementSibling: null,
++		childElementCount: 0,
++	},
++	xmlDoc: {
++		// Node
++		nodeType: Node.DOCUMENT_NODE,
++		nodeName: "#document",
++		ownerDocument: null,
++		parentNode: null,
++		parentElement: null,
++		firstChild: xmlDoctype,
++		lastChild: xmlComment,
++		previousSibling: null,
++		nextSibling: null,
++		nodeValue: null,
++		textContent: null,
++
++		// Document
++		URL: "about:blank",
++		documentURI: "about:blank",
++		compatMode: "CSS1Compat",
++		characterSet: "utf-8",
++		contentType: "application/xml",
++		//doctype: ,
++		//documentElement: ,
++	},
++	xmlElement: {
++		// Node
++		nodeType: Node.ELEMENT_NODE,
++		nodeName: "igiveuponcreativenames",
++		ownerDocument: xmlDoc,
++		parentNode: xmlDoc,
++		parentElement: null,
++		firstChild: xmlTextNode,
++		lastChild: xmlTextNode,
++		previousSibling: xmlDoctype,
++		nextSibling: processingInstruction,
++		nodeValue: null,
++		textContent: "do re mi fa so la ti",
++
++		// Element
++		namespaceURI: "http://www.w3.org/1999/xhtml",
++		prefix: null,
++		localName: "igiveuponcreativenames",
++		tagName: "igiveuponcreativenames",
++		firstElementChild: null,
++		lastElementChild: null,
++		previousElementSibling: null,
++		nextElementSibling: null,
++		childElementCount: 0,
++	},
++	detachedXmlElement: {
++		// Node
++		nodeType: Node.ELEMENT_NODE,
++		nodeName: "everyone-hates-hyphenated-element-names",
++		ownerDocument: xmlDoc,
++		parentNode: null,
++		parentElement: null,
++		firstChild: null,
++		lastChild: null,
++		previousSibling: null,
++		nextSibling: null,
++		nodeValue: null,
++		textContent: "",
++
++		// Element
++		namespaceURI: "http://www.w3.org/1999/xhtml",
++		prefix: null,
++		localName: "everyone-hates-hyphenated-element-names",
++		tagName: "everyone-hates-hyphenated-element-names",
++		firstElementChild: null,
++		lastElementChild: null,
++		previousElementSibling: null,
++		nextElementSibling: null,
++		childElementCount: 0,
++	},
++	detachedTextNode: {
++		// Node
++		nodeType: Node.TEXT_NODE,
++		nodeName: "#text",
++		ownerDocument: document,
++		parentNode: null,
++		parentElement: null,
++		firstChild: null,
++		lastChild: null,
++		previousSibling: null,
++		nextSibling: null,
++		nodeValue: "Uvwxyzab",
++		textContent: "Uvwxyzab",
++
++		// CharacterData
++		data: "Uvwxyzab",
++		length: 8,
++
++		// Text
++		wholeText: "Uvwxyzab",
++	},
++	foreignTextNode: {
++		// Node
++		nodeType: Node.TEXT_NODE,
++		nodeName: "#text",
++		ownerDocument: foreignDoc,
++		parentNode: foreignDoc.body,
++		parentElement: foreignDoc.body,
++		firstChild: null,
++		lastChild: null,
++		previousSibling: foreignPara2,
++		nextSibling: null,
++		nodeValue: "I admit that I harbor doubts about whether we really need so many things to test, but it's too late to stop now.",
++		textContent: "I admit that I harbor doubts about whether we really need so many things to test, but it's too late to stop now.",
++
++		// CharacterData
++		data: "I admit that I harbor doubts about whether we really need so many things to test, but it's too late to stop now.",
++		length: 112,
++
++		// Text
++		wholeText: "I admit that I harbor doubts about whether we really need so many things to test, but it's too late to stop now.",
++	},
++	detachedForeignTextNode: {
++		// Node
++		nodeType: Node.TEXT_NODE,
++		nodeName: "#text",
++		ownerDocument: foreignDoc,
++		parentNode: null,
++		parentElement: null,
++		firstChild: null,
++		lastChild: null,
++		previousSibling: null,
++		nextSibling: null,
++		nodeValue: "Cdefghij",
++		textContent: "Cdefghij",
++
++		// CharacterData
++		data: "Cdefghij",
++		length: 8,
++
++		// Text
++		wholeText: "Cdefghij",
++	},
++	xmlTextNode: {
++		// Node
++		nodeType: Node.TEXT_NODE,
++		nodeName: "#text",
++		ownerDocument: xmlDoc,
++		parentNode: xmlElement,
++		parentElement: xmlElement,
++		firstChild: null,
++		lastChild: null,
++		previousSibling: null,
++		nextSibling: null,
++		nodeValue: "do re mi fa so la ti",
++		textContent: "do re mi fa so la ti",
++
++		// CharacterData
++		data: "do re mi fa so la ti",
++		length: 20,
++
++		// Text
++		wholeText: "do re mi fa so la ti",
++	},
++	detachedXmlTextNode: {
++		// Node
++		nodeType: Node.TEXT_NODE,
++		nodeName: "#text",
++		ownerDocument: xmlDoc,
++		parentNode: null,
++		parentElement: null,
++		firstChild: null,
++		lastChild: null,
++		previousSibling: null,
++		nextSibling: null,
++		nodeValue: "Klmnopqr",
++		textContent: "Klmnopqr",
++
++		// CharacterData
++		data: "Klmnopqr",
++		length: 8,
++
++		// Text
++		wholeText: "Klmnopqr",
++	},
++	processingInstruction: {
++		// Node
++		nodeType: Node.PROCESSING_INSTRUCTION_NODE,
++		nodeName: "somePI",
++		ownerDocument: xmlDoc,
++		parentNode: xmlDoc,
++		parentElement: null,
++		firstChild: null,
++		lastChild: null,
++		previousSibling: xmlElement,
++		nextSibling: xmlComment,
++		nodeValue: 'Did you know that ":syn sync fromstart" is very useful when using vim to edit large amounts of JavaScript embedded in HTML?',
++		textContent: 'Did you know that ":syn sync fromstart" is very useful when using vim to edit large amounts of JavaScript embedded in HTML?',
++
++		// CharacterData
++		data: 'Did you know that ":syn sync fromstart" is very useful when using vim to edit large amounts of JavaScript embedded in HTML?',
++		length: 123,
++
++		// ProcessingInstruction
++		target: "somePI",
++	},
++	detachedProcessingInstruction: {
++		// Node
++		nodeType: Node.PROCESSING_INSTRUCTION_NODE,
++		nodeName: "whippoorwill",
++		ownerDocument: xmlDoc,
++		parentNode: null,
++		parentElement: null,
++		firstChild: null,
++		lastChild: null,
++		previousSibling: null,
++		nextSibling: null,
++		nodeValue: "chirp chirp chirp",
++		textContent: "chirp chirp chirp",
++
++		// CharacterData
++		data: "chirp chirp chirp",
++		length: 17,
++
++		// ProcessingInstruction
++		target: "whippoorwill",
++	},
++	comment: {
++		// Node
++		nodeType: Node.COMMENT_NODE,
++		nodeName: "#comment",
++		ownerDocument: document,
++		parentNode: testDiv,
++		parentElement: testDiv,
++		firstChild: null,
++		lastChild: null,
++		previousSibling: paras[4],
++		nextSibling: null,
++		nodeValue: "Alphabet soup?",
++		textContent: "Alphabet soup?",
++
++		// CharacterData
++		data: "Alphabet soup?",
++		length: 14,
++	},
++	detachedComment: {
++		// Node
++		nodeType: Node.COMMENT_NODE,
++		nodeName: "#comment",
++		ownerDocument: document,
++		parentNode: null,
++		parentElement: null,
++		firstChild: null,
++		lastChild: null,
++		previousSibling: null,
++		nextSibling: null,
++		nodeValue: "Stuvwxyz",
++		textContent: "Stuvwxyz",
++
++		// CharacterData
++		data: "Stuvwxyz",
++		length: 8,
++	},
++	foreignComment: {
++		// Node
++		nodeType: Node.COMMENT_NODE,
++		nodeName: "#comment",
++		ownerDocument: foreignDoc,
++		parentNode: foreignDoc,
++		parentElement: null,
++		firstChild: null,
++		lastChild: null,
++		previousSibling: foreignDoc.documentElement,
++		nextSibling: null,
++		nodeValue: '"Commenter" and "commentator" mean different things.  I\'ve seen non-native speakers trip up on this.',
++		textContent: '"Commenter" and "commentator" mean different things.  I\'ve seen non-native speakers trip up on this.',
++
++		// CharacterData
++		data: '"Commenter" and "commentator" mean different things.  I\'ve seen non-native speakers trip up on this.',
++		length: 100,
++	},
++	detachedForeignComment: {
++		// Node
++		nodeType: Node.COMMENT_NODE,
++		nodeName: "#comment",
++		ownerDocument: foreignDoc,
++		parentNode: null,
++		parentElement: null,
++		firstChild: null,
++		lastChild: null,
++		previousSibling: null,
++		nextSibling: null,
++		nodeValue: "אריה יהודה",
++		textContent: "אריה יהודה",
++
++		// CharacterData
++		data: "אריה יהודה",
++		length: 10,
++	},
++	xmlComment: {
++		// Node
++		nodeType: Node.COMMENT_NODE,
++		nodeName: "#comment",
++		ownerDocument: xmlDoc,
++		parentNode: xmlDoc,
++		parentElement: null,
++		firstChild: null,
++		lastChild: null,
++		previousSibling: processingInstruction,
++		nextSibling: null,
++		nodeValue: "I maliciously created a comment that will break incautious XML serializers, but Firefox threw an exception, so all I got was this lousy T-shirt",
++		textContent: "I maliciously created a comment that will break incautious XML serializers, but Firefox threw an exception, so all I got was this lousy T-shirt",
++
++		// CharacterData
++		data: "I maliciously created a comment that will break incautious XML serializers, but Firefox threw an exception, so all I got was this lousy T-shirt",
++		length: 143,
++	},
++	detachedXmlComment: {
++		// Node
++		nodeType: Node.COMMENT_NODE,
++		nodeName: "#comment",
++		ownerDocument: xmlDoc,
++		parentNode: null,
++		parentElement: null,
++		firstChild: null,
++		lastChild: null,
++		previousSibling: null,
++		nextSibling: null,
++		nodeValue: "בן חיים אליעזר",
++		textContent: "בן חיים אליעזר",
++
++		// CharacterData
++		data: "בן חיים אליעזר",
++		length: 14,
++	},
++	docfrag: {
++		// Node
++		nodeType: Node.DOCUMENT_FRAGMENT_NODE,
++		nodeName: "#document-fragment",
++		ownerDocument: document,
++		parentNode: null,
++		parentElement: null,
++		firstChild: null,
++		lastChild: null,
++		previousSibling: null,
++		nextSibling: null,
++		nodeValue: null,
++		textContent: "",
++	},
++	foreignDocfrag: {
++		// Node
++		nodeType: Node.DOCUMENT_FRAGMENT_NODE,
++		nodeName: "#document-fragment",
++		ownerDocument: foreignDoc,
++		parentNode: null,
++		parentElement: null,
++		firstChild: null,
++		lastChild: null,
++		previousSibling: null,
++		nextSibling: null,
++		nodeValue: null,
++		textContent: "",
++	},
++	xmlDocfrag: {
++		// Node
++		nodeType: Node.DOCUMENT_FRAGMENT_NODE,
++		nodeName: "#document-fragment",
++		ownerDocument: xmlDoc,
++		parentNode: null,
++		parentElement: null,
++		firstChild: null,
++		lastChild: null,
++		previousSibling: null,
++		nextSibling: null,
++		nodeValue: null,
++		textContent: "",
++	},
++	doctype: {
++		// Node
++		nodeType: Node.DOCUMENT_TYPE_NODE,
++		nodeName: "html",
++		ownerDocument: document,
++		parentNode: document,
++		parentElement: null,
++		firstChild: null,
++		lastChild: null,
++		previousSibling: null,
++		nextSibling: document.documentElement,
++		nodeValue: null,
++		textContent: "",
++
++		// DocumentType
++		name: "html",
++		publicId: "",
++		systemId: "",
++	},
++	foreignDoctype: {
++		// Node
++		nodeType: Node.DOCUMENT_TYPE_NODE,
++		nodeName: "html",
++		ownerDocument: foreignDoc,
++		parentNode: foreignDoc,
++		parentElement: null,
++		firstChild: null,
++		lastChild: null,
++		previousSibling: null,
++		nextSibling: foreignDoc.documentElement,
++		nodeValue: null,
++		textContent: "",
++
++		// DocumentType
++		name: "html",
++		publicId: "",
++		systemId: "",
++	},
++	xmlDoctype: {
++		// Node
++		nodeType: Node.DOCUMENT_TYPE_NODE,
++		nodeName: "qorflesnorf",
++		ownerDocument: xmlDoc,
++		parentNode: xmlDoc,
++		parentElement: null,
++		firstChild: null,
++		lastChild: null,
++		previousSibling: null,
++		nextSibling: xmlElement,
++		nodeValue: null,
++		textContent: "",
++
++		// DocumentType
++		name: "qorflesnorf",
++		publicId: "abcde",
++		systemId: "x\"'y",
++	},
++};
++
++for (var node in expected) {
++	for (var prop in expected[node]) {
++		test(function() {
++			assert_equals(window[node][prop], expected[node][prop]);
++		}, node + "." + prop);
++	}
++}
++
++testDiv.parentNode.removeChild(testDiv);
++</script>
+diff --git a/dom/imptests/webapps/DOMCore/tests/approved/test_exceptions.html b/dom/imptests/webapps/DOMCore/tests/approved/test_exceptions.html
+new file mode 100644
+--- /dev/null
++++ b/dom/imptests/webapps/DOMCore/tests/approved/test_exceptions.html
+@@ -0,0 +1,100 @@
++<!doctype html>
++<title>DOMException-throwing tests</title>
++<link rel=author title="Aryeh Gregor" href=ayg@aryeh.name>
++<div id=log></div>
++<script src=/resources/testharness.js></script>
++<script src=/resources/testharnessreport.js></script>
++<script>
++/**
++ * This file just picks one case where browsers are supposed to throw an
++ * exception, and tests the heck out of whether it meets the spec.  In the
++ * future, all these checks should be in assert_throws(), but we don't want
++ * every browser failing every assert_throws() check until they fix every
++ * single bug in their exception-throwing.
++ *
++ * We don't go out of our way to test everything that's already tested by
++ * interfaces.html, like whether all constants are present on the object, but
++ * some things are duplicated.
++ */
++setup({explicit_done: true});
++
++function testException(exception, global, desc) {
++	test(function() {
++		assert_equals(global.Object.getPrototypeOf(exception),
++		              global.DOMException.prototype);
++	}, desc + "Object.getPrototypeOf(exception) === DOMException.prototype");
++
++	test(function() {
++		// WebIDL 4.9.2 as of September 28, 2012: "There must be a property named
++		// “name” on the exception interface prototype object with attributes {
++		// [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true } and
++		// whose value is the identifier of the exception."  Thus, this is
++		// inherited, not own.
++		assert_false(exception.hasOwnProperty("name"));
++	}, desc + "!exception.hasOwnProperty(\"name\")");
++
++	test(function() {
++		assert_equals(exception.name, "HierarchyRequestError");
++	}, desc + "exception.name === \"HierarchyRequestError\"");
++
++	test(function() {
++		// WebIDL 4.9.1.1 as of September 28, 2012: "Call the [[DefineOwnProperty]]
++		// internal method of O passing “message”, Property Descriptor { [[Value]]:
++		// S, [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true },
++		// and false as arguments."  Thus, this is an own property.
++		assert_true(exception.hasOwnProperty("message"));
++	}, desc + "exception.hasOwnProperty(\"message\")");
++
++	test(function() {
++		var desc = global.Object.getOwnPropertyDescriptor(exception, "message");
++		assert_true(desc.writable, "must be writable");
++		assert_false(desc.enumerable, "must not be enumerable");
++		assert_true(desc.configurable, "must be configurable");
++	}, desc + "Object.getOwnPropertyDescriptor(exception, \"message\")");
++
++	test(function() {
++		// Can't test anything more specific, since it's implementation-defined :(
++		assert_equals(typeof exception.message, "string");
++	}, desc + "typeof exception.message === \"string\"");
++
++	test(function() {
++		// WebIDL: "The class string of the exception object must be the identifier
++		// of the exception."
++		assert_equals(global.Object.prototype.toString.call(exception),
++					  "[object DOMException]");
++	}, desc + "Object.prototype.toString.call(exception) === \"[object DOMException]\"");
++
++	test(function() {
++		assert_equals(exception.code, global.DOMException.HIERARCHY_REQUEST_ERR);
++	}, desc + "exception.code === DOMException.HIERARCHY_REQUEST_ERR");
++}
++
++
++// Test in current window
++var exception = null;
++try {
++	// This should throw a HierarchyRequestError in every browser since the
++	// Stone Age, so we're really only testing exception-throwing details.
++	document.documentElement.appendChild(document);
++} catch(e) {
++	exception = e;
++}
++testException(exception, window, "");
++
++// Test in iframe
++var iframe = document.createElement("iframe");
++iframe.src = "about:blank";
++iframe.onload = function() {
++	var exception = null;
++	try {
++		iframe.contentDocument.documentElement.appendChild(iframe.contentDocument);
++	} catch(e) {
++		exception = e;
++	}
++	testException(exception, iframe.contentWindow, "In iframe: ");
++
++	document.body.removeChild(iframe);
++	done();
++};
++document.body.appendChild(iframe);
++</script>
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/Makefile.in b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/Makefile.in
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/Makefile.in
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/Makefile.in
+@@ -13,30 +13,33 @@ DIRS := \
+   $(NULL)
+ 
+ MOCHITEST_FILES := \
+   test_attributes.html \
+   test_case.html \
+   test_CharacterData-appendData.html \
+   test_CharacterData-deleteData.html \
+   test_CharacterData-insertData.html \
++  test_CharacterData-remove.html \
+   test_CharacterData-replaceData.html \
++  test_ChildNode-remove.js \
+   test_Document-adoptNode.html \
+   test_Document-createComment.html \
+   test_Document-createElement.html \
+   test_Document-createElementNS.html \
+   test_Document-createEvent.html \
+   test_Document-createProcessingInstruction.html \
+   test_Document-createProcessingInstruction-literal-1.xhtml \
+   test_Document-createProcessingInstruction-literal-2.xhtml \
+   test_Document-createProcessingInstruction.xhtml \
+   test_Document-getElementById.html \
+   test_Document-getElementsByTagName.html \
+   test_Document-getElementsByTagNameNS.html \
+   test_Document-importNode.html \
++  test_DocumentType-remove.html \
+   test_DOMException-constants.html \
+   test_DOMImplementation-createDocument.html \
+   test_DOMImplementation-createDocumentType.html \
+   test_DOMImplementation-createHTMLDocument.html \
+   test_DOMImplementation-hasFeature.html \
+   test_Element-childElementCount-dynamic-add.html \
+   test_Element-childElementCount-dynamic-add.svg \
+   test_Element-childElementCount-dynamic-add.xhtml \
+@@ -66,16 +69,17 @@ MOCHITEST_FILES := \
+   test_Element-lastElementChild.svg \
+   test_Element-lastElementChild.xhtml \
+   test_Element-nextElementSibling.html \
+   test_Element-nextElementSibling.svg \
+   test_Element-nextElementSibling.xhtml \
+   test_Element-previousElementSibling.html \
+   test_Element-previousElementSibling.svg \
+   test_Element-previousElementSibling.xhtml \
++  test_Element-remove.html \
+   test_Element-removeAttributeNS.html \
+   test_Element-siblingElement-null.html \
+   test_Element-siblingElement-null.svg \
+   test_Element-siblingElement-null.xhtml \
+   test_Element-tagName.html \
+   test_Event-constants.html \
+   test_Event-constructors.html \
+   test_Event-defaultPrevented.html \
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_CharacterData-appendData.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_CharacterData-appendData.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_CharacterData-appendData.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_CharacterData-appendData.html
+@@ -1,10 +1,13 @@
+ <!DOCTYPE html>
++<meta charset=utf-8>
+ <title>CharacterData.appendData</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-characterdata-appenddata">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-characterdata-data">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ <div id="log"></div>
+ <script>
+ function testNode(node) {
+   test(function() {
+     assert_equals(node.data, "test")
+     node.appendData("test")
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_CharacterData-deleteData.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_CharacterData-deleteData.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_CharacterData-deleteData.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_CharacterData-deleteData.html
+@@ -1,21 +1,27 @@
+ <!DOCTYPE html>
++<meta charset=utf-8>
+ <title>CharacterData.deleteData</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-characterdata-deletedata">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-characterdata-data">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ <div id="log"></div>
+ <script>
+ function testNode(node) {
+   test(function() {
+     assert_throws("INDEX_SIZE_ERR", function() { node.deleteData(5, 10) })
+     assert_throws("INDEX_SIZE_ERR", function() { node.deleteData(5, 0) })
+     node.deleteData(2, 10)
+     assert_equals(node.data, "te")
++  })
++  test(function() {
+     node.data = "test"
++    assert_equals(node.data, "test")
+     node.deleteData(1, 1)
+     assert_equals(node.data, "tst")
+   })
+ }
+ test(function() {
+   testNode(document.createTextNode("test"))
+   testNode(document.createComment("test"))
+ })
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_CharacterData-insertData.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_CharacterData-insertData.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_CharacterData-insertData.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_CharacterData-insertData.html
+@@ -1,21 +1,27 @@
+ <!DOCTYPE html>
++<meta charset=utf-8>
+ <title>CharacterData.insertData</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-characterdata-insertdata">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-characterdata-data">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ <div id="log"></div>
+ <script>
+ function testNode(node) {
+   test(function() {
+     assert_throws("INDEX_SIZE_ERR", function() { node.insertData(5, "x") })
+     assert_throws("INDEX_SIZE_ERR", function() { node.insertData(5, "") })
+     node.insertData(2, "X")
+     assert_equals(node.data, "teXst")
++  })
++  test(function() {
+     node.data = "test"
++    assert_equals(node.data, "test")
+     node.insertData(4, "ing")
+     assert_equals(node.data, "testing")
+   })
+ }
+ test(function() {
+   testNode(document.createTextNode("test"))
+   testNode(document.createComment("test"))
+ })
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_CharacterData-remove.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_CharacterData-remove.html
+new file mode 100644
+--- /dev/null
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_CharacterData-remove.html
+@@ -0,0 +1,25 @@
++<!DOCTYPE html>
++<meta charset=utf-8>
++<title>CharacterData.remove</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-childnode-remove">
++<script src="/resources/testharness.js"></script>
++<script src="/resources/testharnessreport.js"></script>
++<script src="ChildNode-remove.js"></script>
++<div id=log></div>
++<script>
++test(function() {
++  var node = document.createTextNode("text");
++  var parent = document.createElement("div");
++  testRemove(node, parent, "text");
++});
++test(function() {
++  var node = document.createComment("comment");
++  var parent = document.createElement("div");
++  testRemove(node, parent, "comment");
++});
++test(function() {
++  var node = document.createProcessingInstruction("foo", "bar");
++  var parent = document.createElement("div");
++  testRemove(node, parent, "PI");
++});
++</script>
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_CharacterData-replaceData.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_CharacterData-replaceData.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_CharacterData-replaceData.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_CharacterData-replaceData.html
+@@ -1,21 +1,27 @@
+ <!DOCTYPE html>
++<meta charset=utf-8>
+ <title>CharacterData.replaceData</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-characterdata-replacedata">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-characterdata-data">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ <div id="log"></div>
+ <script>
+ function testNode(node) {
+   test(function() {
+     assert_throws("INDEX_SIZE_ERR", function() { node.replaceData(5, 1, "x") })
+     assert_throws("INDEX_SIZE_ERR", function() { node.replaceData(5, 0, "") })
+     node.replaceData(2, 10, "yo")
+     assert_equals(node.data, "teyo")
++  })
++  test(function() {
+     node.data = "test"
++    assert_equals(node.data, "test")
+     node.replaceData(1, 1, "waddup")
+     assert_equals(node.data, "twaddupst")
+     node.replaceData(1, 1, "yup")
+     assert_equals(node.data, "tyupaddupst")
+   })
+ }
+ test(function() {
+   testNode(document.createTextNode("test"))
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_ChildNode-remove.js b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_ChildNode-remove.js
+new file mode 100644
+--- /dev/null
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_ChildNode-remove.js
+@@ -0,0 +1,30 @@
++function testRemove(node, parent, type) {
++  test(function() {
++    assert_true("remove" in node);
++    assert_equals(typeof node.remove, "function");
++    assert_equals(node.remove.length, 0);
++  }, type + " should support remove()");
++  test(function() {
++    assert_equals(node.parentNode, null, "Node should not have a parent");
++    assert_equals(node.remove(), undefined);
++    assert_equals(node.parentNode, null, "Removed new node should not have a parent");
++  }, "remove() should work if " + type + " doesn't have a parent");
++  test(function() {
++    assert_equals(node.parentNode, null, "Node should not have a parent");
++    parent.appendChild(node);
++    assert_equals(node.parentNode, parent, "Appended node should have a parent");
++    assert_equals(node.remove(), undefined);
++    assert_equals(node.parentNode, null, "Removed node should not have a parent");
++    assert_array_equals(parent.childNodes, [], "Parent should not have children");
++  }, "remove() should work if " + type + " does have a parent");
++  test(function() {
++    assert_equals(node.parentNode, null, "Node should not have a parent");
++    var before = parent.appendChild(document.createComment("before"));
++    parent.appendChild(node);
++    var after = parent.appendChild(document.createComment("after"));
++    assert_equals(node.parentNode, parent, "Appended node should have a parent");
++    assert_equals(node.remove(), undefined);
++    assert_equals(node.parentNode, null, "Removed node should not have a parent");
++    assert_array_equals(parent.childNodes, [before, after], "Parent should have two children left");
++  }, "remove() should work if " + type + " does have a parent and siblings");
++}
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DOMException-constants.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DOMException-constants.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DOMException-constants.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DOMException-constants.html
+@@ -1,10 +1,13 @@
+ <!doctype html>
++<meta charset=utf-8>
+ <title>DOMException constants</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#domexception">
++<link rel=help href="http://dev.w3.org/2006/webapi/WebIDL/#es-exception-constants">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ <div id="log"></div>
+ <script>
+ test(function() {
+   var constants = [
+     "INDEX_SIZE_ERR",
+     "DOMSTRING_SIZE_ERR",
+@@ -27,15 +30,19 @@ test(function() {
+     "NETWORK_ERR",
+     "ABORT_ERR",
+     "URL_MISMATCH_ERR",
+     "QUOTA_EXCEEDED_ERR",
+     "TIMEOUT_ERR",
+     "INVALID_NODE_TYPE_ERR",
+     "DATA_CLONE_ERR"
+   ]
+-  for (var i = 0; i < constants.length; i++) {
+-    var name = constants[i];
+-    if (name)
++  constants.forEach(function(name, i) {
++    test(function() {
+       assert_equals(DOMException[name], i + 1, name)
+-  }
++      var pd = Object.getOwnPropertyDescriptor(DOMException, name)
++      assert_equals(pd.writable, false, "not writable")
++      assert_equals(pd.enumerable, true, "enumerable")
++      assert_equals(pd.configurable, false, "not configurable")
++    }, "Constant: " + name)
++  })
+ })
+ </script>
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DOMImplementation-createDocument.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DOMImplementation-createDocument.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DOMImplementation-createDocument.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DOMImplementation-createDocument.html
+@@ -1,16 +1,28 @@
+ <!doctype html>
+-<title>DOMImplementation.createDocument(namespaceURI, qualifiedName, doctype)</title>
++<meta charset=utf-8>
++<title>DOMImplementation.createDocument(namespace, qualifiedName, doctype)</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-domimplementation-createdocument">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-document-createelementns">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-node-nodetype">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-document-documentelement">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-document-doctype">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ <div id="log"></div>
+ <script>
+ test(function() {
+   var tests = [
++    /* Arrays with four elements:
++     *   the namespace argument
++     *   the qualifiedName argument
++     *   the doctype argument
++     *   the expected exception, or null if none
++     */
+     [null, null, null, null],
+     [null, "", null, null],
+     [null, "foo", null, null],
+     [null, "1foo", null, "INVALID_CHARACTER_ERR"],
+     [null, "f1oo", null, null],
+     [null, "foo1", null, null],
+     [null, ":foo", null, "NAMESPACE_ERR"],
+     [null, "f:oo", null, "NAMESPACE_ERR"],
+@@ -121,35 +133,30 @@ test(function() {
+       ["foo", null, document.implementation.createDocumentType("foo", "", ""), null],
+       ["foo", "bar", document.implementation.createDocumentType("foo", "", ""), null],
+     ]);
+     tests = tempTests;
+   } catch (e) {
+     assert_unreached()
+   }
+ 
+-  for (var i in tests) {
++  tests.forEach(function(t, i) {
+     test(function() {
+-      var test = tests[i],
+-          namespaceURI = test[0],
+-          qualifiedName = test[1],
+-          doctype = test[2],
+-          expected = test[3]
++      var namespace = t[0], qualifiedName = t[1], doctype = t[2], expected = t[3]
+       if (expected != null) {
+-        assert_throws(expected, function() { document.implementation.createDocument(namespaceURI, qualifiedName, doctype) })
++        assert_throws(expected, function() { document.implementation.createDocument(namespace, qualifiedName, doctype) })
+       } else {
+-        var doc = document.implementation.createDocument(namespaceURI, qualifiedName, doctype)
++        var doc = document.implementation.createDocument(namespace, qualifiedName, doctype)
+         assert_equals(doc.nodeType, Node.DOCUMENT_NODE)
+         assert_equals(doc.nodeType, doc.DOCUMENT_NODE)
+-        if(!qualifiedName) {
++        if (qualifiedName === "" || qualifiedName === null) {
+           assert_equals(doc.documentElement, null)
++        } else {
++          assert_not_equals(doc.documentElement, null)
++          assert_equals(doc.documentElement.nodeType, Node.ELEMENT_NODE)
+         }
+-        if(!doctype) {
+-          assert_equals(doc.doctype, null)
+-        }
+-        if(!qualifiedName && !doctype) {
+-          assert_equals(doc.childNodes.length, 0)
+-        }
++        assert_equals(doc.doctype, doctype)
++        assert_equals(doc.childNodes.length, !!qualifiedName + !!doctype)
+       }
+-    })
+-  }
++    }, "createDocument test " + i + ": " + t.map(function(el) { return format_value(el) }))
++  })
+ })
+ </script>
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DOMImplementation-createDocumentType.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DOMImplementation-createDocumentType.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DOMImplementation-createDocumentType.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DOMImplementation-createDocumentType.html
+@@ -1,10 +1,16 @@
+ <!doctype html>
++<meta charset=utf-8>
+ <title>DOMImplementation.createDocumentType(qualifiedName, publicId, systemId)</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-domimplementation-createdocumenttype">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-documenttype-name">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-documenttype-publicid">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-documenttype-systemid">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-node-ownerdocument">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ <div id="log"></div>
+ <script>
+ test(function() {
+   var tests = [
+         ["foo", "", "", null],
+         ["1foo", "", "", "INVALID_CHARACTER_ERR"],
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DOMImplementation-createHTMLDocument.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DOMImplementation-createHTMLDocument.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DOMImplementation-createHTMLDocument.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DOMImplementation-createHTMLDocument.html
+@@ -1,10 +1,16 @@
+ <!DOCTYPE html>
++<meta charset=utf-8>
+ <title>DOMImplementation.createHTMLDocument</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-domimplementation-createhtmldocument">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-documenttype-name">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-documenttype-publicid">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-documenttype-systemid">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-document-documentelement">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ <div id="log"></div>
+ <script>
+ function checkDoc(title, expectedtitle, normalizedtitle) {
+   test(function() {
+     var doc = document.implementation.createHTMLDocument(title);
+     assert_equals(doc.doctype.name, "html")
+@@ -23,9 +29,22 @@ function checkDoc(title, expectedtitle, 
+ checkDoc("", "", "")
+ checkDoc(null, "null", "null")
+ checkDoc(undefined, "undefined", "undefined")
+ checkDoc("foo  bar baz", "foo  bar baz", "foo bar baz")
+ checkDoc("foo\t\tbar baz", "foo\t\tbar baz", "foo bar baz")
+ checkDoc("foo\n\nbar baz", "foo\n\nbar baz", "foo bar baz")
+ checkDoc("foo\f\fbar baz", "foo\f\fbar baz", "foo bar baz")
+ checkDoc("foo\r\rbar baz", "foo\r\rbar baz", "foo bar baz")
++
++test(function() {
++  var doc = document.implementation.createHTMLDocument();
++    assert_equals(doc.doctype.name, "html")
++    assert_equals(doc.doctype.publicId, "")
++    assert_equals(doc.doctype.systemId, "")
++    assert_equals(doc.documentElement.localName, "html")
++    assert_equals(doc.documentElement.firstChild.localName, "head")
++    assert_equals(doc.documentElement.firstChild.childNodes.length, 0)
++    assert_equals(doc.documentElement.lastChild.localName, "body")
++    assert_equals(doc.documentElement.lastChild.childNodes.length, 0)
++}, "Missing title argument");
++
+ </script>
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DOMImplementation-hasFeature.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DOMImplementation-hasFeature.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DOMImplementation-hasFeature.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DOMImplementation-hasFeature.html
+@@ -1,10 +1,12 @@
+ <!doctype html>
++<meta charset=utf-8>
+ <title>DOMImplementation.hasFeature(feature, version)</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-domimplementation-hasfeature">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ <div id="log"></div>
+ <script>
+ test(function() {
+   var tests = [
+         ["Core", "1.0", false],
+         ["Core", "2.0", true],
+@@ -124,15 +126,16 @@ test(function() {
+         ["XMLa", null, false],
+         ["Coare", null, false],
+         ["XMaL", null, false],
+         ["Core", undefined, false],
+         ["XML", undefined, false],
+         ["This is filler text.", "", false],
+         [null, "", false],
+         [undefined, "", false],
+-      ]
+-  for (var i in tests) {
+-    var test = tests[i]
+-    assert_equals(document.implementation.hasFeature(test[0], test[1]), test[2], test[0] + " " + test[1])
+-  }
++      ];
++  tests.forEach(function(data) {
++    test(function() {
++      assert_equals(document.implementation.hasFeature(data[0], data[1]), data[2])
++    }, "hasFeature(" + format_value(data[0]) + ", " + format_value(data[1]) + ")")
++  })
+ })
+ </script>
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-adoptNode.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-adoptNode.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-adoptNode.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-adoptNode.html
+@@ -1,44 +1,42 @@
+ <!doctype html>
+-<html>
+-<head>
++<meta charset=utf-8>
+ <title>Document.adoptNode</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-document-adoptnode">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+-</head>
+-<body>
+ <div id="log"></div>
+ <!--creates an element with local name "x<": --><x<>x</x<>
+ <script>
+ test(function() {
+   var y = document.getElementsByTagName("x<")[0]
+   assert_equals(y.parentNode, document.body)
+   assert_equals(y.ownerDocument, document)
+-  document.adoptNode(y)
++  assert_equals(document.adoptNode(y), y)
+   assert_equals(y.parentNode, null)
+   assert_equals(y.ownerDocument, document)
+   var doc = document.implementation.createDocument(null, null, null)
+-  doc.adoptNode(y)
++  assert_equals(doc.adoptNode(y), y)
+   assert_equals(y.parentNode, null)
+   assert_equals(y.ownerDocument, doc)
+ }, "Adopting an Element called 'x<' should work.")
+ test(function() {
+   var x = document.createElement(":good:times:")
+-  document.adoptNode(x)
++  assert_equals(document.adoptNode(x), x);
+   var doc = document.implementation.createDocument(null, null, null)
+-  doc.adoptNode(x)
++  assert_equals(doc.adoptNode(x), x)
+   assert_equals(x.parentNode, null)
+   assert_equals(x.ownerDocument, doc)
+ }, "Adopting an Element called ':good:times:' should work.")
+ test(function() {
+   var doctype = document.doctype;
+   assert_equals(doctype.parentNode, document)
+   assert_equals(doctype.ownerDocument, document)
+-  document.adoptNode(doctype)
++  assert_equals(document.adoptNode(doctype), doctype)
+   assert_equals(doctype.parentNode, null)
+   assert_equals(doctype.ownerDocument, document)
+ }, "Explicitly adopting a DocumentType should work.")
+ test(function() {
+   var doc = document.implementation.createDocument(null, null, null)
+   assert_throws("NOT_SUPPORTED_ERR", function() { document.adoptNode(doc) })
+ }, "Adopting a Document should throw.")
+ </script>
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createComment.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createComment.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createComment.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createComment.html
+@@ -1,23 +1,39 @@
+ <!DOCTYPE html>
++<meta charset=utf-8>
+ <title>Document.createComment</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-document-createcomment">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-node-ownerdocument">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-characterdata-data">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-node-nodevalue">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-node-textcontent">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-characterdata-length">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-node-nodetype">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-node-haschildnodes">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-node-childnodes">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-node-firstchild">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-node-lastchild">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ <div id="log"></div>
+ <script>
+ test(function() {
+-  var c = document.createComment("a -- b");
+-  assert_true(c instanceof Comment);
+-  assert_true(c instanceof Node);
+-  assert_equals(c.ownerDocument, document);
+-  assert_equals(c.data, "a -- b");
+-  assert_equals(c.nodeValue, "a -- b");
+-  assert_equals(c.textContent, "a -- b");
+-  assert_equals(c.length, 6);
+-  assert_equals(c.nodeType, 8);
+-  assert_equals(c.nodeName, "#comment");
+-  assert_equals(c.hasChildNodes(), false);
+-  assert_equals(c.childNodes.length, 0);
+-  assert_equals(c.firstChild, null);
+-  assert_equals(c.lastChild, null);
++  ["\u000b", "a -- b", "a-", "-b"].forEach(function(value) {
++    test(function() {
++      var c = document.createComment(value);
++      assert_true(c instanceof Comment);
++      assert_true(c instanceof Node);
++      assert_equals(c.ownerDocument, document);
++      assert_equals(c.data, value);
++      assert_equals(c.nodeValue, value);
++      assert_equals(c.textContent, value);
++      assert_equals(c.length, value.length);
++      assert_equals(c.nodeType, 8);
++      assert_equals(c.nodeName, "#comment");
++      assert_equals(c.hasChildNodes(), false);
++      assert_equals(c.childNodes.length, 0);
++      assert_equals(c.firstChild, null);
++      assert_equals(c.lastChild, null);
++    }, "createComment(" + format_value(value) + ")");
++  });
+ });
+ </script>
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createElement.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createElement.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createElement.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createElement.html
+@@ -1,19 +1,26 @@
+ <!DOCTYPE html>
++<meta charset=utf-8>
+ <title>Document.createElement</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-document-createelement">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-element-localname">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-element-tagname">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-element-prefix">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-element-namespaceuri">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ <div id="log"></div>
+ <script>
+ test(function() {
+   var HTMLNS = "http://www.w3.org/1999/xhtml",
+       valid = [
+         //[input, localName],
+         [undefined, "undefined"],
++        [null, "null"],
+         ["foo", "foo"],
+         ["f1oo", "f1oo"],
+         ["foo1", "foo1"],
+         ["f\u0300oo", "f\u0300oo"],
+         ["foo\u0300", "foo\u0300"],
+         [":foo", ":foo"],
+         ["f:oo", "f:oo"],
+         ["foo:", "foo:"],
+@@ -38,22 +45,26 @@ test(function() {
+        "f\uffffoo",
+        "foo\uffff",
+        "<foo",
+        "foo>",
+        "<foo>",
+        "f<oo"
+      ]
+ 
+-  for (var i = 0, il = valid.length; i < il; i++) {
+-    var test = valid[i],
+-        elt = document.createElement(test[0])
+-    assert_true(elt instanceof Element)
+-    assert_equals(elt.localName, test[1])
+-    assert_equals(elt.tagName, test[1].toUpperCase())
+-    assert_equals(elt.prefix, null)
+-    assert_equals(elt.namespaceURI, HTMLNS)
+-  }
+-  for (var i = 0, il = invalid.length; i < il; i++) {
+-    assert_throws("INVALID_CHARACTER_ERR", function() { document.createElement(invalid[i]) })
+-  }
++  valid.forEach(function(t) {
++    test(function() {
++      var elt = document.createElement(t[0])
++      assert_true(elt instanceof Element)
++      assert_true(elt instanceof Node)
++      assert_equals(elt.localName, t[1])
++      assert_equals(elt.tagName, t[1].toUpperCase())
++      assert_equals(elt.prefix, null)
++      assert_equals(elt.namespaceURI, HTMLNS)
++    }, "createElement(" + format_value(t[0]) + ")");
++  });
++  invalid.forEach(function(arg) {
++    test(function() {
++      assert_throws("INVALID_CHARACTER_ERR", function() { document.createElement(arg) })
++    }, "createElement(" + format_value(arg) + ")");
++  });
+ })
+ </script>
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createElementNS.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createElementNS.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createElementNS.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createElementNS.html
+@@ -1,14 +1,17 @@
+ <!DOCTYPE html>
++<meta charset=utf-8>
+ <title>Document.createElementNS</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-document-createelementns">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ <div id="log"></div>
+ <script>
++// TODO: valid arguments
+ test(function() {
+   var invalidNames = [
+     "",
+     "1foo",
+     "\u0300foo",
+     "}foo",
+     "f}oo",
+     "foo}",
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createEvent.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createEvent.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createEvent.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createEvent.html
+@@ -1,32 +1,42 @@
+ <!DOCTYPE html>
++<meta charset=utf-8>
+ <title>Document.createEvent</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-document-createevent">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ <div id="log"></div>
+ <script>
++// TODO: values of attributes
+ function testAlias(arg, iface) {
+   test(function() {
+-    if (iface in window) {
++    if (iface === "Event" || iface in window) {
+       var ev = document.createEvent(arg);
+       assert_true(ev instanceof window[iface]);
++      assert_true(ev instanceof Event);
+     }
+   }, arg + " should be an alias for " + iface + ".");
+ }
+ [
++  ["Event", "Event"],
+   ["Events", "Event"],
+   ["HTMLEvents", "Event"],
++  ["MouseEvent", "MouseEvent"],
+   ["MouseEvents", "MouseEvent"],
+-  ["MutationEvents", "MutationEvent"],
++  ["UIEvent", "UIEvent"]
+   ["UIEvents", "UIEvent"]
+ ].forEach(function(alias) {
+   testAlias(alias[0], alias[1]);
+   testAlias(alias[0].toLowerCase(), alias[1]);
+   testAlias(alias[0].toUpperCase(), alias[1]);
+ });
+ 
+ test(function() {
+   assert_throws("NOT_SUPPORTED_ERR", function() {
+     var evt = document.createEvent("foo");
+   });
++  assert_throws("NOT_SUPPORTED_ERR", function() {
++    // 'LATIN CAPITAL LETTER I WITH DOT ABOVE' (U+0130)
++    var evt = document.createEvent("U\u0130Event");
++  });
+ }, "Should throw NOT_SUPPORTED_ERR for unrecognized arguments");
+ </script>
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createProcessingInstruction-literal-2.xhtml b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createProcessingInstruction-literal-2.xhtml
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createProcessingInstruction-literal-2.xhtml
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createProcessingInstruction-literal-2.xhtml
+@@ -1,12 +1,14 @@
+ <?xml-stylesheet href="support/style.css" type="text/css"?>
+ <html xmlns="http://www.w3.org/1999/xhtml">
+ <head>
+-<title>Document.createProcessingInstruction</title>
++<title>ProcessingInstruction literals</title>
++<link rel="help" href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-processinginstruction-target"/>
++<link rel="help" href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-characterdata-data"/>
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ </head>
+ <body>
+ <div id="log"/>
+ <script>
+ test(function() {
+   var pienc = document.firstChild;
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createProcessingInstruction.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createProcessingInstruction.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createProcessingInstruction.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createProcessingInstruction.html
+@@ -1,6 +1,11 @@
+ <!DOCTYPE html>
++<meta charset=utf-8>
+ <title>Document.createProcessingInstruction in HTML documents</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-document-createprocessinginstruction">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-processinginstruction-target">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-characterdata-data">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-node-ownerdocument">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ <div id=log></div>
+ <script src="Document-createProcessingInstruction.js"></script>
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createProcessingInstruction.xhtml b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createProcessingInstruction.xhtml
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createProcessingInstruction.xhtml
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-createProcessingInstruction.xhtml
+@@ -1,11 +1,15 @@
+ <html xmlns="http://www.w3.org/1999/xhtml">
+ <head>
+ <title>Document.createProcessingInstruction in XML documents</title>
++<link rel="help" href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-document-createprocessinginstruction"/>
++<link rel="help" href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-processinginstruction-target"/>
++<link rel="help" href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-characterdata-data"/>
++<link rel="help" href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-node-ownerdocument"/>
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ </head>
+ <body>
+ <div id="log"/>
+ <script src="Document-createProcessingInstruction.js"/>
+ </body>
+ </html>
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-getElementById.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-getElementById.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-getElementById.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-getElementById.html
+@@ -1,10 +1,12 @@
+ <!DOCTYPE html>
++<meta charset=utf-8>
+ <title>Document.getElementById with an empty string</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-document-getelementbyid">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ <body>
+ <div id="log"></div>
+ <div id=""></div>
+ <script>
+ test(function() {
+   assert_equals(document.getElementById(""), null)
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-getElementsByTagName.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-getElementsByTagName.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-getElementsByTagName.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-getElementsByTagName.html
+@@ -1,20 +1,23 @@
+ <!DOCTYPE html>
++<meta charset=utf-8>
+ <title>Document.getElementsByTagName</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-document-getelementsbytagname">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+-<body>
+ <div id="log"></div>
+ <script>
++// TODO: getElementsByTagName("*")
+ test(function() {
+   assert_false(document.getElementsByTagName("html") instanceof NodeList, "NodeList")
+   assert_true(document.getElementsByTagName("html") instanceof HTMLCollection, "HTMLCollection")
+-  assert_true(document.getElementsByTagName("html") !== document.getElementsByTagName("html") ||
+-              document.getElementsByTagName("html") === document.getElementsByTagName("html"),
++  var firstCollection = document.getElementsByTagName("html"),
++      secondCollection = document.getElementsByTagName("html")
++  assert_true(firstCollection !== secondCollection || firstCollection === secondCollection,
+               "Caching is allowed.")
+ })
+ test(function() {
+   var l = document.getElementsByTagName("nosuchtag")
+   l[5] = "foopy"
+   assert_equals(l[5], undefined)
+   assert_equals(l.item(5), null)
+ }, "Shouldn't be able to set unsigned properties on a HTMLCollection")
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-getElementsByTagNameNS.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-getElementsByTagNameNS.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-getElementsByTagNameNS.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-getElementsByTagNameNS.html
+@@ -1,16 +1,18 @@
+ <!DOCTYPE html>
++<meta charset=utf-8>
+ <title>Document.getElementsByTagNameNS</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-document-getelementsbytagnamens">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+-<body>
+ <div id="log"></div>
+ <script>
++// TODO: Actual tests; wildcards.
+ test(function() {
+   assert_false(document.getElementsByTagNameNS("http://www.w3.org/1999/xhtml", "html") instanceof NodeList, "NodeList")
+   assert_true(document.getElementsByTagNameNS("http://www.w3.org/1999/xhtml", "html") instanceof HTMLCollection, "HTMLCollection")
+-  assert_true(document.getElementsByTagNameNS("http://www.w3.org/1999/xhtml", "html") !==
+-              document.getElementsByTagNameNS("http://www.w3.org/1999/xhtml", "html") ||
+-              document.getElementsByTagNameNS("http://www.w3.org/1999/xhtml", "html") ===
+-              document.getElementsByTagNameNS("http://www.w3.org/1999/xhtml", "html"), "Caching is allowed.")
++  var firstCollection = document.getElementsByTagNameNS("http://www.w3.org/1999/xhtml", "html"),
++      secondCollection = document.getElementsByTagNameNS("http://www.w3.org/1999/xhtml", "html")
++  assert_true(firstCollection !== secondCollection || firstCollection === secondCollection,
++              "Caching is allowed.")
+ })
+ </script>
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-importNode.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-importNode.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-importNode.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Document-importNode.html
+@@ -1,11 +1,12 @@
+ <!DOCTYPE html>
++<meta charset=utf-8>
+ <title>Document.importNode</title>
+-<link rel="stylesheet" href="/resources/testharness.css">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-document-importnode">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ <div id="log"></div>
+ <script>
+ test(function() {
+   var doc = document.implementation.createHTMLDocument("Title");
+   var div = doc.body.appendChild(doc.createElement("div"));
+   div.appendChild(doc.createElement("span"));
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DocumentType-remove.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DocumentType-remove.html
+new file mode 100644
+--- /dev/null
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_DocumentType-remove.html
+@@ -0,0 +1,15 @@
++<!DOCTYPE html>
++<meta charset=utf-8>
++<title>DocumentType.remove</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-childnode-remove">
++<script src="/resources/testharness.js"></script>
++<script src="/resources/testharnessreport.js"></script>
++<script src="ChildNode-remove.js"></script>
++<div id=log></div>
++<script>
++test(function() {
++  var node = document.implementation.createDocumentType("html", "", "");
++  var parent = document.implementation.createDocument(null, "", null);
++  testRemove(node, parent, "doctype");
++});
++</script>
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Element-remove.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Element-remove.html
+new file mode 100644
+--- /dev/null
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Element-remove.html
+@@ -0,0 +1,15 @@
++<!DOCTYPE html>
++<meta charset=utf-8>
++<title>Element.remove</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-childnode-remove">
++<script src="/resources/testharness.js"></script>
++<script src="/resources/testharnessreport.js"></script>
++<script src="ChildNode-remove.js"></script>
++<div id=log></div>
++<script>
++test(function() {
++  var node = document.createElement("div");
++  var parent = document.createElement("div");
++  testRemove(node, parent, "element");
++});
++</script>
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Node-appendChild.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Node-appendChild.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Node-appendChild.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Node-appendChild.html
+@@ -1,37 +1,59 @@
+ <!DOCTYPE html>
++<meta charset=utf-8>
+ <title>Node.appendChild</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-node-appendchild">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ <div id="log"></div>
+ <iframe src=about:blank></iframe>
+ <script>
+-function testHRE(node) {
++// TODO: Exhaustive tests
++function testLeaf(node, desc) {
++  // WebIDL.
++  test(function() {
++    assert_throws(new TypeError(), function() { node.appendChild(null) })
++  }, "Appending null to a " + desc)
++
++  // Pre-insert step 1.
+   test(function() {
+     assert_throws("HIERARCHY_REQUEST_ERR", function() { node.appendChild(document.createTextNode("fail")) })
+-    assert_throws(new TypeError(), function() { node.appendChild(null) })
+-  })
++  }, "Appending to a " + desc)
+ }
++
++// WebIDL.
++test(function() {
++  assert_throws(new TypeError(), function() { document.body.appendChild(null) })
++  assert_throws(new TypeError(), function() { document.body.appendChild({'a':'b'}) })
++}, "WebIDL tests")
++
++// WebIDL and pre-insert step 1.
++test(function() {
++  testLeaf(document.createTextNode("Foo"), "text node")
++  testLeaf(document.createComment("Foo"), "comment")
++  testLeaf(document.doctype, "doctype")
++}, "Appending to a leaf node.")
++
++// Pre-insert step 5.
++test(function() {
++  var frameDoc = frames[0].document
++  assert_throws("HIERARCHY_REQUEST_ERR", function() { document.body.appendChild(frameDoc) })
++}, "Appending a document")
++
++// Pre-insert step 8.
+ test(function() {
+   var frameDoc = frames[0].document
+   var s = frameDoc.createElement("a")
+   assert_equals(s.ownerDocument, frameDoc)
+   document.body.appendChild(s)
+   assert_equals(s.ownerDocument, document)
+-
+-  assert_throws("HIERARCHY_REQUEST_ERR", function() { document.body.appendChild(frameDoc) })
+-
+-  s = frameDoc.createElement("b")
++}, "Adopting an orphan")
++test(function() {
++  var frameDoc = frames[0].document
++  var s = frameDoc.createElement("b")
++  assert_equals(s.ownerDocument, frameDoc)
+   frameDoc.body.appendChild(s)
+   assert_equals(s.ownerDocument, frameDoc)
+   document.body.appendChild(s)
+   assert_equals(s.ownerDocument, document)
+-
+-  assert_throws(new TypeError(), function() { document.body.appendChild(null) })
+-
+-  assert_throws(new TypeError(), function() { document.body.appendChild({'a':'b'}) })
+-
+-  testHRE(document.createTextNode("Foo"));
+-  testHRE(document.createComment("Foo"));
+-  testHRE(document.doctype);
+-})
++}, "Adopting a non-orphan")
+ </script>
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Node-cloneNode.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Node-cloneNode.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Node-cloneNode.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_Node-cloneNode.html
+@@ -1,10 +1,12 @@
+ <!DOCTYPE html>
++<meta charset=utf-8>
+ <title>Node.cloneNode</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-node-clonenode">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ <div id=log></div>
+ <script>
+ test(function() {
+   var el = document.createElement("foo");
+   el.appendChild(document.createElement("bar"));
+   el.setAttribute("a", "b");
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_attributes.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_attributes.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_attributes.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_attributes.html
+@@ -1,10 +1,14 @@
+ <!DOCTYPE html>
++<meta charset=utf-8>
+ <title>Attributes tests</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#attr">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-element-setattribute">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-element-setattributens">
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ <script src="attributes.js"></script>
+ <script src="productions.js"></script>
+ <div id="log"></div>
+ <span id="test1"></span>
+ <span class="&amp;&lt;&gt;foo"></span>
+ <script>
+diff --git a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_case.html b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_case.html
+--- a/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_case.html
++++ b/dom/imptests/webapps/DOMCore/tests/submissions/Ms2ger/test_case.html
+@@ -1,6 +1,18 @@
+-<meta charset=utf8>
+-<script>is_html=true;</script>
++<!DOCTYPE html>
++<meta charset=utf-8>
++<title>Tests for case-sensitivity in APIs</title>
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-document-createelement">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-document-createelementns">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-document-getelementsbytagname">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-document-getelementsbytagnamens">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-element-setattribute">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-element-setattributens">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-element-hasattribute">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-element-hasattributens">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-element-getelementsbytagname">
++<link rel=help href="http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#dom-element-getelementsbytagnamens">
++<script>var is_html = true;</script>
+ <script src="/resources/testharness.js"></script>
+ <script src="/resources/testharnessreport.js"></script>
+ <script src="case.js"></script>
+ <div id="log"></div>

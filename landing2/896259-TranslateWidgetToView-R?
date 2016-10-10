@@ -1,0 +1,155 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/layout/base/nsLayoutUtils.cpp b/layout/base/nsLayoutUtils.cpp
+--- a/layout/base/nsLayoutUtils.cpp
++++ b/layout/base/nsLayoutUtils.cpp
+@@ -1314,17 +1314,17 @@ nsLayoutUtils::GetEventCoordinatesRelati
+   }
+ 
+   nsView* rootView = rootFrame->GetView();
+   if (!rootView) {
+     return nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
+   }
+ 
+   nsPoint widgetToView = TranslateWidgetToView(rootFrame->PresContext(),
+-                                               aWidget, aPoint, rootView);
++    aWidget, LayoutDeviceIntPoint::FromUntyped(aPoint), rootView);
+ 
+   if (widgetToView == nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE)) {
+     return nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
+   }
+ 
+   // Convert from root document app units to app units of the document aFrame
+   // is in.
+   int32_t rootAPD = rootFrame->PresContext()->AppUnitsPerDevPixel();
+@@ -1710,52 +1710,56 @@ nsLayoutUtils::TransformFrameRectToAnces
+ 
+   float destAppUnitsPerDevPixel = aAncestor->PresContext()->AppUnitsPerDevPixel();
+   return nsRect(NSFloatPixelsToAppUnits(float(result.x), destAppUnitsPerDevPixel),
+                 NSFloatPixelsToAppUnits(float(result.y), destAppUnitsPerDevPixel),
+                 NSFloatPixelsToAppUnits(float(result.width), destAppUnitsPerDevPixel),
+                 NSFloatPixelsToAppUnits(float(result.height), destAppUnitsPerDevPixel));
+ }
+ 
+-static nsIntPoint GetWidgetOffset(nsIWidget* aWidget, nsIWidget*& aRootWidget) {
+-  nsIntPoint offset(0, 0);
++static LayoutDeviceIntPoint
++GetWidgetOffset(nsIWidget* aWidget, nsIWidget*& aRootWidget)
++{
++  LayoutDeviceIntPoint offset(0, 0);
+   nsIWidget* parent = aWidget->GetParent();
+   while (parent) {
+     nsIntRect bounds;
+     aWidget->GetBounds(bounds);
+-    offset += bounds.TopLeft();
++    offset += LayoutDeviceIntPoint::FromUntyped(bounds.TopLeft());
+     aWidget = parent;
+     parent = aWidget->GetParent();
+   }
+   aRootWidget = aWidget;
+   return offset;
+ }
+ 
+ nsPoint
+ nsLayoutUtils::TranslateWidgetToView(nsPresContext* aPresContext,
+-                                     nsIWidget* aWidget, nsIntPoint aPt,
+-                                     nsView* aView)
++                                     nsIWidget* aWidget,
++                                     LayoutDeviceIntPoint aPt, nsView* aView)
+ {
+   nsPoint viewOffset;
+   nsIWidget* viewWidget = aView->GetNearestWidget(&viewOffset);
+   if (!viewWidget) {
+     return nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
+   }
+ 
+   nsIWidget* fromRoot;
+-  nsIntPoint fromOffset = GetWidgetOffset(aWidget, fromRoot);
++  LayoutDeviceIntPoint fromOffset = GetWidgetOffset(aWidget, fromRoot);
+   nsIWidget* toRoot;
+-  nsIntPoint toOffset = GetWidgetOffset(viewWidget, toRoot);
+-
+-  nsIntPoint widgetPoint;
++  LayoutDeviceIntPoint toOffset = GetWidgetOffset(viewWidget, toRoot);
++
++  LayoutDeviceIntPoint widgetPoint;
+   if (fromRoot == toRoot) {
+     widgetPoint = aPt + fromOffset - toOffset;
+   } else {
+     nsIntPoint screenPoint = aWidget->WidgetToScreenOffset();
+-    widgetPoint = aPt + screenPoint - viewWidget->WidgetToScreenOffset();
++    widgetPoint = aPt +
++      LayoutDeviceIntPoint::FromUntyped(
++        screenPoint - viewWidget->WidgetToScreenOffset());
+   }
+ 
+   nsPoint widgetAppUnits(aPresContext->DevPixelsToAppUnits(widgetPoint.x),
+                          aPresContext->DevPixelsToAppUnits(widgetPoint.y));
+   return widgetAppUnits - viewOffset;
+ }
+ 
+ // Combine aNewBreakType with aOrigBreakType, but limit the break types
+diff --git a/layout/base/nsLayoutUtils.h b/layout/base/nsLayoutUtils.h
+--- a/layout/base/nsLayoutUtils.h
++++ b/layout/base/nsLayoutUtils.h
+@@ -32,16 +32,17 @@ class imgIContainer;
+ #include "nsThreadUtils.h"
+ #include "nsIPresShell.h"
+ #include "nsIPrincipal.h"
+ #include "gfxPattern.h"
+ #include "nsCSSPseudoElements.h"
+ #include "FrameMetrics.h"
+ #include "gfx3DMatrix.h"
+ #include "nsIWidget.h"
++#include "Units.h"
+ 
+ #include <limits>
+ #include <algorithm>
+ 
+ namespace mozilla {
+ class SVGImageContext;
+ namespace dom {
+ class Element;
+@@ -505,17 +506,18 @@ public:
+    * Translate from widget coordinates to the view's coordinates
+    * @param aPresContext the PresContext for the view
+    * @param aWidget the widget
+    * @param aPt the point relative to the widget
+    * @param aView  view to which returned coordinates are relative
+    * @return the point in the view's coordinates
+    */
+   static nsPoint TranslateWidgetToView(nsPresContext* aPresContext,
+-                                       nsIWidget* aWidget, nsIntPoint aPt,
++                                       nsIWidget* aWidget,
++                                       mozilla::LayoutDeviceIntPoint aPt,
+                                        nsView* aView);
+ 
+   /**
+    * Given a matrix and a point, let T be the transformation matrix translating points
+    * in the coordinate space with origin aOrigin to the coordinate space used by the
+    * matrix.  If M is the stored matrix, this function returns (T-1)MT, the matrix
+    * that's equivalent to aMatrix but in the coordinate space that treats aOrigin
+    * as the origin.
+diff --git a/layout/base/nsPresShell.cpp b/layout/base/nsPresShell.cpp
+--- a/layout/base/nsPresShell.cpp
++++ b/layout/base/nsPresShell.cpp
+@@ -5850,18 +5850,17 @@ PresShell::RecordMouseLocation(nsGUIEven
+        static_cast<nsMouseEvent*>(aEvent)->reason == nsMouseEvent::eReal) ||
+       aEvent->message == NS_MOUSE_ENTER ||
+       aEvent->message == NS_MOUSE_BUTTON_DOWN ||
+       aEvent->message == NS_MOUSE_BUTTON_UP) {
+     nsIFrame* rootFrame = GetRootFrame();
+     if (!rootFrame) {
+       nsView* rootView = mViewManager->GetRootView();
+       mMouseLocation = nsLayoutUtils::TranslateWidgetToView(mPresContext,
+-        aEvent->widget, LayoutDeviceIntPoint::ToUntyped(aEvent->refPoint),
+-        rootView);
++        aEvent->widget, aEvent->refPoint, rootView);
+     } else {
+       mMouseLocation =
+         nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, rootFrame);
+     }
+ #ifdef DEBUG_MOUSE_LOCATION
+     if (aEvent->message == NS_MOUSE_ENTER)
+       printf("[ps=%p]got mouse enter for %p\n",
+              this, aEvent->widget);

@@ -1,0 +1,316 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/src/jsstr.cpp b/js/src/jsstr.cpp
+--- a/js/src/jsstr.cpp
++++ b/js/src/jsstr.cpp
+@@ -61,28 +61,26 @@
+ 
+ using namespace js;
+ using namespace js::gc;
+ using namespace js::types;
+ using namespace js::unicode;
+ 
+ using mozilla::CheckedInt;
+ 
+-static JSLinearString *
+-ArgToRootedString(JSContext *cx, CallArgs &args, unsigned argno)
++static UnrootedLinearString
++ArgToLinearString(JSContext *cx, CallArgs &args, unsigned argno)
+ {
+     if (argno >= args.length())
+         return cx->names().undefined;
+ 
+-    Value &arg = args[argno];
+-    JSString *str = ToString(cx, arg);
++    UnrootedString str = ToString(cx, args[argno]);
+     if (!str)
+         return NULL;
+ 
+-    arg = StringValue(str);
+     return str->ensureLinear(cx);
+ }
+ 
+ /*
+  * Forward declarations for URI encode/decode and helper routines
+  */
+ static JSBool
+ str_decodeURI(JSContext *cx, unsigned argc, Value *vp);
+@@ -110,17 +108,17 @@ Utf8ToOneUcs4Char(const uint8_t *utf8Buf
+ static JSBool
+ str_escape(JSContext *cx, unsigned argc, Value *vp)
+ {
+     CallArgs args = CallArgsFromVp(argc, vp);
+ 
+     const char digits[] = {'0', '1', '2', '3', '4', '5', '6', '7',
+                            '8', '9', 'A', 'B', 'C', 'D', 'E', 'F' };
+ 
+-    JSLinearString *str = ArgToRootedString(cx, args, 0);
++    JSLinearString *str = ArgToLinearString(cx, args, 0);
+     if (!str)
+         return false;
+ 
+     size_t length = str->length();
+     const jschar *chars = str->chars();
+ 
+     static const uint8_t shouldPassThrough[256] = {
+          0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+@@ -234,17 +232,17 @@ Unhex2(const jschar *chars, jschar *resu
+ 
+ /* ES5 B.2.2 */
+ static JSBool
+ str_unescape(JSContext *cx, unsigned argc, Value *vp)
+ {
+     CallArgs args = CallArgsFromVp(argc, vp);
+ 
+     /* Step 1. */
+-    JSLinearString *str = ArgToRootedString(cx, args, 0);
++    JSLinearString *str = ArgToLinearString(cx, args, 0);
+     if (!str)
+         return false;
+ 
+     /*
+      * NB: use signed integers for length/index to allow simple length
+      * comparisons without unsigned-underflow hazards.
+      */
+     JS_STATIC_ASSERT(JSString::MAX_LENGTH <= INT_MAX);
+@@ -1140,17 +1138,17 @@ str_contains(JSContext *cx, unsigned arg
+     CallArgs args = CallArgsFromVp(argc, vp);
+ 
+     // Steps 1, 2, and 3
+     RootedString str(cx, ThisToStringForStringProto(cx, args));
+     if (!str)
+         return false;
+ 
+     // Steps 4 and 5
+-    Rooted<JSLinearString*> searchStr(cx, ArgToRootedString(cx, args, 0));
++    Rooted<JSLinearString*> searchStr(cx, ArgToLinearString(cx, args, 0));
+     if (!searchStr)
+         return false;
+ 
+     // Steps 6 and 7
+     uint32_t pos = 0;
+     if (args.hasDefined(1)) {
+         if (args[1].isInt32()) {
+             int i = args[1].toInt32();
+@@ -1194,17 +1192,17 @@ str_indexOf(JSContext *cx, unsigned argc
+     CallArgs args = CallArgsFromVp(argc, vp);
+ 
+     // Steps 1, 2, and 3
+     RootedString str(cx, ThisToStringForStringProto(cx, args));
+     if (!str)
+         return false;
+ 
+     // Steps 4 and 5
+-    Rooted<JSLinearString*> searchStr(cx, ArgToRootedString(cx, args, 0));
++    Rooted<JSLinearString*> searchStr(cx, ArgToLinearString(cx, args, 0));
+     if (!searchStr)
+         return false;
+ 
+     // Steps 6 and 7
+     uint32_t pos = 0;
+     if (args.hasDefined(1)) {
+         if (args[1].isInt32()) {
+             int i = args[1].toInt32();
+@@ -1245,17 +1243,17 @@ str_lastIndexOf(JSContext *cx, unsigned 
+ {
+     CallArgs args = CallArgsFromVp(argc, vp);
+     RootedString textstr(cx, ThisToStringForStringProto(cx, args));
+     if (!textstr)
+         return false;
+ 
+     size_t textlen = textstr->length();
+ 
+-    Rooted<JSLinearString*> patstr(cx, ArgToRootedString(cx, args, 0));
++    Rooted<JSLinearString*> patstr(cx, ArgToLinearString(cx, args, 0));
+     if (!patstr)
+         return false;
+ 
+     size_t patlen = patstr->length();
+ 
+     int i = textlen - patlen; // Start searching here
+     if (i < 0) {
+         args.rval().setInt32(-1);
+@@ -1325,17 +1323,17 @@ str_startsWith(JSContext *cx, unsigned a
+     CallArgs args = CallArgsFromVp(argc, vp);
+ 
+     // Steps 1, 2, and 3
+     RootedString str(cx, ThisToStringForStringProto(cx, args));
+     if (!str)
+         return false;
+ 
+     // Steps 4 and 5
+-    Rooted<JSLinearString*> searchStr(cx, ArgToRootedString(cx, args, 0));
++    Rooted<JSLinearString*> searchStr(cx, ArgToLinearString(cx, args, 0));
+     if (!searchStr)
+         return false;
+ 
+     // Steps 6 and 7
+     uint32_t pos = 0;
+     if (args.hasDefined(1)) {
+         if (args[1].isInt32()) {
+             int i = args[1].toInt32();
+@@ -1382,17 +1380,17 @@ str_endsWith(JSContext *cx, unsigned arg
+     CallArgs args = CallArgsFromVp(argc, vp);
+ 
+     // Steps 1, 2, and 3
+     RootedString str(cx, ThisToStringForStringProto(cx, args));
+     if (!str)
+         return false;
+ 
+     // Steps 4 and 5
+-    Rooted<JSLinearString *> searchStr(cx, ArgToRootedString(cx, args, 0));
++    Rooted<JSLinearString *> searchStr(cx, ArgToLinearString(cx, args, 0));
+     if (!searchStr)
+         return false;
+ 
+     // Step 6
+     uint32_t textLen = str->length();
+ 
+     // Steps 7 and 8
+     uint32_t pos = textLen;
+@@ -1591,17 +1589,17 @@ class StringRegExpGuard
+             if (!RegExpToShared(cx, args[0].toObject(), &re_))
+                 return false;
+         } else {
+             if (convertVoid && !args.hasDefined(0)) {
+                 fm.patstr = cx->runtime->emptyString;
+                 return true;
+             }
+ 
+-            JSString *arg = ArgToRootedString(cx, args, 0);
++            JSString *arg = ArgToLinearString(cx, args, 0);
+             if (!arg)
+                 return false;
+ 
+             fm.patstr = AtomizeString(cx, arg);
+             if (!fm.patstr)
+                 return false;
+         }
+         return true;
+@@ -2512,17 +2510,17 @@ js::str_replace(JSContext *cx, unsigned 
+         rdata.repstr = NULL;
+         rdata.dollar = rdata.dollarEnd = NULL;
+ 
+         if (JSObject *base = LambdaIsGetElem(*rdata.lambda))
+             rdata.elembase = base;
+     } else {
+         rdata.lambda = NULL;
+         rdata.elembase = NULL;
+-        rdata.repstr = ArgToRootedString(cx, args, 1);
++        rdata.repstr = ArgToLinearString(cx, args, 1);
+         if (!rdata.repstr)
+             return false;
+ 
+         /* We're about to store pointers into the middle of our string. */
+         JSStableString *stable = rdata.repstr->ensureStable(cx);
+         if (!stable)
+             return false;
+         rdata.dollarEnd = stable->chars().get() + stable->length();
+@@ -2821,17 +2819,17 @@ js::str_split(JSContext *cx, unsigned ar
+     RegExpGuard re(cx);
+     JSLinearString *sepstr = NULL;
+     bool sepDefined = args.hasDefined(0);
+     if (sepDefined) {
+         if (IsObjectWithClass(args[0], ESClass_RegExp, cx)) {
+             if (!RegExpToShared(cx, args[0].toObject(), &re))
+                 return false;
+         } else {
+-            sepstr = ArgToRootedString(cx, args, 0);
++            sepstr = ArgToLinearString(cx, args, 0);
+             if (!sepstr)
+                 return false;
+         }
+     }
+ 
+     /* Step 9. */
+     if (limit == 0) {
+         JSObject *aobj = NewDenseEmptyArray(cx);
+@@ -3092,17 +3090,17 @@ tagify(JSContext *cx, const char *begin,
+ 
+     call.rval().setString(retstr);
+     return true;
+ }
+ 
+ static JSBool
+ tagify_value(JSContext *cx, CallArgs args, const char *begin, const char *end)
+ {
+-    JSLinearString *param = ArgToRootedString(cx, args, 0);
++    JSLinearString *param = ArgToLinearString(cx, args, 0);
+     if (!param)
+         return false;
+ 
+     return tagify(cx, begin, param, end, args);
+ }
+ 
+ static JSBool
+ str_bold(JSContext *cx, unsigned argc, Value *vp)
+@@ -4120,65 +4118,65 @@ Decode(JSContext *cx, JSString *str, con
+ 
+     return JS_FALSE;
+ }
+ 
+ static JSBool
+ str_decodeURI(JSContext *cx, unsigned argc, Value *vp)
+ {
+     CallArgs args = CallArgsFromVp(argc, vp);
+-    JSLinearString *str = ArgToRootedString(cx, args, 0);
++    JSLinearString *str = ArgToLinearString(cx, args, 0);
+     if (!str)
+         return false;
+ 
+     Value result;
+     if (!Decode(cx, str, js_uriReservedPlusPound_ucstr, &result))
+         return false;
+ 
+     args.rval().set(result);
+     return true;
+ }
+ 
+ static JSBool
+ str_decodeURI_Component(JSContext *cx, unsigned argc, Value *vp)
+ {
+     CallArgs args = CallArgsFromVp(argc, vp);
+-    JSLinearString *str = ArgToRootedString(cx, args, 0);
++    JSLinearString *str = ArgToLinearString(cx, args, 0);
+     if (!str)
+         return false;
+ 
+     Value result;
+     if (!Decode(cx, str, js_empty_ucstr, &result))
+         return false;
+ 
+     args.rval().set(result);
+     return true;
+ }
+ 
+ static JSBool
+ str_encodeURI(JSContext *cx, unsigned argc, Value *vp)
+ {
+     CallArgs args = CallArgsFromVp(argc, vp);
+-    JSLinearString *str = ArgToRootedString(cx, args, 0);
++    JSLinearString *str = ArgToLinearString(cx, args, 0);
+     if (!str)
+         return false;
+ 
+     Value result;
+     if (!Encode(cx, str, js_uriReservedPlusPound_ucstr, js_uriUnescaped_ucstr, &result))
+         return false;
+ 
+     args.rval().set(result);
+     return true;
+ }
+ 
+ static JSBool
+ str_encodeURI_Component(JSContext *cx, unsigned argc, Value *vp)
+ {
+     CallArgs args = CallArgsFromVp(argc, vp);
+-    JSLinearString *str = ArgToRootedString(cx, args, 0);
++    JSLinearString *str = ArgToLinearString(cx, args, 0);
+     if (!str)
+         return false;
+ 
+     Value result;
+     if (!Encode(cx, str, js_uriUnescaped_ucstr, NULL, &result))
+         return false;
+ 
+     args.rval().set(result);

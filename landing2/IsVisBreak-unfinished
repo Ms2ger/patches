@@ -1,0 +1,43 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -1149,21 +1149,33 @@ nsHTMLEditor::IsPrevCharWhitespace(nsIDO
+ 
+ 
+ 
+ /* ------------ End Block methods -------------- */
+ 
+ 
+ bool nsHTMLEditor::IsVisBreak(nsIDOMNode *aNode)
+ {
+-  NS_ENSURE_TRUE(aNode, false);
+-  if (!nsTextEditUtils::IsBreak(aNode)) 
++  nsCOMPtr<dom::Element> element = do_QueryInterface(aNode);
++  NS_ENSURE_TRUE(element, false);
++  return IsVisBreak(element);
++}
++
++bool
++nsHTMLEditor::IsVisBreak(dom::Element* aElement)
++{
++  MOZ_ASSERT(aElement);
++
++  if (!aElement->IsHTML(nsGkAtoms::br)) {
+     return false;
+-  // check if there is a later node in block after br
+-  nsCOMPtr<nsIDOMNode> priorNode, nextNode;
++  }
++
++  // Check if there is a later node in block after br.
++  nsIContent* priorNode;
++  nsIContent* nextNode;
+   GetPriorHTMLNode(aNode, address_of(priorNode), true); 
+   GetNextHTMLNode(aNode, address_of(nextNode), true); 
+   // if we are next to another break, we are visible
+   if (priorNode && nsTextEditUtils::IsBreak(priorNode))
+     return true;
+   if (nextNode && nsTextEditUtils::IsBreak(nextNode))
+     return true;
+   

@@ -1,0 +1,57 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/tests/mochitest/w3c/testharnessreport.js b/dom/tests/mochitest/w3c/testharnessreport.js
+--- a/dom/tests/mochitest/w3c/testharnessreport.js
++++ b/dom/tests/mochitest/w3c/testharnessreport.js
+@@ -32,16 +32,17 @@
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ "use strict";
+ var W3CTest = {
+   "expectedFailures": {},
++  "failures": {},
+   "tests": [],
+   "runner": parent.TestRunner || parent.wrappedJSObject.TestRunner,
+   "prefixes": [
+     ["TEST-UNEXPECTED-FAIL", "TEST-PASS"],
+     ["TEST-KNOWN-FAIL", "TEST-UNEXPECTED-PASS"]
+   ],
+   "getURL": function() {
+     return W3CTest.runner.currentTestURL.substring("/tests/dom/tests/mochitest/w3c/".length);
+@@ -62,26 +63,33 @@ var W3CTest = {
+     W3CTest.report({
+       "message": test.message || test.name,
+       "result": test.status === test.PASS,
+       "todo":
+         url in W3CTest.expectedFailures &&
+         (W3CTest.expectedFailures[url] === "all" ||
+          test.name in W3CTest.expectedFailures[url])
+     });
++    if (test.status !== test.PASS) {
++      if (!(url in W3CTest.expectedFailures)) {
++        W3CTest.expectedFailures[url] = {}
++      }
++      W3CTest.expectedFailures[url][test.name] = true;
++    }
+   },
+   "finish": function(tests, status) {
+     var url = W3CTest.getURL();
+     W3CTest.report({
+       "message": "Finished test",
+       "result": status.status === status.OK,
+       "todo":
+         url in W3CTest.expectedFailures &&
+         W3CTest.expectedFailures[url] === "error"
+     });
++    W3CTest.runner.error(JSON.stringify(W3CTest.expectedFailures[url]));
+     W3CTest.runner.testFinished(W3CTest.tests);
+   }
+ };
+ (function() {
+   if (parent === this) {
+     return;
+   }
+   add_result_callback(W3CTest.result);

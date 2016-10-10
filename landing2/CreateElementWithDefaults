@@ -1,0 +1,290 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsGkAtomList.h b/content/base/src/nsGkAtomList.h
+--- a/content/base/src/nsGkAtomList.h
++++ b/content/base/src/nsGkAtomList.h
+@@ -101,16 +101,17 @@ GK_ATOM(all, "all")
+ GK_ATOM(allowevents, "allowevents")
+ GK_ATOM(allownegativeassertions, "allownegativeassertions")
+ GK_ATOM(allowuntrusted, "allowuntrusted")
+ GK_ATOM(alt, "alt")
+ GK_ATOM(alternate, "alternate")
+ GK_ATOM(always, "always")
+ GK_ATOM(ancestor, "ancestor")
+ GK_ATOM(ancestorOrSelf, "ancestor-or-self")
++GK_ATOM(anchor, "anchor")
+ GK_ATOM(_and, "and")
+ GK_ATOM(any, "any")
+ GK_ATOM(mozapp, "mozapp")
+ GK_ATOM(applet, "applet")
+ GK_ATOM(applyImports, "apply-imports")
+ GK_ATOM(applyTemplates, "apply-templates")
+ GK_ATOM(archive, "archive")
+ GK_ATOM(area, "area")
+@@ -602,16 +603,17 @@ GK_ATOM(moz_action_hint, "mozactionhint"
+ GK_ATOM(x_moz_errormessage, "x-moz-errormessage")
+ GK_ATOM(msthemecompatible, "msthemecompatible")
+ GK_ATOM(multicol, "multicol")
+ GK_ATOM(multiple, "multiple")
+ #ifdef MOZ_MEDIA
+ GK_ATOM(muted, "muted")
+ #endif
+ GK_ATOM(name, "name")
++GK_ATOM(namedanchor, "namedanchor")
+ GK_ATOM(_namespace, "namespace")
+ GK_ATOM(namespaceAlias, "namespace-alias")
+ GK_ATOM(namespaceUri, "namespace-uri")
+ GK_ATOM(NaN, "NaN")
+ GK_ATOM(nav, "nav")
+ GK_ATOM(negate, "negate")
+ GK_ATOM(never, "never")
+ GK_ATOM(_new, "new")
+diff --git a/editor/idl/nsIHTMLEditor.idl b/editor/idl/nsIHTMLEditor.idl
+--- a/editor/idl/nsIHTMLEditor.idl
++++ b/editor/idl/nsIHTMLEditor.idl
+@@ -486,17 +486,17 @@ interface nsIHTMLEditor : nsISupports
+    * @param aTagName  The HTML tagname
+    *    Special input values for Links and Named anchors:
+    *    Use "href" to get a link node
+    *      (an "A" tag with the "href" attribute set)
+    *    Use "anchor" or "namedanchor" to get a named anchor node
+    *      (an "A" tag with the "name" attribute set)
+    * @return          The new element created.
+    */
+-  nsIDOMElement createElementWithDefaults(in AString aTagName);
++  nsIDOMElement createElementWithDefaults(in nsIAtom aTagName);
+ 
+   /** 
+    * Insert an link element as the parent of the current selection
+    *
+    * @param aElement   An "A" element with a non-empty "href" attribute
+    */
+   void insertLinkAroundSelection(in nsIDOMElement aAnchorElement);
+ 
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -1595,17 +1595,17 @@ nsHTMLEditor::RebuildDocumentFromSource(
+       res = LoadHTML(body + Substring(endclosehead, endtotal));
+     else if (foundhead) // assume there is no body
+       res = LoadHTML(body);
+     else // assume there is no head, the entire source is body
+       res = LoadHTML(body + aSourceString);
+     NS_ENSURE_SUCCESS(res, res);
+ 
+     nsCOMPtr<nsIDOMElement> divElement;
+-    res = CreateElementWithDefaults(NS_LITERAL_STRING("div"), getter_AddRefs(divElement));
++    res = CreateElementWithDefaults(nsGkAtoms::div, getter_AddRefs(divElement));
+     NS_ENSURE_SUCCESS(res, res);
+ 
+     res = CloneAttributes(bodyElement, divElement);
+     NS_ENSURE_SUCCESS(res, res);
+ 
+     return BeginningOfDocument();
+   }
+ 
+@@ -2878,74 +2878,65 @@ nsHTMLEditor::GetSelectedElement(const n
+     }
+   } 
+   else res = NS_EDITOR_ELEMENT_NOT_FOUND;
+ 
+   return res;
+ }
+ 
+ NS_IMETHODIMP
+-nsHTMLEditor::CreateElementWithDefaults(const nsAString& aTagName, nsIDOMElement** aReturn)
++nsHTMLEditor::CreateElementWithDefaults(nsIAtom* aTagName, nsIDOMElement** aReturn)
+ {
+-  nsresult res=NS_ERROR_NOT_INITIALIZED;
+-  if (aReturn)
+-    *aReturn = nsnull;
+-
+-//  NS_ENSURE_TRUE(aTagName && aReturn, NS_ERROR_NULL_POINTER);
+-  NS_ENSURE_TRUE(!aTagName.IsEmpty() && aReturn, NS_ERROR_NULL_POINTER);
+-    
+-  nsAutoString TagName(aTagName);
+-  ToLowerCase(TagName);
+-  nsAutoString realTagName;
+-
+-  if (IsLinkTag(TagName) || IsNamedAnchorTag(TagName))
+-  {
+-    realTagName.AssignLiteral("a");
++  NS_ENSURE_TRUE(aReturn, NS_ERROR_NULL_POINTER);
++
++  *aReturn = nsnull;
++
++  NS_ENSURE_TRUE(aTagName, NS_ERROR_NULL_POINTER);
++
++  nsIAtom* realTagName;
++  if (aTagName == nsGkAtoms::href || aTagName == nsGkAtoms::anchor ||
++      aTagName == nsGkAtoms::namedanchor) {
++    realTagName = nsGkAtoms::a;
+   } else {
+-    realTagName = TagName;
++    realTagName = aTagName;
+   }
+   //We don't use editor's CreateElement because we don't want to 
+   //  go through the transaction system
+ 
+-  nsCOMPtr<nsIDOMElement>newElement;
+-  nsCOMPtr<dom::Element> newContent;
+   nsCOMPtr<nsIDOMDocument> doc = do_QueryReferent(mDocWeak);
+   NS_ENSURE_TRUE(doc, NS_ERROR_NOT_INITIALIZED);
+ 
+   //new call to use instead to get proper HTML element, bug# 39919
+-  res = CreateHTMLContent(realTagName, getter_AddRefs(newContent));
+-  newElement = do_QueryInterface(newContent);
++  nsCOMPtr<dom::Element> newContent;
++  nsresult res = CreateHTMLContent(nsDependentAtomString(realTagName),
++                                   getter_AddRefs(newContent));
++  nsCOMPtr<nsIDOMElement> newElement = do_QueryInterface(newContent);
+   if (NS_FAILED(res) || !newElement)
+     return NS_ERROR_FAILURE;
+ 
+   // Mark the new element dirty, so it will be formatted
+   newElement->SetAttribute(NS_LITERAL_STRING("_moz_dirty"), EmptyString());
+ 
+   // Set default values for new elements
+-  if (TagName.EqualsLiteral("table")) {
++  if (realTagName == nsGkAtoms::table) {
+     res = newElement->SetAttribute(NS_LITERAL_STRING("cellpadding"),NS_LITERAL_STRING("2"));
+     NS_ENSURE_SUCCESS(res, res);
+     res = newElement->SetAttribute(NS_LITERAL_STRING("cellspacing"),NS_LITERAL_STRING("2"));
+     NS_ENSURE_SUCCESS(res, res);
+     res = newElement->SetAttribute(NS_LITERAL_STRING("border"),NS_LITERAL_STRING("1"));
+-  } else if (TagName.EqualsLiteral("td"))
+-  {
++    NS_ENSURE_SUCCESS(res, res);
++  } else if (realTagName == nsGkAtoms::td) {
+     res = SetAttributeOrEquivalent(newElement, NS_LITERAL_STRING("valign"),
+                                    NS_LITERAL_STRING("top"), true);
++    NS_ENSURE_SUCCESS(res, res);
+   }
+   // ADD OTHER TAGS HERE
+ 
+-  if (NS_SUCCEEDED(res))
+-  {
+-    *aReturn = newElement;
+-    // Getters must addref
+-    NS_ADDREF(*aReturn);
+-  }
+-
+-  return res;
++  newElement.forget(aReturn);
++  return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsHTMLEditor::InsertLinkAroundSelection(nsIDOMElement* aAnchorElement)
+ {
+   NS_ENSURE_TRUE(aAnchorElement, NS_ERROR_NULL_POINTER); 
+ 
+   // We must have a real selection
+diff --git a/editor/libeditor/html/nsTableEditor.cpp b/editor/libeditor/html/nsTableEditor.cpp
+--- a/editor/libeditor/html/nsTableEditor.cpp
++++ b/editor/libeditor/html/nsTableEditor.cpp
+@@ -132,23 +132,20 @@ nsHTMLEditor::InsertCell(nsIDOMElement *
+   NS_ENSURE_TRUE(cellParent, NS_ERROR_NULL_POINTER);
+ 
+ 
+   int32_t cellOffset;
+   res = GetChildOffset(aCell, cellParent, cellOffset);
+   NS_ENSURE_SUCCESS(res, res);
+ 
+   nsCOMPtr<nsIDOMElement> newCell;
+-  if (aIsHeader)
+-    res = CreateElementWithDefaults(NS_LITERAL_STRING("th"), getter_AddRefs(newCell));
+-  else
+-    res = CreateElementWithDefaults(NS_LITERAL_STRING("td"), getter_AddRefs(newCell));
+-    
+-  if(NS_FAILED(res)) return res;
+-  if(!newCell) return NS_ERROR_FAILURE;
++  res = CreateElementWithDefaults(aIsHeader ? nsGkAtoms::th : nsGkAtoms::td,
++                                  getter_AddRefs(newCell));
++  NS_ENSURE_SUCCESS(res, res);
++  NS_ENSURE_TRUE(newCell, NS_ERROR_FAILURE);
+ 
+   //Optional: return new cell created
+   if (aNewCell)
+   {
+     *aNewCell = newCell.get();
+     NS_ADDREF(*aNewCell);
+   }
+ 
+@@ -223,22 +220,22 @@ nsHTMLEditor::InsertTableCell(int32_t aN
+   nsSetSelectionAfterTableEdit setCaret(this, table, startRowIndex, newCellIndex, ePreviousColumn, false);
+   //...so suppress Rules System selection munging
+   nsAutoTxnsConserveSelection dontChangeSelection(this);
+ 
+   int32_t i;
+   for (i = 0; i < aNumber; i++)
+   {
+     nsCOMPtr<nsIDOMElement> newCell;
+-    res = CreateElementWithDefaults(NS_LITERAL_STRING("td"), getter_AddRefs(newCell));
++    res = CreateElementWithDefaults(nsGkAtoms::td, getter_AddRefs(newCell));
+     if (NS_SUCCEEDED(res) && newCell)
+     {
+       if (aAfter) cellOffset++;
+       res = InsertNode(newCell, cellParent, cellOffset);
+-      if(NS_FAILED(res)) break;
++      NS_ENSURE_SUCCESS(res, res);
+     }
+   }
+   return res;
+ }
+ 
+ 
+ NS_IMETHODIMP 
+ nsHTMLEditor::GetFirstRow(nsIDOMElement* aTableElement, nsIDOMNode** aRowNode)
+@@ -678,21 +675,21 @@ nsHTMLEditor::InsertTableRow(int32_t aNu
+   }
+ 
+   if (cellsInRow > 0)
+   {
+     // The row parent and offset where we will insert new row
+     nsCOMPtr<nsIDOMNode> parentOfRow;
+     int32_t newRowOffset;
+ 
+-    NS_NAMED_LITERAL_STRING(trStr, "tr");
+     if (cellForRowParent)
+     {
+       nsCOMPtr<nsIDOMElement> parentRow;
+-      res = GetElementOrParentByTagName(trStr, cellForRowParent, getter_AddRefs(parentRow));
++      res = GetElementOrParentByTagName(NS_LITERAL_STRING("tr"),
++        cellForRowParent, getter_AddRefs(parentRow));
+       NS_ENSURE_SUCCESS(res, res);
+       NS_ENSURE_TRUE(parentRow, NS_ERROR_NULL_POINTER);
+ 
+       parentRow->GetParentNode(getter_AddRefs(parentOfRow));
+       NS_ENSURE_TRUE(parentOfRow, NS_ERROR_NULL_POINTER);
+ 
+       res = GetChildOffset(parentRow, parentOfRow, newRowOffset);
+       NS_ENSURE_SUCCESS(res, res);
+@@ -703,25 +700,25 @@ nsHTMLEditor::InsertTableRow(int32_t aNu
+     }
+     else
+       return NS_ERROR_FAILURE;
+ 
+     for (int32_t row = 0; row < aNumber; row++)
+     {
+       // Create a new row
+       nsCOMPtr<nsIDOMElement> newRow;
+-      res = CreateElementWithDefaults(trStr, getter_AddRefs(newRow));
++      res = CreateElementWithDefaults(nsGkAtoms::tr, getter_AddRefs(newRow));
+       if (NS_SUCCEEDED(res))
+       {
+         NS_ENSURE_TRUE(newRow, NS_ERROR_FAILURE);
+       
+         for (int32_t i = 0; i < cellsInRow; i++)
+         {
+           nsCOMPtr<nsIDOMElement> newCell;
+-          res = CreateElementWithDefaults(NS_LITERAL_STRING("td"), getter_AddRefs(newCell));
++          res = CreateElementWithDefaults(nsGkAtoms::td, getter_AddRefs(newCell));
+           NS_ENSURE_SUCCESS(res, res);
+           NS_ENSURE_TRUE(newCell, NS_ERROR_FAILURE);
+ 
+           // Don't use transaction system yet! (not until entire row is inserted)
+           nsCOMPtr<nsIDOMNode>resultNode;
+           res = newRow->AppendChild(newCell, getter_AddRefs(resultNode));
+           NS_ENSURE_SUCCESS(res, res);
+         }

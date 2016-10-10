@@ -1,0 +1,94 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 724269 - Add nsHTMLCSSUtils::IsCSSEditableProperty(nsIContent*); r=ehsan
+
+diff --git a/editor/libeditor/html/nsHTMLCSSUtils.cpp b/editor/libeditor/html/nsHTMLCSSUtils.cpp
+--- a/editor/libeditor/html/nsHTMLCSSUtils.cpp
++++ b/editor/libeditor/html/nsHTMLCSSUtils.cpp
+@@ -313,26 +313,36 @@ nsHTMLCSSUtils::~nsHTMLCSSUtils()
+ // by aProperty and/or aAttribute for the node aNode
+ bool
+ nsHTMLCSSUtils::IsCSSEditableProperty(nsIDOMNode * aNode,
+                                       nsIAtom * aProperty,
+                                       const nsAString * aAttribute)
+ {
+   NS_ASSERTION(aNode, "Shouldn't you pass aNode? - Bug 214025");
+ 
+-  nsCOMPtr<nsIDOMNode> node = aNode;
++  nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
++  NS_ENSURE_TRUE(content, false);
++  return IsCSSEditableProperty(content, aProperty, aAttribute);
++}
++
++bool
++nsHTMLCSSUtils::IsCSSEditableProperty(nsIContent* aNode,
++                                      nsIAtom* aProperty,
++                                      const nsAString* aAttribute)
++{
++  MOZ_ASSERT(aNode);
++
++  nsIContent* content = aNode;
+   // we need an element node here
+-  if (mHTMLEditor->IsTextNode(aNode)) {
+-    aNode->GetParentNode(getter_AddRefs(node));
++  if (content->NodeType() == nsIDOMNode::TEXT_NODE) {
++    content = content->GetParent();
++    NS_ENSURE_TRUE(content, false);
+   }
+-  nsCOMPtr<nsIContent> content = do_QueryInterface(node);
+-  NS_ENSURE_TRUE(content, false);
+ 
+   nsIAtom *tagName = content->Tag();
+-  // brade: should the above use nsEditor::GetTag(aNode)?
+   // brade: shouldn't some of the above go below the next block?
+ 
+   // html inline styles B I TT U STRIKE and COLOR/FACE on FONT
+   if (nsEditProperty::b == aProperty
+       || nsEditProperty::i == aProperty
+       || nsEditProperty::tt == aProperty
+       || nsEditProperty::u == aProperty
+       || nsEditProperty::strike == aProperty
+diff --git a/editor/libeditor/html/nsHTMLCSSUtils.h b/editor/libeditor/html/nsHTMLCSSUtils.h
+--- a/editor/libeditor/html/nsHTMLCSSUtils.h
++++ b/editor/libeditor/html/nsHTMLCSSUtils.h
+@@ -103,17 +103,18 @@ public:
+   /** answers true if the given combination element_name/attribute_name
+     * has a CSS equivalence in this implementation
+     *
+     * @return               a boolean saying if the tag/attribute has a css equiv
+     * @param aNode          [IN] a DOM node
+     * @param aProperty      [IN] an atom containing a HTML tag name
+     * @param aAttribute     [IN] a string containing the name of a HTML attribute carried by the element above
+     */
+-  bool        IsCSSEditableProperty(nsIDOMNode * aNode, nsIAtom * aProperty, const nsAString * aAttribute);
++  bool IsCSSEditableProperty(nsIContent* aNode, nsIAtom* aProperty, const nsAString* aAttribute);
++  bool IsCSSEditableProperty(nsIDOMNode* aNode, nsIAtom* aProperty, const nsAString* aAttribute);
+ 
+   /** adds/remove a CSS declaration to the STYLE atrribute carried by a given element
+     *
+     * @param aElement       [IN] a DOM element
+     * @param aProperty      [IN] an atom containing the CSS property to set
+     * @param aValue         [IN] a string containing the value of the CSS property
+     * @param aSuppressTransaction [IN] a boolean indicating, when true,
+     *                                  that no transaction should be recorded
+diff --git a/editor/libeditor/html/nsHTMLEditRules.cpp b/editor/libeditor/html/nsHTMLEditRules.cpp
+--- a/editor/libeditor/html/nsHTMLEditRules.cpp
++++ b/editor/libeditor/html/nsHTMLEditRules.cpp
+@@ -856,17 +856,17 @@ nsHTMLEditRules::GetAlignment(bool *aMix
+     blockParent = mHTMLEditor->GetBlockNodeParent(nodeToExamine);
+ 
+   NS_ENSURE_TRUE(blockParent, NS_ERROR_FAILURE);
+ 
+   if (mHTMLEditor->IsCSSEnabled())
+   {
+     nsCOMPtr<nsIContent> blockParentContent = do_QueryInterface(blockParent);
+     if (blockParentContent && 
+-        mHTMLEditor->mHTMLCSSUtils->IsCSSEditableProperty(blockParent, dummyProperty, &typeAttrName))
++        mHTMLEditor->mHTMLCSSUtils->IsCSSEditableProperty(blockParentContent, dummyProperty, &typeAttrName))
+     {
+       // we are in CSS mode and we know how to align this element with CSS
+       nsAutoString value;
+       // let's get the value(s) of text-align or margin-left/margin-right
+       mHTMLEditor->mHTMLCSSUtils->GetCSSEquivalentToHTMLInlineStyleSet(blockParent,
+                                                      dummyProperty,
+                                                      &typeAttrName,
+                                                      value,

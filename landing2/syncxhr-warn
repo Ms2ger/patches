@@ -1,0 +1,73 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsXMLHttpRequest.cpp b/content/base/src/nsXMLHttpRequest.cpp
+--- a/content/base/src/nsXMLHttpRequest.cpp
++++ b/content/base/src/nsXMLHttpRequest.cpp
+@@ -1579,18 +1579,24 @@ nsXMLHttpRequest::Open(const nsACString&
+       LogMessage("TimeoutSyncXHRWarning", mOwner);
+     }
+     if (mResponseType != XML_HTTP_RESPONSE_TYPE_DEFAULT) {
+       LogMessage("ResponseTypeSyncXHRWarning", mOwner);
+     }
+     return NS_ERROR_DOM_INVALID_ACCESS_ERR;
+   }
+ 
+-  nsresult rv;
+-  nsCOMPtr<nsIURI> uri;
++  if (!async && mOwner) {
++    bool chrome = false; // default to false in case IsCapabilityEnabled fails
++    IsCapabilityEnabled("UniversalXPConnect", &chrome);
++    if (chrome) {
++      LogMessage("ChromeSyncXHRWarning", mOwner);
++    }
++    // TODO bug 721336: Throw.
++  }
+ 
+   if (mState & (XML_HTTP_REQUEST_OPENED |
+                 XML_HTTP_REQUEST_HEADERS_RECEIVED |
+                 XML_HTTP_REQUEST_LOADING |
+                 XML_HTTP_REQUEST_SENT |
+                 XML_HTTP_REQUEST_STOPPED)) {
+     // IE aborts as well
+     Abort();
+@@ -1619,17 +1625,18 @@ nsXMLHttpRequest::Open(const nsACString&
+   nsCOMPtr<nsIURI> baseURI;
+   if (mBaseURI) {
+     baseURI = mBaseURI;
+   }
+   else if (doc) {
+     baseURI = doc->GetBaseURI();
+   }
+ 
+-  rv = NS_NewURI(getter_AddRefs(uri), url, nsnull, baseURI);
++  nsCOMPtr<nsIURI> uri;
++  nsresult rv = NS_NewURI(getter_AddRefs(uri), url, nsnull, baseURI);
+   if (NS_FAILED(rv)) return rv;
+ 
+   // mScriptContext should be initialized because of GetBaseURI() above.
+   // Still need to consider the case that doc is nsnull however.
+   rv = CheckInnerWindowCorrectness();
+   NS_ENSURE_SUCCESS(rv, rv);
+   int16_t shouldLoad = nsIContentPolicy::ACCEPT;
+   rv = NS_CheckContentLoadPolicy(nsIContentPolicy::TYPE_XMLHTTPREQUEST,
+diff --git a/dom/locales/en-US/chrome/dom/dom.properties b/dom/locales/en-US/chrome/dom/dom.properties
+--- a/dom/locales/en-US/chrome/dom/dom.properties
++++ b/dom/locales/en-US/chrome/dom/dom.properties
+@@ -131,16 +131,17 @@ FullScreenDeniedNotFocusedTab=Request fo
+ RemovedFullScreenElement=Exited full-screen because full-screen element was removed from document.
+ FocusedWindowedPluginWhileFullScreen=Exited full-screen because windowed plugin was focused.
+ HTMLMultipartXHRWarning=HTML parsing in XMLHttpRequest is not supported for multipart responses.
+ HTMLSyncXHRWarning=HTML parsing in XMLHttpRequest is not supported in the synchronous mode.
+ InvalidRedirectChannelWarning=Unable to redirect to %S because the channel doesn't implement nsIWritablePropertyBag2.
+ ResponseTypeSyncXHRWarning=Use of XMLHttpRequest's responseType attribute is no longer supported in the synchronous mode in window context.
+ WithCredentialsSyncXHRWarning=Use of XMLHttpRequest's withCredentials attribute is no longer supported in the synchronous mode in window context.
+ TimeoutSyncXHRWarning=Use of XMLHttpRequest's timeout attribute is not supported in the synchronous mode in window context.
++ChromeSyncXHRWarning=Use of XMLHttpRequest in the synchronous mode in window context will no longer supported be with chrome privileges.
+ JSONCharsetWarning=An attempt was made to declare a non-UTF-8 encoding for JSON retrieved using XMLHttpRequest. Only UTF-8 is supported for decoding JSON.
+ MediaLoadExhaustedCandidates=All candidate resources failed to load. Media load paused.
+ MediaLoadSourceMissingSrc=<source> element has no "src" attribute. Media resource load failed.
+ # LOCALIZATION NOTE: %1$S is the Http error code the server returned (e.g. 404, 500, etc), %2$S is the URL of the media resource which failed to load.
+ MediaLoadHttpError=HTTP load failed with status %1$S. Load of media resource %2$S failed.
+ # LOCALIZATION NOTE: %S is the URL of the media resource which failed to load.
+ MediaLoadInvalidURI=Invalid URI. Load of media resource %S failed.
+ # LOCALIZATION NOTE: %1$S is the media resource's format/codec type (basically equivalent to the file type, e.g. MP4,AVI,WMV,MOV etc), %2$S is the URL of the media resource which failed to load.

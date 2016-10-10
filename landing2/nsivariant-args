@@ -1,0 +1,36 @@
+From: Peter Van der Beken <peterv@propagandism.org>
+
+diff --git a/js/xpconnect/src/nsDOMQS.h b/js/xpconnect/src/nsDOMQS.h
+--- a/js/xpconnect/src/nsDOMQS.h
++++ b/js/xpconnect/src/nsDOMQS.h
+@@ -172,16 +172,30 @@ xpc_qsUnwrapArg<_clazz>(JSContext *cx, j
+ 
+ DEFINE_UNWRAP_CAST_HTML(canvas, mozilla::dom::HTMLCanvasElement)
+ DEFINE_UNWRAP_CAST_HTML(form, nsHTMLFormElement)
+ DEFINE_UNWRAP_CAST_HTML(img, mozilla::dom::HTMLImageElement)
+ DEFINE_UNWRAP_CAST_HTML(optgroup, mozilla::dom::HTMLOptGroupElement)
+ DEFINE_UNWRAP_CAST_HTML(option, mozilla::dom::HTMLOptionElement)
+ DEFINE_UNWRAP_CAST_HTML(video, mozilla::dom::HTMLVideoElement)
+ 
++template <>
++inline nsresult
++xpc_qsUnwrapArg(JSContext *cx, jsval v, nsIVariant **ppArg,
++                nsIVariant **ppArgRef, jsval *vp)
++{
++    nsRefPtr<XPCVariant> variant = dont_AddRef(XPCVariant::newVariant(cx, v));
++    variant.forget(ppArgRef);
++    if (!*ppArgRef) {
++        return NS_ERROR_FAILURE;
++    }
++    *ppArg = *ppArgRef;
++    return NS_OK;
++}
++
+ inline nsISupports*
+ ToSupports(nsContentList *p)
+ {
+     return static_cast<nsINodeList*>(p);
+ }
+ 
+ inline nsISupports*
+ ToCanonicalSupports(nsINode* p)

@@ -1,0 +1,223 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/events/src/nsDOMEvent.cpp b/content/events/src/nsDOMEvent.cpp
+--- a/content/events/src/nsDOMEvent.cpp
++++ b/content/events/src/nsDOMEvent.cpp
+@@ -1089,18 +1089,17 @@ nsDOMEvent::GetClientCoords(nsPresContex
+     return CSSIntPoint(0, 0);
+   }
+ 
+   nsIFrame* rootFrame = shell->GetRootFrame();
+   if (!rootFrame) {
+     return CSSIntPoint(0, 0);
+   }
+   nsPoint pt =
+-    nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent,
+-      LayoutDeviceIntPoint::ToUntyped(aPoint), rootFrame);
++    nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, aPoint, rootFrame);
+ 
+   return CSSIntPoint::FromAppUnitsRounded(pt);
+ }
+ 
+ // To be called ONLY by nsDOMEvent::GetType (which has the additional
+ // logic for handling user-defined events).
+ // static
+ const char* nsDOMEvent::GetEventName(uint32_t aEventType)
+diff --git a/dom/base/nsDOMWindowUtils.cpp b/dom/base/nsDOMWindowUtils.cpp
+--- a/dom/base/nsDOMWindowUtils.cpp
++++ b/dom/base/nsDOMWindowUtils.cpp
+@@ -3136,18 +3136,18 @@ nsDOMWindowUtils::SelectAtPoint(float aX
+   nsIFrame* rootFrame = presShell->FrameManager()->GetRootFrame();
+   if (!rootFrame) {
+     return NS_ERROR_UNEXPECTED;
+   }
+ 
+   // Get the target frame at the client coordinates passed to us
+   nsPoint offset;
+   nsCOMPtr<nsIWidget> widget = GetWidget(&offset);
+-  nsIntPoint pt = LayoutDeviceIntPoint::ToUntyped(
+-    ToWidgetPoint(CSSPoint(aX, aY), offset, GetPresContext()));
++  LayoutDeviceIntPoint pt =
++    ToWidgetPoint(CSSPoint(aX, aY), offset, GetPresContext());
+   nsPoint ptInRoot =
+     nsLayoutUtils::GetEventCoordinatesRelativeTo(widget, pt, rootFrame);
+   nsIFrame* targetFrame = nsLayoutUtils::GetFrameForPoint(rootFrame, ptInRoot);
+   // This can happen if the page hasn't loaded yet or if the point
+   // is outside the frame.
+   if (!targetFrame) {
+     return NS_ERROR_INVALID_ARG;
+   }
+diff --git a/layout/base/nsLayoutUtils.cpp b/layout/base/nsLayoutUtils.cpp
+--- a/layout/base/nsLayoutUtils.cpp
++++ b/layout/base/nsLayoutUtils.cpp
+@@ -1253,24 +1253,22 @@ nsLayoutUtils::GetEventCoordinatesRelati
+                   aEvent->eventStructType != NS_DRAG_EVENT &&
+                   aEvent->eventStructType != NS_SIMPLE_GESTURE_EVENT &&
+                   aEvent->eventStructType != NS_GESTURENOTIFY_EVENT &&
+                   aEvent->eventStructType != NS_TOUCH_EVENT &&
+                   aEvent->eventStructType != NS_QUERY_CONTENT_EVENT))
+     return nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
+ 
+   const nsGUIEvent* GUIEvent = static_cast<const nsGUIEvent*>(aEvent);
+-  return GetEventCoordinatesRelativeTo(aEvent,
+-                                       LayoutDeviceIntPoint::ToUntyped(GUIEvent->refPoint),
+-                                       aFrame);
++  return GetEventCoordinatesRelativeTo(aEvent, GUIEvent->refPoint, aFrame);
+ }
+ 
+ nsPoint
+ nsLayoutUtils::GetEventCoordinatesRelativeTo(const nsEvent* aEvent,
+-                                             const nsIntPoint aPoint,
++                                             const LayoutDeviceIntPoint aPoint,
+                                              nsIFrame* aFrame)
+ {
+   if (!aFrame) {
+     return nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
+   }
+ 
+   const nsGUIEvent* GUIEvent = static_cast<const nsGUIEvent*>(aEvent);
+   nsIWidget* widget = GUIEvent->widget;
+@@ -1278,17 +1276,17 @@ nsLayoutUtils::GetEventCoordinatesRelati
+     return nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
+   }
+ 
+   return GetEventCoordinatesRelativeTo(widget, aPoint, aFrame);
+ }
+ 
+ nsPoint
+ nsLayoutUtils::GetEventCoordinatesRelativeTo(nsIWidget* aWidget,
+-                                             const nsIntPoint aPoint,
++                                             const LayoutDeviceIntPoint aPoint,
+                                              nsIFrame* aFrame)
+ {
+   if (!aFrame || !aWidget) {
+     return nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
+   }
+ 
+   nsView* view = aFrame->GetView();
+   if (view) {
+@@ -1319,17 +1317,17 @@ nsLayoutUtils::GetEventCoordinatesRelati
+   }
+ 
+   nsView* rootView = rootFrame->GetView();
+   if (!rootView) {
+     return nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
+   }
+ 
+   nsPoint widgetToView = TranslateWidgetToView(rootFrame->PresContext(),
+-    aWidget, LayoutDeviceIntPoint::FromUntyped(aPoint), rootView);
++                                               aWidget, aPoint, rootView);
+ 
+   if (widgetToView == nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE)) {
+     return nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
+   }
+ 
+   // Convert from root document app units to app units of the document aFrame
+   // is in.
+   int32_t rootAPD = rootFrame->PresContext()->AppUnitsPerDevPixel();
+diff --git a/layout/base/nsLayoutUtils.h b/layout/base/nsLayoutUtils.h
+--- a/layout/base/nsLayoutUtils.h
++++ b/layout/base/nsLayoutUtils.h
+@@ -470,31 +470,31 @@ public:
+    * @param aEvent the event
+    * @param aPoint the point to get the coordinates relative to
+    * @param aFrame the frame to make coordinates relative to
+    * @return the point, or (NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE) if
+    * for some reason the coordinates for the mouse are not known (e.g.,
+    * the event is not a GUI event).
+    */
+   static nsPoint GetEventCoordinatesRelativeTo(const nsEvent* aEvent,
+-                                               const nsIntPoint aPoint,
++                                               const mozilla::LayoutDeviceIntPoint aPoint,
+                                                nsIFrame* aFrame);
+ 
+   /**
+    * Get the coordinates of a given point relative to a widget and a
+    * given frame.
+    * @param aWidget the event src widget
+    * @param aPoint the point to get the coordinates relative to
+    * @param aFrame the frame to make coordinates relative to
+    * @return the point, or (NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE) if
+    * for some reason the coordinates for the mouse are not known (e.g.,
+    * the event is not a GUI event).
+    */
+   static nsPoint GetEventCoordinatesRelativeTo(nsIWidget* aWidget,
+-                                               const nsIntPoint aPoint,
++                                               const mozilla::LayoutDeviceIntPoint aPoint,
+                                                nsIFrame* aFrame);
+ 
+   /**
+    * Get the popup frame of a given native mouse event.
+    * @param aPresContext only check popups within aPresContext or a descendant
+    * @param aEvent  the event.
+    * @return        Null, if there is no popup frame at the point, otherwise,
+    *                returns top-most popup frame at the point.
+diff --git a/layout/base/nsPresShell.cpp b/layout/base/nsPresShell.cpp
+--- a/layout/base/nsPresShell.cpp
++++ b/layout/base/nsPresShell.cpp
+@@ -6166,18 +6166,17 @@ PresShell::HandleEvent(nsIFrame        *
+         for (int32_t i = touchEvent->touches.Length(); i; ) {
+           --i;
+           dom::Touch* touch = touchEvent->touches[i];
+ 
+           int32_t id = touch->Identifier();
+           if (!gCaptureTouchList->Get(id, nullptr)) {
+             // find the target for this touch
+             eventPoint = nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent,
+-                                                              touch->mRefPoint,
+-                                                              frame);
++              LayoutDeviceIntPoint::FromUntyped(touch->mRefPoint), frame);
+             nsIFrame* target = FindFrameTargetedByInputEvent(aEvent,
+                                                              frame,
+                                                              eventPoint,
+                                                              flags);
+             if (target && !anyTarget) {
+               target->GetContentForEvent(aEvent, getter_AddRefs(anyTarget));
+               while (anyTarget && !anyTarget->IsElement()) {
+                 anyTarget = anyTarget->GetParent();
+diff --git a/layout/forms/nsRangeFrame.cpp b/layout/forms/nsRangeFrame.cpp
+--- a/layout/forms/nsRangeFrame.cpp
++++ b/layout/forms/nsRangeFrame.cpp
+@@ -478,18 +478,17 @@ nsRangeFrame::GetValueAtEventPoint(nsGUI
+     MOZ_ASSERT(static_cast<nsTouchEvent*>(aEvent)->touches.Length() == 1,
+                "Unexpected number of touches");
+     absPoint = LayoutDeviceIntPoint::FromUntyped(
+       static_cast<nsTouchEvent*>(aEvent)->touches[0]->mRefPoint);
+   } else {
+     absPoint = aEvent->refPoint;
+   }
+   nsPoint point =
+-    nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, 
+-      LayoutDeviceIntPoint::ToUntyped(absPoint), this);
++    nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, absPoint, this);
+ 
+   if (point == nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE)) {
+     // We don't want to change the current value for this error state.
+     return static_cast<dom::HTMLInputElement*>(mContent)->GetValueAsDecimal();
+   }
+ 
+   nsRect rangeContentRect = GetContentRectRelativeToSelf();
+   nsSize thumbSize;
+diff --git a/layout/xul/base/src/nsBoxFrame.cpp b/layout/xul/base/src/nsBoxFrame.cpp
+--- a/layout/xul/base/src/nsBoxFrame.cpp
++++ b/layout/xul/base/src/nsBoxFrame.cpp
+@@ -2057,17 +2057,18 @@ nsBoxFrame::WrapListsInRedirector(nsDisp
+   nsXULEventRedirectorWrapper wrapper(this);
+   wrapper.WrapLists(aBuilder, this, aIn, aOut);
+ }
+ 
+ bool
+ nsBoxFrame::GetEventPoint(nsGUIEvent* aEvent, nsPoint &aPoint) {
+   nsIntPoint refPoint;
+   bool res = GetEventPoint(aEvent, refPoint);
+-  aPoint = nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, refPoint, this);
++  aPoint = nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent,
++    LayoutDeviceIntPoint::FromUntyped(refPoint), this);
+   return res;
+ }
+ 
+ bool
+ nsBoxFrame::GetEventPoint(nsGUIEvent* aEvent, nsIntPoint &aPoint) {
+   NS_ENSURE_TRUE(aEvent, false);
+ 
+   if (aEvent->eventStructType == NS_TOUCH_EVENT) {

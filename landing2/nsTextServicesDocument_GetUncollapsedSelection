@@ -1,0 +1,156 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/txtsvc/src/nsTextServicesDocument.cpp b/editor/txtsvc/src/nsTextServicesDocument.cpp
+--- a/editor/txtsvc/src/nsTextServicesDocument.cpp
++++ b/editor/txtsvc/src/nsTextServicesDocument.cpp
+@@ -2710,72 +2710,60 @@ nsTextServicesDocument::GetCollapsedSele
+   }
+ 
+   return NS_ERROR_FAILURE;
+ }
+ 
+ nsresult
+ nsTextServicesDocument::GetUncollapsedSelection(nsITextServicesDocument::TSDBlockSelectionStatus *aSelStatus, int32_t *aSelOffset, int32_t *aSelLength)
+ {
+-  nsresult result;
+-
+   nsCOMPtr<nsISelection> selection;
+-  nsCOMPtr<nsIDOMRange> range;
+-  OffsetEntry *entry;
+-
+-  result = mSelCon->GetSelection(nsISelectionController::SELECTION_NORMAL, getter_AddRefs(selection));
+-
++  nsresult result = mSelCon->GetSelection(nsISelectionController::SELECTION_NORMAL, getter_AddRefs(selection));
+   NS_ENSURE_SUCCESS(result, result);
+-
+   NS_ENSURE_TRUE(selection, NS_ERROR_FAILURE);
+ 
+   // It is assumed that the calling function has made sure that the
+   // selection is not collapsed, and that the input params to this
+   // method are initialized to some defaults.
+ 
+   nsCOMPtr<nsIDOMNode> startParent, endParent;
+   int32_t startOffset, endOffset;
+-  int32_t rangeCount, tableCount, i;
+-  int32_t e1s1, e1s2, e2s1, e2s2;
+-
+-  OffsetEntry *eStart, *eEnd;
+-  int32_t eStartOffset, eEndOffset;
+-
+-  tableCount = mOffsetTable.Length();
++  int32_t e1s2, e2s1;
++
++  int32_t tableCount = mOffsetTable.Length();
+ 
+   // Get pointers to the first and last offset entries
+   // in the table.
+ 
+-  eStart = mOffsetTable[0];
+-
++  OffsetEntry* eStart = mOffsetTable[0];
++
++  OffsetEntry* eEnd;
+   if (tableCount > 1)
+     eEnd = mOffsetTable[tableCount - 1];
+   else
+     eEnd = eStart;
+ 
+-  eStartOffset = eStart->mNodeOffset;
+-  eEndOffset   = eEnd->mNodeOffset + eEnd->mLength;
+-
++  int32_t eStartOffset = eStart->mNodeOffset;
++  int32_t eEndOffset   = eEnd->mNodeOffset + eEnd->mLength;
++
++  int32_t rangeCount;
+   result = selection->GetRangeCount(&rangeCount);
+-
+   NS_ENSURE_SUCCESS(result, result);
+ 
+   // Find the first range in the selection that intersects
+   // the current text block.
+ 
+-  for (i = 0; i < rangeCount; i++)
+-  {
++  for (int32_t i = 0; i < rangeCount; i++) {
++    nsCOMPtr<nsIDOMRange> range;
+     result = selection->GetRangeAt(i, getter_AddRefs(range));
+-
+     NS_ENSURE_SUCCESS(result, result);
+ 
+     result = GetRangeEndPoints(range,
+                                getter_AddRefs(startParent), &startOffset,
+                                getter_AddRefs(endParent), &endOffset);
+-
+     NS_ENSURE_SUCCESS(result, result);
+ 
+     e1s2 = nsContentUtils::ComparePoints(eStart->mNode, eStartOffset,
+                                          endParent, endOffset);
+     e2s1 = nsContentUtils::ComparePoints(eEnd->mNode, eEndOffset,
+                                          startParent, startOffset);
+ 
+     // Break out of the loop if the text block intersects the current range.
+@@ -2790,20 +2778,20 @@ nsTextServicesDocument::GetUncollapsedSe
+   {
+     *aSelStatus = nsITextServicesDocument::eBlockOutside;
+     *aSelOffset = *aSelLength = -1;
+     return NS_OK;
+   }
+ 
+   // Now that we have an intersecting range, find out more info:
+ 
+-  e1s1 = nsContentUtils::ComparePoints(eStart->mNode, eStartOffset,
+-                                       startParent, startOffset);
+-  e2s2 = nsContentUtils::ComparePoints(eEnd->mNode, eEndOffset,
+-                                       endParent, endOffset);
++  int32_t e1s1 = nsContentUtils::ComparePoints(eStart->mNode, eStartOffset,
++                                               startParent, startOffset);
++  int32_t e2s2 = nsContentUtils::ComparePoints(eEnd->mNode, eEndOffset,
++                                               endParent, endOffset);
+ 
+   if (rangeCount > 1)
+   {
+     // There are multiple selection ranges, we only deal
+     // with the first one that intersects the current,
+     // text block, so mark this a as a partial.
+ 
+     *aSelStatus = nsITextServicesDocument::eBlockPartial;
+@@ -2852,16 +2840,17 @@ nsTextServicesDocument::GetUncollapsedSe
+   if (e2s2 <= 0) {
+     p2 = eEnd->mNode;
+     o2 = eEndOffset;
+   } else {
+     p2 = endParent;
+     o2 = endOffset;
+   }
+ 
++  nsCOMPtr<nsIDOMRange> range;
+   result = CreateRange(p1, o1, p2, o2, getter_AddRefs(range));
+   NS_ENSURE_SUCCESS(result, result);
+ 
+   // Now iterate over this range to figure out the selection's
+   // block offset and length.
+ 
+   nsCOMPtr<nsIContentIterator> iter;
+   result = CreateContentIterator(range, getter_AddRefs(iter));
+@@ -2915,19 +2904,18 @@ nsTextServicesDocument::GetUncollapsedSe
+     }
+ 
+     NS_ENSURE_TRUE(found, NS_ERROR_FAILURE);
+   }
+ 
+   found    = false;
+   *aSelLength = 0;
+ 
+-  for (i = 0; i < tableCount; i++)
+-  {
+-    entry = mOffsetTable[i];
++  for (int32_t i = 0; i < tableCount; i++) {
++    OffsetEntry* entry = mOffsetTable[i];
+ 
+     NS_ENSURE_TRUE(entry, NS_ERROR_FAILURE);
+ 
+     if (!found)
+     {
+       if (entry->mNode == p1.get() &&
+           entry->mNodeOffset <= o1 && o1 <= (entry->mNodeOffset + entry->mLength))
+       {

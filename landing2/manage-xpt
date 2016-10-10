@@ -1,0 +1,607 @@
+# HG changeset patch
+# User Gregory Szorc <gps@mozilla.com>
+# Date 1382657241 25200
+#      Thu Oct 24 16:27:21 2013 -0700
+# Node ID 8f47ed335ee235fb79266413280dba8aa4081b49
+# Parent a0b2ccc6ebbbc8ae3efdca51ecbea1b79d938f51
+Bug 923080 - Generate xpt files into final location
+
+Now that the mozbuild backend knows about FINAL_TARGET, we are able to
+install generated xpt files into their final location. This saves us
+from copying xpt files into their final location on every build.
+
+diff --git a/Makefile.in b/Makefile.in
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -82,17 +82,17 @@ include backend.RecursiveMakeBackend.pp
+ default:: backend.RecursiveMakeBackend
+ 
+ ifdef BUILD_JS
+ .PHONY: js-config-status
+ js-config-status:
+ 	$(call SUBMAKE,backend.RecursiveMakeBackend,js/src,1)
+ endif
+ 
+-install_manifests := bin idl include public private sdk
++install_manifests := bin idl include public private sdk xpi-stage
+ install_manifest_depends = \
+   CLOBBER \
+   $(topsrcdir)/configure \
+   config.status \
+   backend.RecursiveMakeBackend \
+   $(NULL)
+ 
+ ifdef BUILD_JS
+diff --git a/config/makefiles/xpidl/Makefile.in b/config/makefiles/xpidl/Makefile.in
+--- a/config/makefiles/xpidl/Makefile.in
++++ b/config/makefiles/xpidl/Makefile.in
+@@ -31,41 +31,38 @@ include $(topsrcdir)/config/rules.mk
+ # processing XPIDL files is not trivial, it is preferrable to cache the headers
+ # and reinstall them rather than regenerate them. Ideally the dist pruning is
+ # performed with manifests. At that time we can write headers directly to the
+ # dist directory.
+ 
+ # For dependency files.
+ idl_deps_dir := .deps
+ 
+-# Where we put our final, linked .xpt files.
+-idl_xpt_dir := xpt
+-
+ dist_idl_dir := $(DIST)/idl
+ dist_include_dir := $(DIST)/include
+ process_py := $(topsrcdir)/python/mozbuild/mozbuild/action/xpidl-process.py
+ 
+ # TODO we should use py_action, but that would require extra directories to be
+ # in the virtualenv.
+-idlprocess := $(PYTHON_PATH) $(PLY_INCLUDE) -I$(IDL_PARSER_DIR) -I$(IDL_PARSER_CACHE_DIR) \
++idlprocess = $(PYTHON_PATH) $(PLY_INCLUDE) -I$(IDL_PARSER_DIR) -I$(IDL_PARSER_CACHE_DIR) \
+     $(process_py) --cache-dir $(IDL_PARSER_CACHE_DIR) $(dist_idl_dir) \
+-        $(dist_include_dir) $(idl_xpt_dir) $(idl_deps_dir)
++        $(dist_include_dir) $(dir $@) $(idl_deps_dir)
+ 
+ ifdef LIBXUL_SDK
+ idlprocess += -I$(LIBXUL_SDK)/idl
+ endif
+ 
+ xpidl_modules := @xpidl_modules@
++xpt_files := @xpt_files@
+ 
+ @xpidl_rules@
+ 
+-linked_xpt_files := $(addprefix $(idl_xpt_dir)/,$(addsuffix .xpt,$(xpidl_modules)))
+ depends_files := $(foreach root,$(xpidl_modules),$(idl_deps_dir)/$(root).pp)
+ 
+-GARBAGE += $(linked_xpt_files) $(depends_files)
++GARBAGE += $(xpt_files) $(depends_files)
+ 
+-xpidl:: $(linked_xpt_files)
++xpidl:: $(xpt_files)
+ 
+-$(linked_xpt_files): $(process_py) $(call mkdir_deps,$(idl_deps_dir) $(dist_include_dir) $(idl_xpt_dir))
++$(xpt_files): $(process_py) $(call mkdir_deps,$(idl_deps_dir) $(dist_include_dir))
+ 
+ $(call include_deps,$(depends_files))
+ 
+ .PHONY: xpidl
+diff --git a/config/rules.mk b/config/rules.mk
+--- a/config/rules.mk
++++ b/config/rules.mk
+@@ -1201,20 +1201,16 @@ endif
+ endif
+ 
+ ################################################################################
+ # Install a linked .xpt into the appropriate place.
+ # This should ideally be performed by the non-recursive idl make file. Some day.
+ ifdef XPT_NAME #{
+ 
+ ifndef NO_DIST_INSTALL
+-_XPT_NAME_FILES := $(DEPTH)/config/makefiles/xpidl/xpt/$(XPT_NAME)
+-_XPT_NAME_DEST := $(FINAL_TARGET)/components
+-INSTALL_TARGETS += _XPT_NAME
+-
+ ifndef NO_INTERFACES_MANIFEST
+ libs:: $(call mkdir_deps,$(FINAL_TARGET)/components)
+ 	$(call py_action,buildlist,$(FINAL_TARGET)/components/interfaces.manifest "interfaces $(XPT_NAME)")
+ 	$(call py_action,buildlist,$(FINAL_TARGET)/chrome.manifest "manifest components/interfaces.manifest")
+ endif
+ endif
+ 
+ endif #} XPT_NAME
+diff --git a/js/src/config/rules.mk b/js/src/config/rules.mk
+--- a/js/src/config/rules.mk
++++ b/js/src/config/rules.mk
+@@ -1201,20 +1201,16 @@ endif
+ endif
+ 
+ ################################################################################
+ # Install a linked .xpt into the appropriate place.
+ # This should ideally be performed by the non-recursive idl make file. Some day.
+ ifdef XPT_NAME #{
+ 
+ ifndef NO_DIST_INSTALL
+-_XPT_NAME_FILES := $(DEPTH)/config/makefiles/xpidl/xpt/$(XPT_NAME)
+-_XPT_NAME_DEST := $(FINAL_TARGET)/components
+-INSTALL_TARGETS += _XPT_NAME
+-
+ ifndef NO_INTERFACES_MANIFEST
+ libs:: $(call mkdir_deps,$(FINAL_TARGET)/components)
+ 	$(call py_action,buildlist,$(FINAL_TARGET)/components/interfaces.manifest "interfaces $(XPT_NAME)")
+ 	$(call py_action,buildlist,$(FINAL_TARGET)/chrome.manifest "manifest components/interfaces.manifest")
+ endif
+ endif
+ 
+ endif #} XPT_NAME
+diff --git a/js/xpconnect/tests/idl/Makefile.in b/js/xpconnect/tests/idl/Makefile.in
+--- a/js/xpconnect/tests/idl/Makefile.in
++++ b/js/xpconnect/tests/idl/Makefile.in
+@@ -1,11 +1,11 @@
+ #
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+ componentdir = js/xpconnect/tests/components
+-libs:: $(DEPTH)/config/makefiles/xpidl/xpt/$(MODULE).xpt
++libs:: $(FINAL_TARGET)/components/$(MODULE).xpt
+ 	$(INSTALL) $^ $(testxpcobjdir)/$(componentdir)/native
+ 	$(INSTALL) $^ $(testxpcobjdir)/$(componentdir)/js
+diff --git a/netwerk/test/httpserver/Makefile.in b/netwerk/test/httpserver/Makefile.in
+--- a/netwerk/test/httpserver/Makefile.in
++++ b/netwerk/test/httpserver/Makefile.in
+@@ -4,15 +4,23 @@
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ NO_INTERFACES_MANIFEST = 1
+ 
+ ifdef XPI_NAME
+ NO_JS_MANIFEST = 1
+ USE_EXTENSION_MANIFEST = 1
++
++# The xpt for the http server also needs to be installed into the reftest
++# XPI directory. This is a bit hacky. But everything involving XPI_NAME
++# seems to be hacky for the moment.
++reftest_xpt_FILES = $(DIST)/bin/components/test_necko.xpt
++reftest_xpt_DEST = $(DIST)/xpi-stage/reftest/components
++INSTALL_TARGETS += reftest_xpt
++
+ else
+ EXTRA_COMPONENTS += \
+                    httpd.manifest \
+                    $(NULL)
+ endif
+ 
+ TESTING_JS_MODULES = httpd.js
+diff --git a/python/mozbuild/mozbuild/backend/common.py b/python/mozbuild/mozbuild/backend/common.py
+--- a/python/mozbuild/mozbuild/backend/common.py
++++ b/python/mozbuild/mozbuild/backend/common.py
+@@ -24,17 +24,17 @@ class XPIDLManager(object):
+     def __init__(self, config):
+         self.config = config
+         self.topsrcdir = config.topsrcdir
+         self.topobjdir = config.topobjdir
+ 
+         self.idls = {}
+         self.modules = {}
+ 
+-    def register_idl(self, source, module, allow_existing=False):
++    def register_idl(self, source, module, install_target, allow_existing=False):
+         """Registers an IDL file with this instance.
+ 
+         The IDL file will be built, installed, etc.
+         """
+         basename = mozpath.basename(source)
+         root = mozpath.splitext(basename)[0]
+ 
+         entry = {
+@@ -43,17 +43,18 @@ class XPIDLManager(object):
+             'basename': basename,
+             'root': root,
+         }
+ 
+         if not allow_existing and entry['basename'] in self.idls:
+             raise Exception('IDL already registered: %' % entry['basename'])
+ 
+         self.idls[entry['basename']] = entry
+-        self.modules.setdefault(entry['module'], set()).add(entry['root'])
++        t = self.modules.setdefault(entry['module'], (install_target, set()))
++        t[1].add(entry['root'])
+ 
+ 
+ class TestManager(object):
+     """Helps hold state related to tests."""
+ 
+     def __init__(self, config):
+         self.config = config
+         self.topsrcdir = mozpath.normpath(config.topsrcdir)
+@@ -88,17 +89,18 @@ class CommonBackend(BuildBackend):
+ 
+     def consume_object(self, obj):
+         if isinstance(obj, TestManifest):
+             for test in obj.tests:
+                 self._test_manager.add(test, flavor=obj.flavor,
+                     topsrcdir=obj.topsrcdir)
+ 
+         if isinstance(obj, XPIDLFile):
+-            self._idl_manager.register_idl(obj.source_path, obj.module)
++            self._idl_manager.register_idl(obj.source_path, obj.module,
++                obj.install_target)
+ 
+     def consume_finished(self):
+         if len(self._idl_manager.idls):
+             self._handle_idl_manager(self._idl_manager)
+ 
+         # Write out a machine-readable file describing every test.
+         path = os.path.join(self.environment.topobjdir, 'all-tests.json')
+         with self._write_file(path) as fh:
+diff --git a/python/mozbuild/mozbuild/backend/recursivemake.py b/python/mozbuild/mozbuild/backend/recursivemake.py
+--- a/python/mozbuild/mozbuild/backend/recursivemake.py
++++ b/python/mozbuild/mozbuild/backend/recursivemake.py
+@@ -6,18 +6,18 @@ from __future__ import unicode_literals
+ 
+ import itertools
+ import logging
+ import os
+ import re
+ import types
+ 
+ from collections import namedtuple
++from StringIO import StringIO
+ 
+-import mozbuild.makeutil as mozmakeutil
+ from mozpack.copier import FilePurger
+ from mozpack.manifests import (
+     InstallManifest,
+ )
+ import mozpack.path as mozpath
+ 
+ from .common import CommonBackend
+ from ..frontend.data import (
+@@ -295,16 +295,17 @@ class RecursiveMakeBackend(CommonBackend
+         self._install_manifests = {
+             k: InstallManifest() for k in [
+                 'dist_bin',
+                 'dist_idl',
+                 'dist_include',
+                 'dist_public',
+                 'dist_private',
+                 'dist_sdk',
++                'dist_xpi-stage',
+                 'tests',
+                 'xpidl',
+             ]}
+ 
+         self._traversal = RecursiveMakeTraversal()
+         self._may_skip = {
+             'export': set(),
+             'compile': set(),
+@@ -682,17 +683,17 @@ class RecursiveMakeBackend(CommonBackend
+                         os.path.exists(os.path.join(srcdir, 'jar.mn')):
+                     self._may_skip['libs'].remove(bf.relobjdir)
+ 
+                 with self._write_file(makefile) as fh:
+                     bf.environment.create_makefile(fh, stub=stub)
+ 
+         # Write out a master list of all IPDL source files.
+         ipdl_dir = os.path.join(self.environment.topobjdir, 'ipc', 'ipdl')
+-        mk = mozmakeutil.Makefile()
++        mk = Makefile()
+ 
+         sorted_ipdl_sources = list(sorted(self._ipdl_sources))
+         mk.add_statement('ALL_IPDLSRCS := %s' % ' '.join(sorted_ipdl_sources))
+ 
+         def files_from(ipdl):
+             base = os.path.basename(ipdl)
+             root, ext = os.path.splitext(base)
+ 
+@@ -715,17 +716,17 @@ class RecursiveMakeBackend(CommonBackend
+         with self._write_file(os.path.join(ipdl_dir, 'ipdlsrcs.mk')) as ipdls:
+             mk.dump(ipdls, removal_guard=False)
+ 
+         self._may_skip['compile'] -= set(['ipc/ipdl'])
+ 
+         # Write out master lists of WebIDL source files.
+         bindings_dir = os.path.join(self.environment.topobjdir, 'dom', 'bindings')
+ 
+-        mk = mozmakeutil.Makefile()
++        mk = Makefile()
+ 
+         def write_var(variable, sources):
+             files = [os.path.basename(f) for f in sorted(sources)]
+             mk.add_statement('%s += %s' % (variable, ' '.join(files)))
+         write_var('webidl_files', self._webidl_sources)
+         write_var('generated_events_webidl_files', self._generated_events_webidl_sources)
+         write_var('test_webidl_files', self._test_webidl_sources)
+         write_var('preprocessed_test_webidl_files', self._preprocessed_test_webidl_sources)
+@@ -886,16 +887,29 @@ class RecursiveMakeBackend(CommonBackend
+             affected_tiers.add('libs')
+         if obj.is_tool_dir and 'libs' in affected_tiers:
+             affected_tiers.remove('libs')
+             affected_tiers.add('tools')
+ 
+         for tier in set(self._may_skip.keys()) - affected_tiers:
+             self._may_skip[tier].add(backend_file.relobjdir)
+ 
++    def _add_to_dist_manifest(self, path):
++        dist = mozpath.join(self.environment.topobjdir, 'dist')
++        if path.startswith(dist):
++            path = path[len(dist)+1:]
++
++        offset = path.index('/')
++        prefix = path[0:offset]
++
++        key = 'dist_%s' % prefix
++
++        manifest = self._install_manifests[key]
++        manifest.add_optional_exists(path[offset+1:])
++
+     def _process_exports(self, obj, exports, backend_file, namespace=""):
+         # This may not be needed, but is present for backwards compatibility
+         # with the old make rules, just in case.
+         if not obj.dist_install:
+             return
+ 
+         strings = exports.get_strings()
+         if namespace:
+@@ -939,63 +953,81 @@ class RecursiveMakeBackend(CommonBackend
+ 
+         for idl in manager.idls.values():
+             self._install_manifests['dist_idl'].add_symlink(idl['source'],
+                 idl['basename'])
+             self._install_manifests['dist_include'].add_optional_exists('%s.h'
+                 % idl['root'])
+ 
+         for module in manager.modules:
+-            build_files.add_optional_exists(mozpath.join('xpt',
+-                '%s.xpt' % module))
+             build_files.add_optional_exists(mozpath.join('.deps',
+                 '%s.pp' % module))
+ 
+         modules = manager.modules
+         xpt_modules = sorted(modules.keys())
+-        rules = []
++        xpt_files = set()
++        dist = mozpath.join(self.environment.topobjdir, 'dist')
++
++        mk = Makefile()
+ 
+         for module in xpt_modules:
+-            deps = sorted(modules[module])
+-            idl_deps = ['$(dist_idl_dir)/%s.idl' % dep for dep in deps]
+-            rules.extend([
+-                # It may seem strange to have the .idl files listed as
+-                # prerequisites both here and in the auto-generated .pp files.
+-                # It is necessary to list them here to handle the case where a
+-                # new .idl is added to an xpt. If we add a new .idl and nothing
+-                # else has changed, the new .idl won't be referenced anywhere
+-                # except in the command invocation. Therefore, the .xpt won't
+-                # be rebuilt because the dependencies say it is up to date. By
+-                # listing the .idls here, we ensure the make file has a
+-                # reference to the new .idl. Since the new .idl presumably has
+-                # an mtime newer than the .xpt, it will trigger xpt generation.
+-                '$(idl_xpt_dir)/%s.xpt: %s' % (module, ' '.join(idl_deps)),
+-                '\t@echo "$(notdir $@)"',
+-                '\t$(idlprocess) $(basename $(notdir $@)) %s' % ' '.join(deps),
+-                '',
++            install_target, sources = modules[module]
++            deps = sorted(sources)
++
++            # It may seem strange to have the .idl files listed as
++            # prerequisites both here and in the auto-generated .pp files.
++            # It is necessary to list them here to handle the case where a
++            # new .idl is added to an xpt. If we add a new .idl and nothing
++            # else has changed, the new .idl won't be referenced anywhere
++            # except in the command invocation. Therefore, the .xpt won't
++            # be rebuilt because the dependencies say it is up to date. By
++            # listing the .idls here, we ensure the make file has a
++            # reference to the new .idl. Since the new .idl presumably has
++            # an mtime newer than the .xpt, it will trigger xpt generation.
++            xpt_path = '%s/%s/components/%s.xpt' % (dist, install_target, module)
++            xpt_files.add(xpt_path)
++            rule = mk.create_rule([xpt_path])
++            rule.add_dependencies('$(dist_idl_dir)/%s.idl' % dep for dep in deps)
++            rule.add_commands([
++                '@echo "$(notdir $@)"',
++                '$(idlprocess) $(basename $(notdir $@)) %s' % ' '.join(deps),
+             ])
+ 
++            self._add_to_dist_manifest(xpt_path)
++
+         # Create dependency for output header so we force regeneration if the
+         # header was deleted. This ideally should not be necessary. However,
+         # some processes (such as PGO at the time this was implemented) wipe
+         # out dist/include without regard to our install manifests.
+ 
++        rules = StringIO()
++        mk.dump(rules, removal_guard=False)
++
+         out_path = os.path.join(self.environment.topobjdir, 'config',
+             'makefiles', 'xpidl', 'Makefile')
+         with self._write_file(out_path) as fh:
+             self.environment.create_config_file(fh, extra=dict(
+                 xpidl_rules='\n'.join(rules),
+                 xpidl_modules=' '.join(xpt_modules),
++                xpt_files=' '.join(sorted(xpt_files)),
+             ))
+ 
+         # The Makefile can't regenerate itself because of custom substitution.
+         # We need to list it here to ensure changes cause regeneration.
+         self.backend_input_files.add(os.path.join(self.environment.topsrcdir,
+             'config', 'makefiles', 'xpidl', 'Makefile.in'))
+ 
++        # Ensure destination directories for .xpt files exist.
++        for d in set(os.path.dirname(p) for p in xpt_files):
++            try:
++                os.makedirs(d)
++            except OSError as e:
++                if e.errno != errno.EEXIST:
++                    raise
++
+     def _process_program(self, program, backend_file):
+         backend_file.write('PROGRAM = %s\n' % program)
+ 
+     def _process_host_program(self, program, backend_file):
+         backend_file.write('HOST_PROGRAM = %s\n' % program)
+ 
+     def _process_simple_program(self, program, backend_file):
+         backend_file.write('SIMPLE_PROGRAMS += %s\n' % program)
+diff --git a/python/mozbuild/mozbuild/frontend/data.py b/python/mozbuild/mozbuild/frontend/data.py
+--- a/python/mozbuild/mozbuild/frontend/data.py
++++ b/python/mozbuild/mozbuild/frontend/data.py
+@@ -46,16 +46,17 @@ class ReaderSummary(TreeMetadata):
+ class SandboxDerived(TreeMetadata):
+     """Build object derived from a single MozbuildSandbox instance.
+ 
+     It holds fields common to all sandboxes. This class is likely never
+     instantiated directly but is instead derived from.
+     """
+ 
+     __slots__ = (
++        'install_target',
+         'objdir',
+         'relativedir',
+         'sandbox_all_paths',
+         'sandbox_path',
+         'srcdir',
+         'topobjdir',
+         'topsrcdir',
+     )
+@@ -70,16 +71,21 @@ class SandboxDerived(TreeMetadata):
+         # Basic directory state.
+         self.topsrcdir = sandbox['TOPSRCDIR']
+         self.topobjdir = sandbox['TOPOBJDIR']
+ 
+         self.relativedir = sandbox['RELATIVEDIR']
+         self.srcdir = sandbox['SRCDIR']
+         self.objdir = sandbox['OBJDIR']
+ 
++        # We strip 'dist' because most consumers don't care about that part.
++        install_target = sandbox['FINAL_TARGET']
++        offset = install_target.find('/')
++        self.install_target = install_target[offset+1:]
++
+ 
+ class DirectoryTraversal(SandboxDerived):
+     """Describes how directory traversal for building should work.
+ 
+     This build object is likely only of interest to the recursive make backend.
+     Other build backends should (ideally) not attempt to mimic the behavior of
+     the recursive make backend. The only reason this exists is to support the
+     existing recursive make backend while the transition to mozbuild frontend
+diff --git a/python/mozbuild/mozbuild/frontend/emitter.py b/python/mozbuild/mozbuild/frontend/emitter.py
+--- a/python/mozbuild/mozbuild/frontend/emitter.py
++++ b/python/mozbuild/mozbuild/frontend/emitter.py
+@@ -95,16 +95,24 @@ class TreeMetadataEmitter(LoggingMixin):
+ 
+         yield ReaderSummary(file_count, execution_time)
+ 
+     def emit_from_sandbox(self, sandbox):
+         """Convert a MozbuildSandbox to tree metadata objects.
+ 
+         This is a generator of mozbuild.frontend.data.SandboxDerived instances.
+         """
++        # We only want to emit an InstallationTarget if one of the consulted
++        # variables is defined. Later on, we look up FINAL_TARGET, which has
++        # the side-effect of populating it. So, we need to do this lookup
++        # early.
++        if sandbox.get('FINAL_TARGET') or sandbox.get('XPI_NAME') or \
++                sandbox.get('DIST_SUBDIR'):
++            yield InstallationTarget(sandbox)
++
+         # We always emit a directory traversal descriptor. This is needed by
+         # the recursive make backend.
+         for o in self._emit_directory_traversal_from_sandbox(sandbox): yield o
+ 
+         for path in sandbox['CONFIGURE_SUBST_FILES']:
+             yield self._create_substitution(ConfigFileSubstitution, sandbox,
+                 path)
+ 
+@@ -256,20 +264,16 @@ class TreeMetadataEmitter(LoggingMixin):
+             ('PREPROCESSED_WEBIDL_FILES', PreprocessedWebIDLFile),
+             ('TEST_WEBIDL_FILES', TestWebIDLFile),
+             ('WEBIDL_FILES', WebIDLFile),
+         ]
+         for sandbox_var, klass in simple_lists:
+             for name in sandbox.get(sandbox_var, []):
+                 yield klass(sandbox, name)
+ 
+-        if sandbox.get('FINAL_TARGET') or sandbox.get('XPI_NAME') or \
+-                sandbox.get('DIST_SUBDIR'):
+-            yield InstallationTarget(sandbox)
+-
+         # While there are multiple test manifests, the behavior is very similar
+         # across them. We enforce this by having common handling of all
+         # manifests and outputting a single class type with the differences
+         # described inside the instance.
+         #
+         # Keys are variable prefixes and values are tuples describing how these
+         # manifests should be handled:
+         #
+diff --git a/python/mozbuild/mozbuild/frontend/sandbox_symbols.py b/python/mozbuild/mozbuild/frontend/sandbox_symbols.py
+--- a/python/mozbuild/mozbuild/frontend/sandbox_symbols.py
++++ b/python/mozbuild/mozbuild/frontend/sandbox_symbols.py
+@@ -29,18 +29,18 @@ def compute_final_target(variables):
+     basedir = 'dist/'
+     if variables['XPI_NAME']:
+         basedir += 'xpi-stage/' + variables['XPI_NAME']
+     else:
+         basedir += 'bin'
+     if variables['DIST_SUBDIR']:
+         basedir += '/' + variables['DIST_SUBDIR']
+     return basedir
+- 
+- 
++
++
+ # This defines the set of mutable global variables.
+ #
+ # Each variable is a tuple of:
+ #
+ #   (storage_type, input_types, default_value, docs, tier)
+ #
+ # Tier says for which specific tier the variable has an effect.
+ # Valid tiers are:
+diff --git a/python/mozbuild/mozbuild/test/backend/test_recursivemake.py b/python/mozbuild/mozbuild/test/backend/test_recursivemake.py
+--- a/python/mozbuild/mozbuild/test/backend/test_recursivemake.py
++++ b/python/mozbuild/mozbuild/test/backend/test_recursivemake.py
+@@ -413,17 +413,19 @@ class TestRecursiveMakeBackend(BackendTe
+ 
+         m = InstallManifest(path=os.path.join(install_dir, 'dist_idl'))
+         self.assertEqual(len(m), 2)
+         self.assertIn('bar.idl', m)
+         self.assertIn('foo.idl', m)
+ 
+         m = InstallManifest(path=os.path.join(install_dir, 'xpidl'))
+         self.assertIn('.deps/my_module.pp', m)
+-        self.assertIn('xpt/my_module.xpt', m)
++
++        m = InstallManifest(path=os.path.join(install_dir, 'dist_bin'))
++        self.assertIn('components/my_module.xpt', m)
+ 
+         m = InstallManifest(path=os.path.join(install_dir, 'dist_include'))
+         self.assertIn('foo.h', m)
+ 
+         p = os.path.join(env.topobjdir, 'config/makefiles/xpidl')
+         self.assertTrue(os.path.isdir(p))
+ 
+         self.assertTrue(os.path.isfile(os.path.join(p, 'Makefile')))
+@@ -529,17 +531,16 @@ class TestRecursiveMakeBackend(BackendTe
+         found = [str for str in lines if str.startswith('LOCAL_INCLUDES')]
+         self.assertEqual(found, expected)
+ 
+     def test_final_target(self):
+         """Test that FINAL_TARGET is written to backend.mk correctly."""
+         env = self._consume('final_target', RecursiveMakeBackend)
+ 
+         final_target_rule = "FINAL_TARGET = $(if $(XPI_NAME),$(DIST)/xpi-stage/$(XPI_NAME),$(DIST)/bin)$(DIST_SUBDIR:%=/%)"
+-        print([x for x in os.walk(env.topobjdir)])
+         expected = dict()
+         expected[env.topobjdir] = []
+         expected[os.path.join(env.topobjdir, 'both')] = [
+             'XPI_NAME = mycrazyxpi',
+             'DIST_SUBDIR = asubdir',
+             final_target_rule
+         ]
+         expected[os.path.join(env.topobjdir, 'dist-subdir')] = [

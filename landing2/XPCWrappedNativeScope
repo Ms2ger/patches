@@ -1,0 +1,436 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCWrappedNativeScope.cpp b/js/xpconnect/src/XPCWrappedNativeScope.cpp
+--- a/js/xpconnect/src/XPCWrappedNativeScope.cpp
++++ b/js/xpconnect/src/XPCWrappedNativeScope.cpp
+@@ -35,16 +35,18 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* Class used to manage the wrapped native objects within a JS scope. */
+ 
++#include "XPCWrappedNativeScope.h"
++
+ #include "xpcprivate.h"
+ #include "XPCWrapper.h"
+ #include "jsproxy.h"
+ 
+ /***************************************************************************/
+ 
+ #ifdef XPC_TRACK_SCOPE_STATS
+ static int DEBUG_TotalScopeCount;
+diff --git a/js/xpconnect/src/XPCWrappedNativeScope.h b/js/xpconnect/src/XPCWrappedNativeScope.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCWrappedNativeScope.h
+@@ -0,0 +1,196 @@
++#ifndef XPCWrappedNativeScope_h
++#define XPCWrappedNativeScope_h
++
++#include "prclist.h"
++
++#include "XPCCallContext.h"
++
++#include "jspubtd.h"
++#include "jsapi.h"
++#include "jsfriendapi.h"
++
++#include "nsDataHashtable.h"
++#include "nsHashKeys.h"
++#include "nsIScriptObjectPrincipal.h"
++
++class XPCJSRuntime;
++class Native2WrappedNativeMap;
++class ClassInfo2WrappedNativeProtoMap;
++class XPCContext;
++class nsXPCComponents;
++
++// XPCWrappedNativeScope is one-to-one with a JS global object.
++
++class XPCWrappedNativeScope : public PRCList
++{
++public:
++
++    static XPCWrappedNativeScope*
++    GetNewOrUsed(XPCCallContext& ccx, JSObject* aGlobal);
++
++    XPCJSRuntime*
++    GetRuntime() const {return mRuntime;}
++
++    Native2WrappedNativeMap*
++    GetWrappedNativeMap() const {return mWrappedNativeMap;}
++
++    ClassInfo2WrappedNativeProtoMap*
++    GetWrappedNativeProtoMap(JSBool aMainThreadOnly) const
++        {return aMainThreadOnly ?
++                mMainThreadWrappedNativeProtoMap :
++                mWrappedNativeProtoMap;}
++
++    nsXPCComponents*
++    GetComponents() const {return mComponents;}
++
++    JSObject*
++    GetGlobalJSObject() const {return mGlobalJSObject;}
++
++    JSObject*
++    GetPrototypeJSObject() const {return mPrototypeJSObject;}
++
++    // Getter for the prototype that we use for wrappers that have no
++    // helper.
++    JSObject*
++    GetPrototypeNoHelper(XPCCallContext& ccx);
++
++    nsIPrincipal*
++    GetPrincipal() const
++    {return mScriptObjectPrincipal ?
++         mScriptObjectPrincipal->GetPrincipal() : nsnull;}
++
++    JSObject*
++    GetPrototypeJSFunction() const {return mPrototypeJSFunction;}
++
++    void RemoveWrappedNativeProtos();
++
++    static XPCWrappedNativeScope*
++    FindInJSObjectScope(JSContext* cx, JSObject* obj,
++                        JSBool OKIfNotInitialized = false,
++                        XPCJSRuntime* runtime = nsnull);
++
++    static XPCWrappedNativeScope*
++    FindInJSObjectScope(XPCCallContext& ccx, JSObject* obj,
++                        JSBool OKIfNotInitialized = false)
++    {
++        return FindInJSObjectScope(ccx, obj, OKIfNotInitialized,
++                                   ccx.GetRuntime());
++    }
++
++    static void
++    SystemIsBeingShutDown(JSContext* cx);
++
++    static void
++    TraceJS(JSTracer* trc, XPCJSRuntime* rt);
++
++    static void
++    SuspectAllWrappers(XPCJSRuntime* rt, JSContext* cx,
++                       nsCycleCollectionTraversalCallback &cb);
++
++    static void
++    FinishedMarkPhaseOfGC(JSContext* cx, XPCJSRuntime* rt);
++
++    static void
++    FinishedFinalizationPhaseOfGC(JSContext* cx);
++
++    static void
++    MarkAllWrappedNativesAndProtos();
++
++    static nsresult
++    ClearAllWrappedNativeSecurityPolicies(XPCCallContext& ccx);
++
++#ifdef DEBUG
++    static void
++    ASSERT_NoInterfaceSetsAreMarked();
++#endif
++
++    static void
++    SweepAllWrappedNativeTearOffs();
++
++    static void
++    DebugDumpAllScopes(int16_t depth);
++
++    void
++    DebugDump(int16_t depth);
++
++    JSBool
++    IsValid() const {return mRuntime != nsnull;}
++
++    static JSBool
++    IsDyingScope(XPCWrappedNativeScope *scope);
++
++    void SetComponents(nsXPCComponents* aComponents);
++    void SetGlobal(XPCCallContext& ccx, JSObject* aGlobal);
++
++    static void InitStatics() { gScopes = nsnull; gDyingScopes = nsnull; }
++
++    XPCContext *GetContext() { return mContext; }
++    void SetContext(XPCContext *xpcc) { mContext = nsnull; }
++
++    nsDataHashtable<nsDepCharHashKey, JSObject*>& GetCachedDOMPrototypes()
++    {
++        return mCachedDOMPrototypes;
++    }
++
++    static XPCWrappedNativeScope *GetNativeScope(JSContext *cx, JSObject *obj)
++    {
++        JS_ASSERT(js::GetObjectClass(obj)->flags & JSCLASS_XPCONNECT_GLOBAL);
++
++        const JS::Value &v = js::GetSlot(obj, JSCLASS_GLOBAL_SLOT_COUNT);
++        return v.isUndefined()
++               ? nsnull
++               : static_cast<XPCWrappedNativeScope *>(v.toPrivate());
++    }
++    void TraceDOMPrototypes(JSTracer *trc);
++
++    JSBool NewDOMBindingsEnabled()
++    {
++        return mNewDOMBindingsEnabled;
++    }
++
++protected:
++    XPCWrappedNativeScope(XPCCallContext& ccx, JSObject* aGlobal);
++    virtual ~XPCWrappedNativeScope();
++
++    static void KillDyingScopes();
++
++    XPCWrappedNativeScope(); // not implemented
++
++private:
++    static XPCWrappedNativeScope* gScopes;
++    static XPCWrappedNativeScope* gDyingScopes;
++
++    XPCJSRuntime*                    mRuntime;
++    Native2WrappedNativeMap*         mWrappedNativeMap;
++    ClassInfo2WrappedNativeProtoMap* mWrappedNativeProtoMap;
++    ClassInfo2WrappedNativeProtoMap* mMainThreadWrappedNativeProtoMap;
++    nsXPCComponents*                 mComponents;
++    XPCWrappedNativeScope*           mNext;
++    // The JS global object for this scope.  If non-null, this will be the
++    // default parent for the XPCWrappedNatives that have us as the scope,
++    // unless a PreCreate hook overrides it.  Note that this _may_ be null (see
++    // constructor).
++    JS::HeapPtrObject                mGlobalJSObject;
++
++    // Cached value of Object.prototype
++    JS::HeapPtrObject                mPrototypeJSObject;
++    // Cached value of Function.prototype
++    JS::HeapPtrObject                mPrototypeJSFunction;
++    // Prototype to use for wrappers with no helper.
++    JSObject*                        mPrototypeNoHelper;
++
++    XPCContext*                      mContext;
++
++    // The script object principal instance corresponding to our current global
++    // JS object.
++    // XXXbz what happens if someone calls JS_SetPrivate on mGlobalJSObject.
++    // How do we deal?  Do we need to?  I suspect this isn't worth worrying
++    // about, since all of our scope objects are verified as not doing that.
++    nsIScriptObjectPrincipal* mScriptObjectPrincipal;
++
++    nsDataHashtable<nsDepCharHashKey, JSObject*> mCachedDOMPrototypes;
++
++    JSBool mNewDOMBindingsEnabled;
++};
++
++#endif // XPCWrappedNativeScope_h
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -148,16 +148,17 @@
+ #include "XPCNativeSet.h"
+ #include "XPCLock.h"
+ #include "nsXPConnect.h"
+ #include "XPCJSRuntime.h"
+ #include "XPCContext.h"
+ #include "XPCReadableJSStringWrapper.h"
+ #include "XPCCallContext.h"
+ #include "XPCLazyCallContext.h"
++#include "XPCWrappedNativeScope.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -445,189 +446,16 @@ enum WrapperType {
+     XOW             = 1 << 3,
+     COW             = 1 << 4,
+     SOW             = 1 << 5
+ };
+ 
+ }
+ 
+ /***************************************************************************/
+-// XPCWrappedNativeScope is one-to-one with a JS global object.
+-
+-class XPCWrappedNativeScope : public PRCList
+-{
+-public:
+-
+-    static XPCWrappedNativeScope*
+-    GetNewOrUsed(XPCCallContext& ccx, JSObject* aGlobal);
+-
+-    XPCJSRuntime*
+-    GetRuntime() const {return mRuntime;}
+-
+-    Native2WrappedNativeMap*
+-    GetWrappedNativeMap() const {return mWrappedNativeMap;}
+-
+-    ClassInfo2WrappedNativeProtoMap*
+-    GetWrappedNativeProtoMap(JSBool aMainThreadOnly) const
+-        {return aMainThreadOnly ?
+-                mMainThreadWrappedNativeProtoMap :
+-                mWrappedNativeProtoMap;}
+-
+-    nsXPCComponents*
+-    GetComponents() const {return mComponents;}
+-
+-    JSObject*
+-    GetGlobalJSObject() const {return mGlobalJSObject;}
+-
+-    JSObject*
+-    GetPrototypeJSObject() const {return mPrototypeJSObject;}
+-
+-    // Getter for the prototype that we use for wrappers that have no
+-    // helper.
+-    JSObject*
+-    GetPrototypeNoHelper(XPCCallContext& ccx);
+-
+-    nsIPrincipal*
+-    GetPrincipal() const
+-    {return mScriptObjectPrincipal ?
+-         mScriptObjectPrincipal->GetPrincipal() : nsnull;}
+-
+-    JSObject*
+-    GetPrototypeJSFunction() const {return mPrototypeJSFunction;}
+-
+-    void RemoveWrappedNativeProtos();
+-
+-    static XPCWrappedNativeScope*
+-    FindInJSObjectScope(JSContext* cx, JSObject* obj,
+-                        JSBool OKIfNotInitialized = false,
+-                        XPCJSRuntime* runtime = nsnull);
+-
+-    static XPCWrappedNativeScope*
+-    FindInJSObjectScope(XPCCallContext& ccx, JSObject* obj,
+-                        JSBool OKIfNotInitialized = false)
+-    {
+-        return FindInJSObjectScope(ccx, obj, OKIfNotInitialized,
+-                                   ccx.GetRuntime());
+-    }
+-
+-    static void
+-    SystemIsBeingShutDown(JSContext* cx);
+-
+-    static void
+-    TraceJS(JSTracer* trc, XPCJSRuntime* rt);
+-
+-    static void
+-    SuspectAllWrappers(XPCJSRuntime* rt, JSContext* cx,
+-                       nsCycleCollectionTraversalCallback &cb);
+-
+-    static void
+-    FinishedMarkPhaseOfGC(JSContext* cx, XPCJSRuntime* rt);
+-
+-    static void
+-    FinishedFinalizationPhaseOfGC(JSContext* cx);
+-
+-    static void
+-    MarkAllWrappedNativesAndProtos();
+-
+-    static nsresult
+-    ClearAllWrappedNativeSecurityPolicies(XPCCallContext& ccx);
+-
+-#ifdef DEBUG
+-    static void
+-    ASSERT_NoInterfaceSetsAreMarked();
+-#endif
+-
+-    static void
+-    SweepAllWrappedNativeTearOffs();
+-
+-    static void
+-    DebugDumpAllScopes(int16_t depth);
+-
+-    void
+-    DebugDump(int16_t depth);
+-
+-    JSBool
+-    IsValid() const {return mRuntime != nsnull;}
+-
+-    static JSBool
+-    IsDyingScope(XPCWrappedNativeScope *scope);
+-
+-    void SetComponents(nsXPCComponents* aComponents);
+-    void SetGlobal(XPCCallContext& ccx, JSObject* aGlobal);
+-
+-    static void InitStatics() { gScopes = nsnull; gDyingScopes = nsnull; }
+-
+-    XPCContext *GetContext() { return mContext; }
+-    void SetContext(XPCContext *xpcc) { mContext = nsnull; }
+-
+-    nsDataHashtable<nsDepCharHashKey, JSObject*>& GetCachedDOMPrototypes()
+-    {
+-        return mCachedDOMPrototypes;
+-    }
+-
+-    static XPCWrappedNativeScope *GetNativeScope(JSContext *cx, JSObject *obj)
+-    {
+-        JS_ASSERT(js::GetObjectClass(obj)->flags & JSCLASS_XPCONNECT_GLOBAL);
+-
+-        const js::Value &v = js::GetSlot(obj, JSCLASS_GLOBAL_SLOT_COUNT);
+-        return v.isUndefined()
+-               ? nsnull
+-               : static_cast<XPCWrappedNativeScope *>(v.toPrivate());
+-    }
+-    void TraceDOMPrototypes(JSTracer *trc);
+-
+-    JSBool NewDOMBindingsEnabled()
+-    {
+-        return mNewDOMBindingsEnabled;
+-    }
+-
+-protected:
+-    XPCWrappedNativeScope(XPCCallContext& ccx, JSObject* aGlobal);
+-    virtual ~XPCWrappedNativeScope();
+-
+-    static void KillDyingScopes();
+-
+-    XPCWrappedNativeScope(); // not implemented
+-
+-private:
+-    static XPCWrappedNativeScope* gScopes;
+-    static XPCWrappedNativeScope* gDyingScopes;
+-
+-    XPCJSRuntime*                    mRuntime;
+-    Native2WrappedNativeMap*         mWrappedNativeMap;
+-    ClassInfo2WrappedNativeProtoMap* mWrappedNativeProtoMap;
+-    ClassInfo2WrappedNativeProtoMap* mMainThreadWrappedNativeProtoMap;
+-    nsXPCComponents*                 mComponents;
+-    XPCWrappedNativeScope*           mNext;
+-    // The JS global object for this scope.  If non-null, this will be the
+-    // default parent for the XPCWrappedNatives that have us as the scope,
+-    // unless a PreCreate hook overrides it.  Note that this _may_ be null (see
+-    // constructor).
+-    JS::HeapPtrObject                mGlobalJSObject;
+-
+-    // Cached value of Object.prototype
+-    JS::HeapPtrObject                mPrototypeJSObject;
+-    // Cached value of Function.prototype
+-    JS::HeapPtrObject                mPrototypeJSFunction;
+-    // Prototype to use for wrappers with no helper.
+-    JSObject*                        mPrototypeNoHelper;
+-
+-    XPCContext*                      mContext;
+-
+-    // The script object principal instance corresponding to our current global
+-    // JS object.
+-    // XXXbz what happens if someone calls JS_SetPrivate on mGlobalJSObject.
+-    // How do we deal?  Do we need to?  I suspect this isn't worth worrying
+-    // about, since all of our scope objects are verified as not doing that.
+-    nsIScriptObjectPrincipal* mScriptObjectPrincipal;
+-
+-    nsDataHashtable<nsDepCharHashKey, JSObject*> mCachedDOMPrototypes;
+-
+-    JSBool mNewDOMBindingsEnabled;
+-};
+ 
+ JSObject* xpc_CloneJSFunction(XPCCallContext &ccx, JSObject *funobj,
+                               JSObject *parent);
+ 
+ /***************************************************************************/
+ // XPCNativeMember represents a single idl declared method, attribute or
+ // constant.
+ 

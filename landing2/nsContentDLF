@@ -1,0 +1,284 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/docshell/base/nsDocShell.cpp b/docshell/base/nsDocShell.cpp
+--- a/docshell/base/nsDocShell.cpp
++++ b/docshell/base/nsDocShell.cpp
+@@ -6624,18 +6624,18 @@ nsDocShell::CreateAboutBlankContentViewe
+     if (blankDoc) {
+       // Hack: set the base URI manually, since this document never
+       // got Reset() with a channel.
+       blankDoc->SetBaseURI(aBaseURI);
+ 
+       blankDoc->SetContainer(static_cast<nsIDocShell *>(this));
+ 
+       // create a content viewer for us and the new document
+-      docFactory->CreateInstanceForDocument(NS_ISUPPORTS_CAST(nsIDocShell *, this),
+-                    blankDoc, "view", getter_AddRefs(viewer));
++      docFactory->CreateInstanceForDocument(this, blankDoc, "view",
++                                            getter_AddRefs(viewer));
+ 
+       // hook 'em up
+       if (viewer) {
+         viewer->SetContainer(static_cast<nsIContentViewerContainer *>(this));
+         Embed(viewer, "", 0);
+ 
+         SetCurrentURI(blankDoc->GetDocumentURI(), nsnull, true, 0);
+         rv = mIsBeingDestroyed ? NS_ERROR_NOT_AVAILABLE : NS_OK;
+@@ -7658,23 +7658,20 @@ nsDocShell::NewContentViewerObj(const ch
+     nsCOMPtr<nsIDocumentLoaderFactory> docLoaderFactory =
+         nsContentUtils::FindInternalContentViewer(aContentType);
+     if (!docLoaderFactory) {
+         return NS_ERROR_FAILURE;
+     }
+ 
+     // Now create an instance of the content viewer
+     // nsLayoutDLF makes the determination if it should be a "view-source" instead of "view"
+-    nsresult rv = docLoaderFactory->CreateInstance("view",
+-                                                   aOpenedChannel,
++    nsresult rv = docLoaderFactory->CreateInstance("view", aOpenedChannel,
+                                                    aLoadGroup, aContentType,
+-                                                   static_cast<nsIContentViewerContainer*>(this),
+-                                                   nsnull,
+-                                                   aContentHandler,
+-                                                   aViewer);
++                                                   this, nsnull,
++                                                   aContentHandler, aViewer);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     (*aViewer)->SetContainer(static_cast<nsIContentViewerContainer *>(this));
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsDocShell::SetupNewViewer(nsIContentViewer * aNewViewer)
+diff --git a/docshell/base/nsIDocumentLoaderFactory.idl b/docshell/base/nsIDocumentLoaderFactory.idl
+--- a/docshell/base/nsIDocumentLoaderFactory.idl
++++ b/docshell/base/nsIDocumentLoaderFactory.idl
+@@ -39,36 +39,37 @@
+ #include "nsISupports.idl"
+ 
+ interface nsIChannel;
+ interface nsIContentViewer;
+ interface nsIStreamListener;
+ interface nsIDocument;
+ interface nsILoadGroup;
+ interface nsIPrincipal;
++interface nsIDocShell;
+ 
+ /**
+  * To get a component that implements nsIDocumentLoaderFactory
+  * for a given mimetype, use nsICategoryManager to find an entry
+  * with the mimetype as its name in the category "Gecko-Content-Viewers".
+  * The value of the entry is the contractid of the component.
+  * The component is a service, so use GetService, not CreateInstance to get it.
+  */
+ 
+ [scriptable, uuid(5e7d2967-5a07-444f-95d5-25b533252d38)]
+ interface nsIDocumentLoaderFactory : nsISupports {
+     nsIContentViewer createInstance(in string aCommand,
+                               in nsIChannel aChannel,
+                               in nsILoadGroup aLoadGroup,
+                               in string aContentType, 
+-                              in nsISupports aContainer,
++                              in nsIDocShell aContainer,
+                               in nsISupports aExtraInfo,
+                               out nsIStreamListener aDocListenerResult);
+ 
+-    nsIContentViewer createInstanceForDocument(in nsISupports aContainer,
++    nsIContentViewer createInstanceForDocument(in nsIDocShell aContainer,
+                                          in nsIDocument aDocument,
+                                          in string aCommand);
+ 
+     /**
+      * Create a blank document using the given loadgroup and given
+      * principal.  aPrincipal is allowed to be null, in which case the
+      * new document will get the about:blank codebase principal.
+      */
+diff --git a/layout/build/nsContentDLF.cpp b/layout/build/nsContentDLF.cpp
+--- a/layout/build/nsContentDLF.cpp
++++ b/layout/build/nsContentDLF.cpp
+@@ -57,16 +57,17 @@
+ #include "nsIViewSourceChannel.h"
+ #ifdef MOZ_MEDIA
+ #include "nsHTMLMediaElement.h"
+ #endif
+ #include "nsContentUtils.h"
+ #include "imgILoader.h"
+ #include "nsCharsetSource.h"
+ #include "nsMimeTypes.h"
++#include "nsIDocShell.h"
+ 
+ #include "mozilla/FunctionTimer.h"
+ 
+ // plugins
+ #include "nsIPluginHost.h"
+ #include "nsPluginHost.h"
+ static NS_DEFINE_CID(kPluginDocumentCID, NS_PLUGINDOCUMENT_CID);
+ 
+@@ -166,17 +167,17 @@ MayUseXULXBL(nsIChannel* aChannel)
+   return nsContentUtils::AllowXULXBLForPrincipal(principal);
+ }
+ 
+ NS_IMETHODIMP
+ nsContentDLF::CreateInstance(const char* aCommand,
+                              nsIChannel* aChannel,
+                              nsILoadGroup* aLoadGroup,
+                              const char* aContentType, 
+-                             nsISupports* aContainer,
++                             nsIDocShell* aContainer,
+                              nsISupports* aExtraInfo,
+                              nsIStreamListener** aDocListener,
+                              nsIContentViewer** aDocViewer)
+ {
+ #ifdef NS_FUNCTION_TIMER
+   nsCAutoString channelURL__("N/A");
+   nsCOMPtr<nsIURI> url__;
+   if (aChannel && NS_SUCCEEDED(aChannel->GetURI(getter_AddRefs(url__)))) {
+@@ -318,17 +319,17 @@ nsContentDLF::CreateInstance(const char*
+   }
+ 
+   // If we get here, then we weren't able to create anything. Sorry!
+   return NS_ERROR_FAILURE;
+ }
+ 
+ 
+ NS_IMETHODIMP
+-nsContentDLF::CreateInstanceForDocument(nsISupports* aContainer,
++nsContentDLF::CreateInstanceForDocument(nsIDocShell* aContainer,
+                                         nsIDocument* aDocument,
+                                         const char *aCommand,
+                                         nsIContentViewer** aContentViewer)
+ {
+   NS_TIME_FUNCTION;
+ 
+   nsCOMPtr<nsIContentViewer> contentViewer;
+   nsresult rv = NS_NewContentViewer(getter_AddRefs(contentViewer));
+@@ -417,17 +418,17 @@ nsContentDLF::CreateBlankDocument(nsILoa
+   return rv;
+ }
+ 
+ 
+ nsresult
+ nsContentDLF::CreateDocument(const char* aCommand,
+                              nsIChannel* aChannel,
+                              nsILoadGroup* aLoadGroup,
+-                             nsISupports* aContainer,
++                             nsIDocShell* aContainer,
+                              const nsCID& aDocumentCID,
+                              nsIStreamListener** aDocListener,
+                              nsIContentViewer** aContentViewer)
+ {
+   NS_TIME_FUNCTION;
+ 
+   nsresult rv = NS_ERROR_FAILURE;
+ 
+@@ -467,17 +468,17 @@ nsContentDLF::CreateDocument(const char*
+   return rv;
+ }
+ 
+ nsresult
+ nsContentDLF::CreateXULDocument(const char* aCommand,
+                                 nsIChannel* aChannel,
+                                 nsILoadGroup* aLoadGroup,
+                                 const char* aContentType,
+-                                nsISupports* aContainer,
++                                nsIDocShell* aContainer,
+                                 nsISupports* aExtraInfo,
+                                 nsIStreamListener** aDocListener,
+                                 nsIContentViewer** aContentViewer)
+ {
+   NS_TIME_FUNCTION;
+ 
+   nsresult rv;
+   nsCOMPtr<nsIDocument> doc = do_CreateInstance(kXULDocumentCID, &rv);
+diff --git a/layout/build/nsContentDLF.h b/layout/build/nsContentDLF.h
+--- a/layout/build/nsContentDLF.h
++++ b/layout/build/nsContentDLF.h
+@@ -61,26 +61,26 @@ public:
+   NS_DECL_ISUPPORTS
+   NS_DECL_NSIDOCUMENTLOADERFACTORY
+ 
+   nsresult InitUAStyleSheet();
+ 
+   nsresult CreateDocument(const char* aCommand,
+                           nsIChannel* aChannel,
+                           nsILoadGroup* aLoadGroup,
+-                          nsISupports* aContainer,
++                          nsIDocShell* aContainer,
+                           const nsCID& aDocumentCID,
+                           nsIStreamListener** aDocListener,
+                           nsIContentViewer** aContentViewer);
+ 
+   nsresult CreateXULDocument(const char* aCommand,
+                              nsIChannel* aChannel,
+                              nsILoadGroup* aLoadGroup,
+                              const char* aContentType,
+-                             nsISupports* aContainer,
++                             nsIDocShell* aContainer,
+                              nsISupports* aExtraInfo,
+                              nsIStreamListener** aDocListener,
+                              nsIContentViewer** aContentViewer);
+ 
+ private:
+   static nsresult EnsureUAStyleSheet();
+   static bool IsImageContentType(const char* aContentType);
+ };
+diff --git a/xpfe/components/directory/nsDirectoryViewer.cpp b/xpfe/components/directory/nsDirectoryViewer.cpp
+--- a/xpfe/components/directory/nsDirectoryViewer.cpp
++++ b/xpfe/components/directory/nsDirectoryViewer.cpp
+@@ -81,16 +81,17 @@
+ #include "nsIDOMWindow.h"
+ #include "nsIDOMWindowCollection.h"
+ #include "nsIDOMDocument.h"
+ #include "nsIDOMElement.h"
+ #include "nsIStreamConverterService.h"
+ #include "nsICategoryManager.h"
+ #include "nsXPCOMCID.h"
+ #include "nsIDocument.h"
++#include "nsIDocShell.h"
+ #include "mozilla/Preferences.h"
+ 
+ using namespace mozilla;
+ 
+ static const int FORMAT_HTML = 2;
+ static const int FORMAT_XUL = 3;
+ 
+ //----------------------------------------------------------------------
+@@ -1315,17 +1316,17 @@ NS_IMPL_ISUPPORTS1(nsDirectoryViewerFact
+ 
+ 
+ 
+ NS_IMETHODIMP
+ nsDirectoryViewerFactory::CreateInstance(const char *aCommand,
+                                          nsIChannel* aChannel,
+                                          nsILoadGroup* aLoadGroup,
+                                          const char* aContentType, 
+-                                         nsISupports* aContainer,
++                                         nsIDocShell* aContainer,
+                                          nsISupports* aExtraInfo,
+                                          nsIStreamListener** aDocListenerResult,
+                                          nsIContentViewer** aDocViewerResult)
+ {
+   nsresult rv;
+ 
+   bool viewSource = (PL_strstr(aContentType,"view-source") != 0);
+ 
+@@ -1431,17 +1432,17 @@ nsDirectoryViewerFactory::CreateInstance
+   if (NS_FAILED(rv)) return rv;
+ 
+   return NS_OK;
+ }
+ 
+ 
+ 
+ NS_IMETHODIMP
+-nsDirectoryViewerFactory::CreateInstanceForDocument(nsISupports* aContainer,
++nsDirectoryViewerFactory::CreateInstanceForDocument(nsIDocShell* aContainer,
+                                                     nsIDocument* aDocument,
+                                                     const char *aCommand,
+                                                     nsIContentViewer** aDocViewerResult)
+ {
+   NS_NOTYETIMPLEMENTED("didn't expect to get here");
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 

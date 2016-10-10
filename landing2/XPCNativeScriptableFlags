@@ -1,0 +1,199 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCNativeScriptableFlags.h b/js/xpconnect/src/XPCNativeScriptableFlags.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCNativeScriptableFlags.h
+@@ -0,0 +1,80 @@
++#ifndef XPCNativeScriptableFlags_h
++#define XPCNativeScriptableFlags_h
++
++#include "nsIXPCScriptable.h"
++
++#include "jstypes.h"
++
++// XPCNativeScriptableFlags is a wrapper class that holds the flags returned
++// from calls to nsIXPCScriptable::GetScriptableFlags(). It has convenience
++// methods to check for particular bitflags. Since we also use this class as
++// a member of the gc'd class XPCNativeScriptableShared, this class holds the
++// bit and exposes the inlined methods to support marking.
++
++#define XPC_WN_SJSFLAGS_MARK_FLAG JS_BIT(31) // only high bit of 32 is set
++
++class XPCNativeScriptableFlags
++{
++private:
++    JSUint32 mFlags;
++
++public:
++
++    XPCNativeScriptableFlags(JSUint32 flags = 0) : mFlags(flags) {}
++
++    JSUint32 GetFlags() const {return mFlags & ~XPC_WN_SJSFLAGS_MARK_FLAG;}
++    void     SetFlags(JSUint32 flags) {mFlags = flags;}
++
++    operator JSUint32() const {return GetFlags();}
++
++    XPCNativeScriptableFlags(const XPCNativeScriptableFlags& r)
++        {mFlags = r.GetFlags();}
++
++    XPCNativeScriptableFlags& operator= (const XPCNativeScriptableFlags& r)
++        {mFlags = r.GetFlags(); return *this;}
++
++    void Mark()       {mFlags |= XPC_WN_SJSFLAGS_MARK_FLAG;}
++    void Unmark()     {mFlags &= ~XPC_WN_SJSFLAGS_MARK_FLAG;}
++    JSBool IsMarked() const {return 0 != (mFlags & XPC_WN_SJSFLAGS_MARK_FLAG);}
++
++#ifdef GET_IT
++#undef GET_IT
++#endif
++#define GET_IT(f_) const {return 0 != (mFlags & nsIXPCScriptable:: f_ );}
++
++    JSBool WantPreCreate()                GET_IT(WANT_PRECREATE)
++    JSBool WantCreate()                   GET_IT(WANT_CREATE)
++    JSBool WantPostCreate()               GET_IT(WANT_POSTCREATE)
++    JSBool WantAddProperty()              GET_IT(WANT_ADDPROPERTY)
++    JSBool WantDelProperty()              GET_IT(WANT_DELPROPERTY)
++    JSBool WantGetProperty()              GET_IT(WANT_GETPROPERTY)
++    JSBool WantSetProperty()              GET_IT(WANT_SETPROPERTY)
++    JSBool WantEnumerate()                GET_IT(WANT_ENUMERATE)
++    JSBool WantNewEnumerate()             GET_IT(WANT_NEWENUMERATE)
++    JSBool WantNewResolve()               GET_IT(WANT_NEWRESOLVE)
++    JSBool WantConvert()                  GET_IT(WANT_CONVERT)
++    JSBool WantFinalize()                 GET_IT(WANT_FINALIZE)
++    JSBool WantCheckAccess()              GET_IT(WANT_CHECKACCESS)
++    JSBool WantCall()                     GET_IT(WANT_CALL)
++    JSBool WantConstruct()                GET_IT(WANT_CONSTRUCT)
++    JSBool WantHasInstance()              GET_IT(WANT_HASINSTANCE)
++    JSBool WantTrace()                    GET_IT(WANT_TRACE)
++    JSBool WantEquality()                 GET_IT(WANT_EQUALITY)
++    JSBool WantOuterObject()              GET_IT(WANT_OUTER_OBJECT)
++    JSBool UseJSStubForAddProperty()      GET_IT(USE_JSSTUB_FOR_ADDPROPERTY)
++    JSBool UseJSStubForDelProperty()      GET_IT(USE_JSSTUB_FOR_DELPROPERTY)
++    JSBool UseJSStubForSetProperty()      GET_IT(USE_JSSTUB_FOR_SETPROPERTY)
++    JSBool DontEnumStaticProps()          GET_IT(DONT_ENUM_STATIC_PROPS)
++    JSBool DontEnumQueryInterface()       GET_IT(DONT_ENUM_QUERY_INTERFACE)
++    JSBool DontAskInstanceForScriptable() GET_IT(DONT_ASK_INSTANCE_FOR_SCRIPTABLE)
++    JSBool ClassInfoInterfacesOnly()      GET_IT(CLASSINFO_INTERFACES_ONLY)
++    JSBool AllowPropModsDuringResolve()   GET_IT(ALLOW_PROP_MODS_DURING_RESOLVE)
++    JSBool AllowPropModsToPrototype()     GET_IT(ALLOW_PROP_MODS_TO_PROTOTYPE)
++    JSBool DontSharePrototype()           GET_IT(DONT_SHARE_PROTOTYPE)
++    JSBool DontReflectInterfaceNames()    GET_IT(DONT_REFLECT_INTERFACE_NAMES)
++    JSBool UseStubEqualityHook()          GET_IT(USE_STUB_EQUALITY_HOOK)
++
++#undef GET_IT
++};
++
++#endif // XPCNativeScriptableFlags_h
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -152,16 +152,17 @@
+ #include "XPCContext.h"
+ #include "XPCReadableJSStringWrapper.h"
+ #include "XPCCallContext.h"
+ #include "XPCLazyCallContext.h"
+ #include "XPCWrappedNativeScope.h"
+ #include "XPCNativeMember.h"
+ #include "XPCNativeInterface.h"
+ #include "XPCNativeSetKey.h"
++#include "XPCNativeScriptableFlags.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -449,90 +450,16 @@ enum WrapperType {
+     XOW             = 1 << 3,
+     COW             = 1 << 4,
+     SOW             = 1 << 5
+ };
+ 
+ }
+ 
+ /***************************************************************************/
+-/***************************************************************************/
+-// XPCNativeScriptableFlags is a wrapper class that holds the flags returned
+-// from calls to nsIXPCScriptable::GetScriptableFlags(). It has convenience
+-// methods to check for particular bitflags. Since we also use this class as
+-// a member of the gc'd class XPCNativeScriptableShared, this class holds the
+-// bit and exposes the inlined methods to support marking.
+-
+-#define XPC_WN_SJSFLAGS_MARK_FLAG JS_BIT(31) // only high bit of 32 is set
+-
+-class XPCNativeScriptableFlags
+-{
+-private:
+-    JSUint32 mFlags;
+-
+-public:
+-
+-    XPCNativeScriptableFlags(JSUint32 flags = 0) : mFlags(flags) {}
+-
+-    JSUint32 GetFlags() const {return mFlags & ~XPC_WN_SJSFLAGS_MARK_FLAG;}
+-    void     SetFlags(JSUint32 flags) {mFlags = flags;}
+-
+-    operator JSUint32() const {return GetFlags();}
+-
+-    XPCNativeScriptableFlags(const XPCNativeScriptableFlags& r)
+-        {mFlags = r.GetFlags();}
+-
+-    XPCNativeScriptableFlags& operator= (const XPCNativeScriptableFlags& r)
+-        {mFlags = r.GetFlags(); return *this;}
+-
+-    void Mark()       {mFlags |= XPC_WN_SJSFLAGS_MARK_FLAG;}
+-    void Unmark()     {mFlags &= ~XPC_WN_SJSFLAGS_MARK_FLAG;}
+-    JSBool IsMarked() const {return 0 != (mFlags & XPC_WN_SJSFLAGS_MARK_FLAG);}
+-
+-#ifdef GET_IT
+-#undef GET_IT
+-#endif
+-#define GET_IT(f_) const {return 0 != (mFlags & nsIXPCScriptable:: f_ );}
+-
+-    JSBool WantPreCreate()                GET_IT(WANT_PRECREATE)
+-    JSBool WantCreate()                   GET_IT(WANT_CREATE)
+-    JSBool WantPostCreate()               GET_IT(WANT_POSTCREATE)
+-    JSBool WantAddProperty()              GET_IT(WANT_ADDPROPERTY)
+-    JSBool WantDelProperty()              GET_IT(WANT_DELPROPERTY)
+-    JSBool WantGetProperty()              GET_IT(WANT_GETPROPERTY)
+-    JSBool WantSetProperty()              GET_IT(WANT_SETPROPERTY)
+-    JSBool WantEnumerate()                GET_IT(WANT_ENUMERATE)
+-    JSBool WantNewEnumerate()             GET_IT(WANT_NEWENUMERATE)
+-    JSBool WantNewResolve()               GET_IT(WANT_NEWRESOLVE)
+-    JSBool WantConvert()                  GET_IT(WANT_CONVERT)
+-    JSBool WantFinalize()                 GET_IT(WANT_FINALIZE)
+-    JSBool WantCheckAccess()              GET_IT(WANT_CHECKACCESS)
+-    JSBool WantCall()                     GET_IT(WANT_CALL)
+-    JSBool WantConstruct()                GET_IT(WANT_CONSTRUCT)
+-    JSBool WantHasInstance()              GET_IT(WANT_HASINSTANCE)
+-    JSBool WantTrace()                    GET_IT(WANT_TRACE)
+-    JSBool WantEquality()                 GET_IT(WANT_EQUALITY)
+-    JSBool WantOuterObject()              GET_IT(WANT_OUTER_OBJECT)
+-    JSBool UseJSStubForAddProperty()      GET_IT(USE_JSSTUB_FOR_ADDPROPERTY)
+-    JSBool UseJSStubForDelProperty()      GET_IT(USE_JSSTUB_FOR_DELPROPERTY)
+-    JSBool UseJSStubForSetProperty()      GET_IT(USE_JSSTUB_FOR_SETPROPERTY)
+-    JSBool DontEnumStaticProps()          GET_IT(DONT_ENUM_STATIC_PROPS)
+-    JSBool DontEnumQueryInterface()       GET_IT(DONT_ENUM_QUERY_INTERFACE)
+-    JSBool DontAskInstanceForScriptable() GET_IT(DONT_ASK_INSTANCE_FOR_SCRIPTABLE)
+-    JSBool ClassInfoInterfacesOnly()      GET_IT(CLASSINFO_INTERFACES_ONLY)
+-    JSBool AllowPropModsDuringResolve()   GET_IT(ALLOW_PROP_MODS_DURING_RESOLVE)
+-    JSBool AllowPropModsToPrototype()     GET_IT(ALLOW_PROP_MODS_TO_PROTOTYPE)
+-    JSBool DontSharePrototype()           GET_IT(DONT_SHARE_PROTOTYPE)
+-    JSBool DontReflectInterfaceNames()    GET_IT(DONT_REFLECT_INTERFACE_NAMES)
+-    JSBool UseStubEqualityHook()          GET_IT(USE_STUB_EQUALITY_HOOK)
+-
+-#undef GET_IT
+-};
+-
+-/***************************************************************************/
+ 
+ // XPCNativeScriptableShared is used to hold the JSClass and the
+ // associated scriptable flags for XPCWrappedNatives. These are shared across
+ // the runtime and are garbage collected by xpconnect. We *used* to just store
+ // this inside the XPCNativeScriptableInfo (usually owned by instances of
+ // XPCWrappedNativeProto. This had two problems... It was wasteful, and it
+ // was a big problem when wrappers are reparented to different scopes (and
+ // thus different protos (the DOM does this).

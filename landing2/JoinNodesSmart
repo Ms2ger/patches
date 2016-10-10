@@ -1,0 +1,203 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/base/nsEditor.cpp b/editor/libeditor/base/nsEditor.cpp
+--- a/editor/libeditor/base/nsEditor.cpp
++++ b/editor/libeditor/base/nsEditor.cpp
+@@ -1704,16 +1704,24 @@ nsEditor::InsertContainerAbove( nsIDOMNo
+ 
+   // put new parent in doc
+   return InsertNode(*outNode, parent, offset);
+ }
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // MoveNode:  move aNode to {aParent,aOffset}
+ nsresult
++nsEditor::MoveNode(nsINode* aNode, nsINode* aParent, int32_t aOffset)
++{
++  nsCOMPtr<nsIDOMNode> node = do_QueryInterface(aNode);
++  nsCOMPtr<nsIDOMNode> parent = do_QueryInterface(aParent);
++  return MoveNode(node, parent, aOffset);
++}
++
++nsresult
+ nsEditor::MoveNode(nsIDOMNode *aNode, nsIDOMNode *aParent, int32_t aOffset)
+ {
+   NS_ENSURE_TRUE(aNode && aParent, NS_ERROR_NULL_POINTER);
+ 
+   nsCOMPtr<nsIDOMNode> oldParent;
+   int32_t oldOffset;
+   nsresult res = GetNodeLocation(aNode, address_of(oldParent), &oldOffset);
+   
+diff --git a/editor/libeditor/base/nsEditor.h b/editor/libeditor/base/nsEditor.h
+--- a/editor/libeditor/base/nsEditor.h
++++ b/editor/libeditor/base/nsEditor.h
+@@ -195,16 +195,17 @@ public:
+ 
+   nsresult RemoveContainer(nsINode* aNode);
+   nsresult RemoveContainer(nsIDOMNode *inNode);
+   nsresult InsertContainerAbove(nsIDOMNode *inNode, 
+                                 nsCOMPtr<nsIDOMNode> *outNode, 
+                                 const nsAString &aNodeType,
+                                 const nsAString *aAttribute = nsnull,
+                                 const nsAString *aValue = nsnull);
++  nsresult MoveNode(nsINode* aNode, nsINode* aParent, int32_t aOffset);
+   nsresult MoveNode(nsIDOMNode *aNode, nsIDOMNode *aParent, int32_t aOffset);
+ 
+   /* Method to replace certain CreateElementNS() calls. 
+      Arguments:
+       nsString& aTag          - tag you want
+       nsIContent** aContent   - returned Content that was created with above namespace.
+   */
+   nsresult CreateHTMLContent(const nsAString& aTag,
+diff --git a/editor/libeditor/html/nsHTMLEditRules.cpp b/editor/libeditor/html/nsHTMLEditRules.cpp
+--- a/editor/libeditor/html/nsHTMLEditRules.cpp
++++ b/editor/libeditor/html/nsHTMLEditRules.cpp
+@@ -7345,72 +7345,81 @@ nsHTMLEditRules::SplitAsNeeded(const nsA
+ //                  children (which often means joining them, too).
+ //                  aNodeLeft & aNodeRight must be same type of node.
+ nsresult 
+ nsHTMLEditRules::JoinNodesSmart( nsIDOMNode *aNodeLeft, 
+                                  nsIDOMNode *aNodeRight, 
+                                  nsCOMPtr<nsIDOMNode> *aOutMergeParent, 
+                                  int32_t *aOutMergeOffset)
+ {
+-  // check parms
+-  NS_ENSURE_TRUE(aNodeLeft &&  
+-      aNodeRight && 
+-      aOutMergeParent &&
+-      aOutMergeOffset, NS_ERROR_NULL_POINTER);
+-  
+-  nsresult res = NS_OK;
++  NS_ENSURE_TRUE(aOutMergeParent && aOutMergeOffset, NS_ERROR_NULL_POINTER);
++
++  nsCOMPtr<nsINode> nodeLeft = do_QueryInterface(aNodeLeft);
++  nsCOMPtr<nsINode> nodeRight = do_QueryInterface(aNodeRight);
++  NS_ENSURE_TRUE(nodeLeft && nodeRight, NS_ERROR_NULL_POINTER);
++
++  nsCOMPtr<nsINode> outMergeParent;
++  nsresult rv = JoinNodesSmart(nodeLeft, nodeRight,
++                               getter_AddRefs(outMergeParent), aOutMergeOffset);
++  *aOutMergeParent = do_QueryInterface(outMergeParent);
++  return rv;
++}
++
++nsresult
++nsHTMLEditRules::JoinNodesSmart(nsINode* aNodeLeft,
++                                nsINode* aNodeRight,
++                                nsINode** aOutMergeParent,
++                                int32_t* aOutMergeOffset)
++{
++  MOZ_ASSERT(aNodeLeft && aNodeRight && aOutMergeParent && aOutMergeOffset);
++
+   // caller responsible for:
+   //   left & right node are same type
+-  int32_t parOffset;
+-  nsCOMPtr<nsIDOMNode> parent, rightParent;
+-  res = nsEditor::GetNodeLocation(aNodeLeft, address_of(parent), &parOffset);
+-  NS_ENSURE_SUCCESS(res, res);
+-  aNodeRight->GetParentNode(getter_AddRefs(rightParent));
++
++  nsINode* parent = aNodeLeft->GetNodeParent();
++  int32_t parOffset = parent->IndexOf(aNodeLeft);
+ 
+   // if they don't have the same parent, first move the 'right' node 
+   // to after the 'left' one
+-  if (parent != rightParent)
+-  {
+-    res = mHTMLEditor->MoveNode(aNodeRight, parent, parOffset);
++  if (parent != aNodeRight->GetNodeParent()) {
++    nsresult res = mHTMLEditor->MoveNode(aNodeRight, parent, parOffset);
+     NS_ENSURE_SUCCESS(res, res);
+   }
+   
+   // defaults for outParams
+   *aOutMergeParent = aNodeRight;
+-  res = mHTMLEditor->GetLengthOfDOMNode(aNodeLeft, *((uint32_t*)aOutMergeOffset));
+-  NS_ENSURE_SUCCESS(res, res);
++  *aOutMergeOffset = aNodeLeft->Length();
+ 
+   // separate join rules for differing blocks
+-  if (nsHTMLEditUtils::IsList(aNodeLeft) ||
+-      mHTMLEditor->IsTextNode(aNodeLeft))
+-  {
++  if (aNodeLeft->NodeType() == nsIDOMNode::TEXT_NODE ||
++      (aNodeLeft->IsElement() &&
++       nsHTMLEditUtils::IsList(aNodeLeft->AsElement()))) {
+     // for list's, merge shallow (wouldn't want to combine list items)
+-    res = mHTMLEditor->JoinNodes(aNodeLeft, aNodeRight, parent);
+-    NS_ENSURE_SUCCESS(res, res);
+-    return res;
+-  }
+-  else
+-  {
+-    // remember the last left child, and firt right child
+-    nsCOMPtr<nsIDOMNode> lastLeft, firstRight;
+-    res = mHTMLEditor->GetLastEditableChild(aNodeLeft, address_of(lastLeft));
+-    NS_ENSURE_SUCCESS(res, res);
+-    res = mHTMLEditor->GetFirstEditableChild(aNodeRight, address_of(firstRight));
+-    NS_ENSURE_SUCCESS(res, res);
+-
+-    // for list items, divs, etc, merge smart
+-    res = mHTMLEditor->JoinNodes(aNodeLeft, aNodeRight, parent);
+-    NS_ENSURE_SUCCESS(res, res);
+-
+-    if (lastLeft && firstRight &&
+-        mHTMLEditor->NodesSameType(lastLeft, firstRight) &&
+-        (nsEditor::IsTextNode(lastLeft) ||
+-         mHTMLEditor->mHTMLCSSUtils->ElementsSameStyle(lastLeft, firstRight)))
+-      return JoinNodesSmart(lastLeft, firstRight, aOutMergeParent, aOutMergeOffset);
+-  }
++    return mHTMLEditor->JoinNodes(aNodeLeft, aNodeRight, parent);
++  }
++
++  // remember the last left child, and firt right child
++  nsCOMPtr<nsIDOMNode> nodeLeft = do_QueryInterface(aNodeLeft);
++  nsCOMPtr<nsIDOMNode> nodeRight = do_QueryInterface(aNodeRight);
++  nsCOMPtr<nsIDOMNode> lastLeft, firstRight;
++  nsresult res = mHTMLEditor->GetLastEditableChild(nodeLeft, address_of(lastLeft));
++  NS_ENSURE_SUCCESS(res, res);
++  res = mHTMLEditor->GetFirstEditableChild(nodeRight, address_of(firstRight));
++  NS_ENSURE_SUCCESS(res, res);
++
++  // for list items, divs, etc, merge smart
++  res = mHTMLEditor->JoinNodes(nodeLeft, nodeRight, parent);
++  NS_ENSURE_SUCCESS(res, res);
++
++  if (lastLeft && firstRight &&
++      mHTMLEditor->NodesSameType(lastLeft, firstRight) &&
++      (nsEditor::IsTextNode(lastLeft) ||
++       mHTMLEditor->mHTMLCSSUtils->ElementsSameStyle(lastLeft, firstRight)))
++    return JoinNodesSmart(lastLeft, firstRight, aOutMergeParent, aOutMergeOffset);
++
+   return res;
+ }
+ 
+ 
+ nsresult 
+ nsHTMLEditRules::GetTopEnclosingMailCite(nsIDOMNode *aNode, 
+                                          nsCOMPtr<nsIDOMNode> *aOutCiteNode,
+                                          bool aPlainText)
+diff --git a/editor/libeditor/html/nsHTMLEditRules.h b/editor/libeditor/html/nsHTMLEditRules.h
+--- a/editor/libeditor/html/nsHTMLEditRules.h
++++ b/editor/libeditor/html/nsHTMLEditRules.h
+@@ -268,16 +268,20 @@ protected:
+   nsresult ApplyBlockStyle(nsCOMArray<nsIDOMNode>& arrayOfNodes, const nsAString *aBlockTag);
+   nsresult MakeBlockquote(nsCOMArray<nsIDOMNode>& arrayOfNodes);
+   nsresult SplitAsNeeded(const nsAString *aTag, nsCOMPtr<nsIDOMNode> *inOutParent, int32_t *inOutOffset);
+   nsresult AddTerminatingBR(nsIDOMNode *aBlock);
+   nsresult JoinNodesSmart( nsIDOMNode *aNodeLeft, 
+                            nsIDOMNode *aNodeRight, 
+                            nsCOMPtr<nsIDOMNode> *aOutMergeParent, 
+                            int32_t *aOutMergeOffset);
++  nsresult JoinNodesSmart(nsINode* aNodeLeft,
++                          nsINode* aNodeRight,
++                          nsINode** aOutMergeParent,
++                          int32_t* aOutMergeOffset);
+   nsresult GetTopEnclosingMailCite(nsIDOMNode *aNode, nsCOMPtr<nsIDOMNode> *aOutCiteNode, bool aPlaintext);
+   nsresult PopListItem(nsIDOMNode *aListItem, bool *aOutOfList);
+   nsresult RemoveListStructure(nsIDOMNode *aList);
+   nsresult CacheInlineStyles(nsIDOMNode *aNode);
+   nsresult ReapplyCachedStyles(); 
+   nsresult ClearCachedStyles();
+   nsresult AdjustSpecialBreaks(bool aSafeToAskFrames = false);
+   nsresult AdjustWhitespace(nsISelection *aSelection);

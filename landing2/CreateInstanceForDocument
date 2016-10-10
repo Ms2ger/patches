@@ -1,0 +1,96 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/docshell/base/nsDocShell.cpp b/docshell/base/nsDocShell.cpp
+--- a/docshell/base/nsDocShell.cpp
++++ b/docshell/base/nsDocShell.cpp
+@@ -6584,17 +6584,17 @@ nsDocShell::CreateAboutBlankContentViewe
+     if (blankDoc) {
+       // Hack: set the base URI manually, since this document never
+       // got Reset() with a channel.
+       blankDoc->SetBaseURI(aBaseURI);
+ 
+       blankDoc->SetContainer(static_cast<nsIDocShell *>(this));
+ 
+       // create a content viewer for us and the new document
+-      docFactory->CreateInstanceForDocument(this, blankDoc, "view",
++      docFactory->CreateInstanceForDocument(blankDoc,
+                                             getter_AddRefs(viewer));
+ 
+       // hook 'em up
+       if (viewer) {
+         viewer->SetContainer(static_cast<nsIContentViewerContainer *>(this));
+         Embed(viewer, "", 0);
+ 
+         SetCurrentURI(blankDoc->GetDocumentURI(), nsnull, true, 0);
+diff --git a/docshell/base/nsIDocumentLoaderFactory.idl b/docshell/base/nsIDocumentLoaderFactory.idl
+--- a/docshell/base/nsIDocumentLoaderFactory.idl
++++ b/docshell/base/nsIDocumentLoaderFactory.idl
+@@ -27,19 +27,17 @@ interface nsIDocumentLoaderFactory : nsI
+     nsIContentViewer createInstance(in string aCommand,
+                               in nsIChannel aChannel,
+                               in nsILoadGroup aLoadGroup,
+                               in string aContentType, 
+                               in nsIDocShell aContainer,
+                               in nsISupports aExtraInfo,
+                               out nsIStreamListener aDocListenerResult);
+ 
+-    nsIContentViewer createInstanceForDocument(in nsIDocShell aContainer,
+-                                         in nsIDocument aDocument,
+-                                         in string aCommand);
++    nsIContentViewer createInstanceForDocument(in nsIDocument aDocument);
+ 
+     /**
+      * Create a blank document using the given loadgroup and given
+      * principal.  aPrincipal is allowed to be null, in which case the
+      * new document will get the about:blank codebase principal.
+      */
+     nsIDocument createBlankDocument(in nsILoadGroup aLoadGroup,
+                                     in nsIPrincipal aPrincipal);
+diff --git a/layout/build/nsContentDLF.cpp b/layout/build/nsContentDLF.cpp
+--- a/layout/build/nsContentDLF.cpp
++++ b/layout/build/nsContentDLF.cpp
+@@ -287,19 +287,17 @@ nsContentDLF::CreateInstance(const char*
+   }
+ 
+   // If we get here, then we weren't able to create anything. Sorry!
+   return NS_ERROR_FAILURE;
+ }
+ 
+ 
+ NS_IMETHODIMP
+-nsContentDLF::CreateInstanceForDocument(nsIDocShell* aContainer,
+-                                        nsIDocument* aDocument,
+-                                        const char *aCommand,
++nsContentDLF::CreateInstanceForDocument(nsIDocument* aDocument,
+                                         nsIContentViewer** aContentViewer)
+ {
+   NS_TIME_FUNCTION;
+ 
+   nsCOMPtr<nsIContentViewer> contentViewer;
+   nsresult rv = NS_NewContentViewer(getter_AddRefs(contentViewer));
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+diff --git a/xpfe/components/directory/nsDirectoryViewer.cpp b/xpfe/components/directory/nsDirectoryViewer.cpp
+--- a/xpfe/components/directory/nsDirectoryViewer.cpp
++++ b/xpfe/components/directory/nsDirectoryViewer.cpp
+@@ -1396,19 +1396,17 @@ nsDirectoryViewerFactory::CreateInstance
+   if (NS_FAILED(rv)) return rv;
+ 
+   return NS_OK;
+ }
+ 
+ 
+ 
+ NS_IMETHODIMP
+-nsDirectoryViewerFactory::CreateInstanceForDocument(nsIDocShell* aContainer,
+-                                                    nsIDocument* aDocument,
+-                                                    const char *aCommand,
++nsDirectoryViewerFactory::CreateInstanceForDocument(nsIDocument* aDocument,
+                                                     nsIContentViewer** aDocViewerResult)
+ {
+   NS_NOTYETIMPLEMENTED("didn't expect to get here");
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 
+ NS_IMETHODIMP
+ nsDirectoryViewerFactory::CreateBlankDocument(nsILoadGroup *aLoadGroup,

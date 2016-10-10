@@ -1,0 +1,589 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/accessible/src/generic/Accessible.cpp b/accessible/src/generic/Accessible.cpp
+--- a/accessible/src/generic/Accessible.cpp
++++ b/accessible/src/generic/Accessible.cpp
+@@ -2889,17 +2889,22 @@ Accessible::CurrentItem()
+     }
+   }
+   return nsnull;
+ }
+ 
+ void
+ Accessible::SetCurrentItem(Accessible* aItem)
+ {
+-  nsIAtom* id = aItem->GetContent()->GetID();
++  nsIContent* content = aItem->GetContent();
++  if (!content->IsElement()) {
++    return;
++  }
++
++  nsIAtom* id = content->AsElement()->GetID();
+   if (id) {
+     nsAutoString idStr;
+     id->ToString(idStr);
+     mContent->SetAttr(kNameSpaceID_None,
+                       nsGkAtoms::aria_activedescendant, idStr, true);
+   }
+ }
+ 
+diff --git a/accessible/src/msaa/AccessibleWrap.cpp b/accessible/src/msaa/AccessibleWrap.cpp
+--- a/accessible/src/msaa/AccessibleWrap.cpp
++++ b/accessible/src/msaa/AccessibleWrap.cpp
+@@ -1567,19 +1567,22 @@ AccessibleWrap::FirePlatformEvent(AccEve
+   HWND hWnd = GetHWNDFor(accessible);
+   NS_ENSURE_TRUE(hWnd, NS_ERROR_FAILURE);
+ 
+   nsAutoString tag;
+   nsCAutoString id;
+   nsIContent* cnt = accessible->GetContent();
+   if (cnt) {
+     cnt->Tag()->ToString(tag);
+-    nsIAtom* aid = cnt->GetID();
+-    if (aid)
+-      aid->ToUTF8String(id);
++    if (cnt->IsElement()) {
++      nsIAtom* aid = cnt->AsElement()->GetID();
++      if (aid) {
++        aid->ToUTF8String(id);
++      }
++    }
+   }
+ 
+ #ifdef DEBUG
+   if (logging::IsEnabled(logging::ePlatforms)) {
+     printf("\n\nMSAA event: event: %d, target: %s@id='%s', childid: %d, hwnd: %d\n\n",
+            eventType, NS_ConvertUTF16toUTF8(tag).get(), id.get(),
+            childID, hWnd);
+   }
+diff --git a/content/base/public/Element.h b/content/base/public/Element.h
+--- a/content/base/public/Element.h
++++ b/content/base/public/Element.h
+@@ -184,18 +184,55 @@ public:
+    */
+   virtual nsICSSDeclaration* GetSMILOverrideStyle() = 0;
+ 
+   /**
+    * Returns if the element is labelable as per HTML specification.
+    */
+   virtual bool IsLabelable() const = 0;
+ 
++  /**
++   * Get the ID of this content node (the atom corresponding to the
++   * value of the null-namespace attribute whose name is given by
++   * GetIDAttributeName().  This may be null if there is no ID.
++   */
++  nsIAtom* GetID() const {
++    if (HasID()) {
++      return DoGetID();
++    }
++    return nsnull;
++  }
++
++  /**
++   * Get the class list of this content node (this corresponds to the
++   * value of the null-namespace attribute whose name is given by
++   * GetClassAttributeName()).  This may be null if there are no
++   * classes, but that's not guaranteed.
++   */
++  const nsAttrValue* GetClasses() const {
++    if (HasFlag(NODE_MAY_HAVE_CLASS)) {
++      return DoGetClasses();
++    }
++    return nsnull;
++  }
++
+ protected:
+   /**
++   * Hook for implementing GetID.  This is guaranteed to only be
++   * called if HasID() is true.
++   */
++  virtual nsIAtom* DoGetID() const = 0;
++
++  /**
++   * Hook for implementing GetClasses.  This is guaranteed to only be
++   * called if the NODE_MAY_HAVE_CLASS flag is set.
++   */
++  virtual const nsAttrValue* DoGetClasses() const = 0;
++
++  /**
+    * Method to get the _intrinsic_ content state of this element.  This is the
+    * state that is independent of the element's presentation.  To get the full
+    * content state, use State().  See nsEventStates.h for
+    * the possible bits that could be set here.
+    */
+   virtual nsEventStates IntrinsicState() const;
+ 
+   /**
+diff --git a/content/base/public/nsIContent.h b/content/base/public/nsIContent.h
+--- a/content/base/public/nsIContent.h
++++ b/content/base/public/nsIContent.h
+@@ -726,41 +726,16 @@ public:
+    * @returns true otherwise.
+    */
+   virtual bool IsDoneAddingChildren()
+   {
+     return true;
+   }
+ 
+   /**
+-   * Get the ID of this content node (the atom corresponding to the
+-   * value of the null-namespace attribute whose name is given by
+-   * GetIDAttributeName().  This may be null if there is no ID.
+-   */
+-  nsIAtom* GetID() const {
+-    if (HasID()) {
+-      return DoGetID();
+-    }
+-    return nsnull;
+-  }
+-
+-  /**
+-   * Get the class list of this content node (this corresponds to the
+-   * value of the null-namespace attribute whose name is given by
+-   * GetClassAttributeName()).  This may be null if there are no
+-   * classes, but that's not guaranteed.
+-   */
+-  const nsAttrValue* GetClasses() const {
+-    if (HasFlag(NODE_MAY_HAVE_CLASS)) {
+-      return DoGetClasses();
+-    }
+-    return nsnull;
+-  }
+-
+-  /**
+    * Walk aRuleWalker over the content style rules (presentational
+    * hint rules) for this content node.
+    */
+   NS_IMETHOD WalkContentStyleRules(nsRuleWalker* aRuleWalker) = 0;
+ 
+   /**
+    * Is the attribute named stored in the mapped attributes?
+    *
+@@ -872,31 +847,17 @@ public:
+   virtual already_AddRefed<nsIURI> GetBaseURI() const;
+ 
+   virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor);
+ 
+   virtual bool IsPurple() = 0;
+   virtual void RemovePurple() = 0;
+ 
+   virtual bool OwnedOnlyByTheDOMTree() { return false; }
+-protected:
+-  /**
+-   * Hook for implementing GetID.  This is guaranteed to only be
+-   * called if HasID() is true.
+-   */
+-  virtual nsIAtom* DoGetID() const = 0;
+ 
+-private:
+-  /**
+-   * Hook for implementing GetClasses.  This is guaranteed to only be
+-   * called if the NODE_MAY_HAVE_CLASS flag is set.
+-   */
+-  virtual const nsAttrValue* DoGetClasses() const = 0;
+-
+-public:
+ #ifdef DEBUG
+   /**
+    * List the content (and anything it contains) out to the given
+    * file stream. Use aIndent as the base indent during formatting.
+    */
+   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const = 0;
+ 
+   /**
+diff --git a/content/base/src/nsContentUtils.cpp b/content/base/src/nsContentUtils.cpp
+--- a/content/base/src/nsContentUtils.cpp
++++ b/content/base/src/nsContentUtils.cpp
+@@ -3461,17 +3461,17 @@ nsContentUtils::DispatchChromeEvent(nsID
+ 
+ /* static */
+ Element*
+ nsContentUtils::MatchElementId(nsIContent *aContent, const nsIAtom* aId)
+ {
+   for (nsIContent* cur = aContent;
+        cur;
+        cur = cur->GetNextNode(aContent)) {
+-    if (aId == cur->GetID()) {
++    if (cur->IsElement() && aId == cur->AsElement()->GetID()) {
+       return cur->AsElement();
+     }
+   }
+ 
+   return nsnull;
+ }
+ 
+ /* static */
+@@ -6091,31 +6091,36 @@ struct ClassMatchingInfo {
+   nsAttrValue::AtomArray mClasses;
+   nsCaseTreatment mCaseTreatment;
+ };
+ 
+ static bool
+ MatchClassNames(nsIContent* aContent, int32_t aNamespaceID, nsIAtom* aAtom,
+                 void* aData)
+ {
++  if (!aContent->IsElement()) {
++    return false;
++  }
++
++  Element* element = aContent->AsElement();
++
+   // We can't match if there are no class names
+-  const nsAttrValue* classAttr = aContent->GetClasses();
++  const nsAttrValue* classAttr = element->GetClasses();
+   if (!classAttr) {
+     return false;
+   }
+   
+   // need to match *all* of the classes
+   ClassMatchingInfo* info = static_cast<ClassMatchingInfo*>(aData);
+   uint32_t length = info->mClasses.Length();
+   if (!length) {
+     // If we actually had no classes, don't match.
+     return false;
+   }
+-  uint32_t i;
+-  for (i = 0; i < length; ++i) {
++  for (uint32_t i = 0; i < length; ++i) {
+     if (!classAttr->Contains(info->mClasses[i],
+                              info->mCaseTreatment)) {
+       return false;
+     }
+   }
+   
+   return true;
+ }
+diff --git a/content/base/src/nsGenericDOMDataNode.cpp b/content/base/src/nsGenericDOMDataNode.cpp
+--- a/content/base/src/nsGenericDOMDataNode.cpp
++++ b/content/base/src/nsGenericDOMDataNode.cpp
+@@ -892,29 +892,16 @@ nsGenericDOMDataNode::AppendTextTo(nsASt
+ already_AddRefed<nsIAtom>
+ nsGenericDOMDataNode::GetCurrentValueAtom()
+ {
+   nsAutoString val;
+   GetData(val);
+   return NS_NewAtom(val);
+ }
+ 
+-nsIAtom*
+-nsGenericDOMDataNode::DoGetID() const
+-{
+-  return nsnull;
+-}
+-
+-const nsAttrValue*
+-nsGenericDOMDataNode::DoGetClasses() const
+-{
+-  NS_NOTREACHED("Shouldn't ever be called");
+-  return nsnull;
+-}
+-
+ NS_IMETHODIMP
+ nsGenericDOMDataNode::WalkContentStyleRules(nsRuleWalker* aRuleWalker)
+ {
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP_(bool)
+ nsGenericDOMDataNode::IsAttributeMapped(const nsIAtom* aAttribute) const
+diff --git a/content/base/src/nsGenericDOMDataNode.h b/content/base/src/nsGenericDOMDataNode.h
+--- a/content/base/src/nsGenericDOMDataNode.h
++++ b/content/base/src/nsGenericDOMDataNode.h
+@@ -198,18 +198,16 @@ public:
+   virtual void List(FILE* out, int32_t aIndent) const;
+   virtual void DumpContent(FILE* out, int32_t aIndent, bool aDumpAll) const;
+ #endif
+ 
+   virtual nsIContent *GetBindingParent() const;
+   virtual bool IsNodeOfType(uint32_t aFlags) const;
+   virtual bool IsLink(nsIURI** aURI) const;
+ 
+-  virtual nsIAtom* DoGetID() const;
+-  virtual const nsAttrValue* DoGetClasses() const;
+   NS_IMETHOD WalkContentStyleRules(nsRuleWalker* aRuleWalker);
+   NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const;
+   virtual nsChangeHint GetAttributeChangeHint(const nsIAtom* aAttribute,
+                                               int32_t aModType) const;
+   virtual nsIAtom *GetClassAttributeName() const;
+ 
+   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const
+   {
+diff --git a/content/events/src/nsXMLEventsManager.cpp b/content/events/src/nsXMLEventsManager.cpp
+--- a/content/events/src/nsXMLEventsManager.cpp
++++ b/content/events/src/nsXMLEventsManager.cpp
+@@ -175,19 +175,20 @@ nsXMLEventsListener::HandleEvent(nsIDOME
+   if (!aEvent) 
+     return NS_ERROR_INVALID_ARG;
+   bool targetMatched = true;
+   nsCOMPtr<nsIDOMEvent> event(aEvent);
+   if (mTarget) {
+     targetMatched = false;
+     nsCOMPtr<nsIDOMEventTarget> target;
+     aEvent->GetTarget(getter_AddRefs(target));
+-    nsCOMPtr<nsIContent> targetEl(do_QueryInterface(target));
+-    if (targetEl && targetEl->GetID() == mTarget) 
+-        targetMatched = true;
++    nsCOMPtr<Element> targetEl = do_QueryInterface(target);
++    if (targetEl && targetEl->GetID() == mTarget) {
++      targetMatched = true;
++    }
+   }
+   if (!targetMatched)
+     return NS_OK;
+   nsCOMPtr<nsIDOMEventListener> handler(do_QueryInterface(mHandler));
+   if (handler) {
+     nsresult rv = handler->HandleEvent(event);
+     if (NS_SUCCEEDED(rv)) {
+       if (mStopPropagation)
+diff --git a/content/html/content/src/HTMLPropertiesCollection.cpp b/content/html/content/src/HTMLPropertiesCollection.cpp
+--- a/content/html/content/src/HTMLPropertiesCollection.cpp
++++ b/content/html/content/src/HTMLPropertiesCollection.cpp
+@@ -283,21 +283,21 @@ HTMLPropertiesCollection::EnsureFresh()
+   }
+ }
+   
+ static Element*
+ GetElementByIdForConnectedSubtree(nsIContent* aContent, const nsIAtom* aId)
+ {
+   aContent = static_cast<nsIContent*>(aContent->SubtreeRoot());
+   do {
+-    if (aContent->GetID() == aId) {
++    if (aContent->IsElement() && aContent->AsElement()->GetID() == aId) {
+       return aContent->AsElement();
+     }
+     aContent = aContent->GetNextNode();
+-  } while(aContent);
++  } while (aContent);
+   
+   return NULL;
+ }
+ 
+ void
+ HTMLPropertiesCollection::CrawlProperties()
+ {
+   nsIDocument* doc = mRoot->GetCurrentDoc();
+diff --git a/content/html/document/src/nsHTMLDocument.cpp b/content/html/document/src/nsHTMLDocument.cpp
+--- a/content/html/document/src/nsHTMLDocument.cpp
++++ b/content/html/document/src/nsHTMLDocument.cpp
+@@ -2432,17 +2432,21 @@ nsHTMLDocument::DeferredContentEditableC
+     }
+   }
+ }
+ 
+ static bool
+ DocAllResultMatch(nsIContent* aContent, int32_t aNamespaceID, nsIAtom* aAtom,
+                   void* aData)
+ {
+-  if (aContent->GetID() == aAtom) {
++  if (!aContent->IsElement()) {
++    return false;
++  }
++
++  if (aContent->AsElement()->GetID() == aAtom) {
+     return true;
+   }
+ 
+   nsGenericHTMLElement* elm = nsGenericHTMLElement::FromContent(aContent);
+   if (!elm) {
+     return false;
+   }
+ 
+diff --git a/content/xslt/src/xpath/txXPathNode.h b/content/xslt/src/xpath/txXPathNode.h
+--- a/content/xslt/src/xpath/txXPathNode.h
++++ b/content/xslt/src/xpath/txXPathNode.h
+@@ -75,27 +75,42 @@ private:
+     {
+         return mIndex == eContent;
+     }
+     bool isAttribute() const
+     {
+         return mIndex != eDocument && mIndex != eContent;
+     }
+ 
++public:
++    bool isElement() const
++    {
++        return isContent() && Content()->IsElement();
++    }
++
++private:
+     nsIContent* Content() const
+     {
+         NS_ASSERTION(isContent() || isAttribute(), "wrong type");
+         return static_cast<nsIContent*>(mNode);
+     }
+     nsIDocument* Document() const
+     {
+         NS_ASSERTION(isDocument(), "wrong type");
+         return static_cast<nsIDocument*>(mNode);
+     }
+ 
++public:
++    mozilla::dom::Element* Element() const
++    {
++        MOZ_ASSERT(isElement());
++        return Content()->AsElement();
++    }
++
++private:
+     enum PositionType
+     {
+         eDocument = (1 << 30),
+         eContent = eDocument - 1
+     };
+ 
+     nsINode* mNode;
+     uint32_t mRefCountRoot : 1;
+diff --git a/content/xslt/src/xslt/txXSLTPatterns.cpp b/content/xslt/src/xslt/txXSLTPatterns.cpp
+--- a/content/xslt/src/xslt/txXSLTPatterns.cpp
++++ b/content/xslt/src/xslt/txXSLTPatterns.cpp
+@@ -8,17 +8,19 @@
+ #include "nsReadableUtils.h"
+ #include "txExecutionState.h"
+ #include "txXSLTPatterns.h"
+ #include "txNodeSetContext.h"
+ #include "txForwardContext.h"
+ #include "txXMLUtils.h"
+ #include "txXSLTFunctions.h"
+ #include "nsWhitespaceTokenizer.h"
+-#include "nsIContent.h"
++#include "mozilla/dom/Element.h"
++
++using namespace mozilla::dom;
+ 
+ /*
+  * Returns the default priority of this Pattern.
+  * UnionPatterns don't like this.
+  * This should be called on the simple patterns.
+  */
+ double txUnionPattern::getDefaultPriority()
+ {
+@@ -261,25 +263,25 @@ txIdPattern::txIdPattern(const nsSubstri
+         // this can fail, XXX move to a Init(aString) method
+         nsCOMPtr<nsIAtom> atom = do_GetAtom(tokenizer.nextToken());
+         mIds.AppendObject(atom);
+     }
+ }
+ 
+ bool txIdPattern::matches(const txXPathNode& aNode, txIMatchContext* aContext)
+ {
+-    if (!txXPathNodeUtils::isElement(aNode)) {
++    if (!aNode.isElement()) {
+         return false;
+     }
+ 
+     // Get a ID attribute, if there is
+-    nsIContent* content = txXPathNativeNode::getContent(aNode);
+-    NS_ASSERTION(content, "a Element without nsIContent");
++    Element* element = aNode.Element();
++    NS_ASSERTION(element, "a Element without Element");
+ 
+-    nsIAtom* id = content->GetID();
++    nsIAtom* id = element->GetID();
+     return id && mIds.IndexOf(id) > -1;
+ }
+ 
+ double txIdPattern::getDefaultPriority()
+ {
+     return 0.5;
+ }
+ 
+diff --git a/content/xul/document/src/nsXULDocument.cpp b/content/xul/document/src/nsXULDocument.cpp
+--- a/content/xul/document/src/nsXULDocument.cpp
++++ b/content/xul/document/src/nsXULDocument.cpp
+@@ -4015,17 +4015,19 @@ nsXULDocument::OverlayForwardReference::
+ 
+     // This must be a strong reference since it will be the only
+     // reference to a content object during part of this loop.
+     nsCOMPtr<nsIContent> currContent;
+ 
+     for (i = 0; i < childCount; ++i) {
+         currContent = aOverlayNode->GetFirstChild();
+ 
+-        nsIAtom *idAtom = currContent->GetID();
++        nsIAtom* idAtom = currContent->IsElement()
++            ? currContent->AsElement()->GetID()
++            : NULL;
+ 
+         nsIContent *elementInDocument = nsnull;
+         if (idAtom) {
+             nsDependentAtomString id(idAtom);
+ 
+             if (!id.IsEmpty()) {
+                 nsIDocument *doc = aTargetNode->GetDocument();
+                 if (!doc) return NS_ERROR_FAILURE;
+@@ -4040,19 +4042,21 @@ nsXULDocument::OverlayForwardReference::
+         // node. Otherwise, we just do an append as if the element had
+         // no id attribute.
+         if (elementInDocument) {
+             // Given two parents, aTargetNode and aOverlayNode, we want
+             // to call merge on currContent if we find an associated
+             // node in the document with the same id as currContent that
+             // also has aTargetNode as its parent.
+ 
+-            nsIContent *elementParent = elementInDocument->GetParent();
+-
+-            nsIAtom *parentID = elementParent->GetID();
++            nsINode* elementParent = elementInDocument->GetElementParent();
++
++            nsIAtom* parentID = elementParent
++                ? elementParent->AsElement()->GetID()
++                : NULL;
+             if (parentID &&
+                 aTargetNode->AttrValueIs(kNameSpaceID_None, nsGkAtoms::id,
+                                          nsDependentAtomString(parentID),
+                                          eCaseMatters)) {
+                 // The element matches. "Go Deep!"
+                 rv = Merge(elementInDocument, currContent, aNotify);
+                 if (NS_FAILED(rv)) return rv;
+                 aOverlayNode->RemoveChildAt(0, false);
+diff --git a/content/xul/templates/src/nsXULTemplateResultXML.cpp b/content/xul/templates/src/nsXULTemplateResultXML.cpp
+--- a/content/xul/templates/src/nsXULTemplateResultXML.cpp
++++ b/content/xul/templates/src/nsXULTemplateResultXML.cpp
+@@ -1,39 +1,41 @@
+ /* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "nsIServiceManager.h"
+ #include "nsIDOMNode.h"
+ #include "nsIDOMElement.h"
+-#include "nsIContent.h"
++#include "mozilla/dom/Element.h"
+ 
+ #include "nsIRDFService.h"
+ 
+ #include "nsXULTemplateResultXML.h"
+ #include "nsXMLBinding.h"
+ 
++using namespace mozilla::dom;
++
+ static uint32_t sTemplateId = 0;
+ 
+ NS_IMPL_ISUPPORTS1(nsXULTemplateResultXML, nsIXULTemplateResult)
+ 
+ nsXULTemplateResultXML::nsXULTemplateResultXML(nsXMLQuery* aQuery,
+                                                nsIDOMNode* aNode,
+                                                nsXMLBindingSet* aBindings)
+     : mQuery(aQuery), mNode(aNode)
+ {
+-    nsCOMPtr<nsIContent> content = do_QueryInterface(mNode);
++    nsCOMPtr<Element> element = do_QueryInterface(mNode);
+ 
+     // If the node has an id, create the uri from it. Otherwise, there isn't
+     // anything to identify the node with so just use a somewhat random number.
+-    nsCOMPtr<nsIAtom> id = content->GetID();
++    nsCOMPtr<nsIAtom> id = element ? element->GetID() : NULL;
+     if (id) {
+-      nsCOMPtr<nsIURI> uri = content->GetBaseURI();
++      nsCOMPtr<nsIURI> uri = element->GetBaseURI();
+       nsCAutoString spec;
+       uri->GetSpec(spec);
+ 
+       mId = NS_ConvertUTF8toUTF16(spec);
+ 
+       nsAutoString idstr;
+       id->ToString(idstr);
+       mId += NS_LITERAL_STRING("#") + idstr;

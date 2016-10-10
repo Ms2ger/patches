@@ -1,0 +1,252 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/base/nsEditor.cpp b/editor/libeditor/base/nsEditor.cpp
+--- a/editor/libeditor/base/nsEditor.cpp
++++ b/editor/libeditor/base/nsEditor.cpp
+@@ -1506,16 +1506,23 @@ nsEditor::JoinNodes(nsIDOMNode * aLeftNo
+   
+   for (i = 0; i < mActionListeners.Count(); i++)
+     mActionListeners[i]->DidJoinNodes(aLeftNode, aRightNode, aParent, result);
+ 
+   return result;
+ }
+ 
+ 
++nsresult
++nsEditor::DeleteNode(nsINode* aElement)
++{
++  nsCOMPtr<nsIDOMNode> element = do_QueryInterface(aElement);
++  return DeleteNode(element);
++}
++
+ NS_IMETHODIMP nsEditor::DeleteNode(nsIDOMNode * aElement)
+ {
+   int32_t i, offset;
+   nsCOMPtr<nsIDOMNode> parent;
+   nsAutoRules beginRulesSniffing(this, kOpCreateNode, nsIEditor::ePrevious);
+ 
+   // save node location for selection updating code.
+   nsresult result = GetNodeLocation(aElement, address_of(parent), &offset);
+@@ -1707,39 +1714,38 @@ nsEditor::InsertContainerAbove( nsIDOMNo
+ }
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // MoveNode:  move aNode to {aParent,aOffset}
+ nsresult
+ nsEditor::MoveNode(nsIDOMNode *aNode, nsIDOMNode *aParent, int32_t aOffset)
+ {
+   NS_ENSURE_TRUE(aNode && aParent, NS_ERROR_NULL_POINTER);
+-
+-  nsCOMPtr<nsIDOMNode> oldParent;
+-  int32_t oldOffset;
+-  nsresult res = GetNodeLocation(aNode, address_of(oldParent), &oldOffset);
++nsresult
++nsEditor::MoveNode(nsINode* aNode, nsINode* aParent, int32_t aOffset)
++{
++  MOZ_ASSERT(aNode && aParent);
++  nsINode* oldParent = aNode->GetNodeParent();
++  int32_t oldOffset = oldParent->IndexOf(aNode);
+   
+-  if (aOffset == -1)
+-  {
+-    uint32_t unsignedOffset;
++  if (aOffset == -1) {
+     // magic value meaning "move to end of aParent"
+-    res = GetLengthOfDOMNode(aParent, unsignedOffset);
+-    NS_ENSURE_SUCCESS(res, res);
+-    aOffset = (int32_t)unsignedOffset;
++    aOffset = aParent->Length();
+   }
+   
+   // don't do anything if it's already in right place
+-  if ((aParent == oldParent.get()) && (oldOffset == aOffset)) return NS_OK;
++  if (aParent == oldParent && oldOffset == aOffset) {
++    return NS_OK;
++  }
+   
+   // notify our internal selection state listener
+   nsAutoMoveNodeSelNotify selNotify(mRangeUpdater, oldParent, oldOffset, aParent, aOffset);
+   
+   // need to adjust aOffset if we are moving aNode further along in its current parent
+-  if ((aParent == oldParent.get()) && (oldOffset < aOffset)) 
+-  {
++  if (aParent == oldParent && oldOffset < aOffset) {
+     aOffset--;  // this is because when we delete aNode, it will make the offsets after it off by one
+   }
+ 
+   // put aNode in new parent
+   res = DeleteNode(aNode);
+   NS_ENSURE_SUCCESS(res, res);
+   return InsertNode(aNode, aParent, aOffset);
+ }
+diff --git a/editor/libeditor/base/nsEditor.h b/editor/libeditor/base/nsEditor.h
+--- a/editor/libeditor/base/nsEditor.h
++++ b/editor/libeditor/base/nsEditor.h
+@@ -196,16 +196,19 @@ public:
+   nsresult RemoveContainer(nsINode* aNode);
+   nsresult RemoveContainer(nsIDOMNode *inNode);
+   nsresult InsertContainerAbove(nsIDOMNode *inNode, 
+                                 nsCOMPtr<nsIDOMNode> *outNode, 
+                                 const nsAString &aNodeType,
+                                 const nsAString *aAttribute = nsnull,
+                                 const nsAString *aValue = nsnull);
+   nsresult MoveNode(nsIDOMNode *aNode, nsIDOMNode *aParent, int32_t aOffset);
++  nsresult MoveNode(nsINode* aNode, nsINode* aParent, int32_t aOffset);
++
++  nsresult DeleteNode(nsINode* aElement);
+ 
+   /* Method to replace certain CreateElementNS() calls. 
+      Arguments:
+       nsString& aTag          - tag you want
+       nsIContent** aContent   - returned Content that was created with above namespace.
+   */
+   nsresult CreateHTMLContent(const nsAString& aTag,
+                              mozilla::dom::Element** aContent);
+diff --git a/editor/libeditor/html/nsHTMLEditRules.cpp b/editor/libeditor/html/nsHTMLEditRules.cpp
+--- a/editor/libeditor/html/nsHTMLEditRules.cpp
++++ b/editor/libeditor/html/nsHTMLEditRules.cpp
+@@ -2683,25 +2683,22 @@ nsHTMLEditRules::JoinBlocks(nsCOMPtr<nsI
+     // Do br adjustment.
+     nsCOMPtr<nsIDOMNode> brNode;
+     res = CheckForInvisibleBR(*aLeftBlock, kBlockEnd, address_of(brNode));
+     NS_ENSURE_SUCCESS(res, res);
+     if (bMergeLists)
+     {
+       // idea here is to take all children in  rightList that are past
+       // theOffset, and pull them into leftlist.
+-      nsCOMPtr<nsIDOMNode> childToMove;
+       nsCOMPtr<nsIContent> parent(do_QueryInterface(rightList));
+       NS_ENSURE_TRUE(parent, NS_ERROR_NULL_POINTER);
+ 
+       nsIContent *child = parent->GetChildAt(theOffset);
+-      while (child)
+-      {
+-        childToMove = do_QueryInterface(child);
+-        res = mHTMLEditor->MoveNode(childToMove, leftList, -1);
++      while (child) {
++        res = mHTMLEditor->MoveNode(child, leftList, -1);
+         NS_ENSURE_SUCCESS(res, res);
+ 
+         child = parent->GetChildAt(rightOffset);
+       }
+     }
+     else
+     {
+       res = MoveBlock(*aLeftBlock, *aRightBlock, leftOffset, rightOffset);
+diff --git a/editor/libeditor/html/nsHTMLEditorStyle.cpp b/editor/libeditor/html/nsHTMLEditorStyle.cpp
+--- a/editor/libeditor/html/nsHTMLEditorStyle.cpp
++++ b/editor/libeditor/html/nsHTMLEditorStyle.cpp
+@@ -1605,17 +1605,17 @@ nsHTMLEditor::RelativeFontChangeOnTextNo
+   if (aStartOffset == aEndOffset) return NS_OK;
+   
+   nsresult res = NS_OK;
+   nsCOMPtr<nsIDOMNode> parent;
+   res = aTextNode->GetParentNode(getter_AddRefs(parent));
+   NS_ENSURE_SUCCESS(res, res);
+   if (!CanContainTag(parent, NS_LITERAL_STRING("big"))) return NS_OK;
+ 
+-  nsCOMPtr<nsIDOMNode> tmp, node = do_QueryInterface(aTextNode);
++  nsCOMPtr<nsIDOMNode> tmp, node = aTextNode;
+ 
+   // do we need to split the text node?
+   uint32_t textLen;
+   aTextNode->GetLength(&textLen);
+   
+   // -1 is a magic value meaning to the end of node
+   if (aEndOffset == -1) aEndOffset = textLen;
+   
+@@ -1631,37 +1631,33 @@ nsHTMLEditor::RelativeFontChangeOnTextNo
+     // we need to split off front of text node
+     res = SplitNode(node, aStartOffset, getter_AddRefs(tmp));
+     NS_ENSURE_SUCCESS(res, res);
+   }
+ 
+   NS_NAMED_LITERAL_STRING(bigSize, "big");
+   NS_NAMED_LITERAL_STRING(smallSize, "small");
+   const nsAString& nodeType = (aSizeChange==1) ? static_cast<const nsAString&>(bigSize) : static_cast<const nsAString&>(smallSize);
++
+   // look for siblings that are correct type of node
+-  nsCOMPtr<nsIDOMNode> sibling;
+-  GetPriorHTMLSibling(node, address_of(sibling));
+-  if (sibling && NodeIsType(sibling, (aSizeChange==1) ? nsEditProperty::big : nsEditProperty::small))
+-  {
++  nsCOMPtr<nsINode> n = do_QueryInterface(node);
++  nsIContent* sibling = GetPriorHTMLSibling(n);
++  if (sibling && sibling->IsHTML((aSizeChange==1) ? nsEditProperty::big : nsEditProperty::small))) {
+     // previous sib is already right kind of inline node; slide this over into it
+-    res = MoveNode(node, sibling, -1);
+-    return res;
++    return MoveNode(node, sibling, -1);
+   }
+-  sibling = nsnull;
+-  GetNextHTMLSibling(node, address_of(sibling));
+-  if (sibling && NodeIsType(sibling, (aSizeChange==1) ? nsEditProperty::big : nsEditProperty::small))
+-  {
++
++  sibling = GetNextHTMLSibling(n);
++  if (sibling && sibling->IsHTML((aSizeChange==1) ? nsEditProperty::big : nsEditProperty::small)) {
+     // following sib is already right kind of inline node; slide this over into it
+-    res = MoveNode(node, sibling, 0);
+-    return res;
++    return MoveNode(node, sibling, 0);
+   }
+-  
++
+   // else reparent the node inside font node with appropriate relative size
+-  res = InsertContainerAbove(node, address_of(tmp), nodeType);
+-  return res;
++  return InsertContainerAbove(node, address_of(tmp), nodeType);
+ }
+ 
+ 
+ nsresult
+ nsHTMLEditor::RelativeFontChangeHelper( int32_t aSizeChange, 
+                                         nsIDOMNode *aNode)
+ {
+   /*  This routine looks for all the font nodes in the tree rooted by aNode,
+@@ -1758,35 +1754,31 @@ nsHTMLEditor::RelativeFontChangeOnNode( 
+   if (TagCanContain(tag, aNode))
+   {
+     // first populate any nested font tags that have the size attr set
+     res = RelativeFontChangeHelper(aSizeChange, aNode);
+     NS_ENSURE_SUCCESS(res, res);
+     // ok, chuck it in.
+     // first look at siblings of aNode for matching bigs or smalls.
+     // if we find one, move aNode into it.
+-    nsCOMPtr<nsIDOMNode> sibling;
+-    GetPriorHTMLSibling(aNode, address_of(sibling));
+-    if (sibling && nsEditor::NodeIsType(sibling, (aSizeChange==1 ? nsEditProperty::big : nsEditProperty::small)))
+-    {
++    nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
++    NS_ENSURE_TRUE(node, NS_ERROR_NULL_POINTER);
++    nsIContent* sibling = GetPriorHTMLSibling(node);
++    if (sibling && sibling->IsHTML((aSizeChange==1 ? nsEditProperty::big : nsEditProperty::small))) {
+       // previous sib is already right kind of inline node; slide this over into it
+-      res = MoveNode(aNode, sibling, -1);
+-      return res;
++      return MoveNode(node, sibling, -1);
+     }
+-    sibling = nsnull;
+-    GetNextHTMLSibling(aNode, address_of(sibling));
+-    if (sibling && nsEditor::NodeIsType(sibling, (aSizeChange==1 ? nsEditProperty::big : nsEditProperty::small)))
+-    {
++
++    sibling = GetNextHTMLSibling(node);
++    if (sibling && sibling->IsHTML((aSizeChange==1 ? nsEditProperty::big : nsEditProperty::small))) {
+       // following sib is already right kind of inline node; slide this over into it
+-      res = MoveNode(aNode, sibling, 0);
+-      return res;
++      return MoveNode(node, sibling, 0);
+     }
+     // else insert it above aNode
+-    res = InsertContainerAbove(aNode, address_of(tmp), tag);
+-    return res;
++    return InsertContainerAbove(aNode, address_of(tmp), tag);
+   }
+   // none of the above?  then cycle through the children.
+   // MOOSE: we should group the children together if possible
+   // into a single "big" or "small".  For the moment they are
+   // each getting their own.  
+   nsCOMPtr<nsIDOMNodeList> childNodes;
+   res = aNode->GetChildNodes(getter_AddRefs(childNodes));
+   NS_ENSURE_SUCCESS(res, res);

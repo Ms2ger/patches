@@ -1,0 +1,331 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCJSRuntime.cpp b/js/xpconnect/src/XPCJSRuntime.cpp
+--- a/js/xpconnect/src/XPCJSRuntime.cpp
++++ b/js/xpconnect/src/XPCJSRuntime.cpp
+@@ -1901,16 +1901,22 @@ bool PreserveWrapper(JSContext *cx, JSOb
+     nsresult rv;
+     nsCOMPtr<nsINode> node = do_QueryInterface(native, &rv);
+     if (NS_FAILED(rv))
+         return false;
+     nsContentUtils::PreserveWrapper(native, node);
+     return true;
+ }
+ 
++#define CRASH_IF_NULL(_ptr)                                                     \
++    do {                                                                        \
++        if (!_ptr)                                                              \
++            MOZ_CRASH();                                                        \
++    } while (false)
++
+ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
+  : mXPConnect(aXPConnect),
+    mJSRuntime(nsnull),
+    mJSContextStack(new XPCJSContextStack()),
+    mJSCycleCollectionContext(nsnull),
+    mCallContext(nsnull),
+    mAutoRoots(nsnull),
+    mResolveName(JSID_VOID),
+@@ -1941,30 +1947,41 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* 
+ {
+ #ifdef XPC_CHECK_WRAPPERS_AT_SHUTDOWN
+     DEBUG_WrappedNativeHashtable =
+         JS_NewDHashTable(JS_DHashGetStubOps(), nsnull,
+                          sizeof(JSDHashEntryStub), 128);
+ #endif
+     NS_TIME_FUNCTION;
+ 
++    MOZ_ASSERT(aXPConnect);
++
++    CRASH_IF_NULL(mWrappedJSMap);
++    CRASH_IF_NULL(mWrappedJSClassMap);
++    CRASH_IF_NULL(mIID2NativeInterfaceMap);
++    CRASH_IF_NULL(mClassInfo2NativeSetMap);
++    CRASH_IF_NULL(mNativeSetMap);
++    CRASH_IF_NULL(mThisTranslatorMap);
++    CRASH_IF_NULL(mNativeScriptableSharedMap);
++    CRASH_IF_NULL(mDyingWrappedNativeProtoMap);
++    CRASH_IF_NULL(mMapLock);
++
+     DOM_InitInterfaces();
+     Preferences::AddBoolVarCache(&gNewDOMBindingsEnabled, "dom.new_bindings",
+                                  false);
+     Preferences::AddBoolVarCache(&gExperimentalBindingsEnabled,
+                                  "dom.experimental_bindings",
+                                  false);
+ 
+ 
+     // these jsids filled in later when we have a JSContext to work with.
+     mStrIDs[0] = JSID_VOID;
+ 
+     mJSRuntime = JS_NewRuntime(32L * 1024L * 1024L); // pref ?
+-    if (!mJSRuntime)
+-        NS_RUNTIMEABORT("JS_NewRuntime failed.");
++    CRASH_IF_NULL(mJSRuntime);
+ 
+     // Unconstrain the runtime's threshold on nominal heap size, to avoid
+     // triggering GC too often if operating continuously near an arbitrary
+     // finite threshold (0xffffffff is infinity for uint32_t parameters).
+     // This leaves the maximum-JS_malloc-bytes threshold still in effect
+     // to cause period, and we hope hygienic, last-ditch GCs from within
+     // the GC's allocator.
+     JS_SetGCParameter(mJSRuntime, JSGC_MAX_BYTES, 0xffffffff);
+@@ -1996,72 +2013,41 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* 
+     NS_RegisterMemoryReporter(new NS_MEMORY_REPORTER_NAME(XPConnectJSUserCompartmentCount));
+     NS_RegisterMemoryMultiReporter(new JSMemoryMultiReporter);
+     NS_RegisterMemoryMultiReporter(new JSCompartmentsMultiReporter);
+ 
+     if (!JS_DHashTableInit(&mJSHolders, JS_DHashGetStubOps(), nsnull,
+                            sizeof(ObjectHolder), 512))
+         mJSHolders.ops = nsnull;
+ 
+-    mCompartmentSet.init();
++    if (!mCompartmentSet.init())
++        NS_RUNTIMEABORT("mCompartmentSet.init() failed.");
+ 
+     // Install a JavaScript 'debugger' keyword handler in debug builds only
+ #ifdef DEBUG
+     if (!JS_GetGlobalDebugHooks(mJSRuntime)->debuggerHandler)
+         xpc_InstallJSDebuggerKeywordHandler(mJSRuntime);
+ #endif
+ 
+     mWatchdogLock = PR_NewLock();
+-    if (!mWatchdogLock)
+-        NS_RUNTIMEABORT("PR_NewLock failed.");
++    CRASH_IF_NULL(mWatchdogLock);
++
+     mWatchdogWakeup = PR_NewCondVar(mWatchdogLock);
+-    if (!mWatchdogWakeup)
+-        NS_RUNTIMEABORT("PR_NewCondVar failed.");
++    CRASH_IF_NULL(mWatchdogWakeup);
+ 
+     {
+         AutoLockWatchdog lock(this);
+ 
+         mWatchdogThread = PR_CreateThread(PR_USER_THREAD, WatchdogMain, this,
+                                           PR_PRIORITY_NORMAL, PR_LOCAL_THREAD,
+                                           PR_UNJOINABLE_THREAD, 0);
+-        if (!mWatchdogThread)
+-            NS_RUNTIMEABORT("PR_CreateThread failed!");
++        CRASH_IF_NULL(mWatchdogThread);
+     }
+ }
+ 
+-// static
+-XPCJSRuntime*
+-XPCJSRuntime::newXPCJSRuntime(nsXPConnect* aXPConnect)
+-{
+-    NS_PRECONDITION(aXPConnect,"bad param");
+-
+-    XPCJSRuntime* self = new XPCJSRuntime(aXPConnect);
+-
+-    if (self                                    &&
+-        self->GetJSRuntime()                    &&
+-        self->GetWrappedJSMap()                 &&
+-        self->GetWrappedJSClassMap()            &&
+-        self->GetIID2NativeInterfaceMap()       &&
+-        self->GetClassInfo2NativeSetMap()       &&
+-        self->GetNativeSetMap()                 &&
+-        self->GetThisTranslatorMap()            &&
+-        self->GetNativeScriptableSharedMap()    &&
+-        self->GetDyingWrappedNativeProtoMap()   &&
+-        self->GetMapLock()                      &&
+-        self->GetCompartmentSet().initialized() &&
+-        self->mWatchdogThread) {
+-        return self;
+-    }
+-
+-    NS_RUNTIMEABORT("new XPCJSRuntime failed to initialize.");
+-
+-    delete self;
+-    return nsnull;
+-}
+-
+ // InternStaticDictionaryJSVals is automatically generated.
+ bool InternStaticDictionaryJSVals(JSContext* aCx);
+ 
+ JSBool
+ XPCJSRuntime::OnJSContextNew(JSContext *cx)
+ {
+     NS_TIME_FUNCTION;
+ 
+diff --git a/js/xpconnect/src/nsXPConnect.cpp b/js/xpconnect/src/nsXPConnect.cpp
+--- a/js/xpconnect/src/nsXPConnect.cpp
++++ b/js/xpconnect/src/nsXPConnect.cpp
+@@ -76,23 +76,34 @@ nsXPConnect::nsXPConnect()
+         mInterfaceInfoManager(do_GetService(NS_INTERFACEINFOMANAGER_SERVICE_CONTRACTID)),
+         mDefaultSecurityManager(nsnull),
+         mDefaultSecurityManagerFlags(0),
+         mShuttingDown(false),
+         mNeedGCBeforeCC(true),
+         mEventDepth(0),
+         mCycleCollectionContext(nsnull)
+ {
+-    mRuntime = XPCJSRuntime::newXPCJSRuntime(this);
++    MOZ_ASSERT(NS_IsMainThread());
++    if (!mInterfaceInfoManager) {
++        NS_RUNTIMEABORT("Couldn't create global interface info manager.");
++    }
++
++    mRuntime = new XPCJSRuntime(this);
+ 
+     nsCycleCollector_registerJSRuntime(this);
+ 
+     char* reportableEnv = PR_GetEnv("MOZ_REPORT_ALL_JS_EXCEPTIONS");
+     if (reportableEnv && *reportableEnv)
+         gReportAllJSExceptions = 1;
++
++    // Add XPConnect as an thread observer.
++    nsCOMPtr<nsIThreadInternal> thread = do_QueryInterface(NS_GetCurrentThread());
++    if (NS_FAILED(thread->AddObserver(this))) {
++        NS_RUNTIMEABORT("Couldn't add XPConnect as an thread observer.");
++    }
+ }
+ 
+ nsXPConnect::~nsXPConnect()
+ {
+     nsCycleCollector_forgetJSRuntime();
+ 
+     JSContext *cx = nsnull;
+     if (mRuntime) {
+@@ -123,58 +134,16 @@ nsXPConnect::~nsXPConnect()
+     XPC_LOG_FINISH();
+ 
+     delete mRuntime;
+ 
+     gSelf = nsnull;
+     gOnceAliveNowDead = true;
+ }
+ 
+-// static
+-nsXPConnect*
+-nsXPConnect::GetXPConnect()
+-{
+-    // Do a release-mode assert that we're not doing anything significant in
+-    // XPConnect off the main thread. If you're an extension developer hitting
+-    // this, you need to change your code. See bug 716167.
+-    if (!NS_LIKELY(NS_IsMainThread() || NS_IsCycleCollectorThread()))
+-        MOZ_CRASH();
+-
+-    if (!gSelf) {
+-        if (gOnceAliveNowDead)
+-            return nsnull;
+-        gSelf = new nsXPConnect();
+-        if (!gSelf)
+-            return nsnull;
+-
+-        if (!gSelf->mRuntime) {
+-            NS_RUNTIMEABORT("Couldn't create XPCJSRuntime.");
+-        }
+-        if (!gSelf->mInterfaceInfoManager) {
+-            NS_RUNTIMEABORT("Couldn't get global interface info manager.");
+-        }
+-
+-        // Initial extra ref to keep the singleton alive
+-        // balanced by explicit call to ReleaseXPConnectSingleton()
+-        NS_ADDREF(gSelf);
+-
+-        // Add XPConnect as an thread observer.
+-        //
+-        // The cycle collector sometimes calls GetXPConnect, but it should never
+-        // be the one that initializes gSelf.
+-        MOZ_ASSERT(NS_IsMainThread());
+-        nsCOMPtr<nsIThreadInternal> thread = do_QueryInterface(NS_GetCurrentThread());
+-        if (NS_FAILED(thread->AddObserver(gSelf))) {
+-            NS_RELEASE(gSelf);
+-            // Fall through to returning null
+-        }
+-    }
+-    return gSelf;
+-}
+-
+ namespace xpc {
+ 
+ nsIXPConnect*
+ GetXPConnect()
+ {
+     return nsXPConnect::GetXPConnect();
+ }
+ 
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -480,17 +480,36 @@ public:
+     NS_DECL_NSIJSRUNTIMESERVICE
+     NS_DECL_NSIJSCONTEXTSTACK
+     NS_DECL_NSITHREADJSCONTEXTSTACK
+     NS_DECL_NSIJSENGINETELEMETRYSTATS
+ 
+     // non-interface implementation
+ public:
+     // These get non-addref'd pointers
+-    static nsXPConnect*  GetXPConnect();
++    static nsXPConnect*  GetXPConnect()
++    {
++        // Do a release-mode assert that we're not doing anything significant in
++        // XPConnect off the main thread. If you're an extension developer hitting
++        // this, you need to change your code. See bug 716167.
++        if (!NS_LIKELY(NS_IsMainThread() || NS_IsCycleCollectorThread()))
++            MOZ_Assert("NS_IsMainThread()", __FILE__, __LINE__);
++
++        if (!gSelf) {
++            if (gOnceAliveNowDead)
++                return NULL;
++
++            gSelf = new nsXPConnect();
++
++            // Released in ReleaseXPConnectSingleton().
++            NS_ADDREF(gSelf);
++        }
++        return gSelf;
++    }
++
+     static nsXPConnect*  FastGetXPConnect() { return gSelf ? gSelf : GetXPConnect(); }
+     static XPCJSRuntime* GetRuntimeInstance();
+     XPCJSRuntime* GetRuntime() {return mRuntime;}
+ 
+     // Gets addref'd pointer
+     static nsresult GetInterfaceInfoManager(nsIInterfaceInfoSuperManager** iim,
+                                             nsXPConnect* xpc = nsnull);
+ 
+@@ -636,17 +655,19 @@ private:
+ // In the current xpconnect system there can only be one XPCJSRuntime.
+ // So, xpconnect can only be used on one JSRuntime within the process.
+ 
+ // no virtuals. no refcounting.
+ class XPCJSContextStack;
+ class XPCJSRuntime
+ {
+ public:
+-    static XPCJSRuntime* newXPCJSRuntime(nsXPConnect* aXPConnect);
++    // Will crash if it fails to initialize completely.
++    explicit XPCJSRuntime(nsXPConnect* aXPConnect);
++
+     static XPCJSRuntime* Get() { return nsXPConnect::GetXPConnect()->GetRuntime(); }
+ 
+     JSRuntime*     GetJSRuntime() const {return mJSRuntime;}
+     nsXPConnect*   GetXPConnect() const {return mXPConnect;}
+ 
+     XPCJSContextStack* GetJSContextStack() {return mJSContextStack;}
+     void DestroyJSContextStack();
+ 
+@@ -852,18 +873,17 @@ public:
+         return gExperimentalBindingsEnabled;
+     }
+ 
+     size_t SizeOfIncludingThis(nsMallocSizeOfFun mallocSizeOf);
+ 
+     AutoMarkingPtr**  GetAutoRootsAdr() {return &mAutoRoots;}
+ 
+ private:
+-    XPCJSRuntime(); // no implementation
+-    XPCJSRuntime(nsXPConnect* aXPConnect);
++    XPCJSRuntime() MOZ_DELETE;
+ 
+     // The caller must be holding the GC lock
+     void RescheduleWatchdog(XPCContext* ccx);
+ 
+     static void WatchdogMain(void *arg);
+ 
+     static bool gNewDOMBindingsEnabled;
+     static bool gExperimentalBindingsEnabled;

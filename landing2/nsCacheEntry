@@ -1,0 +1,84 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/netwerk/cache/nsCacheEntry.cpp b/netwerk/cache/nsCacheEntry.cpp
+--- a/netwerk/cache/nsCacheEntry.cpp
++++ b/netwerk/cache/nsCacheEntry.cpp
+@@ -32,17 +32,16 @@ nsCacheEntry::nsCacheEntry(const nsACStr
+       mFlags(0),
+       mPredictedDataSize(-1),
+       mDataSize(0),
+       mCacheDevice(nullptr),
+       mCustomDevice(nullptr),
+       mData(nullptr)
+ {
+     MOZ_COUNT_CTOR(nsCacheEntry);
+-    PR_INIT_CLIST(this);
+     PR_INIT_CLIST(&mRequestQ);
+     PR_INIT_CLIST(&mDescriptorQ);
+ 
+     if (streamBased) MarkStreamBased();
+     SetStoragePolicy(storagePolicy);
+ 
+     MarkPublic();
+ 
+diff --git a/netwerk/cache/nsCacheEntry.h b/netwerk/cache/nsCacheEntry.h
+--- a/netwerk/cache/nsCacheEntry.h
++++ b/netwerk/cache/nsCacheEntry.h
+@@ -7,33 +7,34 @@
+ #ifndef _nsCacheEntry_h_
+ #define _nsCacheEntry_h_
+ 
+ #include "nsICache.h"
+ #include "nsICacheEntryDescriptor.h"
+ #include "nsIThread.h"
+ #include "nsCacheMetaData.h"
+ 
++#include "mozilla/LinkedList.h"
+ #include "nspr.h"
+ #include "pldhash.h"
+ #include "nsAutoPtr.h"
+ #include "nscore.h"
+ #include "nsCOMPtr.h"
+ #include "nsString.h"
+ #include "nsAString.h"
+ 
+ class nsCacheDevice;
+ class nsCacheMetaData;
+ class nsCacheRequest;
+ class nsCacheEntryDescriptor;
+ 
+ /******************************************************************************
+ * nsCacheEntry
+ *******************************************************************************/
+-class nsCacheEntry : public PRCList
++class nsCacheEntry : public mozilla::LinkedListEntry<nsCacheEntry>
+ {
+ public:
+ 
+     nsCacheEntry(const nsACString &   key,
+                  bool                 streamBased,
+                  nsCacheStoragePolicy storagePolicy);
+     ~nsCacheEntry();
+ 
+diff --git a/netwerk/cache/nsCacheService.cpp b/netwerk/cache/nsCacheService.cpp
+--- a/netwerk/cache/nsCacheService.cpp
++++ b/netwerk/cache/nsCacheService.cpp
+@@ -2340,17 +2340,17 @@ nsCacheService::DoomEntry_Internal(nsCac
+     if (entry->IsActive()) {
+         // remove from active entries
+         mActiveEntries.RemoveEntry(entry);
+         CACHE_LOG_DEBUG(("Removed entry %p from mActiveEntries\n", entry));
+         entry->MarkInactive();
+      }
+ 
+     // put on doom list to wait for descriptors to close
+-    NS_ASSERTION(PR_CLIST_IS_EMPTY(entry), "doomed entry still on device list");
++    NS_ASSERTION(entry->isEmpty(), "doomed entry still on device list");
+     PR_APPEND_LINK(entry, &mDoomedEntries);
+ 
+     // handle pending requests only if we're supposed to
+     if (doProcessPendingRequests) {
+         // tell pending requests to get on with their lives...
+         rv = ProcessPendingRequests(entry);
+ 
+         // All requests have been removed, but there may still be open descriptors

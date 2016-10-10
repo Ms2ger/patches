@@ -1,0 +1,427 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/html/nsHTMLEditUtils.cpp b/editor/libeditor/html/nsHTMLEditUtils.cpp
+--- a/editor/libeditor/html/nsHTMLEditUtils.cpp
++++ b/editor/libeditor/html/nsHTMLEditUtils.cpp
+@@ -238,23 +238,35 @@ nsHTMLEditUtils::IsTableRow(nsIDOMNode *
+ {
+   return nsEditor::NodeIsType(node, nsEditProperty::tr);
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // IsTableCell: true if node an html td or th
+ //                  
++bool
++nsHTMLEditUtils::IsTableCell(nsINode* aNode)
++{
++  NS_PRECONDITION(aNode, "null parent passed to nsHTMLEditUtils::IsTableCell");
++  if (!aNode->IsElement()) {
++    return false;
++  }
++
++  nsIAtom* tagName = aNode->AsElement()->Tag();
++  return tagName == nsGkAtoms::td ||
++         tagName == nsGkAtoms::th;
++}
++
+ bool 
+-nsHTMLEditUtils::IsTableCell(nsIDOMNode *node)
++nsHTMLEditUtils::IsTableCell(nsIDOMNode* aNode)
+ {
+   NS_PRECONDITION(node, "null parent passed to nsHTMLEditUtils::IsTableCell");
+-  nsCOMPtr<nsIAtom> nodeAtom = nsEditor::GetTag(node);
+-  return (nodeAtom == nsEditProperty::td)
+-      || (nodeAtom == nsEditProperty::th);
++  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
++  return IsTableCell(node);
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // IsTableCell: true if node an html td or th
+ //                  
+ bool 
+ nsHTMLEditUtils::IsTableCellOrCaption(nsIDOMNode *node)
+@@ -265,24 +277,36 @@ nsHTMLEditUtils::IsTableCellOrCaption(ns
+       || (nodeAtom == nsEditProperty::th)
+       || (nodeAtom == nsEditProperty::caption);
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // IsList: true if node an html list
+ //                  
++bool
++nsHTMLEditUtils::IsList(nsINode* aNode)
++{
++  NS_PRECONDITION(aNode, "null parent passed to nsHTMLEditUtils::IsList");
++  if (!aNode->IsElement()) {
++    return false;
++  }
++
++  nsIAtom* tagName = aNode->AsElement()->Tag();
++  return tagName == nsGkAtoms::ul ||
++         tagName == nsGkAtoms::ol ||
++         tagName == nsGkAtoms::dl;
++}
++
+ bool 
+-nsHTMLEditUtils::IsList(nsIDOMNode *node)
++nsHTMLEditUtils::IsList(nsIDOMNode* aNode)
+ {
+   NS_PRECONDITION(node, "null parent passed to nsHTMLEditUtils::IsList");
+-  nsCOMPtr<nsIAtom> nodeAtom = nsEditor::GetTag(node);
+-  return (nodeAtom == nsEditProperty::ul)
+-      || (nodeAtom == nsEditProperty::ol)
+-      || (nodeAtom == nsEditProperty::dl);
++  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
++  return IsList(node);
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // IsOrderedList: true if node an html ordered list
+ //                  
+ bool 
+ nsHTMLEditUtils::IsOrderedList(nsIDOMNode *node)
+@@ -325,42 +349,57 @@ nsHTMLEditUtils::IsPre(nsIDOMNode *node)
+ // IsImage: true if node an html image node
+ //                  
+ bool 
+ nsHTMLEditUtils::IsImage(nsIDOMNode *node)
+ {
+   return nsEditor::NodeIsType(node, nsEditProperty::img);
+ }
+ 
+-bool 
++bool
++nsHTMLEditUtils::IsLink(nsINode* aNode)
++{
++  NS_ENSURE_TRUE(aNode, false);
++  if (!aNode->IsElement()) {
++    return false;
++  }
++
++  dom::Element* element = aNode->AsElement();
++  nsAutoString value;
++  return element->IsHTML(nsGkAtoms::a) &&
++         element->GetAttr(kNameSpaceID_None, nsGkAtoms::href, value) &&
++         !value.IsEmpty();
++}
++bool
+ nsHTMLEditUtils::IsLink(nsIDOMNode *aNode)
+ {
+-  NS_ENSURE_TRUE(aNode, false);
+-  nsCOMPtr<nsIDOMHTMLAnchorElement> anchor = do_QueryInterface(aNode);
+-  if (anchor)
+-  {
+-    nsAutoString tmpText;
+-    if (NS_SUCCEEDED(anchor->GetHref(tmpText)) && !tmpText.IsEmpty())
+-      return true;
+-  }
+-  return false;
++  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
++  return IsLink(node);
+ }
+ 
+-bool 
++bool
++nsHTMLEditUtils::IsNamedAnchor(nsINode* aNode)
++{
++  NS_ENSURE_TRUE(aNode, false);
++  if (!aNode->IsElement()) {
++    return false;
++  }
++
++  dom::Element* element = aNode->AsElement();
++  nsAutoString value;
++  return element->IsHTML(nsGkAtoms::a) &&
++         element->GetAttr(kNameSpaceID_None, nsGkAtoms::name, value) &&
++         !value.IsEmpty();
++}
++
++bool
+ nsHTMLEditUtils::IsNamedAnchor(nsIDOMNode *aNode)
+ {
+-  NS_ENSURE_TRUE(aNode, false);
+-  nsCOMPtr<nsIDOMHTMLAnchorElement> anchor = do_QueryInterface(aNode);
+-  if (anchor)
+-  {
+-    nsAutoString tmpText;
+-    if (NS_SUCCEEDED(anchor->GetName(tmpText)) && !tmpText.IsEmpty())
+-      return true;
+-  }
+-  return false;
++  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
++  return IsNamedAnchor(node);
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // IsDiv: true if node an html div node
+ //                  
+ bool 
+ nsHTMLEditUtils::IsDiv(nsIDOMNode *node)
+diff --git a/editor/libeditor/html/nsHTMLEditUtils.h b/editor/libeditor/html/nsHTMLEditUtils.h
+--- a/editor/libeditor/html/nsHTMLEditUtils.h
++++ b/editor/libeditor/html/nsHTMLEditUtils.h
+@@ -36,16 +36,17 @@
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #ifndef nsHTMLEditUtils_h__
+ #define nsHTMLEditUtils_h__
+ 
+ #include "prtypes.h"  // for int32_t
+ 
+ class nsIDOMNode;
++class nsINode;
+ 
+ namespace mozilla {
+ namespace dom {
+ class Element;
+ } // namespace dom
+ } // namespace mozilla
+ 
+ class nsHTMLEditUtils
+@@ -62,26 +63,30 @@ public:
+   static bool IsHeader(nsIDOMNode *aNode);
+   static bool IsParagraph(nsIDOMNode *aNode);
+   static bool IsHR(nsIDOMNode *aNode);
+   static bool IsListItem(nsIDOMNode *aNode);
+   static bool IsTable(nsIDOMNode *aNode);
+   static bool IsTableRow(nsIDOMNode *aNode);
+   static bool IsTableElement(nsIDOMNode *aNode);
+   static bool IsTableElementButNotTable(nsIDOMNode *aNode);
++  static bool IsTableCell(nsINode *aNode);
+   static bool IsTableCell(nsIDOMNode *aNode);
+   static bool IsTableCellOrCaption(nsIDOMNode *aNode);
++  static bool IsList(nsINode *aNode);
+   static bool IsList(nsIDOMNode *aNode);
+   static bool IsOrderedList(nsIDOMNode *aNode);
+   static bool IsUnorderedList(nsIDOMNode *aNode);
+   static bool IsBlockquote(nsIDOMNode *aNode);
+   static bool IsPre(nsIDOMNode *aNode);
+   static bool IsAnchor(nsIDOMNode *aNode);
+   static bool IsImage(nsIDOMNode *aNode);
++  static bool IsLink(nsINode* aNode);
+   static bool IsLink(nsIDOMNode *aNode);
++  static bool IsNamedAnchor(nsINode* aNode);
+   static bool IsNamedAnchor(nsIDOMNode *aNode);
+   static bool IsDiv(nsIDOMNode *aNode);
+   static bool IsMozDiv(nsIDOMNode *aNode);
+   static bool IsMailCite(nsIDOMNode *aNode);
+   static bool IsFormWidget(nsIDOMNode *aNode);
+   static bool SupportsAlignAttr(mozilla::dom::Element *aNode);
+   static bool SupportsAlignAttr(nsIDOMNode* aNode);
+   static bool CanContain(int32_t aParent, int32_t aChild);
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -2626,134 +2626,121 @@ nsHTMLEditor::Align(const nsAString& aAl
+   res = mRules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
+   if (cancel || NS_FAILED(res))
+     return res;
+   
+   res = mRules->DidDoAction(selection, &ruleInfo, res);
+   return res;
+ }
+ 
++static nsresult
++GetAnchorNode(nsHTMLEditor* aEditor, nsINode** aNode)
++{
++  nsCOMPtr<nsISelection> selection;
++  nsresult rv = aEditor->GetSelection(getter_AddRefs(selection));
++  NS_ENSURE_SUCCESS(rv, rv);
++  NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
++
++  nsCOMPtr<nsIDOMNode> anchorNode;
++  rv = selection->GetAnchorNode(getter_AddRefs(anchorNode));
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  nsCOMPtr<nsINode> anchor = do_QueryInterface(anchorNode);
++  NS_ENSURE_TRUE(anchorNode, NS_ERROR_FAILURE);
++
++  nsCOMPtr<nsINode> currentNode;
++  // Try to get the actual selected node
++  if (anchor->GetFirstChild() && anchor->IsNodeOfType(nsINode::eCONTENT)) {
++    int32_t offset;
++    rv = selection->GetAnchorOffset(&offset);
++    NS_ENSURE_SUCCESS(rv, rv);
++    currentNode = anchor->GetChildAt(offset);
++  }
++
++  // Anchor node is probably a text node - just use that.
++  if (!currentNode) {
++    currentNode = anchor;
++  }
++
++  currentNode.forget(aNode);
++  return NS_OK;
++}
++
+ NS_IMETHODIMP
+ nsHTMLEditor::GetElementOrParentByTagName(const nsAString& aTagName, nsIDOMNode *aNode, nsIDOMElement** aReturn)
+ {
+-  if (aTagName.IsEmpty() || !aReturn )
++  if (aTagName.IsEmpty() || !aReturn) {
+     return NS_ERROR_NULL_POINTER;
++  }
+   
+-  nsresult res = NS_OK;
+-  nsCOMPtr<nsIDOMNode> currentNode;
+-
+-  if (aNode)
+-    currentNode = aNode;
+-  else
+-  {
++  nsCOMPtr<nsINode> currentNode;
++  if (aNode) {
++    currentNode = do_QueryInterface(aNode);
++  } else {
+     // If no node supplied, get it from anchor node of current selection
+-    nsCOMPtr<nsISelection>selection;
+-    res = GetSelection(getter_AddRefs(selection));
+-    NS_ENSURE_SUCCESS(res, res);
+-    NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
+-
+-    nsCOMPtr<nsIDOMNode> anchorNode;
+-    res = selection->GetAnchorNode(getter_AddRefs(anchorNode));
+-    if(NS_FAILED(res)) return res;
+-    NS_ENSURE_TRUE(anchorNode, NS_ERROR_FAILURE);
+-
+-    // Try to get the actual selected node
+-    bool hasChildren = false;
+-    anchorNode->HasChildNodes(&hasChildren);
+-    if (hasChildren)
+-    {
+-      int32_t offset;
+-      res = selection->GetAnchorOffset(&offset);
+-      if(NS_FAILED(res)) return res;
+-      currentNode = nsEditor::GetChildAt(anchorNode, offset);
+-    }
+-    // anchor node is probably a text node - just use that
+-    if (!currentNode)
+-      currentNode = anchorNode;
++    nsresult rv = GetAnchorNode(this, getter_AddRefs(currentNode));
++    NS_ENSURE_SUCCESS(rv, rv);
+   }
+    
+   nsAutoString TagName(aTagName);
+   ToLowerCase(TagName);
+   bool getLink = IsLinkTag(TagName);
+   bool getNamedAnchor = IsNamedAnchorTag(TagName);
+-  if ( getLink || getNamedAnchor)
+-  {
+-    TagName.AssignLiteral("a");  
++  if (getLink || getNamedAnchor) {
++    TagName.AssignLiteral("a");
+   }
+   bool findTableCell = TagName.EqualsLiteral("td");
+   bool findList = TagName.EqualsLiteral("list");
+ 
++  nsCOMPtr<nsIAtom> tag = do_GetAtom(TagName);
++
+   // default is null - no element found
+   *aReturn = nsnull;
+   
+-  nsCOMPtr<nsIDOMNode> parent;
+-  bool bNodeFound = false;
+-
+-  while (true)
+-  {
+-    nsAutoString currentTagName; 
++  while (true) {
+     // Test if we have a link (an anchor with href set)
+     if ( (getLink && nsHTMLEditUtils::IsLink(currentNode)) ||
+-         (getNamedAnchor && nsHTMLEditUtils::IsNamedAnchor(currentNode)) )
+-    {
+-      bNodeFound = true;
++         (getNamedAnchor && nsHTMLEditUtils::IsNamedAnchor(currentNode)) ) {
+       break;
+-    } else {
+-      if (findList)
+-      {
+-        // Match "ol", "ul", or "dl" for lists
+-        if (nsHTMLEditUtils::IsList(currentNode))
+-          goto NODE_FOUND;
+-
+-      } else if (findTableCell)
+-      {
+-        // Table cells are another special case:
+-        // Match either "td" or "th" for them
+-        if (nsHTMLEditUtils::IsTableCell(currentNode))
+-          goto NODE_FOUND;
+-
+-      } else {
+-        currentNode->GetNodeName(currentTagName);
+-        if (currentTagName.Equals(TagName, nsCaseInsensitiveStringComparator()))
+-        {
+-NODE_FOUND:
+-          bNodeFound = true;
+-          break;
+-        } 
++    } else if (findList) {
++      // Match "ol", "ul", or "dl" for lists
++      if (nsHTMLEditUtils::IsList(currentNode)) {
++        break;
+       }
++    } else if (findTableCell) {
++      // Table cells are another special case:
++      // Match either "td" or "th" for them
++      if (nsHTMLEditUtils::IsTableCell(currentNode)) {
++        break;
++      }
++    } else if (currentNode->IsElement() &&
++               currentNode->AsElement()->Tag() == tag) {
++      break;
+     }
++
+     // Search up the parent chain
+     // We should never fail because of root test below, but lets be safe
+-    // XXX: ERROR_HANDLING error return code lost
+-    if (NS_FAILED(currentNode->GetParentNode(getter_AddRefs(parent))) || !parent)
+-      break;
++    nsINode* parent = currentNode->GetNodeParent();
++    if (!parent) {
++      return NS_EDITOR_ELEMENT_NOT_FOUND;
++    }
+ 
+     // Stop searching if parent is a body tag
+-    nsAutoString parentTagName;
+-    parent->GetNodeName(parentTagName);
+     // Note: Originally used IsRoot to stop at table cells,
+     //  but that's too messy when you are trying to find the parent table
+-    if(parentTagName.LowerCaseEqualsLiteral("body"))
+-      break;
++    if (parent->IsElement() && parent->AsElement()->IsHTML(nsGkAtoms::body)) {
++      return NS_EDITOR_ELEMENT_NOT_FOUND;
++    }
+ 
+     currentNode = parent;
+   }
+-  if (bNodeFound)
+-  {
+-    nsCOMPtr<nsIDOMElement> currentElement = do_QueryInterface(currentNode);
+-    if (currentElement)
+-    {
+-      *aReturn = currentElement;
+-      // Getters must addref
+-      NS_ADDREF(*aReturn);
+-    }
+-  }
+-  else res = NS_EDITOR_ELEMENT_NOT_FOUND;
+-
+-  return res;
++
++  nsCOMPtr<nsIDOMElement> currentElement = do_QueryInterface(currentNode);
++  currentElement.forget(aReturn);
++  return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsHTMLEditor::GetSelectedElement(const nsAString& aTagName, nsIDOMElement** aReturn)
+ {
+   NS_ENSURE_TRUE(aReturn , NS_ERROR_NULL_POINTER);
+   
+   // default is null - no element found

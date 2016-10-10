@@ -1,0 +1,152 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCNativeScriptableCreateInfo.h b/js/xpconnect/src/XPCNativeScriptableCreateInfo.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCNativeScriptableCreateInfo.h
+@@ -0,0 +1,57 @@
++#ifndef XPCNativeScriptableCreateInfo_h
++#define XPCNativeScriptableCreateInfo_h
++
++#include "nsIXPCScriptable.h"
++#include "XPCNativeScriptableFlags.h"
++
++#include "nsCOMPtr.h"
++
++// XPCNativeScriptableCreateInfo is used in creating new wrapper and protos.
++// it abstracts out the scriptable interface pointer and the flags. After
++// creation these are factored differently using XPCNativeScriptableInfo.
++
++class NS_STACK_CLASS XPCNativeScriptableCreateInfo
++{
++public:
++
++    XPCNativeScriptableCreateInfo(const XPCNativeScriptableInfo& si)
++        : mCallback(si.GetCallback()), mFlags(si.GetFlags()),
++          mInterfacesBitmap(si.GetInterfacesBitmap()) {}
++
++    XPCNativeScriptableCreateInfo(already_AddRefed<nsIXPCScriptable> callback,
++                                  XPCNativeScriptableFlags flags,
++                                  uint32_t interfacesBitmap)
++        : mCallback(callback), mFlags(flags),
++          mInterfacesBitmap(interfacesBitmap) {}
++
++    XPCNativeScriptableCreateInfo()
++        : mFlags(0), mInterfacesBitmap(0) {}
++
++
++    nsIXPCScriptable*
++    GetCallback() const {return mCallback;}
++
++    const XPCNativeScriptableFlags&
++    GetFlags() const      {return mFlags;}
++
++    uint32_t
++    GetInterfacesBitmap() const     {return mInterfacesBitmap;}
++
++    void
++    SetCallback(already_AddRefed<nsIXPCScriptable> callback)
++        {mCallback = callback;}
++
++    void
++    SetFlags(const XPCNativeScriptableFlags& flags)  {mFlags = flags;}
++
++    void
++    SetInterfacesBitmap(uint32_t interfacesBitmap)
++        {mInterfacesBitmap = interfacesBitmap;}
++
++private:
++    nsCOMPtr<nsIXPCScriptable>  mCallback;
++    XPCNativeScriptableFlags    mFlags;
++    uint32_t                    mInterfacesBitmap;
++};
++
++#endif // XPCNativeScriptableCreateInfo_h
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -155,16 +155,17 @@
+ #include "XPCLazyCallContext.h"
+ #include "XPCWrappedNativeScope.h"
+ #include "XPCNativeMember.h"
+ #include "XPCNativeInterface.h"
+ #include "XPCNativeSetKey.h"
+ #include "XPCNativeScriptableFlags.h"
+ #include "XPCNativeScriptableShared.h"
+ #include "XPCNativeScriptableInfo.h"
++#include "XPCNativeScriptableCreateInfo.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -453,66 +454,16 @@ enum WrapperType {
+     COW             = 1 << 4,
+     SOW             = 1 << 5
+ };
+ 
+ }
+ 
+ /***************************************************************************/
+ 
+-/***************************************************************************/
+-/***************************************************************************/
+-// XPCNativeScriptableCreateInfo is used in creating new wrapper and protos.
+-// it abstracts out the scriptable interface pointer and the flags. After
+-// creation these are factored differently using XPCNativeScriptableInfo.
+-
+-class NS_STACK_CLASS XPCNativeScriptableCreateInfo
+-{
+-public:
+-
+-    XPCNativeScriptableCreateInfo(const XPCNativeScriptableInfo& si)
+-        : mCallback(si.GetCallback()), mFlags(si.GetFlags()),
+-          mInterfacesBitmap(si.GetInterfacesBitmap()) {}
+-
+-    XPCNativeScriptableCreateInfo(already_AddRefed<nsIXPCScriptable> callback,
+-                                  XPCNativeScriptableFlags flags,
+-                                  uint32_t interfacesBitmap)
+-        : mCallback(callback), mFlags(flags),
+-          mInterfacesBitmap(interfacesBitmap) {}
+-
+-    XPCNativeScriptableCreateInfo()
+-        : mFlags(0), mInterfacesBitmap(0) {}
+-
+-
+-    nsIXPCScriptable*
+-    GetCallback() const {return mCallback;}
+-
+-    const XPCNativeScriptableFlags&
+-    GetFlags() const      {return mFlags;}
+-
+-    uint32_t
+-    GetInterfacesBitmap() const     {return mInterfacesBitmap;}
+-
+-    void
+-    SetCallback(already_AddRefed<nsIXPCScriptable> callback)
+-        {mCallback = callback;}
+-
+-    void
+-    SetFlags(const XPCNativeScriptableFlags& flags)  {mFlags = flags;}
+-
+-    void
+-    SetInterfacesBitmap(uint32_t interfacesBitmap)
+-        {mInterfacesBitmap = interfacesBitmap;}
+-
+-private:
+-    nsCOMPtr<nsIXPCScriptable>  mCallback;
+-    XPCNativeScriptableFlags    mFlags;
+-    uint32_t                    mInterfacesBitmap;
+-};
+-
+ /***********************************************/
+ // XPCWrappedNativeProto hold the additional (potentially shared) wrapper data
+ // for XPCWrappedNative whose native objects expose nsIClassInfo.
+ 
+ #define UNKNOWN_OFFSETS ((QITableEntry*)1)
+ 
+ class XPCWrappedNativeProto
+ {

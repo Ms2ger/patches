@@ -1,0 +1,167 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/layout/style/nsCSSRuleProcessor.cpp b/layout/style/nsCSSRuleProcessor.cpp
+--- a/layout/style/nsCSSRuleProcessor.cpp
++++ b/layout/style/nsCSSRuleProcessor.cpp
+@@ -1539,28 +1539,26 @@ edgeOfTypeMatches(Element* aElement, Tre
+             GetNthIndex(aElement, true, true, true) == 1);
+ }
+ 
+ static inline bool
+ checkGenericEmptyMatches(Element* aElement,
+                          TreeMatchContext& aTreeMatchContext,
+                          bool isWhitespaceSignificant)
+ {
+-  nsIContent *child = nsnull;
+-  int32_t index = -1;
+-
+   if (aTreeMatchContext.mForStyling)
+     aElement->SetFlags(NODE_HAS_EMPTY_SELECTOR);
+ 
+-  do {
+-    child = aElement->GetChildAt(++index);
+-    // stop at first non-comment (and non-whitespace for
+-    // :-moz-only-whitespace) node        
+-  } while (child && !IsSignificantChild(child, true, isWhitespaceSignificant));
+-  return (child == nsnull);
++  nsIContent* child = aElement->GetFirstChild();
++  // stop at first non-comment (and non-whitespace for
++  // :-moz-only-whitespace) node        
++  while (child && !IsSignificantChild(child, true, isWhitespaceSignificant)) {
++    child = child->GetNextSibling();
++  }
++  return !child;
+ }
+ 
+ // An array of the states that are relevant for various pseudoclasses.
+ static const nsEventStates sPseudoClassStates[] = {
+ #define CSS_PSEUDO_CLASS(_name, _value)         \
+   nsEventStates(),
+ #define CSS_STATE_PSEUDO_CLASS(_name, _value, _states) \
+   _states,
+@@ -1696,33 +1694,34 @@ static bool SelectorMatches(Element* aEl
+         if (!checkGenericEmptyMatches(aElement, aTreeMatchContext, false)) {
+           return false;
+         }
+         break;
+ 
+       case nsCSSPseudoClasses::ePseudoClass_mozEmptyExceptChildrenWithLocalname:
+         {
+           NS_ASSERTION(pseudoClass->u.mString, "Must have string!");
+-          nsIContent *child = nsnull;
+-          int32_t index = -1;
+ 
+           if (aTreeMatchContext.mForStyling)
+             // FIXME:  This isn't sufficient to handle:
+             //   :-moz-empty-except-children-with-localname() + E
+             //   :-moz-empty-except-children-with-localname() ~ E
+             // because we don't know to restyle the grandparent of the
+             // inserted/removed element (as in bug 534804 for :empty).
+             aElement->SetFlags(NODE_HAS_SLOW_SELECTOR);
+-          do {
+-            child = aElement->GetChildAt(++index);
+-          } while (child &&
+-                   (!IsSignificantChild(child, true, false) ||
+-                    (child->GetNameSpaceID() == aElement->GetNameSpaceID() &&
+-                     child->Tag()->Equals(nsDependentString(pseudoClass->u.mString)))));
+-          if (child != nsnull) {
++
++          nsIContent* child = aElement->GetFirstChild();
++          while (child &&
++                 (!IsSignificantChild(child, true, false) ||
++                  (child->GetNameSpaceID() == aElement->GetNameSpaceID() &&
++                   child->Tag()->Equals(nsDependentString(pseudoClass->u.mString))))) {
++            child = child->GetNextSibling();
++          }
++
++          if (child) {
+             return false;
+           }
+         }
+         break;
+ 
+       case nsCSSPseudoClasses::ePseudoClass_lang:
+         {
+           NS_ASSERTION(nsnull != pseudoClass->u.mString, "null lang parameter");
+@@ -1815,55 +1814,59 @@ static bool SelectorMatches(Element* aEl
+       case nsCSSPseudoClasses::ePseudoClass_firstChild:
+         if (!edgeChildMatches(aElement, aTreeMatchContext, true, false)) {
+           return false;
+         }
+         break;
+ 
+       case nsCSSPseudoClasses::ePseudoClass_firstNode:
+         {
+-          nsIContent *firstNode = nsnull;
+           nsIContent *parent = aElement->GetParent();
+-          if (parent) {
+-            if (aTreeMatchContext.mForStyling)
+-              parent->SetFlags(NODE_HAS_EDGE_CHILD_SELECTOR);
+-
+-            int32_t index = -1;
+-            do {
+-              firstNode = parent->GetChildAt(++index);
+-              // stop at first non-comment and non-whitespace node
+-            } while (firstNode &&
+-                     !IsSignificantChild(firstNode, true, false));
++          if (!parent) {
++            return false;
++          }
++
++          if (aTreeMatchContext.mForStyling) {
++            parent->SetFlags(NODE_HAS_EDGE_CHILD_SELECTOR);
++          }
++
++          nsIContent* firstNode = aElement->GetFirstChild();
++          // stop at first non-comment and non-whitespace node
++          while (firstNode &&
++                 !IsSignificantChild(firstNode, true, false)) {
++            firstNode = firstNode->GetNextSibling();
+           }
+           if (aElement != firstNode) {
+             return false;
+           }
+         }
+         break;
+ 
+       case nsCSSPseudoClasses::ePseudoClass_lastChild:
+         if (!edgeChildMatches(aElement, aTreeMatchContext, false, true)) {
+           return false;
+         }
+         break;
+ 
+       case nsCSSPseudoClasses::ePseudoClass_lastNode:
+         {
+-          nsIContent *lastNode = nsnull;
+           nsIContent *parent = aElement->GetParent();
+-          if (parent) {
+-            if (aTreeMatchContext.mForStyling)
+-              parent->SetFlags(NODE_HAS_EDGE_CHILD_SELECTOR);
+-            
+-            uint32_t index = parent->GetChildCount();
+-            do {
+-              lastNode = parent->GetChildAt(--index);
+-              // stop at first non-comment and non-whitespace node
+-            } while (lastNode &&
+-                     !IsSignificantChild(lastNode, true, false));
++          if (!parent) {
++            return false;
++          }
++
++          if (aTreeMatchContext.mForStyling) {
++            parent->SetFlags(NODE_HAS_EDGE_CHILD_SELECTOR);
++          }
++          
++          nsIContent* lastNode = parent->GetLastChild();
++          // stop at first non-comment and non-whitespace node
++          while (lastNode &&
++                 !IsSignificantChild(lastNode, true, false)) {
++            lastNode = lastNode->GetPreviousSibling();
+           }
+           if (aElement != lastNode) {
+             return false;
+           }
+         }
+         break;
+ 
+       case nsCSSPseudoClasses::ePseudoClass_onlyChild:

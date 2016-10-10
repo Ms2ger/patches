@@ -1,0 +1,389 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/base/nsEditor.cpp b/editor/libeditor/base/nsEditor.cpp
+--- a/editor/libeditor/base/nsEditor.cpp
++++ b/editor/libeditor/base/nsEditor.cpp
+@@ -3512,28 +3512,25 @@ nsEditor::GetLeftmostChild(nsIDOMNode *a
+     } else {
+       hasChildren = false;
+     }
+   }
+ 
+   return resultNode.forget();
+ }
+ 
+-bool 
+-nsEditor::IsBlockNode(nsIDOMNode *aNode)
+-{
+-  // stub to be overridden in nsHTMLEditor.
+-  // screwing around with the class hierarchy here in order
+-  // to not duplicate the code in GetNextNode/GetPrevNode
+-  // across both nsEditor/nsHTMLEditor.  
+-  return false;
+-}
+-
+-bool 
+-nsEditor::IsBlockNode(nsINode *aNode)
++bool
++nsEditor::IsBlockNode(nsIDOMNode* aNode)
++{
++  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
++  return IsBlockNode(node);
++}
++
++bool
++nsEditor::IsBlockNode(nsINode* aNode)
+ {
+   // stub to be overridden in nsHTMLEditor.
+   // screwing around with the class hierarchy here in order
+   // to not duplicate the code in GetNextNode/GetPrevNode
+   // across both nsEditor/nsHTMLEditor.
+   return false;
+ }
+ 
+diff --git a/editor/libeditor/base/nsEditor.h b/editor/libeditor/base/nsEditor.h
+--- a/editor/libeditor/base/nsEditor.h
++++ b/editor/libeditor/base/nsEditor.h
+@@ -343,19 +343,20 @@ protected:
+    *
+    *  Editor methods *should* call this method instead of the versions
+    *  in the various selection interfaces, since this version makes sure
+    *  that the editor's sync/async settings for reflowing, painting, and
+    *  scrolling match.
+    */
+   NS_IMETHOD ScrollSelectionIntoView(bool aScrollToAnchor);
+ 
++  // Convenience method; forwards to IsBlockNode(nsINode*).
++  bool IsBlockNode(nsIDOMNode* aNode);
+   // stub.  see comment in source.                     
+-  virtual bool IsBlockNode(nsIDOMNode *aNode);
+-  virtual bool IsBlockNode(nsINode *aNode);
++  virtual bool IsBlockNode(nsINode* aNode);
+   
+   // helper for GetPriorNode and GetNextNode
+   nsIContent* FindNextLeafNode(nsINode  *aCurrentNode,
+                                bool      aGoForward,
+                                bool      bNoBlockCrossing);
+ 
+   // Get nsIWidget interface
+   nsresult GetWidget(nsIWidget **aWidget);
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -688,197 +688,122 @@ nsHTMLEditor::HandleKeyPressEvent(nsIDOM
+     // we don't PreventDefault() here or keybindings like control-x won't work
+     return NS_OK;
+   }
+   aKeyEvent->PreventDefault();
+   nsAutoString str(nativeKeyEvent->charCode);
+   return TypedText(str, eTypedText);
+ }
+ 
++static void
++AssertParserServiceIsCorrect(nsIAtom* aTag, bool aIsBlock)
++{
++#ifdef DEBUG
++  // Check this against what we would have said with the old code:
++  if (aTag==nsEditProperty::p          ||
++      aTag==nsEditProperty::div        ||
++      aTag==nsEditProperty::blockquote ||
++      aTag==nsEditProperty::h1         ||
++      aTag==nsEditProperty::h2         ||
++      aTag==nsEditProperty::h3         ||
++      aTag==nsEditProperty::h4         ||
++      aTag==nsEditProperty::h5         ||
++      aTag==nsEditProperty::h6         ||
++      aTag==nsEditProperty::ul         ||
++      aTag==nsEditProperty::ol         ||
++      aTag==nsEditProperty::dl         ||
++      aTag==nsEditProperty::noscript   ||
++      aTag==nsEditProperty::form       ||
++      aTag==nsEditProperty::hr         ||
++      aTag==nsEditProperty::table      ||
++      aTag==nsEditProperty::fieldset   ||
++      aTag==nsEditProperty::address    ||
++      aTag==nsEditProperty::caption    ||
++      aTag==nsEditProperty::col        ||
++      aTag==nsEditProperty::colgroup   ||
++      aTag==nsEditProperty::li         ||
++      aTag==nsEditProperty::dt         ||
++      aTag==nsEditProperty::dd         ||
++      aTag==nsEditProperty::legend     )
++  {
++    if (!aIsBlock) {
++      nsAutoString assertmsg (NS_LITERAL_STRING("Parser and editor disagree on blockness: "));
++
++      nsAutoString tagName;
++      aTag->ToString(tagName);
++      assertmsg.Append(tagName);
++      char* assertstr = ToNewCString(assertmsg);
++      NS_ASSERTION(aIsBlock, assertstr);
++      NS_Free(assertstr);
++    }
++  }
++#endif // DEBUG
++}
++
+ /**
+  * Returns true if the id represents an element of block type.
+  * Can be used to determine if a new paragraph should be started.
+  */
+-nsresult
+-nsHTMLEditor::NodeIsBlockStatic(nsIDOMNode *aNode, bool *aIsBlock)
++bool
++nsHTMLEditor::NodeIsBlockStatic(const dom::Element* aElement)
+ {
+-  if (!aNode || !aIsBlock) { return NS_ERROR_NULL_POINTER; }
+-
+-  *aIsBlock = false;
+-
+-#define USE_PARSER_FOR_BLOCKNESS 1
+-#ifdef USE_PARSER_FOR_BLOCKNESS
+-  nsresult rv;
+-
+-  nsCOMPtr<nsIDOMElement>element = do_QueryInterface(aNode);
+-  if (!element)
+-  {
+-    // We don't have an element -- probably a text node
+-    return NS_OK;
+-  }
+-
+-  nsIAtom *tagAtom = GetTag(aNode);
+-  NS_ENSURE_TRUE(tagAtom, NS_ERROR_NULL_POINTER);
++  MOZ_ASSERT(aElement);
++
++  nsIAtom* tagAtom = aElement->Tag();
++  MOZ_ASSERT(tagAtom);
+ 
+   // Nodes we know we want to treat as block
+   // even though the parser says they're not:
+   if (tagAtom==nsEditProperty::body       ||
+       tagAtom==nsEditProperty::head       ||
+       tagAtom==nsEditProperty::tbody      ||
+       tagAtom==nsEditProperty::thead      ||
+       tagAtom==nsEditProperty::tfoot      ||
+       tagAtom==nsEditProperty::tr         ||
+       tagAtom==nsEditProperty::th         ||
+       tagAtom==nsEditProperty::td         ||
+       tagAtom==nsEditProperty::li         ||
+       tagAtom==nsEditProperty::dt         ||
+       tagAtom==nsEditProperty::dd         ||
+       tagAtom==nsEditProperty::pre)
+   {
+-    *aIsBlock = true;
+-    return NS_OK;
++    return true;
+   }
+ 
+-  rv = nsContentUtils::GetParserService()->
++  bool isBlock;
++  DebugOnly<nsresult> rv = nsContentUtils::GetParserService()->
+     IsBlock(nsContentUtils::GetParserService()->HTMLAtomTagToId(tagAtom),
+-            *aIsBlock);
+-
+-#ifdef DEBUG
+-  // Check this against what we would have said with the old code:
+-  if (tagAtom==nsEditProperty::p          ||
+-      tagAtom==nsEditProperty::div        ||
+-      tagAtom==nsEditProperty::blockquote ||
+-      tagAtom==nsEditProperty::h1         ||
+-      tagAtom==nsEditProperty::h2         ||
+-      tagAtom==nsEditProperty::h3         ||
+-      tagAtom==nsEditProperty::h4         ||
+-      tagAtom==nsEditProperty::h5         ||
+-      tagAtom==nsEditProperty::h6         ||
+-      tagAtom==nsEditProperty::ul         ||
+-      tagAtom==nsEditProperty::ol         ||
+-      tagAtom==nsEditProperty::dl         ||
+-      tagAtom==nsEditProperty::noscript   ||
+-      tagAtom==nsEditProperty::form       ||
+-      tagAtom==nsEditProperty::hr         ||
+-      tagAtom==nsEditProperty::table      ||
+-      tagAtom==nsEditProperty::fieldset   ||
+-      tagAtom==nsEditProperty::address    ||
+-      tagAtom==nsEditProperty::caption    ||
+-      tagAtom==nsEditProperty::col        ||
+-      tagAtom==nsEditProperty::colgroup   ||
+-      tagAtom==nsEditProperty::li         ||
+-      tagAtom==nsEditProperty::dt         ||
+-      tagAtom==nsEditProperty::dd         ||
+-      tagAtom==nsEditProperty::legend     )
+-  {
+-    if (!(*aIsBlock))
+-    {
+-      nsAutoString assertmsg (NS_LITERAL_STRING("Parser and editor disagree on blockness: "));
+-
+-      nsAutoString tagName;
+-      rv = element->GetTagName(tagName);
+-      NS_ENSURE_SUCCESS(rv, rv);
+-
+-      assertmsg.Append(tagName);
+-      char* assertstr = ToNewCString(assertmsg);
+-      NS_ASSERTION(*aIsBlock, assertstr);
+-      NS_Free(assertstr);
+-    }
+-  }
+-#endif /* DEBUG */
+-
+-  return rv;
+-#else /* USE_PARSER_FOR_BLOCKNESS */
+-  nsresult result = NS_ERROR_FAILURE;
+-  *aIsBlock = false;
+-  nsCOMPtr<nsIDOMElement>element;
+-  element = do_QueryInterface(aNode);
+-  if (element)
+-  {
+-    nsAutoString tagName;
+-    result = element->GetTagName(tagName);
+-    if (NS_SUCCEEDED(result))
+-    {
+-      ToLowerCase(tagName);
+-      nsCOMPtr<nsIAtom> tagAtom = do_GetAtom(tagName);
+-      if (!tagAtom) { return NS_ERROR_NULL_POINTER; }
+-
+-      if (tagAtom==nsEditProperty::p          ||
+-          tagAtom==nsEditProperty::div        ||
+-          tagAtom==nsEditProperty::blockquote ||
+-          tagAtom==nsEditProperty::h1         ||
+-          tagAtom==nsEditProperty::h2         ||
+-          tagAtom==nsEditProperty::h3         ||
+-          tagAtom==nsEditProperty::h4         ||
+-          tagAtom==nsEditProperty::h5         ||
+-          tagAtom==nsEditProperty::h6         ||
+-          tagAtom==nsEditProperty::ul         ||
+-          tagAtom==nsEditProperty::ol         ||
+-          tagAtom==nsEditProperty::dl         ||
+-          tagAtom==nsEditProperty::pre        ||
+-          tagAtom==nsEditProperty::noscript   ||
+-          tagAtom==nsEditProperty::form       ||
+-          tagAtom==nsEditProperty::hr         ||
+-          tagAtom==nsEditProperty::fieldset   ||
+-          tagAtom==nsEditProperty::address    ||
+-          tagAtom==nsEditProperty::body       ||
+-          tagAtom==nsEditProperty::caption    ||
+-          tagAtom==nsEditProperty::table      ||
+-          tagAtom==nsEditProperty::tbody      ||
+-          tagAtom==nsEditProperty::thead      ||
+-          tagAtom==nsEditProperty::tfoot      ||
+-          tagAtom==nsEditProperty::tr         ||
+-          tagAtom==nsEditProperty::td         ||
+-          tagAtom==nsEditProperty::th         ||
+-          tagAtom==nsEditProperty::col        ||
+-          tagAtom==nsEditProperty::colgroup   ||
+-          tagAtom==nsEditProperty::li         ||
+-          tagAtom==nsEditProperty::dt         ||
+-          tagAtom==nsEditProperty::dd         ||
+-          tagAtom==nsEditProperty::legend     )
+-      {
+-        *aIsBlock = true;
+-      }
+-      result = NS_OK;
+-    }
+-  } else {
+-    // We don't have an element -- probably a text node
+-    nsCOMPtr<nsIDOMCharacterData>nodeAsText = do_QueryInterface(aNode);
+-    if (nodeAsText)
+-    {
+-      *aIsBlock = false;
+-      result = NS_OK;
+-    }
+-  }
+-  return result;
+-
+-#endif /* USE_PARSER_FOR_BLOCKNESS */
++            isBlock);
++  MOZ_ASSERT(rv == NS_OK);
++
++  AssertParserServiceIsCorrect(tagAtom, isBlock);
++
++  return isBlock;
++}
++
++nsresult
++nsHTMLEditor::NodeIsBlockStatic(nsIDOMNode *aNode, bool *aIsBlock)
++{
++  if (!aNode || !aIsBlock) { return NS_ERROR_NULL_POINTER; }
++
++  nsCOMPtr<dom::Element> element = do_QueryInterface(aNode);
++  *aIsBlock = element && NodeIsBlockStatic(element);
++  return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsHTMLEditor::NodeIsBlock(nsIDOMNode *aNode, bool *aIsBlock)
+ {
+   return NodeIsBlockStatic(aNode, aIsBlock);
+ }
+ 
+ bool
+-nsHTMLEditor::IsBlockNode(nsIDOMNode *aNode)
+-{
+-  bool isBlock;
+-  NodeIsBlockStatic(aNode, &isBlock);
+-  return isBlock;
+-}
+-
+-bool
+ nsHTMLEditor::IsBlockNode(nsINode *aNode)
+ {
+-  bool isBlock;
+-  nsCOMPtr<nsIDOMNode> node = do_QueryInterface(aNode);
+-  NodeIsBlockStatic(node, &isBlock);
+-  return isBlock;
++  return aNode && aNode->IsElement() && NodeIsBlockStatic(aNode->AsElement());
+ }
+ 
+ // Non-static version for the nsIEditor interface and JavaScript
+ NS_IMETHODIMP 
+ nsHTMLEditor::SetDocumentTitle(const nsAString &aTitle)
+ {
+   nsRefPtr<SetDocTitleTxn> txn = new SetDocTitleTxn();
+   NS_ENSURE_TRUE(txn, NS_ERROR_OUT_OF_MEMORY);
+diff --git a/editor/libeditor/html/nsHTMLEditor.h b/editor/libeditor/html/nsHTMLEditor.h
+--- a/editor/libeditor/html/nsHTMLEditor.h
++++ b/editor/libeditor/html/nsHTMLEditor.h
+@@ -247,18 +247,24 @@ public:
+ 
+   nsresult EndUpdateViewBatch();
+ 
+   /** prepare the editor for use */
+   NS_IMETHOD Init(nsIDOMDocument *aDoc, nsIContent *aRoot, nsISelectionController *aSelCon, uint32_t aFlags);
+   NS_IMETHOD PreDestroy(bool aDestroyingFrames);
+ 
+   /** Internal, static version */
++  // aElement must not be null.
++  static bool NodeIsBlockStatic(const mozilla::dom::Element* aElement);
+   static nsresult NodeIsBlockStatic(nsIDOMNode *aNode, bool *aIsBlock);
++protected:
++  using nsEditor::IsBlockNode;
++  virtual bool IsBlockNode(nsINode *aNode);
+ 
++public:
+   NS_IMETHOD SetFlags(uint32_t aFlags);
+ 
+   NS_IMETHOD Paste(int32_t aSelectionType);
+   NS_IMETHOD CanPaste(int32_t aSelectionType, bool *aCanPaste);
+ 
+   NS_IMETHOD PasteTransferable(nsITransferable *aTransferable);
+   NS_IMETHOD CanPasteTransferable(nsITransferable *aTransferable, bool *aCanPaste);
+ 
+@@ -475,19 +481,16 @@ protected:
+   NS_IMETHOD FixBadColSpan(nsIDOMElement *aTable, int32_t aColIndex, int32_t& aNewColCount);
+ 
+   // Fallback method: Call this after using ClearSelection() and you
+   //  failed to set selection to some other content in the document
+   NS_IMETHOD SetSelectionAtDocumentStart(nsISelection *aSelection);
+ 
+ // End of Table Editing utilities
+   
+-  virtual bool IsBlockNode(nsIDOMNode *aNode);
+-  virtual bool IsBlockNode(nsINode *aNode);
+-  
+   static nsCOMPtr<nsIDOMNode> GetEnclosingTable(nsIDOMNode *aNode);
+ 
+   /** content-based query returns true if <aProperty aAttribute=aValue> effects aNode
+     * If <aProperty aAttribute=aValue> contains aNode, 
+     * but <aProperty aAttribute=SomeOtherValue> also contains aNode and the second is
+     * more deeply nested than the first, then the first does not effect aNode.
+     *
+     * @param aNode      The target of the query

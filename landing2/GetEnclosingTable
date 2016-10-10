@@ -1,0 +1,224 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/html/nsHTMLAnonymousUtils.cpp b/editor/libeditor/html/nsHTMLAnonymousUtils.cpp
+--- a/editor/libeditor/html/nsHTMLAnonymousUtils.cpp
++++ b/editor/libeditor/html/nsHTMLAnonymousUtils.cpp
+@@ -320,18 +320,18 @@ nsHTMLEditor::CheckSelectionStateForAnon
+   if (mIsObjectResizingEnabled && cellElement) {
+     // we are here because Resizing is enabled AND selection is contained in
+     // a cell
+ 
+     // get the enclosing table
+     if (nsEditProperty::img != focusTagAtom) {
+       // the element container of the selection is not an image, so we'll show
+       // the resizers around the table
+-      nsCOMPtr<nsIDOMNode> tableNode = GetEnclosingTable(cellElement);
+-      focusElement = do_QueryInterface(tableNode);
++      nsCOMPtr<nsINode> cellNode = do_QueryInterface(cellElement);
++      focusElement = do_QueryInterface(GetEnclosingTable(cellNode));
+       focusTagAtom = nsEditProperty::table;
+     }
+   }
+ 
+   // we allow resizers only around images, tables, and absolutely positioned
+   // elements. If we don't have image/table, let's look at the latter case.
+   if (nsEditProperty::img != focusTagAtom &&
+       nsEditProperty::table != focusTagAtom)
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -1238,52 +1238,49 @@ NS_IMETHODIMP nsHTMLEditor::TypedText(co
+ 
+ NS_IMETHODIMP nsHTMLEditor::TabInTable(bool inIsShift, bool *outHandled)
+ {
+   NS_ENSURE_TRUE(outHandled, NS_ERROR_NULL_POINTER);
+   *outHandled = false;
+ 
+   // Find enclosing table cell from the selection (cell may be the selected element)
+   nsCOMPtr<nsIDOMElement> cellElement;
+-    // can't use |NS_LITERAL_STRING| here until |GetElementOrParentByTagName| is fixed to accept readables
+   nsresult res = GetElementOrParentByTagName(NS_LITERAL_STRING("td"), nsnull, getter_AddRefs(cellElement));
+   NS_ENSURE_SUCCESS(res, res);
+   // Do nothing -- we didn't find a table cell
+   NS_ENSURE_TRUE(cellElement, NS_OK);
+ 
++  nsCOMPtr<nsIContent> cBlock = do_QueryInterface(cellElement);
++
+   // find enclosing table
+-  nsCOMPtr<nsIDOMNode> tbl = GetEnclosingTable(cellElement);
+-  NS_ENSURE_TRUE(tbl, res);
++  nsRefPtr<dom::Element> tbl = GetEnclosingTable(cBlock);
++  NS_ENSURE_TRUE(tbl, NS_OK);
+ 
+   // advance to next cell
+   // first create an iterator over the table
+   nsCOMPtr<nsIContentIterator> iter =
+       do_CreateInstance("@mozilla.org/content/post-content-iterator;1", &res);
+   NS_ENSURE_SUCCESS(res, res);
+   NS_ENSURE_TRUE(iter, NS_ERROR_NULL_POINTER);
+-  nsCOMPtr<nsIContent> cTbl = do_QueryInterface(tbl);
+-  nsCOMPtr<nsIContent> cBlock = do_QueryInterface(cellElement);
+-  res = iter->Init(cTbl);
++  res = iter->Init(tbl);
+   NS_ENSURE_SUCCESS(res, res);
+   // position iter at block
+   res = iter->PositionAt(cBlock);
+   NS_ENSURE_SUCCESS(res, res);
+ 
+-  nsCOMPtr<nsIDOMNode> node;
+-  do
+-  {
++  do {
+     if (inIsShift)
+       iter->Prev();
+     else
+       iter->Next();
+ 
+-    node = do_QueryInterface(iter->GetCurrentNode());
++    nsCOMPtr<nsIDOMNode> node = do_QueryInterface(iter->GetCurrentNode());
+ 
+     if (node && nsHTMLEditUtils::IsTableCell(node) &&
+-        GetEnclosingTable(node) == tbl)
++        GetEnclosingTable(iter->GetCurrentNode()) == tbl)
+     {
+       res = CollapseSelectionToDeepestNonTableFirstChild(nsnull, node);
+       NS_ENSURE_SUCCESS(res, res);
+       *outHandled = true;
+       return NS_OK;
+     }
+   } while (!iter->IsDone());
+   
+@@ -1307,18 +1304,19 @@ NS_IMETHODIMP nsHTMLEditor::TabInTable(b
+                          &row, nsnull);
+     NS_ENSURE_SUCCESS(res, res);
+     // ...so that we can ask for first cell in that row...
+     res = GetCellAt(tblElement, row, 0, getter_AddRefs(cell));
+     NS_ENSURE_SUCCESS(res, res);
+     // ...and then set selection there.
+     // (Note that normally you should use CollapseSelectionToDeepestNonTableFirstChild(),
+     //  but we know cell is an empty new cell, so this works fine)
+-    node = do_QueryInterface(cell);
+-    if (node) selection->Collapse(node,0);
++    if (nsCOMPtr<nsIDOMNode> node = do_QueryInterface(cell)) {
++      selection->Collapse(node,0);
++    }
+     return NS_OK;
+   }
+   
+   return res;
+ }
+ 
+ NS_IMETHODIMP nsHTMLEditor::CreateBRImpl(nsCOMPtr<nsIDOMNode> *aInOutParent, 
+                                          int32_t *aInOutOffset, 
+@@ -4121,30 +4119,30 @@ nsHTMLEditor::SetCaretInTableCell(nsIDOM
+     }
+   }
+   return caretIsSet;
+ }            
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // GetEnclosingTable: find ancestor who is a table, if any
+ //                  
+-nsCOMPtr<nsIDOMNode> 
+-nsHTMLEditor::GetEnclosingTable(nsIDOMNode *aNode)
++dom::Element*
++nsHTMLEditor::GetEnclosingTable(nsINode* aNode)
+ {
+   NS_PRECONDITION(aNode, "null node passed to nsHTMLEditor::GetEnclosingTable");
+-  nsCOMPtr<nsIDOMNode> tbl, tmp, node = aNode;
+-
+-  while (!tbl)
+-  {
+-    tmp = GetBlockNodeParent(node);
+-    if (!tmp) break;
+-    if (nsHTMLEditUtils::IsTable(tmp)) tbl = tmp;
+-    node = tmp;
+-  }
+-  return tbl;
++
++  for (dom::Element* element = GetBlockNodeParent(aNode);
++       element;
++       element = GetBlockNodeParent(element)) {
++    if (element->IsHTML(nsGkAtoms::table)) {
++      return element;
++    }
++  }
++
++  return NULL;
+ }
+ 
+ 
+ #ifdef PRE_NODE_IN_BODY
+ nsCOMPtr<nsIDOMElement> nsHTMLEditor::FindPreElement()
+ {
+   nsCOMPtr<nsIDOMDocument> domdoc;
+   nsEditor::GetDocument(getter_AddRefs(domdoc));
+diff --git a/editor/libeditor/html/nsHTMLEditor.h b/editor/libeditor/html/nsHTMLEditor.h
+--- a/editor/libeditor/html/nsHTMLEditor.h
++++ b/editor/libeditor/html/nsHTMLEditor.h
+@@ -532,17 +532,17 @@ protected:
+   //  failed to set selection to some other content in the document
+   NS_IMETHOD SetSelectionAtDocumentStart(nsISelection *aSelection);
+ 
+ // End of Table Editing utilities
+   
+   virtual bool IsBlockNode(nsIDOMNode *aNode);
+   virtual bool IsBlockNode(nsINode *aNode);
+   
+-  static nsCOMPtr<nsIDOMNode> GetEnclosingTable(nsIDOMNode *aNode);
++  static mozilla::dom::Element* GetEnclosingTable(nsINode* aNode);
+ 
+   /** content-based query returns true if <aProperty aAttribute=aValue> effects aNode
+     * If <aProperty aAttribute=aValue> contains aNode, 
+     * but <aProperty aAttribute=SomeOtherValue> also contains aNode and the second is
+     * more deeply nested than the first, then the first does not effect aNode.
+     *
+     * @param aNode      The target of the query
+     * @param aProperty  The property that we are querying for
+diff --git a/editor/libeditor/html/nsHTMLInlineTableEditor.cpp b/editor/libeditor/html/nsHTMLInlineTableEditor.cpp
+--- a/editor/libeditor/html/nsHTMLInlineTableEditor.cpp
++++ b/editor/libeditor/html/nsHTMLInlineTableEditor.cpp
+@@ -160,18 +160,19 @@ nsHTMLEditor::DoInlineTableEditingAction
+       anonElement) {
+     nsAutoString anonclass;
+     nsresult res = aElement->GetAttribute(NS_LITERAL_STRING("_moz_anonclass"), anonclass);
+     NS_ENSURE_SUCCESS(res, res);
+ 
+     if (!StringBeginsWith(anonclass, NS_LITERAL_STRING("mozTable")))
+       return NS_OK;
+ 
+-    nsCOMPtr<nsIDOMNode> tableNode = GetEnclosingTable(mInlineEditedCell);
+-    nsCOMPtr<nsIDOMElement> tableElement = do_QueryInterface(tableNode);
++    nsCOMPtr<nsINode> inlineEditedCell = do_QueryInterface(mInlineEditedCell);
++    nsCOMPtr<nsIDOMElement> tableElement =
++      do_QueryInterface(GetEnclosingTable(inlineEditedCell));
+     int32_t rowCount, colCount;
+     res = GetTableSize(tableElement, &rowCount, &colCount);
+     NS_ENSURE_SUCCESS(res, res);
+ 
+     bool hideUI = false;
+     bool hideResizersWithInlineTableUI = (mResizedObject == tableElement);
+ 
+     if (anonclass.EqualsLiteral("mozTableAddColumnBefore"))
+@@ -241,18 +242,19 @@ nsHTMLEditor::RefreshInlineTableEditingU
+   nsresult res = htmlElement->GetOffsetWidth(&wCell);
+   NS_ENSURE_SUCCESS(res, res);
+   res = htmlElement->GetOffsetHeight(&hCell);
+   NS_ENSURE_SUCCESS(res, res);
+ 
+   int32_t xHoriz = xCell + wCell/2;
+   int32_t yVert  = yCell + hCell/2;
+ 
+-  nsCOMPtr<nsIDOMNode> tableNode = GetEnclosingTable(mInlineEditedCell);
+-  nsCOMPtr<nsIDOMElement> tableElement = do_QueryInterface(tableNode);
++  nsCOMPtr<nsINode> inlineEditedCell = do_QueryInterface(mInlineEditedCell);
++  nsCOMPtr<nsIDOMElement> tableElement =
++    do_QueryInterface(GetEnclosingTable(inlineEditedCell));
+   int32_t rowCount, colCount;
+   res = GetTableSize(tableElement, &rowCount, &colCount);
+   NS_ENSURE_SUCCESS(res, res);
+ 
+   SetAnonymousElementPosition(xHoriz-10, yCell-7,  mAddColumnBeforeButton);
+ #ifdef DISABLE_TABLE_DELETION
+   NS_NAMED_LITERAL_STRING(classStr, "class");
+ 

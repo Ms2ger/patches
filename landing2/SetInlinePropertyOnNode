@@ -1,0 +1,421 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/base/nsEditor.cpp b/editor/libeditor/base/nsEditor.cpp
+--- a/editor/libeditor/base/nsEditor.cpp
++++ b/editor/libeditor/base/nsEditor.cpp
+@@ -1462,17 +1462,24 @@ nsEditor::SplitNode(nsIDOMNode * aNode,
+   {
+     nsIDOMNode *ptr = *aNewLeftNode;
+     mActionListeners[i]->DidSplitNode(aNode, aOffset, ptr, result);
+   }
+ 
+   return result;
+ }
+ 
+-
++nsresult
++nsEditor::JoinNodes(nsINode* aLeftNode, nsINode* aRightNode, nsINode* aParent)
++{
++  nsCOMPtr<nsIDOMNode> leftNode = do_QueryInterface(aLeftNode);
++  nsCOMPtr<nsIDOMNode> rightNode = do_QueryInterface(aRightNode);
++  nsCOMPtr<nsIDOMNode> parent = do_QueryInterface(aParent);
++  return JoinNodes(leftNode, rightNode, parent);
++}
+ 
+ NS_IMETHODIMP
+ nsEditor::JoinNodes(nsIDOMNode * aLeftNode,
+                     nsIDOMNode * aRightNode,
+                     nsIDOMNode * aParent)
+ {
+   int32_t i, offset;
+   nsAutoRules beginRulesSniffing(this, kOpJoinNode, nsIEditor::ePrevious);
+diff --git a/editor/libeditor/base/nsEditor.h b/editor/libeditor/base/nsEditor.h
+--- a/editor/libeditor/base/nsEditor.h
++++ b/editor/libeditor/base/nsEditor.h
+@@ -407,16 +407,18 @@ public:
+    * @param aNewLeftNode         [OUT] the new node resulting from the split, becomes aExistingRightNode's previous sibling.
+    * @param aParent              the parent of aExistingRightNode
+    */
+   nsresult SplitNodeImpl(nsIDOMNode *aExistingRightNode,
+                          int32_t     aOffset,
+                          nsIDOMNode *aNewLeftNode,
+                          nsIDOMNode *aParent);
+ 
++  nsresult JoinNodes(nsINode* aLeftNode, nsINode* aRightNode, nsINode* aParent);
++
+   /** 
+    * JoinNodes() takes 2 nodes and merge their content|children.
+    * @param aNodeToKeep   The node that will remain after the join.
+    * @param aNodeToJoin   The node that will be joined with aNodeToKeep.
+    *                      There is no requirement that the two nodes be of the same type.
+    * @param aParent       The parent of aNodeToKeep
+    * @param aNodeToKeepIsFirst  if true, the contents|children of aNodeToKeep come before the
+    *                            contents|children of aNodeToJoin, otherwise their positions are switched.
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -4204,17 +4204,17 @@ nsHTMLEditor::RemoveBlockContainer(nsIDO
+   return RemoveContainer(inNode);
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // GetPriorHTMLSibling: returns the previous editable sibling, if there is
+ //                   one within the parent
+ //                       
+-nsINode*
++nsIContent*
+ nsHTMLEditor::GetPriorHTMLSibling(nsINode* aNode)
+ {
+   MOZ_ASSERT(aNode);
+ 
+   nsIContent* node = aNode->GetPreviousSibling();
+   while (node && !IsEditable(node)) {
+     node = node->GetPreviousSibling();
+   }
+@@ -4237,17 +4237,17 @@ nsHTMLEditor::GetPriorHTMLSibling(nsIDOM
+ 
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // GetPriorHTMLSibling: returns the previous editable sibling, if there is
+ //                   one within the parent.  just like above routine but
+ //                   takes a parent/offset instead of a node.
+ //                       
+-nsINode*
++nsIContent*
+ nsHTMLEditor::GetPriorHTMLSibling(nsINode* aParent, int32_t aOffset)
+ {
+   MOZ_ASSERT(aParent);
+ 
+   nsIContent* node = aParent->GetChildAt(aOffset - 1);
+   if (!node || IsEditable(node)) {
+     return node;
+   }
+@@ -4269,17 +4269,17 @@ nsHTMLEditor::GetPriorHTMLSibling(nsIDOM
+ }
+ 
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // GetNextHTMLSibling: returns the next editable sibling, if there is
+ //                   one within the parent
+ //                       
+-nsINode*
++nsIContent*
+ nsHTMLEditor::GetNextHTMLSibling(nsINode* aNode)
+ {
+   MOZ_ASSERT(aNode);
+ 
+   nsIContent* node = aNode->GetNextSibling();
+   while (node && !IsEditable(node)) {
+     node = node->GetNextSibling();
+   }
+@@ -4301,17 +4301,17 @@ nsHTMLEditor::GetNextHTMLSibling(nsIDOMN
+ }
+ 
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+ // GetNextHTMLSibling: returns the next editable sibling, if there is
+ //                   one within the parent.  just like above routine but
+ //                   takes a parent/offset instead of a node.
+-nsINode*
++nsIContent*
+ nsHTMLEditor::GetNextHTMLSibling(nsINode* aParent, int32_t aOffset)
+ {
+   MOZ_ASSERT(aParent);
+ 
+   nsIContent* node = aParent->GetChildAt(aOffset + 1);
+   if (!node || IsEditable(node)) {
+     return node;
+   }
+diff --git a/editor/libeditor/html/nsHTMLEditor.h b/editor/libeditor/html/nsHTMLEditor.h
+--- a/editor/libeditor/html/nsHTMLEditor.h
++++ b/editor/libeditor/html/nsHTMLEditor.h
+@@ -684,21 +684,33 @@ protected:
+ 
+   /* helper routines for inline style */
+   nsresult SetInlinePropertyOnTextNode( nsIDOMCharacterData *aTextNode, 
+                                         int32_t aStartOffset,
+                                         int32_t aEndOffset,
+                                         nsIAtom *aProperty, 
+                                         const nsAString *aAttribute,
+                                         const nsAString *aValue);
++  nsresult SetInlinePropertyOnNode(nsINode* aNode,
++                                   nsIAtom* aProperty,
++                                   const nsAString* aAttribute,
++                                   const nsAString* aValue);
+   nsresult SetInlinePropertyOnNode( nsIDOMNode *aNode,
+                                     nsIAtom *aProperty, 
+                                     const nsAString *aAttribute,
+                                     const nsAString *aValue);
++private:
++  // aNode and aDOMNode must be the same.
++  nsresult SetInlinePropertyOnNodeInternal(nsINode* aNode,
++                                           nsIDOMNode* aDOMNode,
++                                           nsIAtom* aProperty,
++                                           const nsAString* aAttribute,
++                                           const nsAString* aValue);
+ 
++public:
+   nsresult PromoteInlineRange(nsIDOMRange *inRange);
+   nsresult PromoteRangeIfStartsOrEndsInNamedAnchor(nsIDOMRange *inRange);
+   nsresult SplitStyleAboveRange(nsIDOMRange *aRange, 
+                                 nsIAtom *aProperty, 
+                                 const nsAString *aAttribute);
+   nsresult SplitStyleAbovePoint(nsCOMPtr<nsIDOMNode> *aNode,
+                                 int32_t *aOffset,
+                                 nsIAtom *aProperty, 
+@@ -715,23 +727,23 @@ protected:
+   bool NodeIsProperty(nsIDOMNode *aNode);
+   bool HasAttr(nsIDOMNode *aNode, const nsAString *aAttribute);
+   bool HasAttrVal(nsIDOMNode *aNode, const nsAString *aAttribute, const nsAString *aValue);
+   bool IsAtFrontOfNode(nsIDOMNode *aNode, int32_t aOffset);
+   bool IsAtEndOfNode(nsIDOMNode *aNode, int32_t aOffset);
+   bool IsOnlyAttribute(nsIDOMNode *aElement, const nsAString *aAttribute);
+ 
+   nsresult RemoveBlockContainer(nsIDOMNode *inNode);
+-  nsINode* GetPriorHTMLSibling(nsINode* aNode);
++  nsIContent* GetPriorHTMLSibling(nsINode* aNode);
+   nsresult GetPriorHTMLSibling(nsIDOMNode *inNode, nsCOMPtr<nsIDOMNode> *outNode);
+-  nsINode* GetPriorHTMLSibling(nsINode* aParent, int32_t aOffset);
++  nsIContent* GetPriorHTMLSibling(nsINode* aParent, int32_t aOffset);
+   nsresult GetPriorHTMLSibling(nsIDOMNode *inParent, int32_t inOffset, nsCOMPtr<nsIDOMNode> *outNode);
+-  nsINode* GetNextHTMLSibling(nsINode* aNode);
++  nsIContent* GetNextHTMLSibling(nsINode* aNode);
+   nsresult GetNextHTMLSibling(nsIDOMNode *inNode, nsCOMPtr<nsIDOMNode> *outNode);
+-  nsINode* GetNextHTMLSibling(nsINode* aParent, int32_t aOffset);
++  nsIContent* GetNextHTMLSibling(nsINode* aParent, int32_t aOffset);
+   nsresult GetNextHTMLSibling(nsIDOMNode *inParent, int32_t inOffset, nsCOMPtr<nsIDOMNode> *outNode);
+   nsresult GetPriorHTMLNode(nsIDOMNode *inNode, nsCOMPtr<nsIDOMNode> *outNode, bool bNoBlockCrossing = false);
+   nsresult GetPriorHTMLNode(nsIDOMNode *inParent, int32_t inOffset, nsCOMPtr<nsIDOMNode> *outNode, bool bNoBlockCrossing = false);
+   nsresult GetNextHTMLNode(nsIDOMNode *inNode, nsCOMPtr<nsIDOMNode> *outNode, bool bNoBlockCrossing = false);
+   nsresult GetNextHTMLNode(nsIDOMNode *inParent, int32_t inOffset, nsCOMPtr<nsIDOMNode> *outNode, bool bNoBlockCrossing = false);
+ 
+   nsresult IsFirstEditableChild( nsIDOMNode *aNode, bool *aOutIsFirst);
+   nsresult IsLastEditableChild( nsIDOMNode *aNode, bool *aOutIsLast);
+diff --git a/editor/libeditor/html/nsHTMLEditorStyle.cpp b/editor/libeditor/html/nsHTMLEditorStyle.cpp
+--- a/editor/libeditor/html/nsHTMLEditorStyle.cpp
++++ b/editor/libeditor/html/nsHTMLEditorStyle.cpp
+@@ -356,80 +356,108 @@ nsHTMLEditor::SetInlinePropertyOnTextNod
+   }
+   
+   // reparent the node inside inline node with appropriate {attribute,value}
+   return SetInlinePropertyOnNode(node, aProperty, aAttribute, aValue);
+ }
+ 
+ 
+ nsresult
++nsHTMLEditor::SetInlinePropertyOnNode(nsINode* aNode,
++                                      nsIAtom* aProperty, 
++                                      const nsAString* aAttribute,
++                                      const nsAString* aValue)
++{
++  nsCOMPtr<nsIDOMNode> node = do_QueryInterface(aNode);
++  NS_ENSURE_TRUE(node, NS_ERROR_NULL_POINTER);
++  return SetInlinePropertyOnNodeInternal(aNode, node, aProperty, aAttribute,
++                                         aValue);
++}
++
++nsresult
+ nsHTMLEditor::SetInlinePropertyOnNode( nsIDOMNode *aNode,
+                                        nsIAtom *aProperty, 
+                                        const nsAString *aAttribute,
+                                        const nsAString *aValue)
+ {
+-  NS_ENSURE_TRUE(aNode && aProperty, NS_ERROR_NULL_POINTER);
++  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
++  NS_ENSURE_TRUE(node, NS_ERROR_NULL_POINTER);
++  return SetInlinePropertyOnNodeInternal(node, aNode, aProperty, aAttribute,
++                                         aValue);
++}
++
++nsresult
++nsHTMLEditor::SetInlinePropertyOnNodeInternal(nsINode* node,
++                                              nsIDOMNode* aNode, 
++                                              nsIAtom* aProperty, 
++                                              const nsAString* aAttribute,
++                                              const nsAString* aValue)
++{
++  MOZ_ASSERT(node && aNode);
++  MOZ_ASSERT(SameCOMIdentity(node, aNode));
++
++  NS_ENSURE_TRUE(aProperty, NS_ERROR_NULL_POINTER);
+ 
+   nsresult res = NS_OK;
+-  nsCOMPtr<nsIDOMNode> tmp;
+   nsAutoString tag;
+   aProperty->ToString(tag);
+   ToLowerCase(tag);
+ 
+   bool useCSS = (IsCSSEnabled() &&
+     mHTMLCSSUtils->IsCSSEditableProperty(aNode, aProperty, aAttribute)) ||
+     // bgcolor is always done using CSS
+     aAttribute->EqualsLiteral("bgcolor");
+   
+   if (useCSS) {
+     nsCOMPtr<nsIDOMNode> tmp = aNode;
+-    if (IsTextNode(tmp))
+-    {
++    if (node->NodeType() == nsIDOMNode::TEXT_NODE) {
+       // we are working on a text node and need to create a span container
+       // that will carry the styles
+       InsertContainerAbove(aNode, 
+                            address_of(tmp), 
+                            NS_LITERAL_STRING("span"),
+                            nsnull,
+                            nsnull);
+     }
+-    nsCOMPtr<nsIDOMElement>element;
+-    element = do_QueryInterface(tmp);
++
+     // first we have to remove occurences of the same style hint in the
+     // children of the aNode
+     res = RemoveStyleInside(tmp, aProperty, aAttribute, true);
+     NS_ENSURE_SUCCESS(res, res);
++
++    // then we add the css styles corresponding to the HTML style request
+     int32_t count;
+-    // then we add the css styles corresponding to the HTML style request
+-    res = mHTMLCSSUtils->SetCSSEquivalentToHTMLStyle(element, aProperty, aAttribute, aValue, &count, false);
++    res = mHTMLCSSUtils->SetCSSEquivalentToHTMLStyle(tmp, aProperty, aAttribute, aValue, &count, false);
+     NS_ENSURE_SUCCESS(res, res);
+ 
+-    nsCOMPtr<nsIDOMNode> nextSibling, previousSibling;
+-    GetNextHTMLSibling(tmp, address_of(nextSibling));
+-    GetPriorHTMLSibling(tmp, address_of(previousSibling));
+-    if (nextSibling || previousSibling)
+-    {
+-      nsCOMPtr<nsIDOMNode> mergeParent;
+-      res = tmp->GetParentNode(getter_AddRefs(mergeParent));
++    nsCOMPtr<nsINode> tmpNode = do_QueryInterface(tmp);
++    NS_ENSURE_TRUE(tmpNode, NS_ERROR_NULL_POINTER);
++    NS_ENSURE_TRUE(tmpNode->IsElement(), NS_OK);
++
++    nsIContent* nextSibling = GetNextHTMLSibling(tmpNode);
++    nsIContent* previousSibling = GetPriorHTMLSibling(tmpNode);
++    if (!nextSibling && !previousSibling) {
++      return NS_OK;
++    }
++
++    nsINode* mergeParent = tmpNode->GetNodeParent();
++    if (previousSibling &&
++        previousSibling->IsHTML(nsGkAtoms::span) &&
++        tmpNode->AsElement()->IsHTML(nsGkAtoms::span)) {
++      res = JoinNodes(previousSibling, tmpNode, mergeParent);
+       NS_ENSURE_SUCCESS(res, res);
+-      if (previousSibling &&
+-          nsEditor::NodeIsType(previousSibling, nsEditProperty::span) &&
+-          NodesSameType(tmp, previousSibling))
+-      {
+-        res = JoinNodes(previousSibling, tmp, mergeParent);
+-        NS_ENSURE_SUCCESS(res, res);
+-      }
+-      if (nextSibling &&
+-          nsEditor::NodeIsType(nextSibling, nsEditProperty::span) &&
+-          NodesSameType(tmp, nextSibling))
+-      {
+-        res = JoinNodes(tmp, nextSibling, mergeParent);
+-      }
+     }
+-    return res;
++
++    if (nextSibling &&
++        nextSibling->IsHTML(nsGkAtoms::span) &&
++        tmpNode->AsElement()->IsHTML(nsGkAtoms::span)) {
++      res = JoinNodes(tmpNode, nextSibling, mergeParent);
++      NS_ENSURE_SUCCESS(res, res);
++    }
++    return NS_OK;
+   }
+   
+   // don't need to do anything if property already set on node
+   bool bHasProp;
+   nsCOMPtr<nsIDOMNode> styleNode;
+   IsTextPropertySetByContent(aNode, aProperty, aAttribute, aValue, bHasProp, getter_AddRefs(styleNode));
+   if (bHasProp) return NS_OK;
+ 
+@@ -463,58 +491,48 @@ nsHTMLEditor::SetInlinePropertyOnNode( n
+              IsOnlyAttribute(priorNode, aAttribute) )
+     {
+       // following sib is already right kind of inline node; slide this over into it
+       res = MoveNode(aNode, nextNode, 0);
+     }
+     else
+     {
+       // ok, chuck it in its very own container
++      nsCOMPtr<nsIDOMNode> tmp;
+       res = InsertContainerAbove(aNode, address_of(tmp), tag, aAttribute, aValue);
+     }
+     NS_ENSURE_SUCCESS(res, res);
+     return RemoveStyleInside(aNode, aProperty, aAttribute);
+   }
++
+   // none of the above?  then cycle through the children.
+-  nsCOMPtr<nsIDOMNodeList> childNodes;
+-  res = aNode->GetChildNodes(getter_AddRefs(childNodes));
+-  NS_ENSURE_SUCCESS(res, res);
+-  if (childNodes)
+-  {
+-    int32_t j;
+-    uint32_t childCount;
+-    childNodes->GetLength(&childCount);
+-    if (childCount)
+-    {
+-      nsCOMArray<nsIDOMNode> arrayOfNodes;
+-      nsCOMPtr<nsIDOMNode> node;
+-      
+-      // populate the list
+-      for (j=0 ; j < (int32_t)childCount; j++)
+-      {
+-        nsCOMPtr<nsIDOMNode> childNode;
+-        res = childNodes->Item(j, getter_AddRefs(childNode));
+-        if ((NS_SUCCEEDED(res)) && (childNode) && IsEditable(childNode))
+-        {
+-          arrayOfNodes.AppendObject(childNode);
+-        }
+-      }
+-      
+-      // then loop through the list, set the property on each node
+-      int32_t listCount = arrayOfNodes.Count();
+-      for (j = 0; j < listCount; j++)
+-      {
+-        node = arrayOfNodes[j];
+-        res = SetInlinePropertyOnNode(node, aProperty, aAttribute, aValue);
+-        NS_ENSURE_SUCCESS(res, res);
+-      }
+-      arrayOfNodes.Clear();
++  if (!node->HasChildren()) {
++    return NS_OK;
++  }
++
++  nsCOMArray<nsIContent> arrayOfNodes;
++  
++  // Populate the list.
++  for (nsIContent* child = node->GetFirstChild();
++       child;
++       child = child->GetNextSibling()) {
++    if (IsEditable(child)) {
++      arrayOfNodes.AppendObject(child);
+     }
+   }
+-  return res;
++  
++  // Then loop through the list, and set the property on each node.
++  int32_t listCount = arrayOfNodes.Count();
++  for (int32_t j = 0; j < listCount; ++j) {
++    res = SetInlinePropertyOnNode(arrayOfNodes[j], aProperty, aAttribute,
++                                  aValue);
++    NS_ENSURE_SUCCESS(res, res);
++  }
++  arrayOfNodes.Clear();
++  return NS_OK;
+ }
+ 
+ 
+ nsresult nsHTMLEditor::SplitStyleAboveRange(nsIDOMRange *inRange, 
+                                             nsIAtom *aProperty, 
+                                             const nsAString *aAttribute)
+ {
+   NS_ENSURE_TRUE(inRange, NS_ERROR_NULL_POINTER);

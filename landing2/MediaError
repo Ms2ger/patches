@@ -1,0 +1,422 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/content/public/HTMLMediaElement.h b/content/html/content/public/HTMLMediaElement.h
+--- a/content/html/content/public/HTMLMediaElement.h
++++ b/content/html/content/public/HTMLMediaElement.h
+@@ -23,16 +23,17 @@
+ #include "mozilla/Mutex.h"
+ #include "mozilla/dom/TimeRanges.h"
+ #include "nsIDOMWakeLock.h"
+ #include "AudioChannelCommon.h"
+ #include "DecoderTraits.h"
+ #include "MediaMetadataManager.h"
+ #include "AudioChannelAgent.h"
+ #include "mozilla/Attributes.h"
++#include "mozilla/dom/MediaError.h"
+ #include "mozilla/dom/TextTrack.h"
+ #include "mozilla/dom/TextTrackList.h"
+ #include "mozilla/ErrorResult.h"
+ 
+ // Define to output information on decoding and painting framerate
+ /* #define DEBUG_FRAME_RATE 1 */
+ 
+ typedef uint16_t nsMediaNetworkState;
+@@ -44,17 +45,16 @@ class MediaDecoder;
+ }
+ 
+ class nsITimer;
+ class nsRange;
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+-class MediaError;
+ class MediaSource;
+ 
+ class HTMLMediaElement : public nsGenericHTMLElement,
+                          public nsIObserver,
+                          public MediaDecoderOwner,
+                          public nsIAudioChannelAgentCallback
+ {
+ public:
+@@ -787,19 +787,18 @@ protected:
+ 
+   /**
+    * Dispatches an error event to a child source element.
+    */
+   void DispatchAsyncSourceError(nsIContent* aSourceElement);
+ 
+   /**
+    * Resets the media element for an error condition as per aErrorCode.
+-   * aErrorCode must be one of nsIDOMHTMLMediaError codes.
+    */
+-  void Error(uint16_t aErrorCode);
++  void Error(MediaError::ErrorCode aErrorCode);
+ 
+   /**
+    * Returns the URL spec of the currentSrc.
+    **/
+   void GetCurrentSpec(nsCString& aString);
+ 
+   /**
+    * Process any media fragment entries in the URI
+diff --git a/content/html/content/src/HTMLMediaElement.cpp b/content/html/content/src/HTMLMediaElement.cpp
+--- a/content/html/content/src/HTMLMediaElement.cpp
++++ b/content/html/content/src/HTMLMediaElement.cpp
+@@ -492,18 +492,18 @@ HTMLMediaElement::SetMozSrcObject(nsIDOM
+ /* readonly attribute nsIDOMHTMLMediaElement mozAutoplayEnabled; */
+ NS_IMETHODIMP HTMLMediaElement::GetMozAutoplayEnabled(bool *aAutoplayEnabled)
+ {
+   *aAutoplayEnabled = mAutoplayEnabled;
+ 
+   return NS_OK;
+ }
+ 
+-/* readonly attribute nsIDOMMediaError error; */
+-NS_IMETHODIMP HTMLMediaElement::GetError(nsIDOMMediaError * *aError)
++/* readonly attribute MediaError error; */
++NS_IMETHODIMP HTMLMediaElement::GetError(nsISupports** aError)
+ {
+   NS_IF_ADDREF(*aError = mError);
+ 
+   return NS_OK;
+ }
+ 
+ /* readonly attribute boolean ended; */
+ bool
+@@ -651,17 +651,17 @@ void HTMLMediaElement::AbortExistingLoad
+ 
+   mIsRunningSelectResource = false;
+ }
+ 
+ void HTMLMediaElement::NoSupportedMediaSourceError()
+ {
+   NS_ASSERTION(mDelayingLoadEvent, "Load event not delayed during source selection?");
+ 
+-  mError = new MediaError(this, nsIDOMMediaError::MEDIA_ERR_SRC_NOT_SUPPORTED);
++  mError = new MediaError(this, MediaError::MEDIA_ERR_SRC_NOT_SUPPORTED);
+   mNetworkState = nsIDOMHTMLMediaElement::NETWORK_NO_SOURCE;
+   DispatchAsyncEvent(NS_LITERAL_STRING("error"));
+   // This clears mDelayingLoadEvent, so AddRemoveSelfReference will be called
+   ChangeDelayLoadStatus(false);
+ }
+ 
+ typedef void (HTMLMediaElement::*SyncSectionFn)();
+ 
+@@ -2833,17 +2833,17 @@ void HTMLMediaElement::ResourceLoaded()
+   // Ensure a progress event is dispatched at the end of download.
+   DispatchAsyncEvent(NS_LITERAL_STRING("progress"));
+   // The download has stopped.
+   DispatchAsyncEvent(NS_LITERAL_STRING("suspend"));
+ }
+ 
+ void HTMLMediaElement::NetworkError()
+ {
+-  Error(nsIDOMMediaError::MEDIA_ERR_NETWORK);
++  Error(MediaError::MEDIA_ERR_NETWORK);
+ }
+ 
+ void HTMLMediaElement::DecodeError()
+ {
+   nsAutoString src;
+   GetCurrentSrc(src);
+   const PRUnichar* params[] = { src.get() };
+   ReportLoadError("MediaLoadDecodeError", params, ArrayLength(params));
+@@ -2856,31 +2856,27 @@ void HTMLMediaElement::DecodeError()
+     mError = nullptr;
+     if (mSourceLoadCandidate) {
+       DispatchAsyncSourceError(mSourceLoadCandidate);
+       QueueLoadFromSourceTask();
+     } else {
+       NS_WARNING("Should know the source we were loading from!");
+     }
+   } else {
+-    Error(nsIDOMMediaError::MEDIA_ERR_DECODE);
++    Error(MediaError::MEDIA_ERR_DECODE);
+   }
+ }
+ 
+ void HTMLMediaElement::LoadAborted()
+ {
+-  Error(nsIDOMMediaError::MEDIA_ERR_ABORTED);
++  Error(MediaError::MEDIA_ERR_ABORTED);
+ }
+ 
+-void HTMLMediaElement::Error(uint16_t aErrorCode)
++void HTMLMediaElement::Error(MediaError::ErrorCode aErrorCode)
+ {
+-  NS_ASSERTION(aErrorCode == nsIDOMMediaError::MEDIA_ERR_DECODE ||
+-               aErrorCode == nsIDOMMediaError::MEDIA_ERR_NETWORK ||
+-               aErrorCode == nsIDOMMediaError::MEDIA_ERR_ABORTED,
+-               "Only use nsIDOMMediaError codes!");
+   mError = new MediaError(this, aErrorCode);
+   mBegun = false;
+   DispatchAsyncEvent(NS_LITERAL_STRING("error"));
+   if (mReadyState == nsIDOMHTMLMediaElement::HAVE_NOTHING) {
+     mNetworkState = nsIDOMHTMLMediaElement::NETWORK_EMPTY;
+     DispatchAsyncEvent(NS_LITERAL_STRING("emptied"));
+   } else {
+     mNetworkState = nsIDOMHTMLMediaElement::NETWORK_IDLE;
+diff --git a/content/html/content/src/MediaError.cpp b/content/html/content/src/MediaError.cpp
+--- a/content/html/content/src/MediaError.cpp
++++ b/content/html/content/src/MediaError.cpp
+@@ -2,47 +2,37 @@
+ /* vim:set ts=2 sw=2 sts=2 et cindent: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "mozilla/dom/MediaError.h"
+ 
+ #include "mozilla/dom/HTMLMediaElement.h"
+-#include "nsDOMClassInfoID.h"
+ #include "mozilla/dom/MediaErrorBinding.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(MediaError, mParent)
+ NS_IMPL_CYCLE_COLLECTING_ADDREF(MediaError)
+ NS_IMPL_CYCLE_COLLECTING_RELEASE(MediaError)
+ 
+ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(MediaError)
+   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
+-  NS_INTERFACE_MAP_ENTRY(nsIDOMMediaError)
+-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMMediaError)
++  NS_INTERFACE_MAP_ENTRY(nsISupports)
+ NS_INTERFACE_MAP_END
+ 
+-MediaError::MediaError(HTMLMediaElement* aParent, uint16_t aCode)
++MediaError::MediaError(HTMLMediaElement* aParent, ErrorCode aCode)
+   : mParent(aParent)
+   , mCode(aCode)
+ {
+   SetIsDOMBinding();
+ }
+ 
+-NS_IMETHODIMP MediaError::GetCode(uint16_t* aCode)
+-{
+-  if (aCode)
+-    *aCode = Code();
+-
+-  return NS_OK;
+-}
+-
+ ParentObject
+ MediaError::GetParentObject() const
+ {
+   return ParentObject(mParent);
+ }
+ 
+ JSObject*
+ MediaError::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+diff --git a/content/html/content/src/MediaError.h b/content/html/content/src/MediaError.h
+--- a/content/html/content/src/MediaError.h
++++ b/content/html/content/src/MediaError.h
+@@ -3,53 +3,64 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_MediaError_h
+ #define mozilla_dom_MediaError_h
+ 
+ #include "mozilla/Attributes.h"
++#include "mozilla/TypedEnum.h"
+ #include "nsAutoPtr.h"
+-#include "nsIDOMMediaError.h"
+ #include "nsISupports.h"
+ #include "nsWrapperCache.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ class HTMLMediaElement;
+ class ParentObject;
+ 
+-class MediaError MOZ_FINAL : public nsIDOMMediaError,
++class MediaError MOZ_FINAL : public nsISupports,
+                              public nsWrapperCache
+ {
+ public:
+-  MediaError(HTMLMediaElement* aParent, uint16_t aCode);
++  enum ErrorCode MOZ_ENUM_TYPE(uint16_t) {
++    // The download of the media resource was aborted by the user agent at the
++    // user's request.
++    MEDIA_ERR_ABORTED = 1,
++    // A network error of some description caused the user agent to stop
++    // downloading the media resource.
++    MEDIA_ERR_NETWORK = 2,
++    // An error of some description occurred while decoding the media resource.
++    MEDIA_ERR_DECODE = 3,
++    // No suitable media resource could be found.
++    MEDIA_ERR_SRC_NOT_SUPPORTED = 4,
++  };
++
++  MediaError(HTMLMediaElement* aParent, ErrorCode aCode);
+ 
+   // nsISupports
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(MediaError)
+ 
+-  // nsIDOMMediaError
+-  NS_DECL_NSIDOMMEDIAERROR
+-
+   ParentObject GetParentObject() const;
+ 
+   virtual JSObject* WrapObject(JSContext* aCx,
+                                JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+ 
++
+   uint16_t Code() const
+   {
+-    return mCode;
++    return static_cast<uint16_t>(mCode);
+   }
+ 
+ private:
+   nsRefPtr<HTMLMediaElement> mParent;
+ 
+   // Error code
+-  const uint16_t mCode;
++  const ErrorCode mCode;
+ };
+ 
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #endif // mozilla_dom_MediaError_h
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -3520,17 +3520,16 @@ const InterfaceShimEntry kInterfaceShimM
+   { "nsIDOMNSEvent", "Event" },
+   { "nsIDOMKeyEvent", "KeyEvent" },
+   { "nsIDOMMouseEvent", "MouseEvent" },
+   { "nsIDOMMouseScrollEvent", "MouseScrollEvent" },
+   { "nsIDOMMutationEvent", "MutationEvent" },
+   { "nsIDOMSimpleGestureEvent", "SimpleGestureEvent" },
+   { "nsIDOMUIEvent", "UIEvent" },
+   { "nsIDOMHTMLMediaElement", "HTMLMediaElement" },
+-  { "nsIDOMMediaError", "MediaError" },
+   { "nsIDOMLoadStatus", "LoadStatus" },
+   { "nsIDOMOfflineResourceList", "OfflineResourceList" },
+   { "nsIDOMRange", "Range" },
+   { "nsIDOMSVGLength", "SVGLength" },
+   { "nsIDOMNodeFilter", "NodeFilter" },
+   { "nsIDOMXPathNamespace", "XPathNamespace" },
+   { "nsIDOMXPathResult", "XPathResult" } };
+ 
+diff --git a/dom/interfaces/html/moz.build b/dom/interfaces/html/moz.build
+--- a/dom/interfaces/html/moz.build
++++ b/dom/interfaces/html/moz.build
+@@ -54,17 +54,16 @@ XPIDL_SOURCES += [
+     'nsIDOMHTMLStyleElement.idl',
+     'nsIDOMHTMLTableCaptionElem.idl',
+     'nsIDOMHTMLTableCellElement.idl',
+     'nsIDOMHTMLTableElement.idl',
+     'nsIDOMHTMLTextAreaElement.idl',
+     'nsIDOMHTMLTitleElement.idl',
+     'nsIDOMHTMLUListElement.idl',
+     'nsIDOMHTMLVideoElement.idl',
+-    'nsIDOMMediaError.idl',
+     'nsIDOMMozBrowserFrame.idl',
+     'nsIDOMTimeRanges.idl',
+     'nsIDOMValidityState.idl',
+     'nsIMozBrowserFrame.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_html'
+ 
+diff --git a/dom/interfaces/html/nsIDOMHTMLMediaElement.idl b/dom/interfaces/html/nsIDOMHTMLMediaElement.idl
+--- a/dom/interfaces/html/nsIDOMHTMLMediaElement.idl
++++ b/dom/interfaces/html/nsIDOMHTMLMediaElement.idl
+@@ -1,16 +1,15 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* vim:set ts=2 sw=2 sts=2 et cindent: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "nsIDOMHTMLElement.idl"
+-#include "nsIDOMMediaError.idl"
+ #include "nsIDOMTimeRanges.idl"
+ 
+ interface nsIDOMMediaStream;
+ 
+ /**
+  * The nsIDOMHTMLMediaElement interface is an interface to be implemented by the HTML
+  * <audio> and <video> elements.
+  *
+@@ -26,17 +25,17 @@ interface nsIDOMMediaStream;
+ #undef GetCurrentTime
+ #endif
+ %}
+ 
+ [scriptable, uuid(d83d38f3-68b9-4ea2-8748-1cc738d74333)]
+ interface nsIDOMHTMLMediaElement : nsISupports
+ {
+   // error state
+-  readonly attribute nsIDOMMediaError error;
++  readonly attribute nsISupports /* MediaError */ error;
+ 
+   // network state
+            attribute DOMString src;
+            attribute nsIDOMMediaStream mozSrcObject;
+   readonly attribute DOMString currentSrc;
+            attribute DOMString crossOrigin;
+   const unsigned short NETWORK_EMPTY = 0;
+   const unsigned short NETWORK_IDLE = 1;
+diff --git a/dom/interfaces/html/nsIDOMMediaError.idl b/dom/interfaces/html/nsIDOMMediaError.idl
+deleted file mode 100644
+--- a/dom/interfaces/html/nsIDOMMediaError.idl
++++ /dev/null
+@@ -1,27 +0,0 @@
+-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+-/* vim:set ts=2 sw=2 sts=2 et cindent: */
+-/* This Source Code Form is subject to the terms of the Mozilla Public
+- * License, v. 2.0. If a copy of the MPL was not distributed with this
+- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+-#include "domstubs.idl"
+-
+-[scriptable, uuid(7bd8c29f-8a76-453f-9373-79f820f2dc01)]
+-interface nsIDOMMediaError : nsISupports
+-{
+-  /* The download of the media resource was aborted by
+-     the user agent at the user's requet */
+-  const unsigned short MEDIA_ERR_ABORTED = 1;
+-
+-  /* A network error of some description caused the 
+-     user agent to stop downloading the media resource */
+-  const unsigned short MEDIA_ERR_NETWORK = 2;
+-
+-  /* An error of some description occurred while decoding 
+-     the media resource */
+-  const unsigned short MEDIA_ERR_DECODE  = 3;
+-
+-  /* No suitable media resource could be found */
+-  const unsigned short MEDIA_ERR_SRC_NOT_SUPPORTED = 4;
+-
+-  readonly attribute unsigned short code;
+-};
+diff --git a/js/xpconnect/tests/mochitest/test_bug790732.html b/js/xpconnect/tests/mochitest/test_bug790732.html
+--- a/js/xpconnect/tests/mochitest/test_bug790732.html
++++ b/js/xpconnect/tests/mochitest/test_bug790732.html
+@@ -32,17 +32,16 @@ https://bugzilla.mozilla.org/show_bug.cg
+   is(Ci.nsIDOMNSEvent.CLICK, Event.CLICK);
+   is(Ci.nsIDOMKeyEvent, KeyEvent);
+   is(Ci.nsIDOMMouseEvent, MouseEvent);
+   is(Ci.nsIDOMMouseScrollEvent, MouseScrollEvent);
+   is(Ci.nsIDOMMutationEvent, MutationEvent);
+   is(Ci.nsIDOMSimpleGestureEvent, SimpleGestureEvent);
+   is(Ci.nsIDOMUIEvent, UIEvent);
+   is(Ci.nsIDOMHTMLMediaElement, HTMLMediaElement);
+-  is(Ci.nsIDOMMediaError, MediaError);
+   is(Ci.nsIDOMLoadStatus, LoadStatus);
+   is(Ci.nsIDOMOfflineResourceList, OfflineResourceList);
+   is(Ci.nsIDOMRange, Range);
+   is(Ci.nsIDOMSVGLength, SVGLength);
+   is(Ci.nsIDOMNodeFilter, NodeFilter);
+   is(Ci.nsIDOMXPathNamespace, XPathNamespace);
+   is(Ci.nsIDOMXPathResult, XPathResult);
+ 

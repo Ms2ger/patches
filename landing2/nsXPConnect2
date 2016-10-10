@@ -1,0 +1,391 @@
+diff --git a/js/xpconnect/src/nsXPConnect.h b/js/xpconnect/src/nsXPConnect.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/nsXPConnect.h
+@@ -0,0 +1,203 @@
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is __________________________________________.
++ *
++ * The Initial Developer of the Original Code is
++ * ____________________________________________.
++ * Portions created by the Initial Developer are Copyright (C) 2___
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#ifndef nsXPConnect_h
++#define nsXPConnect_h
++
++#include "nsIXPConnect.h"
++#include "nsIThreadInternal.h"
++#include "nsWeakReference.h"
++#include "nsCycleCollector.h"
++#include "nsCycleCollectionParticipant.h"
++#include "nsIJSRuntimeService.h"
++#include "nsIJSContextStack.h"
++#include "nsIJSEngineTelemetryStats.h"
++
++#include "nsBaseHashtable.h"
++#include "nsThreadUtils.h"
++#include "nsHashKeys.h"
++//#include "nsIScriptSecurityManager.h"
++class XPCJSRuntime;
++class XPCCallContext;
++class nsIScriptSecurityManager;
++
++class nsXPConnect : public nsIXPConnect,
++                    public nsIThreadObserver,
++                    public nsSupportsWeakReference,
++                    public nsCycleCollectionJSRuntime,
++                    public nsCycleCollectionParticipant,
++                    public nsIJSRuntimeService,
++                    public nsIThreadJSContextStack,
++                    public nsIJSEngineTelemetryStats
++{
++public:
++    // all the interface method declarations...
++    NS_DECL_ISUPPORTS
++    NS_DECL_NSIXPCONNECT
++    NS_DECL_NSITHREADOBSERVER
++    NS_DECL_NSIJSRUNTIMESERVICE
++    NS_DECL_NSIJSCONTEXTSTACK
++    NS_DECL_NSITHREADJSCONTEXTSTACK
++    NS_DECL_NSIJSENGINETELEMETRYSTATS
++
++    // non-interface implementation
++public:
++    // These get non-addref'd pointers
++    static nsXPConnect*  GetXPConnect();
++    static nsXPConnect*  FastGetXPConnect() { return gSelf ? gSelf : GetXPConnect(); }
++    static XPCJSRuntime* GetRuntimeInstance();
++    XPCJSRuntime* GetRuntime() {return mRuntime;}
++
++    // Gets addref'd pointer
++    static nsresult GetInterfaceInfoManager(nsIInterfaceInfoSuperManager** iim,
++                                            nsXPConnect* xpc = nsnull);
++
++    static JSBool IsISupportsDescendant(nsIInterfaceInfo* info);
++
++    nsIXPCSecurityManager* GetDefaultSecurityManager() const
++    {
++        // mDefaultSecurityManager is main-thread only.
++        if (!NS_IsMainThread()) {
++            return nsnull;
++        }
++        return mDefaultSecurityManager;
++    }
++
++    uint16_t GetDefaultSecurityManagerFlags() const
++        {return mDefaultSecurityManagerFlags;}
++
++    // This returns an AddRef'd pointer. It does not do this with an 'out' param
++    // only because this form is required by the generic module macro:
++    // NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR
++    static nsXPConnect* GetSingleton();
++
++    // Called by module code in dll startup
++    static void InitStatics() { gSelf = nsnull; gOnceAliveNowDead = false; }
++    // Called by module code on dll shutdown.
++    static void ReleaseXPConnectSingleton();
++
++    virtual ~nsXPConnect();
++
++    JSBool IsShuttingDown() const {return mShuttingDown;}
++
++    void EnsureGCBeforeCC() { mNeedGCBeforeCC = true; }
++
++    nsresult GetInfoForIID(const nsIID * aIID, nsIInterfaceInfo** info);
++    nsresult GetInfoForName(const char * name, nsIInterfaceInfo** info);
++
++    // nsCycleCollectionParticipant
++    NS_IMETHOD Root(void *p);
++    NS_IMETHOD Unlink(void *p);
++    NS_IMETHOD Unroot(void *p);
++    NS_IMETHOD Traverse(void *p,
++                        nsCycleCollectionTraversalCallback &cb);
++
++    // nsCycleCollectionLanguageRuntime
++    virtual void NotifyLeaveMainThread();
++    virtual void NotifyEnterCycleCollectionThread();
++    virtual void NotifyLeaveCycleCollectionThread();
++    virtual void NotifyEnterMainThread();
++    virtual nsresult BeginCycleCollection(nsCycleCollectionTraversalCallback &cb,
++                                          bool explainExpectedLiveGarbage);
++    virtual nsresult FinishTraverse();
++    virtual nsresult FinishCycleCollection();
++    virtual nsCycleCollectionParticipant *ToParticipant(void *p);
++    virtual bool NeedCollect();
++    virtual void Collect();
++#ifdef DEBUG_CC
++    virtual void PrintAllReferencesTo(void *p);
++#endif
++
++    XPCCallContext *GetCycleCollectionContext()
++    {
++        return mCycleCollectionContext;
++    }
++
++    unsigned GetOutstandingRequests(JSContext* cx);
++
++    // This returns the singleton nsCycleCollectionParticipant for JSContexts.
++    static nsCycleCollectionParticipant *JSContextParticipant();
++
++    virtual nsIPrincipal* GetPrincipal(JSObject* obj,
++                                       bool allowShortCircuit) const;
++
++    void RecordTraversal(void *p, nsISupports *s);
++    virtual char* DebugPrintJSStack(bool showArgs,
++                                    bool showLocals,
++                                    bool showThisProps);
++
++
++    static bool ReportAllJSExceptions()
++    {
++      return gReportAllJSExceptions > 0;
++    }
++
++protected:
++    nsXPConnect();
++
++private:
++    static PRThread* FindMainThread();
++
++private:
++    // Singleton instance
++    static nsXPConnect*      gSelf;
++    static JSBool            gOnceAliveNowDead;
++
++    XPCJSRuntime*            mRuntime;
++    nsCOMPtr<nsIInterfaceInfoSuperManager> mInterfaceInfoManager;
++    nsIXPCSecurityManager*   mDefaultSecurityManager;
++    uint16_t                 mDefaultSecurityManagerFlags;
++    JSBool                   mShuttingDown;
++    JSBool                   mNeedGCBeforeCC;
++#ifdef DEBUG_CC
++    PLDHashTable             mJSRoots;
++#endif
++    nsAutoPtr<XPCCallContext> mCycleCollectionContext;
++
++    typedef nsBaseHashtable<nsVoidPtrHashKey, nsISupports*, nsISupports*> ScopeSet;
++    ScopeSet mScopes;
++    nsCOMPtr<nsIXPCScriptable> mBackstagePass;
++
++    static uint32_t gReportAllJSExceptions;
++    static JSBool gDebugMode;
++    static JSBool gDesiredDebugMode;
++    static inline void CheckForDebugMode(JSRuntime *rt);
++
++public:
++    static nsIScriptSecurityManager *gScriptSecurityManager;
++};
++
++#endif // nsXPConnect_h
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -142,16 +142,17 @@
+ #ifdef GetClassName
+ #undef GetClassName
+ #endif
+ #endif /* XP_WIN */
+ 
+ #include "nsINode.h"
+ #include "XPCNativeSet.h"
+ #include "XPCLock.h"
++#include "nsXPConnect.h"
+ 
+ class XPCRootSetElem;
+ 
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+@@ -296,161 +297,16 @@ inline bool
+ AddToCCKind(JSGCTraceKind kind)
+ {
+     return kind == JSTRACE_OBJECT || kind == JSTRACE_XML || kind == JSTRACE_SCRIPT;
+ }
+ 
+ const bool OBJ_IS_GLOBAL = true;
+ const bool OBJ_IS_NOT_GLOBAL = false;
+ 
+-class nsXPConnect : public nsIXPConnect,
+-                    public nsIThreadObserver,
+-                    public nsSupportsWeakReference,
+-                    public nsCycleCollectionJSRuntime,
+-                    public nsCycleCollectionParticipant,
+-                    public nsIJSRuntimeService,
+-                    public nsIThreadJSContextStack,
+-                    public nsIJSEngineTelemetryStats
+-{
+-public:
+-    // all the interface method declarations...
+-    NS_DECL_ISUPPORTS
+-    NS_DECL_NSIXPCONNECT
+-    NS_DECL_NSITHREADOBSERVER
+-    NS_DECL_NSIJSRUNTIMESERVICE
+-    NS_DECL_NSIJSCONTEXTSTACK
+-    NS_DECL_NSITHREADJSCONTEXTSTACK
+-    NS_DECL_NSIJSENGINETELEMETRYSTATS
+-
+-    // non-interface implementation
+-public:
+-    // These get non-addref'd pointers
+-    static nsXPConnect*  GetXPConnect();
+-    static nsXPConnect*  FastGetXPConnect() { return gSelf ? gSelf : GetXPConnect(); }
+-    static XPCJSRuntime* GetRuntimeInstance();
+-    XPCJSRuntime* GetRuntime() {return mRuntime;}
+-
+-    // Gets addref'd pointer
+-    static nsresult GetInterfaceInfoManager(nsIInterfaceInfoSuperManager** iim,
+-                                            nsXPConnect* xpc = nsnull);
+-
+-    static JSBool IsISupportsDescendant(nsIInterfaceInfo* info);
+-
+-    nsIXPCSecurityManager* GetDefaultSecurityManager() const
+-    {
+-        // mDefaultSecurityManager is main-thread only.
+-        if (!NS_IsMainThread()) {
+-            return nsnull;
+-        }
+-        return mDefaultSecurityManager;
+-    }
+-
+-    uint16_t GetDefaultSecurityManagerFlags() const
+-        {return mDefaultSecurityManagerFlags;}
+-
+-    // This returns an AddRef'd pointer. It does not do this with an 'out' param
+-    // only because this form is required by the generic module macro:
+-    // NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR
+-    static nsXPConnect* GetSingleton();
+-
+-    // Called by module code in dll startup
+-    static void InitStatics() { gSelf = nsnull; gOnceAliveNowDead = false; }
+-    // Called by module code on dll shutdown.
+-    static void ReleaseXPConnectSingleton();
+-
+-    virtual ~nsXPConnect();
+-
+-    JSBool IsShuttingDown() const {return mShuttingDown;}
+-
+-    void EnsureGCBeforeCC() { mNeedGCBeforeCC = true; }
+-
+-    nsresult GetInfoForIID(const nsIID * aIID, nsIInterfaceInfo** info);
+-    nsresult GetInfoForName(const char * name, nsIInterfaceInfo** info);
+-
+-    // nsCycleCollectionParticipant
+-    NS_IMETHOD Root(void *p);
+-    NS_IMETHOD Unlink(void *p);
+-    NS_IMETHOD Unroot(void *p);
+-    NS_IMETHOD Traverse(void *p,
+-                        nsCycleCollectionTraversalCallback &cb);
+-
+-    // nsCycleCollectionLanguageRuntime
+-    virtual void NotifyLeaveMainThread();
+-    virtual void NotifyEnterCycleCollectionThread();
+-    virtual void NotifyLeaveCycleCollectionThread();
+-    virtual void NotifyEnterMainThread();
+-    virtual nsresult BeginCycleCollection(nsCycleCollectionTraversalCallback &cb,
+-                                          bool explainExpectedLiveGarbage);
+-    virtual nsresult FinishTraverse();
+-    virtual nsresult FinishCycleCollection();
+-    virtual nsCycleCollectionParticipant *ToParticipant(void *p);
+-    virtual bool NeedCollect();
+-    virtual void Collect();
+-#ifdef DEBUG_CC
+-    virtual void PrintAllReferencesTo(void *p);
+-#endif
+-
+-    XPCCallContext *GetCycleCollectionContext()
+-    {
+-        return mCycleCollectionContext;
+-    }
+-
+-    unsigned GetOutstandingRequests(JSContext* cx);
+-
+-    // This returns the singleton nsCycleCollectionParticipant for JSContexts.
+-    static nsCycleCollectionParticipant *JSContextParticipant();
+-
+-    virtual nsIPrincipal* GetPrincipal(JSObject* obj,
+-                                       bool allowShortCircuit) const;
+-
+-    void RecordTraversal(void *p, nsISupports *s);
+-    virtual char* DebugPrintJSStack(bool showArgs,
+-                                    bool showLocals,
+-                                    bool showThisProps);
+-
+-
+-    static bool ReportAllJSExceptions()
+-    {
+-      return gReportAllJSExceptions > 0;
+-    }
+-
+-protected:
+-    nsXPConnect();
+-
+-private:
+-    static PRThread* FindMainThread();
+-
+-private:
+-    // Singleton instance
+-    static nsXPConnect*      gSelf;
+-    static JSBool            gOnceAliveNowDead;
+-
+-    XPCJSRuntime*            mRuntime;
+-    nsCOMPtr<nsIInterfaceInfoSuperManager> mInterfaceInfoManager;
+-    nsIXPCSecurityManager*   mDefaultSecurityManager;
+-    uint16_t                 mDefaultSecurityManagerFlags;
+-    JSBool                   mShuttingDown;
+-    JSBool                   mNeedGCBeforeCC;
+-#ifdef DEBUG_CC
+-    PLDHashTable             mJSRoots;
+-#endif
+-    nsAutoPtr<XPCCallContext> mCycleCollectionContext;
+-
+-    typedef nsBaseHashtable<nsVoidPtrHashKey, nsISupports*, nsISupports*> ScopeSet;
+-    ScopeSet mScopes;
+-    nsCOMPtr<nsIXPCScriptable> mBackstagePass;
+-
+-    static uint32_t gReportAllJSExceptions;
+-    static JSBool gDebugMode;
+-    static JSBool gDesiredDebugMode;
+-    static inline void CheckForDebugMode(JSRuntime *rt);
+-
+-public:
+-    static nsIScriptSecurityManager *gScriptSecurityManager;
+-};
+ 
+ 
+ /***************************************************************************/
+ 
+ // In the current xpconnect system there can only be one XPCJSRuntime.
+ // So, xpconnect can only be used on one JSRuntime within the process.
+ 
+ // no virtuals. no refcounting.

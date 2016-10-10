@@ -1,0 +1,284 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/base/nsEditor.cpp b/editor/libeditor/base/nsEditor.cpp
+--- a/editor/libeditor/base/nsEditor.cpp
++++ b/editor/libeditor/base/nsEditor.cpp
+@@ -1650,35 +1650,39 @@ nsEditor::RemoveContainer(nsIDOMNode *in
+ ///////////////////////////////////////////////////////////////////////////
+ // InsertContainerAbove:  insert a new parent for inNode, returned in outNode,
+ //                   which is contructed to be of type aNodeType.  outNode becomes
+ //                   a child of inNode's earlier parent.
+ //                   Callers responsibility to make sure inNode's can be child
+ //                   of outNode, and outNode can be child of old parent.
+ nsresult
+ nsEditor::InsertContainerAbove( nsIDOMNode *inNode, 
+-                                nsCOMPtr<nsIDOMNode> *outNode, 
++                                dom::Element** outNode, 
+                                 const nsAString &aNodeType,
+                                 const nsAString *aAttribute,
+                                 const nsAString *aValue)
+ {
+-  NS_ENSURE_TRUE(inNode && outNode, NS_ERROR_NULL_POINTER);
++  NS_ENSURE_TRUE(inNode, NS_ERROR_NULL_POINTER);
++
+   nsCOMPtr<nsIDOMNode> parent;
+   int32_t offset;
+   nsresult res = GetNodeLocation(inNode, address_of(parent), &offset);
+   NS_ENSURE_SUCCESS(res, res);
+ 
+   // create new container
+   nsCOMPtr<dom::Element> newContent;
+ 
+   //new call to use instead to get proper HTML element, bug# 39919
+   res = CreateHTMLContent(aNodeType, getter_AddRefs(newContent));
++  NS_ENSURE_SUCCESS(res, res);
++
+   nsCOMPtr<nsIDOMElement> elem = do_QueryInterface(newContent);
+-  NS_ENSURE_SUCCESS(res, res);
+-  *outNode = do_QueryInterface(elem);
++  if (outNode) {
++    newContent.forget(outNode);
++  }
+   
+   // set attribute if needed
+   if (aAttribute && aValue && !aAttribute->IsEmpty())
+   {
+     res = elem->SetAttribute(*aAttribute, *aValue);
+     NS_ENSURE_SUCCESS(res, res);
+   }
+   
+diff --git a/editor/libeditor/base/nsEditor.h b/editor/libeditor/base/nsEditor.h
+--- a/editor/libeditor/base/nsEditor.h
++++ b/editor/libeditor/base/nsEditor.h
+@@ -190,18 +190,19 @@ public:
+                             nsCOMPtr<nsIDOMNode> *outNode, 
+                             const nsAString &aNodeType,
+                             const nsAString *aAttribute = nsnull,
+                             const nsAString *aValue = nsnull,
+                             bool aCloneAttributes = false);
+ 
+   nsresult RemoveContainer(nsINode* aNode);
+   nsresult RemoveContainer(nsIDOMNode *inNode);
++  // outNode may be null.
+   nsresult InsertContainerAbove(nsIDOMNode *inNode, 
+-                                nsCOMPtr<nsIDOMNode> *outNode, 
++                                mozilla::dom::Element** outNode, 
+                                 const nsAString &aNodeType,
+                                 const nsAString *aAttribute = nsnull,
+                                 const nsAString *aValue = nsnull);
+   nsresult MoveNode(nsIDOMNode *aNode, nsIDOMNode *aParent, int32_t aOffset);
+ 
+   /* Method to replace certain CreateElementNS() calls. 
+      Arguments:
+       nsString& aTag          - tag you want
+diff --git a/editor/libeditor/html/nsHTMLEditRules.cpp b/editor/libeditor/html/nsHTMLEditRules.cpp
+--- a/editor/libeditor/html/nsHTMLEditRules.cpp
++++ b/editor/libeditor/html/nsHTMLEditRules.cpp
+@@ -3240,17 +3240,19 @@ nsHTMLEditRules::WillMakeList(nsISelecti
+       {
+         // don't wrap li around a paragraph.  instead replace paragraph with li
+         if (nsHTMLEditUtils::IsParagraph(curNode))
+         {
+           res = mHTMLEditor->ReplaceContainer(curNode, address_of(listItem), itemType);
+         }
+         else
+         {
+-          res = mHTMLEditor->InsertContainerAbove(curNode, address_of(listItem), itemType);
++          nsRefPtr<dom::Element> listElement;
++          res = mHTMLEditor->InsertContainerAbove(curNode, getter_AddRefs(listElement), itemType);
++          listItem = do_QueryInterface(listElement);
+         }
+         NS_ENSURE_SUCCESS(res, res);
+         if (IsInlineNode(curNode)) 
+           prevListItem = listItem;
+         else
+           prevListItem = nsnull;
+       }
+     }
+diff --git a/editor/libeditor/html/nsHTMLEditor.h b/editor/libeditor/html/nsHTMLEditor.h
+--- a/editor/libeditor/html/nsHTMLEditor.h
++++ b/editor/libeditor/html/nsHTMLEditor.h
+@@ -746,16 +746,17 @@ protected:
+                              const nsAString *aValue,
+                              bool *aFirst, 
+                              bool *aAny, 
+                              bool *aAll,
+                              nsAString *outValue,
+                              bool aCheckDefaults = true);
+   bool HasStyleOrIdOrClass(mozilla::dom::Element* aElement);
+   nsresult RemoveElementIfNoStyleOrIdOrClass(nsIDOMNode* aElement);
++  nsresult RemoveElementIfNoStyleOrIdOrClass(mozilla::dom::Element* aElement);
+ 
+   // Whether the outer window of the DOM event target has focus or not.
+   bool     OurWindowHasFocus();
+ 
+   // This function is used to insert a string of HTML input optionally with some
+   // context information into the editable field.  The HTML input either comes
+   // from a transferable object created as part of a drop/paste operation, or from
+   // the InsertHTML method.  We may want the HTML input to be sanitized (for example,
+diff --git a/editor/libeditor/html/nsHTMLEditorStyle.cpp b/editor/libeditor/html/nsHTMLEditorStyle.cpp
+--- a/editor/libeditor/html/nsHTMLEditorStyle.cpp
++++ b/editor/libeditor/html/nsHTMLEditorStyle.cpp
+@@ -388,26 +388,26 @@ nsHTMLEditor::SetInlinePropertyOnNode( n
+   
+   if (IsCSSEnabled())
+   {
+     // we are in CSS mode
+     if (mHTMLCSSUtils->IsCSSEditableProperty(aNode, aProperty, aAttribute))
+     {
+       // the HTML style defined by aProperty/aAttribute has a CSS equivalence
+       // in this implementation for the node aNode
+-      nsCOMPtr<nsIDOMNode> tmp = aNode;
+-      if (IsTextNode(tmp))
+-      {
++      nsCOMPtr<nsIDOMNode> tmp;
++      if (IsTextNode(tmp)) {
+         // we are working on a text node and need to create a span container
+         // that will carry the styles
+-        InsertContainerAbove( aNode, 
+-                              address_of(tmp), 
+-                              NS_LITERAL_STRING("span"),
+-                              nsnull,
+-                              nsnull);
++        nsRefPtr<dom::Element> element;
++        InsertContainerAbove(aNode, getter_AddRefs(element),
++                             NS_LITERAL_STRING("span"), nsnull, nsnull);
++        tmp = do_QueryInterface(element);
++      } else {
++        tmp = aNode;
+       }
+       nsCOMPtr<nsIDOMElement>element;
+       element = do_QueryInterface(tmp);
+       // first we have to remove occurences of the same style hint in the
+       // children of the aNode
+       res = RemoveStyleInside(tmp, aProperty, aAttribute, true);
+       NS_ENSURE_SUCCESS(res, res);
+       int32_t count;
+@@ -477,17 +477,17 @@ nsHTMLEditor::SetInlinePropertyOnNode( n
+              IsOnlyAttribute(priorNode, aAttribute) )
+     {
+       // following sib is already right kind of inline node; slide this over into it
+       res = MoveNode(aNode, nextNode, 0);
+     }
+     else
+     {
+       // ok, chuck it in its very own container
+-      res = InsertContainerAbove(aNode, address_of(tmp), tag, aAttribute, aValue);
++      res = InsertContainerAbove(aNode, NULL, tag, aAttribute, aValue);
+     }
+     NS_ENSURE_SUCCESS(res, res);
+     return RemoveStyleInside(aNode, aProperty, aAttribute);
+   }
+   // none of the above?  then cycle through the children.
+   nsCOMPtr<nsIDOMNodeList> childNodes;
+   res = aNode->GetChildNodes(getter_AddRefs(childNodes));
+   NS_ENSURE_SUCCESS(res, res);
+@@ -674,36 +674,38 @@ nsresult nsHTMLEditor::RemoveStyleInside
+       bool hasStyleAttr = HasAttr(aNode, &styleAttr);
+       bool hasClassAtrr = HasAttr(aNode, &classAttr);
+       if (aProperty &&
+           (hasStyleAttr || hasClassAtrr)) {
+         // aNode carries inline styles or a class attribute so we can't
+         // just remove the element... We need to create above the element
+         // a span that will carry those styles or class, then we can delete
+         // the node.
+-        nsCOMPtr<nsIDOMNode> spanNode;
+-        res = InsertContainerAbove(aNode, address_of(spanNode),
++        nsCOMPtr<dom::Element> span;
++        res = InsertContainerAbove(aNode, getter_AddRefs(span),
+                                    NS_LITERAL_STRING("span"));
+         NS_ENSURE_SUCCESS(res, res);
++
++        nsCOMPtr<nsIDOMNode> spanNode = do_QueryInterface(span);
+         res = CloneAttribute(styleAttr, spanNode, aNode);
+         NS_ENSURE_SUCCESS(res, res);
+         res = CloneAttribute(classAttr, spanNode, aNode);
+         NS_ENSURE_SUCCESS(res, res);
+         if (hasStyleAttr)
+         {
+           // we need to remove the styles property corresponding to
+           // aProperty (bug 215406)
+           nsAutoString propertyValue;
+           mHTMLCSSUtils->RemoveCSSEquivalentToHTMLStyle(spanNode,
+                                                         aProperty,
+                                                         aAttribute,
+                                                         &propertyValue,
+                                                         false);
+           // remove the span if it's useless
+-          RemoveElementIfNoStyleOrIdOrClass(spanNode);
++          RemoveElementIfNoStyleOrIdOrClass(span);
+         }
+       }
+       res = RemoveContainer(aNode);
+     }
+     // otherwise we just want to eliminate the attribute
+     else
+     {
+       if (HasAttr(aNode, aAttribute))
+@@ -1646,18 +1648,17 @@ nsHTMLEditor::RelativeFontChangeOnTextNo
+   if (sibling && NodeIsType(sibling, (aSizeChange==1) ? nsEditProperty::big : nsEditProperty::small))
+   {
+     // following sib is already right kind of inline node; slide this over into it
+     res = MoveNode(node, sibling, 0);
+     return res;
+   }
+   
+   // else reparent the node inside font node with appropriate relative size
+-  res = InsertContainerAbove(node, address_of(tmp), nodeType);
+-  return res;
++  return InsertContainerAbove(node, NULL, nodeType);
+ }
+ 
+ 
+ nsresult
+ nsHTMLEditor::RelativeFontChangeHelper( int32_t aSizeChange, 
+                                         nsIDOMNode *aNode)
+ {
+   /*  This routine looks for all the font nodes in the tree rooted by aNode,
+@@ -1770,19 +1771,19 @@ nsHTMLEditor::RelativeFontChangeOnNode( 
+     sibling = nsnull;
+     GetNextHTMLSibling(aNode, address_of(sibling));
+     if (sibling && nsEditor::NodeIsType(sibling, (aSizeChange==1 ? nsEditProperty::big : nsEditProperty::small)))
+     {
+       // following sib is already right kind of inline node; slide this over into it
+       res = MoveNode(aNode, sibling, 0);
+       return res;
+     }
++
+     // else insert it above aNode
+-    res = InsertContainerAbove(aNode, address_of(tmp), tag);
+-    return res;
++    return InsertContainerAbove(aNode, NULL, tag);
+   }
+   // none of the above?  then cycle through the children.
+   // MOOSE: we should group the children together if possible
+   // into a single "big" or "small".  For the moment they are
+   // each getting their own.  
+   nsCOMPtr<nsIDOMNodeList> childNodes;
+   res = aNode->GetChildNodes(getter_AddRefs(childNodes));
+   NS_ENSURE_SUCCESS(res, res);
+@@ -1905,15 +1906,22 @@ nsHTMLEditor::HasStyleOrIdOrClass(dom::E
+ }
+ 
+ nsresult
+ nsHTMLEditor::RemoveElementIfNoStyleOrIdOrClass(nsIDOMNode* aElement)
+ {
+   nsCOMPtr<dom::Element> element = do_QueryInterface(aElement);
+   NS_ENSURE_TRUE(element, NS_ERROR_NULL_POINTER);
+ 
++  return RemoveElementIfNoStyleOrIdOrClass(element);
++}
++
++nsresult
++nsHTMLEditor::RemoveElementIfNoStyleOrIdOrClass(dom::Element* aElement)
++{
++  MOZ_ASSERT(aElement);
+   // early way out if node is not the right kind of element
+-  if (!element->IsHTML(nsGkAtoms::span) || HasStyleOrIdOrClass(element)) {
++  if (!aElement->IsHTML(nsGkAtoms::span) || HasStyleOrIdOrClass(aElement)) {
+     return NS_OK;
+   }
+ 
+-  return RemoveContainer(element);
++  return RemoveContainer(aElement);
+ }

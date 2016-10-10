@@ -1,0 +1,241 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/toolkit/components/places/nsPlacesExportService.cpp b/toolkit/components/places/nsPlacesExportService.cpp
+--- a/toolkit/components/places/nsPlacesExportService.cpp
++++ b/toolkit/components/places/nsPlacesExportService.cpp
+@@ -99,16 +99,17 @@
+ #include "nsAppDirectoryServiceDefs.h"
+ #include "nsDirectoryServiceUtils.h"
+ #include "nsToolkitCompsCID.h"
+ #include "nsIParser.h"
+ #include "prprf.h"
+ #include "nsIObserverService.h"
+ #include "nsISupportsPrimitives.h"
+ #include "nsPlacesMacros.h"
++#include "nsEscape.h"
+ #include "mozilla/Util.h"
+ 
+ using namespace mozilla;
+ 
+ #define LOAD_IN_SIDEBAR_ANNO NS_LITERAL_CSTRING("bookmarkProperties/loadInSidebar")
+ #define DESCRIPTION_ANNO NS_LITERAL_CSTRING("bookmarkProperties/description")
+ #define POST_DATA_ANNO NS_LITERAL_CSTRING("bookmarkProperties/POSTData")
+ 
+@@ -123,76 +124,16 @@ using namespace mozilla;
+ #else
+ #define NS_LINEBREAK "\012"
+ #endif
+ 
+ class nsIOutputStream;
+ static const char kWhitespace[] = " \r\n\t\b";
+ static nsresult WriteEscapedUrl(const nsCString &aString, nsIOutputStream* aOutput);
+ 
+-/**
+- * Copied from nsEscape.cpp, which requires internal string API.
+- */
+-char*
+-nsEscapeHTML(const char* string)
+-{
+-  /* XXX Hardcoded max entity len. The +1 is for the trailing null. */
+-  char* escaped = nsnull;
+-  uint32_t len = strlen(string);
+-  if (len >= (PR_UINT32_MAX / 6))
+-    return nsnull;
+-
+-  escaped = (char*)NS_Alloc((len * 6) + 1);
+-  if (escaped) {
+-    char* ptr = escaped;
+-    for (; *string != '\0'; string++) {
+-      switch(*string) {
+-        case '<':
+-          *ptr++ = '&';
+-          *ptr++ = 'l';
+-          *ptr++ = 't';
+-          *ptr++ = ';';
+-          break;
+-        case '>':
+-          *ptr++ = '&';
+-          *ptr++ = 'g';
+-          *ptr++ = 't';
+-          *ptr++ = ';';
+-          break;
+-        case '&':
+-          *ptr++ = '&';
+-          *ptr++ = 'a';
+-          *ptr++ = 'm';
+-          *ptr++ = 'p';
+-          *ptr++ = ';';
+-          break;
+-        case '"':
+-          *ptr++ = '&';
+-          *ptr++ = 'q';
+-          *ptr++ = 'u';
+-          *ptr++ = 'o';
+-          *ptr++ = 't';
+-          *ptr++ = ';';
+-          break;
+-        case '\'':
+-          *ptr++ = '&';
+-          *ptr++ = '#';
+-          *ptr++ = '3';
+-          *ptr++ = '9';
+-          *ptr++ = ';';
+-          break;
+-        default:
+-          *ptr++ = *string;
+-      }
+-    }
+-    *ptr = '\0';
+-  }
+-  return escaped;
+-}
+-
+ PLACES_FACTORY_SINGLETON_IMPLEMENTATION(nsPlacesExportService, gExportService)
+ 
+ NS_IMPL_ISUPPORTS1(nsPlacesExportService, nsIPlacesImportExportService)
+ 
+ nsPlacesExportService::nsPlacesExportService()
+ {
+   NS_ASSERTION(!gExportService,
+                "Attempting to create two instances of the service!");
+diff --git a/xpcom/io/nsEscape.cpp b/xpcom/io/nsEscape.cpp
+--- a/xpcom/io/nsEscape.cpp
++++ b/xpcom/io/nsEscape.cpp
+@@ -1,9 +1,9 @@
+-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* ***** BEGIN LICENSE BLOCK *****
+  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+  *
+  * The contents of this file are subject to the Mozilla Public License Version
+  * 1.1 (the "License"); you may not use this file except in compliance with
+  * the License. You may obtain a copy of the License at
+  * http://www.mozilla.org/MPL/
+  *
+@@ -217,77 +217,66 @@ int32_t nsUnescapeCount(char * str)
+     return (int)(dst - str);
+ 
+ } /* NET_UnEscapeCnt */
+ 
+ 
+ char *
+ nsEscapeHTML(const char * string)
+ {
+-    char *rv = nsnull;
+-    /* XXX Hardcoded max entity len. The +1 is for the trailing null. */
+-    uint32_t len = PL_strlen(string);
+-    if (len >= (PR_UINT32_MAX / 6))
+-      return nsnull;
++  uint32_t len = PL_strlen(string);
++  if (len >= (PR_UINT32_MAX / 6)) {
++    return nsnull;
++  }
+ 
+-    rv = (char *)NS_Alloc( (6 * len) + 1 );
+-    char *ptr = rv;
+-
+-    if(rv)
+-      {
+-        for(; *string != '\0'; string++)
+-          {
+-            if(*string == '<')
+-              {
+-                *ptr++ = '&';
+-                *ptr++ = 'l';
+-                *ptr++ = 't';
+-                *ptr++ = ';';
+-              }
+-            else if(*string == '>')
+-              {
+-                *ptr++ = '&';
+-                *ptr++ = 'g';
+-                *ptr++ = 't';
+-                *ptr++ = ';';
+-              }
+-            else if(*string == '&')
+-              {
+-                *ptr++ = '&';
+-                *ptr++ = 'a';
+-                *ptr++ = 'm';
+-                *ptr++ = 'p';
+-                *ptr++ = ';';
+-              }
+-            else if (*string == '"')
+-              {
+-                *ptr++ = '&';
+-                *ptr++ = 'q';
+-                *ptr++ = 'u';
+-                *ptr++ = 'o';
+-                *ptr++ = 't';
+-                *ptr++ = ';';
+-              }
+-            else if (*string == '\'')
+-              {
+-                *ptr++ = '&';
+-                *ptr++ = '#';
+-                *ptr++ = '3';
+-                *ptr++ = '9';
+-                *ptr++ = ';';
+-              }
+-            else
+-              {
+-                *ptr++ = *string;
+-              }
+-          }
+-        *ptr = '\0';
+-      }
+-
+-    return(rv);
++  /* XXX Hardcoded max entity len. The +1 is for the trailing null. */
++  char* rv = static_cast<char*>(moz_xmalloc(6 * len + 1));
++  char* ptr = rv;
++  for (; *string != '\0'; ++string) {
++    switch (*string) {
++    case '<':
++      *ptr++ = '&';
++      *ptr++ = 'l';
++      *ptr++ = 't';
++      *ptr++ = ';';
++      break;
++    case '>':
++      *ptr++ = '&';
++      *ptr++ = 'g';
++      *ptr++ = 't';
++      *ptr++ = ';';
++      break;
++    case '&':
++      *ptr++ = '&';
++      *ptr++ = 'a';
++      *ptr++ = 'm';
++      *ptr++ = 'p';
++      *ptr++ = ';';
++      break;
++    case '"':
++      *ptr++ = '&';
++      *ptr++ = 'q';
++      *ptr++ = 'u';
++      *ptr++ = 'o';
++      *ptr++ = 't';
++      *ptr++ = ';';
++      break;
++    case '\'':
++      *ptr++ = '&';
++      *ptr++ = '#';
++      *ptr++ = '3';
++      *ptr++ = '9';
++      *ptr++ = ';';
++      break;
++    default:
++      *ptr++ = *string;
++    }
++  }
++  *ptr = '\0';
++  return rv;
+ }
+ 
+ PRUnichar *
+ nsEscapeHTML2(const PRUnichar *aSourceBuffer, int32_t aSourceBufferLen)
+ {
+   // if the caller didn't calculate the length
+   if (aSourceBufferLen < 0) {
+     aSourceBufferLen = nsCRT::strlen(aSourceBuffer); // ...then I will

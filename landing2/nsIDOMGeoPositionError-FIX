@@ -1,0 +1,153 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/src/geolocation/nsGeolocation.cpp b/dom/src/geolocation/nsGeolocation.cpp
+--- a/dom/src/geolocation/nsGeolocation.cpp
++++ b/dom/src/geolocation/nsGeolocation.cpp
+@@ -230,23 +230,23 @@ private:
+ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(PositionError, mParent)
+ NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(PositionError, AddRef)
+ NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(PositionError, Release)
+ 
+ void
+ PositionError::GetMessage(nsString& aMessage) const
+ {
+   switch (mCode) {
+-    case nsIDOMGeoPositionError::PERMISSION_DENIED:
++    case PERMISSION_DENIED:
+       aMessage = NS_LITERAL_STRING("User denied geolocation prompt");
+       break;
+-    case nsIDOMGeoPositionError::POSITION_UNAVAILABLE:
++    case POSITION_UNAVAILABLE:
+       aMessage = NS_LITERAL_STRING("Unknown error acquiring position");
+       break;
+-    case nsIDOMGeoPositionError::TIMEOUT:
++    case TIMEOUT:
+       aMessage = NS_LITERAL_STRING("Position acquisition timed out");
+       break;
+     default:
+       break;
+   }
+ }
+ 
+ JSObject*
+@@ -313,17 +313,17 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsGeolo
+ 
+ NS_IMPL_CYCLE_COLLECTION_3(nsGeolocationRequest, mCallback, mErrorCallback, mLocator)
+ 
+ NS_IMETHODIMP
+ nsGeolocationRequest::Notify(nsITimer* aTimer)
+ {
+   MOZ_ASSERT(!mShutdown, "timeout after shutdown");
+ 
+-  NotifyError(nsIDOMGeoPositionError::TIMEOUT);
++  NotifyError(PositionError::TIMEOUT);
+   if (!mIsWatchPositionRequest) {
+     Shutdown();
+     mLocator->RemoveRequest(this);
+   } else if (!mShutdown) {
+     SetTimeoutTimer();
+   }
+ 
+   return NS_OK;
+@@ -371,17 +371,17 @@ nsGeolocationRequest::GetElement(nsIDOME
+   NS_ENSURE_ARG_POINTER(aRequestingElement);
+   *aRequestingElement = nullptr;
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsGeolocationRequest::Cancel()
+ {
+-  NotifyError(nsIDOMGeoPositionError::PERMISSION_DENIED);
++  NotifyError(PositionError::PERMISSION_DENIED);
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsGeolocationRequest::Allow()
+ {
+   nsCOMPtr<nsIDOMWindow> window;
+   GetWindow(getter_AddRefs(window));
+@@ -389,17 +389,17 @@ nsGeolocationRequest::Allow()
+   nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(webNav);
+ 
+   // Kick off the geo device, if it isn't already running
+   nsRefPtr<nsGeolocationService> gs = nsGeolocationService::GetGeolocationService();
+   nsresult rv = gs->StartDevice(GetPrincipal());
+ 
+   if (NS_FAILED(rv)) {
+     // Location provider error
+-    NotifyError(nsIDOMGeoPositionError::POSITION_UNAVAILABLE);
++    NotifyError(PositionError::POSITION_UNAVAILABLE);
+     return NS_OK;
+   }
+ 
+   nsCOMPtr<nsIDOMGeoPosition> lastPosition = gs->GetCachedPosition();
+   DOMTimeStamp cachedPositionTime;
+   if (lastPosition) {
+     lastPosition->GetTimestamp(&cachedPositionTime);
+   }
+@@ -478,17 +478,17 @@ nsGeolocationRequest::SendLocation(nsIDO
+     nsCOMPtr<nsIDOMGeoPositionCoords> coords;
+     aPosition->GetCoords(getter_AddRefs(coords));
+     if (coords) {
+       wrapped = new Position(ToSupports(mLocator), aPosition);
+     }
+   }
+ 
+   if (!wrapped) {
+-    NotifyError(nsIDOMGeoPositionError::POSITION_UNAVAILABLE);
++    NotifyError(PositionError::POSITION_UNAVAILABLE);
+     return;
+   }
+ 
+   mLocator->SetCachedPosition(wrapped);
+ 
+   // Ensure that the proper context is on the stack (bug 452762)
+   nsCxPusher pusher;
+   pusher.PushNull();
+@@ -829,17 +829,17 @@ nsGeolocationService::StartDevice(nsIPri
+     return NS_ERROR_FAILURE;
+   }
+ 
+   nsresult rv;
+ 
+   if (NS_FAILED(rv = mProvider->Startup()) ||
+       NS_FAILED(rv = mProvider->Watch(this))) {
+ 
+-    NotifyError(nsIDOMGeoPositionError::POSITION_UNAVAILABLE);
++    NotifyError(PositionError::POSITION_UNAVAILABLE);
+     return rv;
+   }
+ 
+   obs->NotifyObservers(mProvider,
+                        "geolocation-device-events",
+                        NS_LITERAL_STRING("starting").get());
+ 
+   return NS_OK;
+diff --git a/dom/src/geolocation/nsGeolocation.h b/dom/src/geolocation/nsGeolocation.h
+--- a/dom/src/geolocation/nsGeolocation.h
++++ b/dom/src/geolocation/nsGeolocation.h
+@@ -276,16 +276,22 @@ private:
+ };
+ 
+ class PositionError MOZ_FINAL : public nsWrapperCache
+ {
+ public:
+   NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(PositionError)
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(PositionError)
+ 
++  enum {
++    PERMISSION_DENIED = 1,
++    POSITION_UNAVAILABLE = 2,
++    TIMEOUT = 3
++  };
++
+   PositionError(Geolocation* aParent, int16_t aCode)
+     : mCode(aCode)
+     , mParent(aParent)
+   {
+     SetIsDOMBinding();
+   }
+ 
+   Geolocation* GetParentObject() const

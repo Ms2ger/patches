@@ -1,0 +1,258 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/document/src/HTMLAllCollection.cpp b/content/html/document/src/HTMLAllCollection.cpp
+--- a/content/html/document/src/HTMLAllCollection.cpp
++++ b/content/html/document/src/HTMLAllCollection.cpp
+@@ -15,32 +15,33 @@
+ #include "xpcpublic.h"
+ 
+ using namespace mozilla;
+ using namespace mozilla::dom;
+ 
+ class nsHTMLDocumentSH
+ {
+ protected:
+-  static bool GetDocumentAllNodeList(JSContext *cx, JS::Handle<JSObject*> obj,
+-                                     nsDocument *doc,
+-                                     nsContentList **nodeList);
++  static bool GetDocumentAllNodeList(JSContext*,
++                                     JS::Handle<JSObject*>,
++                                     nsHTMLDocument* aDocument,
++                                     nsContentList** aNodeList);
+ public:
+   static bool DocumentAllGetProperty(JSContext *cx, JS::Handle<JSObject*> obj, JS::Handle<jsid> id,
+                                      JS::MutableHandle<JS::Value> vp);
+   static bool DocumentAllNewResolve(JSContext *cx, JS::Handle<JSObject*> obj, JS::Handle<jsid> id,
+                                     unsigned flags, JS::MutableHandle<JSObject*> objp);
+   static void ReleaseDocument(JSFreeOp *fop, JSObject *obj);
+   static bool CallToGetPropMapper(JSContext *cx, unsigned argc, JS::Value *vp);
+ };
+ 
+ JSClass sHTMLDocumentAllClass = {
+   "HTML document.all class",
+   JSCLASS_HAS_PRIVATE | JSCLASS_PRIVATE_IS_NSISUPPORTS | JSCLASS_NEW_RESOLVE |
+-  JSCLASS_EMULATES_UNDEFINED | JSCLASS_HAS_RESERVED_SLOTS(1),
++  JSCLASS_EMULATES_UNDEFINED,
+   JS_PropertyStub,                                         /* addProperty */
+   JS_DeletePropertyStub,                                   /* delProperty */
+   nsHTMLDocumentSH::DocumentAllGetProperty,                /* getProperty */
+   JS_StrictPropertyStub,                                   /* setProperty */
+   JS_EnumerateStub,
+   (JSResolveOp)nsHTMLDocumentSH::DocumentAllNewResolve,
+   JS_ConvertStub,
+   nsHTMLDocumentSH::ReleaseDocument,
+@@ -103,16 +104,27 @@ HTMLAllCollection::GetObject(JSContext* 
+     // Make the JSObject hold a reference to the document.
+     JS_SetPrivate(mObject, ToSupports(mDocument));
+     NS_ADDREF(mDocument);
+   }
+ 
+   return xpc_UnmarkGrayObject(mObject);
+ }
+ 
++nsContentList*
++HTMLAllCollection::Collection()
++{
++  if (!mCollection) {
++    nsIDocument* document = mDocument;
++    mCollection = document->GetElementsByTagName(NS_LITERAL_STRING("*"));
++    MOZ_ASSERT(mCollection);
++  }
++  return mCollection;
++}
++
+ } // namespace dom
+ } // namespace mozilla
+ 
+ static nsHTMLDocument*
+ GetDocument(JSObject *obj)
+ {
+   MOZ_ASSERT(js::GetObjectJSClass(obj) == &sHTMLDocumentAllClass);
+   return static_cast<nsHTMLDocument*>(
+@@ -151,79 +163,24 @@ WrapNative(JSContext *cx, JSObject *scop
+            nsIXPConnectJSObjectHolder** aHolder = nullptr)
+ {
+   return WrapNative(cx, scope, native, cache, nullptr, vp, aHolder,
+                     aAllowWrapping);
+ }
+ 
+ // static
+ bool
+-nsHTMLDocumentSH::GetDocumentAllNodeList(JSContext *cx,
+-                                         JS::Handle<JSObject*> obj,
+-                                         nsDocument *domdoc,
+-                                         nsContentList **nodeList)
++nsHTMLDocumentSH::GetDocumentAllNodeList(JSContext*,
++                                         JS::Handle<JSObject*>,
++                                         nsHTMLDocument* aDocument,
++                                         nsContentList** aNodeList)
+ {
+-  // The document.all object is a mix of the node list returned by
+-  // document.getElementsByTagName("*") and a map of elements in the
+-  // document exposed by their id and/or name. To make access to the
+-  // node list part (i.e. access to elements by index) not walk the
+-  // document each time, we create a nsContentList and hold on to it
+-  // in a reserved slot (0) on the document.all JSObject.
+-  nsresult rv = NS_OK;
+-
+-  JS::Rooted<JS::Value> collection(cx, JS_GetReservedSlot(obj, 0));
+-
+-  if (!JSVAL_IS_PRIMITIVE(collection)) {
+-    // We already have a node list in our reserved slot, use it.
+-    JS::Rooted<JSObject*> obj(cx, JSVAL_TO_OBJECT(collection));
+-    nsIHTMLCollection* htmlCollection;
+-    rv = UNWRAP_OBJECT(HTMLCollection, cx, obj, htmlCollection);
+-    if (NS_SUCCEEDED(rv)) {
+-      NS_ADDREF(*nodeList = static_cast<nsContentList*>(htmlCollection));
+-    }
+-    else {
+-      nsISupports *native = nsDOMClassInfo::XPConnect()->GetNativeOfWrapper(cx, obj);
+-      if (native) {
+-        NS_ADDREF(*nodeList = nsContentList::FromSupports(native));
+-        rv = NS_OK;
+-      }
+-      else {
+-        rv = NS_ERROR_FAILURE;
+-      }
+-    }
+-  } else {
+-    // No node list for this document.all yet, create one...
+-
+-    nsRefPtr<nsContentList> list =
+-      domdoc->GetElementsByTagName(NS_LITERAL_STRING("*"));
+-    if (!list) {
+-      rv = NS_ERROR_OUT_OF_MEMORY;
+-    }
+-
+-    nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
+-    nsresult tmp = WrapNative(cx, JS::CurrentGlobalOrNull(cx),
+-                              static_cast<nsINodeList*>(list), list, false,
+-                              collection.address(), getter_AddRefs(holder));
+-    if (NS_FAILED(tmp)) {
+-      rv = tmp;
+-    }
+-
+-    list.forget(nodeList);
+-
+-    // ... and store it in our reserved slot.
+-    JS_SetReservedSlot(obj, 0, collection);
+-  }
+-
+-  if (NS_FAILED(rv)) {
+-    xpc::Throw(cx, NS_ERROR_FAILURE);
+-
+-    return false;
+-  }
+-
+-  return *nodeList != nullptr;
++  nsRefPtr<nsContentList> collection = aDocument->All()->Collection();
++  collection.forget(aNodeList);
++  return true;
+ }
+ 
+ bool
+ nsHTMLDocumentSH::DocumentAllGetProperty(JSContext *cx, JS::Handle<JSObject*> obj_,
+                                          JS::Handle<jsid> id, JS::MutableHandle<JS::Value> vp)
+ {
+   JS::Rooted<JSObject*> obj(cx, obj_);
+ 
+diff --git a/content/html/document/src/HTMLAllCollection.h b/content/html/document/src/HTMLAllCollection.h
+--- a/content/html/document/src/HTMLAllCollection.h
++++ b/content/html/document/src/HTMLAllCollection.h
+@@ -7,16 +7,17 @@
+ #ifndef mozilla_dom_HTMLAllCollection_h
+ #define mozilla_dom_HTMLAllCollection_h
+ 
+ #include "js/RootingAPI.h"
+ #include "nsAutoPtr.h"
+ #include "nsCycleCollectionParticipant.h"
+ #include "nsISupportsImpl.h"
+ 
++class nsContentList;
+ class nsHTMLDocument;
+ 
+ namespace mozilla {
+ class ErrorResult;
+ 
+ namespace dom {
+ 
+ class HTMLAllCollection
+@@ -25,17 +26,20 @@ public:
+   HTMLAllCollection(nsHTMLDocument* aDocument);
+   ~HTMLAllCollection();
+ 
+   NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(HTMLAllCollection)
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(HTMLAllCollection)
+ 
+   JSObject* GetObject(JSContext* aCx, ErrorResult& aRv);
+ 
++  nsContentList* Collection();
++
+ private:
+   JS::Heap<JSObject*> mObject;
+   nsRefPtr<nsHTMLDocument> mDocument;
++  nsRefPtr<nsContentList> mCollection;
+ };
+ 
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #endif // mozilla_dom_HTMLAllCollection_h
+diff --git a/content/html/document/src/nsHTMLDocument.cpp b/content/html/document/src/nsHTMLDocument.cpp
+--- a/content/html/document/src/nsHTMLDocument.cpp
++++ b/content/html/document/src/nsHTMLDocument.cpp
+@@ -2690,24 +2690,29 @@ nsHTMLDocument::GetDocumentAllResult(con
+   }
+ 
+   // There's only 0 or 1 items. Return the first one or null.
+   *aCache = cont = docAllList->Item(0, true);
+ 
+   return cont;
+ }
+ 
+-JSObject*
+-nsHTMLDocument::GetAll(JSContext* aCx, ErrorResult& aRv)
++HTMLAllCollection*
++nsHTMLDocument::All()
+ {
+   if (!mAll) {
+     mAll = new HTMLAllCollection(this);
+   }
+-
+-  return mAll->GetObject(aCx, aRv);
++  return mAll;
++}
++
++JSObject*
++nsHTMLDocument::GetAll(JSContext* aCx, ErrorResult& aRv)
++{
++  return All()->GetObject(aCx, aRv);
+ }
+ 
+ static void
+ NotifyEditableStateChange(nsINode *aNode, nsIDocument *aDocument)
+ {
+   for (nsIContent* child = aNode->GetFirstChild();
+        child;
+        child = child->GetNextSibling()) {
+diff --git a/content/html/document/src/nsHTMLDocument.h b/content/html/document/src/nsHTMLDocument.h
+--- a/content/html/document/src/nsHTMLDocument.h
++++ b/content/html/document/src/nsHTMLDocument.h
+@@ -105,16 +105,17 @@ public:
+   /**
+    * Returns the result of document.all[aID] which can either be a node
+    * or a nodelist depending on if there are multiple nodes with the same
+    * id.
+    */
+   nsISupports *GetDocumentAllResult(const nsAString& aID,
+                                     nsWrapperCache **aCache,
+                                     nsresult *aResult);
++  mozilla::dom::HTMLAllCollection* All();
+   JSObject* GetAll(JSContext* aCx, mozilla::ErrorResult& aRv);
+ 
+   nsISupports* ResolveName(const nsAString& aName, nsWrapperCache **aCache);
+ 
+   virtual void AddedForm() MOZ_OVERRIDE;
+   virtual void RemovedForm() MOZ_OVERRIDE;
+   virtual int32_t GetNumFormsSynchronous() MOZ_OVERRIDE;
+   virtual void TearingDownEditor(nsIEditor *aEditor) MOZ_OVERRIDE;

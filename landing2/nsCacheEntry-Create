@@ -1,0 +1,148 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/netwerk/cache/nsCacheEntry.cpp b/netwerk/cache/nsCacheEntry.cpp
+--- a/netwerk/cache/nsCacheEntry.cpp
++++ b/netwerk/cache/nsCacheEntry.cpp
+@@ -51,29 +51,27 @@ nsCacheEntry::~nsCacheEntry()
+ {
+     MOZ_COUNT_DTOR(nsCacheEntry);
+     
+     if (mData)
+         nsCacheService::ReleaseObject_Locked(mData, mThread);
+ }
+ 
+ 
+-nsresult
++nsCacheEntry*
+ nsCacheEntry::Create( const char *          key,
+                       bool                  streamBased,
+                       nsCacheStoragePolicy  storagePolicy,
+-                      nsCacheDevice *       device,
+-                      nsCacheEntry **       result)
++                      nsCacheDevice *       device)
+ {
+     nsCacheEntry* entry = new nsCacheEntry(nsCString(key),
+                                            streamBased,
+                                            storagePolicy);
+     entry->SetCacheDevice(device);
+-    *result = entry;
+-    return NS_OK;
++    return entry;
+ }
+ 
+ 
+ void
+ nsCacheEntry::Fetched()
+ {
+     mLastFetched = SecondsFromPRTime(PR_Now());
+     ++mFetchCount;
+diff --git a/netwerk/cache/nsCacheEntry.h b/netwerk/cache/nsCacheEntry.h
+--- a/netwerk/cache/nsCacheEntry.h
++++ b/netwerk/cache/nsCacheEntry.h
+@@ -32,21 +32,20 @@ class nsCacheEntry : public PRCList
+ public:
+ 
+     nsCacheEntry(const nsACString &   key,
+                  bool                 streamBased,
+                  nsCacheStoragePolicy storagePolicy);
+     ~nsCacheEntry();
+ 
+ 
+-    static nsresult  Create( const char *          key,
+-                             bool                  streamBased,
+-                             nsCacheStoragePolicy  storagePolicy,
+-                             nsCacheDevice *       device,
+-                             nsCacheEntry **       result);
++    static nsCacheEntry* Create( const char *          key,
++                                 bool                  streamBased,
++                                 nsCacheStoragePolicy  storagePolicy,
++                                 nsCacheDevice *       device);
+                                       
+     nsCString *  Key()  { return &mKey; }
+ 
+     int32_t  FetchCount()                              { return mFetchCount; }
+     void     SetFetchCount( int32_t   count)           { mFetchCount = count; }
+     void     Fetched();
+ 
+     uint32_t LastFetched()                             { return mLastFetched; }
+diff --git a/netwerk/cache/nsDiskCacheDeviceSQL.cpp b/netwerk/cache/nsDiskCacheDeviceSQL.cpp
+--- a/netwerk/cache/nsDiskCacheDeviceSQL.cpp
++++ b/netwerk/cache/nsDiskCacheDeviceSQL.cpp
+@@ -451,28 +451,25 @@ struct nsOfflineCacheRecord
+   int64_t        expirationTime;
+ };
+ 
+ static nsCacheEntry *
+ CreateCacheEntry(nsOfflineCacheDevice *device,
+                  const nsCString *fullKey,
+                  const nsOfflineCacheRecord &rec)
+ {
+-  nsCacheEntry *entry;
+-
+   if (device->IsLocked(*fullKey)) {
+-      return nullptr;
++    return nullptr;
+   }
+   
+-  nsresult rv = nsCacheEntry::Create(fullKey->get(), // XXX enable sharing
+-                                     nsICache::STREAM_BASED,
+-                                     nsICache::STORE_OFFLINE,
+-                                     device, &entry);
+-  if (NS_FAILED(rv))
+-    return nullptr;
++  nsCacheEntry* entry = nsCacheEntry::Create(fullKey->get(), // XXX enable sharing
++                                             nsICache::STREAM_BASED,
++                                             nsICache::STORE_OFFLINE,
++                                             device);
++  MOZ_ASSERT(entry);
+ 
+   entry->SetFetchCount((uint32_t) rec.fetchCount);
+   entry->SetLastFetched(SecondsFromPRTime(rec.lastFetched));
+   entry->SetLastModified(SecondsFromPRTime(rec.lastModified));
+   entry->SetExpirationTime(SecondsFromPRTime(rec.expirationTime));
+   entry->SetDataSize((uint32_t) rec.dataSize);
+ 
+   entry->UnflattenMetaData((const char *) rec.metaData, rec.metaDataLen);
+diff --git a/netwerk/cache/nsDiskCacheEntry.cpp b/netwerk/cache/nsDiskCacheEntry.cpp
+--- a/netwerk/cache/nsDiskCacheEntry.cpp
++++ b/netwerk/cache/nsDiskCacheEntry.cpp
+@@ -21,33 +21,31 @@
+ /**
+  *  CreateCacheEntry()
+  *
+  *  Creates an nsCacheEntry and sets all fields except for the binding.
+  */
+ nsCacheEntry *
+ nsDiskCacheEntry::CreateCacheEntry(nsCacheDevice *  device)
+ {
+-    nsCacheEntry * entry = nullptr;
+-    nsresult       rv = nsCacheEntry::Create(Key(),
+-                                             nsICache::STREAM_BASED,
+-                                             nsICache::STORE_ON_DISK,
+-                                             device,
+-                                             &entry);
+-    if (NS_FAILED(rv) || !entry) return nullptr;
++    nsCacheEntry* entry = nsCacheEntry::Create(Key(),
++                                               nsICache::STREAM_BASED,
++                                               nsICache::STORE_ON_DISK,
++                                               device);
++    MOZ_ASSERT(entry);
+     
+     entry->SetFetchCount(mFetchCount);
+     entry->SetLastFetched(mLastFetched);
+     entry->SetLastModified(mLastModified);
+     entry->SetExpirationTime(mExpirationTime);
+     entry->SetCacheDevice(device);
+     // XXX why does nsCacheService have to fill out device in BindEntry()?
+     entry->SetDataSize(mDataSize);
+     
+-    rv = entry->UnflattenMetaData(MetaData(), mMetaDataSize);
++    nsresult rv = entry->UnflattenMetaData(MetaData(), mMetaDataSize);
+     if (NS_FAILED(rv)) {
+         delete entry;
+         return nullptr;
+     }
+ 
+     // Restore security info, if present
+     const char* info = entry->GetMetaDataElement("security-info");
+     if (info) {

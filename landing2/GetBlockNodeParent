@@ -1,0 +1,85 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/libeditor/html/nsHTMLEditor.cpp b/editor/libeditor/html/nsHTMLEditor.cpp
+--- a/editor/libeditor/html/nsHTMLEditor.cpp
++++ b/editor/libeditor/html/nsHTMLEditor.cpp
+@@ -863,34 +863,54 @@ nsHTMLEditor::SetDocumentTitle(const nsA
+   nsAutoTxnsConserveSelection dontChangeSelection(this);
+   return nsEditor::DoTransaction(txn);  
+ }
+ 
+ /* ------------ Block methods moved from nsEditor -------------- */
+ ///////////////////////////////////////////////////////////////////////////
+ // GetBlockNodeParent: returns enclosing block level ancestor, if any
+ //
++static dom::Element*
++GetElementParent(nsINode* aNode)
++{
++  MOZ_ASSERT(aNode);
++  nsINode* parent = aNode->GetNodeParent();
++  return (parent && parent->IsElement()) ? parent->AsElement() : NULL;
++}
++
++dom::Element*
++nsHTMLEditor::GetBlockNodeParent(nsINode* aNode)
++{
++  MOZ_ASSERT(aNode);
++
++  for (dom::Element* p = GetElementParent(aNode); p; p = GetElementParent(p)) {
++    if (NodeIsBlockStatic(p)) {
++      return p;
++    }
++  }
++
++  return NULL;
++}
++
+ already_AddRefed<nsIDOMNode>
+ nsHTMLEditor::GetBlockNodeParent(nsIDOMNode *aNode)
+ {
+   if (!aNode)
+   {
+     NS_NOTREACHED("null node passed to GetBlockNodeParent()");
+     return false;
+   }
+ 
+   nsCOMPtr<nsIDOMNode> p;
+   if (NS_FAILED(aNode->GetParentNode(getter_AddRefs(p))))  // no parent, ran off top of tree
+     return nsnull;
+ 
+   nsCOMPtr<nsIDOMNode> tmp;
+-  while (p)
+-  {
+-    bool isBlock;
+-    if (NS_FAILED(NodeIsBlockStatic(p, &isBlock)) || isBlock)
++  while (p) {
++    if (NodeIsBlockStatic(p))
+       break;
+     if (NS_FAILED(p->GetParentNode(getter_AddRefs(tmp))) || !tmp) // no parent, ran off top of tree
+       break;
+ 
+     p = tmp;
+   }
+   return p.forget();
+ }
+diff --git a/editor/libeditor/html/nsHTMLEditor.h b/editor/libeditor/html/nsHTMLEditor.h
+--- a/editor/libeditor/html/nsHTMLEditor.h
++++ b/editor/libeditor/html/nsHTMLEditor.h
+@@ -274,16 +274,17 @@ public:
+   /* miscellaneous */
+   // This sets background on the appropriate container element (table, cell,)
+   //   or calls into nsTextEditor to set the page background
+   NS_IMETHOD SetCSSBackgroundColor(const nsAString& aColor);
+   NS_IMETHOD SetHTMLBackgroundColor(const nsAString& aColor);
+ 
+   /* ------------ Block methods moved from nsEditor -------------- */
+   static already_AddRefed<nsIDOMNode> GetBlockNodeParent(nsIDOMNode *aNode);
++  static mozilla::dom::Element* GetBlockNodeParent(nsINode* aNode);
+ 
+   static already_AddRefed<nsIDOMNode> NextNodeInBlock(nsIDOMNode *aNode, IterDirection aDir);
+   nsresult IsNextCharWhitespace(nsIDOMNode *aParentNode, 
+                                 int32_t aOffset, 
+                                 bool *outIsSpace, 
+                                 bool *outIsNBSP,
+                                 nsCOMPtr<nsIDOMNode> *outNode = 0,
+                                 int32_t *outOffset = 0);

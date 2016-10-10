@@ -1,0 +1,96 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCWrappedNativeJSOps.cpp b/js/xpconnect/src/XPCWrappedNativeJSOps.cpp
+--- a/js/xpconnect/src/XPCWrappedNativeJSOps.cpp
++++ b/js/xpconnect/src/XPCWrappedNativeJSOps.cpp
+@@ -42,16 +42,43 @@
+ /* JavaScript JSClasses and JSOps for our Wrapped Native JS Objects. */
+ 
+ #include "xpcprivate.h"
+ #include "XPCWrapper.h"
+ #include "nsWrapperCacheInlines.h"
+ 
+ /***************************************************************************/
+ 
++class NS_STACK_CLASS AutoResolveName
++{
++public:
++    AutoResolveName(XPCCallContext& ccx, jsid name
++                    MOZILLA_GUARD_OBJECT_NOTIFIER_PARAM)
++        : mTLS(ccx.GetThreadData())
++        , mOld(mTLS->SetResolveName(name))
++        , mCheck(name)
++    {
++        MOZILLA_GUARD_OBJECT_NOTIFIER_INIT;
++    }
++    ~AutoResolveName()
++    {
++#ifdef DEBUG
++        jsid old =
++#endif
++        mTLS->SetResolveName(mOld);
++        NS_ASSERTION(old == mCheck, "Bad Nesting!");
++    }
++
++private:
++    XPCPerThreadData* mTLS;
++    jsid mOld;
++    jsid mCheck;
++    MOZILLA_DECL_USE_GUARD_OBJECT_NOTIFIER
++};
++
+ // All of the exceptions thrown into JS from this file go through here.
+ // That makes this a nice place to set a breakpoint.
+ 
+ static JSBool Throw(uintN errNum, JSContext* cx)
+ {
+     XPCThrower::Throw(errNum, cx);
+     return false;
+ }
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -3836,43 +3836,16 @@ private:
+     MOZILLA_DECL_USE_GUARD_OBJECT_NOTIFIER
+ 
+     // No copying or assignment allowed
+     AutoScriptEvaluate(const AutoScriptEvaluate &);
+     AutoScriptEvaluate & operator =(const AutoScriptEvaluate &);
+ };
+ 
+ /***************************************************************************/
+-class NS_STACK_CLASS AutoResolveName
+-{
+-public:
+-    AutoResolveName(XPCCallContext& ccx, jsid name
+-                    MOZILLA_GUARD_OBJECT_NOTIFIER_PARAM)
+-        : mTLS(ccx.GetThreadData()),
+-          mOld(mTLS->SetResolveName(name)),
+-          mCheck(name) {
+-        MOZILLA_GUARD_OBJECT_NOTIFIER_INIT;
+-    }
+-    ~AutoResolveName()
+-        {
+-#ifdef DEBUG
+-            jsid old =
+-#endif
+-            mTLS->SetResolveName(mOld);
+-            NS_ASSERTION(old == mCheck, "Bad Nesting!");
+-        }
+-
+-private:
+-    XPCPerThreadData* mTLS;
+-    jsid mOld;
+-    jsid mCheck;
+-    MOZILLA_DECL_USE_GUARD_OBJECT_NOTIFIER
+-};
+-
+-/***************************************************************************/
+ class XPCMarkableJSVal
+ {
+ public:
+     XPCMarkableJSVal(jsval val) : mVal(val), mValPtr(&mVal) {}
+     XPCMarkableJSVal(jsval *pval) : mVal(JSVAL_VOID), mValPtr(pval) {}
+     ~XPCMarkableJSVal() {}
+     void Mark() {}
+     void TraceJS(JSTracer* trc)

@@ -1,0 +1,1624 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/Makefile.in b/js/xpconnect/src/Makefile.in
+--- a/js/xpconnect/src/Makefile.in
++++ b/js/xpconnect/src/Makefile.in
+@@ -58,26 +58,29 @@ CPPSRCS		= \
+ 		nsXPConnect.cpp \
+ 		XPCCallContext.cpp \
+ 		XPCComponents.cpp \
+ 		XPCContext.cpp \
+ 		XPCConvert.cpp \
+ 		XPCDebug.cpp \
+ 		XPCException.cpp \
+ 		XPCJSID.cpp \
++		XPCJSObjectHolder.cpp \
+ 		XPCJSRuntime.cpp \
+ 		XPCLocale.cpp \
+ 		XPCLog.cpp \
+ 		XPCMaps.cpp \
+ 		XPCModule.cpp \
+-		XPCRuntimeService.cpp  \
++		XPCRootSetElem.cpp \
++		XPCRuntimeService.cpp \
+ 		XPCStack.cpp \
+ 		XPCString.cpp \
+ 		XPCThreadContext.cpp \
+ 		XPCThrower.cpp \
++		XPCTraceableVariant.cpp \
+ 		XPCWrappedJS.cpp \
+ 		XPCVariant.cpp \
+ 		XPCWrappedJSClass.cpp \
+ 		XPCWrappedNative.cpp \
+ 		XPCWrappedNativeInfo.cpp \
+ 		XPCWrappedNativeJSOps.cpp \
+ 		XPCWrappedNativeProto.cpp \
+ 		XPCWrappedNativeScope.cpp \
+diff --git a/js/xpconnect/src/XPCConvert.cpp b/js/xpconnect/src/XPCConvert.cpp
+--- a/js/xpconnect/src/XPCConvert.cpp
++++ b/js/xpconnect/src/XPCConvert.cpp
+@@ -41,26 +41,28 @@
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* Data conversion between native and JavaScript types. */
+ 
+ #include "mozilla/Util.h"
+ 
+ #include "xpcprivate.h"
++#include "XPCWrapper.h"
++#include "nsXPCWrappedJS.h"
++#include "dombindings.h"
++#include "AccessCheck.h"
++#include "WrapperFactory.h"
++
+ #include "nsString.h"
+ #include "nsIAtom.h"
+-#include "XPCWrapper.h"
+ #include "nsJSPrincipals.h"
+ #include "nsWrapperCache.h"
+-#include "WrapperFactory.h"
+-#include "AccessCheck.h"
+ #include "nsJSUtils.h"
+ 
+-#include "dombindings.h"
+ #include "nsWrapperCacheInlines.h"
+ 
+ using namespace mozilla;
+ 
+ //#define STRICT_CHECK_OF_UNICODE
+ #ifdef STRICT_CHECK_OF_UNICODE
+ #define ILLEGAL_RANGE(c) (0!=((c) & 0xFF80))
+ #else // STRICT_CHECK_OF_UNICODE
+diff --git a/js/xpconnect/src/XPCInlines.h b/js/xpconnect/src/XPCInlines.h
+--- a/js/xpconnect/src/XPCInlines.h
++++ b/js/xpconnect/src/XPCInlines.h
+@@ -39,16 +39,20 @@
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* private inline methods (#include'd by xpcprivate.h). */
+ 
+ #ifndef xpcinlines_h___
+ #define xpcinlines_h___
+ 
++#include "nsXPCWrappedJS.h"
++#include "XPCJSObjectHolder.h"
++#include "XPCTraceableVariant.h"
++
+ #include "jsfriendapi.h"
+ 
+ /***************************************************************************/
+ bool
+ xpc::PtrAndPrincipalHashKey::KeyEquals(const PtrAndPrincipalHashKey* aKey) const
+ {
+     if (aKey->mPtr != mPtr)
+         return false;
+diff --git a/js/xpconnect/src/XPCJSObjectHolder.cpp b/js/xpconnect/src/XPCJSObjectHolder.cpp
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCJSObjectHolder.cpp
+@@ -0,0 +1,92 @@
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is __________________________________________.
++ *
++ * The Initial Developer of the Original Code is
++ * ____________________________________________.
++ * Portions created by the Initial Developer are Copyright (C) 2___
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#include "XPCJSObjectHolder.h"
++
++#include "xpcprivate.h"
++
++#include "jsapi.h"
++#include "jsprf.h"
++
++NS_IMPL_THREADSAFE_ISUPPORTS1(XPCJSObjectHolder, nsIXPConnectJSObjectHolder)
++
++NS_IMETHODIMP
++XPCJSObjectHolder::GetJSObject(JSObject** aJSObj)
++{
++    NS_PRECONDITION(aJSObj, "bad param");
++    NS_PRECONDITION(mJSObj, "bad object state");
++    *aJSObj = mJSObj;
++    return NS_OK;
++}
++
++XPCJSObjectHolder::XPCJSObjectHolder(XPCCallContext& ccx, JSObject* obj)
++    : mJSObj(obj)
++{
++    ccx.GetRuntime()->AddObjectHolderRoot(this);
++}
++
++XPCJSObjectHolder::~XPCJSObjectHolder()
++{
++    RemoveFromRootSet(nsXPConnect::GetRuntimeInstance()->GetMapLock());
++}
++
++void
++XPCJSObjectHolder::TraceJS(JSTracer *trc)
++{
++    JS_SET_TRACING_DETAILS(trc, PrintTraceName, this, 0);
++    JS_CallTracer(trc, mJSObj, JSTRACE_OBJECT);
++}
++
++#ifdef DEBUG
++// static
++void
++XPCJSObjectHolder::PrintTraceName(JSTracer* trc, char *buf, size_t bufsize)
++{
++    JS_snprintf(buf, bufsize, "XPCJSObjectHolder[0x%p].mJSObj",
++                trc->debugPrintArg);
++}
++#endif
++
++// static
++XPCJSObjectHolder*
++XPCJSObjectHolder::newHolder(XPCCallContext& ccx, JSObject* obj)
++{
++    if (!obj) {
++        NS_ERROR("bad param");
++        return nsnull;
++    }
++    return new XPCJSObjectHolder(ccx, obj);
++}
+diff --git a/js/xpconnect/src/XPCJSObjectHolder.h b/js/xpconnect/src/XPCJSObjectHolder.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCJSObjectHolder.h
+@@ -0,0 +1,74 @@
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is __________________________________________.
++ *
++ * The Initial Developer of the Original Code is
++ * ____________________________________________.
++ * Portions created by the Initial Developer are Copyright (C) 2___
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#ifndef XPCJSObjectHolder_h
++#define XPCJSObjectHolder_h
++
++#include "nsIXPConnect.h"
++#include "XPCRootSetElem.h"
++
++#include "jspubtd.h"
++
++class XPCCallContext;
++
++class XPCJSObjectHolder : public nsIXPConnectJSObjectHolder,
++                          public XPCRootSetElem
++{
++public:
++    // all the interface method declarations...
++    NS_DECL_ISUPPORTS
++    NS_DECL_NSIXPCONNECTJSOBJECTHOLDER
++
++    // non-interface implementation
++
++public:
++    static XPCJSObjectHolder* newHolder(XPCCallContext& ccx, JSObject* obj);
++
++    virtual ~XPCJSObjectHolder();
++
++    void TraceJS(JSTracer *trc);
++#ifdef DEBUG
++    static void PrintTraceName(JSTracer* trc, char *buf, size_t bufsize);
++#endif
++
++private:
++    XPCJSObjectHolder(XPCCallContext& ccx, JSObject* obj);
++    XPCJSObjectHolder(); // not implemented
++
++    JSObject* mJSObj;
++};
++
++#endif // XPCJSObjectHolder_h
+diff --git a/js/xpconnect/src/XPCJSRuntime.cpp b/js/xpconnect/src/XPCJSRuntime.cpp
+--- a/js/xpconnect/src/XPCJSRuntime.cpp
++++ b/js/xpconnect/src/XPCJSRuntime.cpp
+@@ -42,16 +42,17 @@
+ /* Per JSRuntime object */
+ 
+ #include "mozilla/Util.h"
+ 
+ #include "xpcprivate.h"
+ #include "xpcpublic.h"
+ #include "WrapperFactory.h"
+ #include "dom_quickstubs.h"
++#include "XPCRootSetElem.h"
+ 
+ #include "jsgcchunk.h"
+ #include "jsscope.h"
+ #include "nsIMemoryReporter.h"
+ #include "nsPrintfCString.h"
+ #include "mozilla/FunctionTimer.h"
+ #include "prsystem.h"
+ #include "mozilla/Preferences.h"
+@@ -2409,49 +2410,16 @@ XPCJSRuntime::DebugDump(int16_t depth)
+ 
+         XPC_LOG_OUTDENT();
+ #endif
+ }
+ 
+ /***************************************************************************/
+ 
+ void
+-XPCRootSetElem::AddToRootSet(XPCLock *lock, XPCRootSetElem **listHead)
+-{
+-    NS_ASSERTION(!mSelfp, "Must be not linked");
+-
+-    XPCAutoLock autoLock(lock);
+-
+-    mSelfp = listHead;
+-    mNext = *listHead;
+-    if (mNext) {
+-        NS_ASSERTION(mNext->mSelfp == listHead, "Must be list start");
+-        mNext->mSelfp = &mNext;
+-    }
+-    *listHead = this;
+-}
+-
+-void
+-XPCRootSetElem::RemoveFromRootSet(XPCLock *lock)
+-{
+-    NS_ASSERTION(mSelfp, "Must be linked");
+-
+-    XPCAutoLock autoLock(lock);
+-
+-    NS_ASSERTION(*mSelfp == this, "Link invariant");
+-    *mSelfp = mNext;
+-    if (mNext)
+-        mNext->mSelfp = mSelfp;
+-#ifdef DEBUG
+-    mSelfp = nsnull;
+-    mNext = nsnull;
+-#endif
+-}
+-
+-void
+ XPCJSRuntime::AddGCCallback(JSGCCallback cb)
+ {
+     NS_ASSERTION(cb, "null callback");
+     extraGCCallbacks.AppendElement(cb);
+ }
+ 
+ void
+ XPCJSRuntime::RemoveGCCallback(JSGCCallback cb)
+diff --git a/js/xpconnect/src/XPCJSWeakReference.cpp b/js/xpconnect/src/XPCJSWeakReference.cpp
+--- a/js/xpconnect/src/XPCJSWeakReference.cpp
++++ b/js/xpconnect/src/XPCJSWeakReference.cpp
+@@ -32,16 +32,17 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "xpcprivate.h"
+ #include "XPCJSWeakReference.h"
++#include "nsXPCWrappedJS.h"
+ 
+ xpcJSWeakReference::xpcJSWeakReference()
+ {
+ }
+ 
+ NS_IMPL_ISUPPORTS1(xpcJSWeakReference, xpcIJSWeakReference)
+ 
+ nsresult xpcJSWeakReference::Init()
+diff --git a/js/xpconnect/src/XPCMaps.h b/js/xpconnect/src/XPCMaps.h
+--- a/js/xpconnect/src/XPCMaps.h
++++ b/js/xpconnect/src/XPCMaps.h
+@@ -38,16 +38,18 @@
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* Private maps (hashtables). */
+ 
+ #ifndef xpcmaps_h___
+ #define xpcmaps_h___
+ 
++#include "nsXPCWrappedJS.h"
++
+ // Maps...
+ 
+ // Note that most of the declarations for hash table entries begin with
+ // a pointer to something or another. This makes them look enough like
+ // the JSDHashEntryStub struct that the default OPs (JS_DHashGetStubOps())
+ // just do the right thing for most of our needs.
+ 
+ // no virtuals in the maps - all the common stuff inlined
+diff --git a/js/xpconnect/src/XPCQuickStubs.cpp b/js/xpconnect/src/XPCQuickStubs.cpp
+--- a/js/xpconnect/src/XPCQuickStubs.cpp
++++ b/js/xpconnect/src/XPCQuickStubs.cpp
+@@ -41,16 +41,17 @@
+ 
+ #include "jsapi.h"
+ #include "jscntxt.h"  /* for error messages */
+ #include "nsCOMPtr.h"
+ #include "xpcprivate.h"
+ #include "XPCInlines.h"
+ #include "XPCQuickStubs.h"
+ #include "XPCWrapper.h"
++#include "nsXPCWrappedJS.h"
+ 
+ using namespace mozilla;
+ 
+ static inline QITableEntry *
+ GetOffsets(nsISupports *identity, XPCWrappedNativeProto* proto)
+ {
+     QITableEntry* offsets = proto ? proto->GetOffsets() : nsnull;
+     if (!offsets) {
+diff --git a/js/xpconnect/src/XPCRootSetElem.cpp b/js/xpconnect/src/XPCRootSetElem.cpp
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCRootSetElem.cpp
+@@ -0,0 +1,74 @@
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is __________________________________________.
++ *
++ * The Initial Developer of the Original Code is
++ * ____________________________________________.
++ * Portions created by the Initial Developer are Copyright (C) 2___
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#include "XPCRootSetElem.h"
++
++#include "xpcprivate.h" // XPCLock, XPCAutoLock
++
++#include "nsDebug.h"
++
++void
++XPCRootSetElem::AddToRootSet(XPCLock *lock, XPCRootSetElem **listHead)
++{
++    NS_ASSERTION(!mSelfp, "Must be not linked");
++
++    XPCAutoLock autoLock(lock);
++
++    mSelfp = listHead;
++    mNext = *listHead;
++    if (mNext) {
++        NS_ASSERTION(mNext->mSelfp == listHead, "Must be list start");
++        mNext->mSelfp = &mNext;
++    }
++    *listHead = this;
++}
++
++void
++XPCRootSetElem::RemoveFromRootSet(XPCLock *lock)
++{
++    NS_ASSERTION(mSelfp, "Must be linked");
++
++    XPCAutoLock autoLock(lock);
++
++    NS_ASSERTION(*mSelfp == this, "Link invariant");
++    *mSelfp = mNext;
++    if (mNext)
++        mNext->mSelfp = mSelfp;
++#ifdef DEBUG
++    mSelfp = nsnull;
++    mNext = nsnull;
++#endif
++}
+diff --git a/js/xpconnect/src/XPCRootSetElem.h b/js/xpconnect/src/XPCRootSetElem.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCRootSetElem.h
+@@ -0,0 +1,74 @@
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is __________________________________________.
++ *
++ * The Initial Developer of the Original Code is
++ * ____________________________________________.
++ * Portions created by the Initial Developer are Copyright (C) 2___
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#ifndef XPCRootSetElem_h
++#define XPCRootSetElem_h
++
++#include "nsDebug.h"
++
++namespace mozilla {
++class ReentrantMonitor;
++}
++
++typedef mozilla::ReentrantMonitor XPCLock;
++
++class XPCRootSetElem
++{
++public:
++    XPCRootSetElem()
++    {
++#ifdef DEBUG
++        mNext = NULL;
++        mSelfp = NULL;
++#endif
++    }
++
++    ~XPCRootSetElem()
++    {
++        NS_ASSERTION(!mNext, "Must be unlinked");
++        NS_ASSERTION(!mSelfp, "Must be unlinked");
++    }
++
++    inline XPCRootSetElem* GetNextRoot() { return mNext; }
++    void AddToRootSet(XPCLock *lock, XPCRootSetElem **listHead);
++    void RemoveFromRootSet(XPCLock *lock);
++
++private:
++    XPCRootSetElem *mNext;
++    XPCRootSetElem **mSelfp;
++};
++
++#endif // XPCRootSetElem_h
+diff --git a/js/xpconnect/src/XPCTraceableVariant.cpp b/js/xpconnect/src/XPCTraceableVariant.cpp
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCTraceableVariant.cpp
+@@ -0,0 +1,81 @@
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is __________________________________________.
++ *
++ * The Initial Developer of the Original Code is
++ * ____________________________________________.
++ * Portions created by the Initial Developer are Copyright (C) 2___
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#include "XPCTraceableVariant.h"
++
++#include "xpcprivate.h"
++
++#include "jsapi.h"
++#include "jsprf.h"
++
++XPCTraceableVariant::XPCTraceableVariant(XPCCallContext& ccx, jsval aJSVal)
++    : XPCVariant(ccx, aJSVal)
++{
++    ccx.GetRuntime()->AddVariantRoot(this);
++}
++
++XPCTraceableVariant::~XPCTraceableVariant()
++{
++    jsval val = GetJSValPreserveColor();
++
++    NS_ASSERTION(JSVAL_IS_GCTHING(val), "Must be traceable or unlinked");
++
++    // If val is JSVAL_STRING, we don't need to clean anything up; simply
++    // removing the string from the root set is good.
++    if (!JSVAL_IS_STRING(val))
++        nsVariant::Cleanup(&mData);
++
++    if (!JSVAL_IS_NULL(val))
++        RemoveFromRootSet(nsXPConnect::GetRuntimeInstance()->GetMapLock());
++}
++
++void XPCTraceableVariant::TraceJS(JSTracer* trc)
++{
++    jsval val = GetJSValPreserveColor();
++
++    NS_ASSERTION(JSVAL_IS_TRACEABLE(val), "Must be traceable");
++    JS_SET_TRACING_DETAILS(trc, PrintTraceName, this, 0);
++    JS_CallTracer(trc, JSVAL_TO_TRACEABLE(val), JSVAL_TRACE_KIND(val));
++}
++
++#ifdef DEBUG
++// static
++void
++XPCTraceableVariant::PrintTraceName(JSTracer* trc, char *buf, size_t bufsize)
++{
++    JS_snprintf(buf, bufsize, "XPCVariant[0x%p].mJSVal", trc->debugPrintArg);
++}
++#endif
+diff --git a/js/xpconnect/src/XPCTraceableVariant.h b/js/xpconnect/src/XPCTraceableVariant.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCTraceableVariant.h
+@@ -0,0 +1,56 @@
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is __________________________________________.
++ *
++ * The Initial Developer of the Original Code is
++ * ____________________________________________.
++ * Portions created by the Initial Developer are Copyright (C) 2___
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#ifndef XPCTraceableVariant_h
++#define XPCTraceableVariant_h
++
++#include "XPCVariant.h"
++#include "XPCRootSetElem.h"
++
++class XPCTraceableVariant : public XPCVariant,
++                            public XPCRootSetElem
++{
++public:
++    XPCTraceableVariant(XPCCallContext& ccx, jsval aJSVal);
++    virtual ~XPCTraceableVariant();
++
++    void TraceJS(JSTracer* trc);
++#ifdef DEBUG
++    static void PrintTraceName(JSTracer* trc, char *buf, size_t bufsize);
++#endif
++};
++
++#endif // XPCTraceableVariant_h
+diff --git a/js/xpconnect/src/XPCVariant.cpp b/js/xpconnect/src/XPCVariant.cpp
+--- a/js/xpconnect/src/XPCVariant.cpp
++++ b/js/xpconnect/src/XPCVariant.cpp
+@@ -37,16 +37,17 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* nsIVariant implementation for xpconnect. */
+ 
+ #include "xpcprivate.h"
+ #include "XPCWrapper.h"
++#include "XPCTraceableVariant.h"
+ 
+ NS_IMPL_CYCLE_COLLECTION_CLASS(XPCVariant)
+ 
+ NS_IMPL_CLASSINFO(XPCVariant, NULL, 0, XPCVARIANT_CID)
+ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(XPCVariant)
+   NS_INTERFACE_MAP_ENTRY(XPCVariant)
+   NS_INTERFACE_MAP_ENTRY(nsIVariant)
+   NS_INTERFACE_MAP_ENTRY(nsISupports)
+@@ -76,49 +77,16 @@ XPCVariant::XPCVariant(XPCCallContext& c
+                                                          JSVAL_TO_OBJECT(mJSVal),
+                                                          nsnull,
+                                                          &proto);
+         mReturnRawObject = !wn && !proto;
+     } else
+         mReturnRawObject = false;
+ }
+ 
+-XPCTraceableVariant::~XPCTraceableVariant()
+-{
+-    jsval val = GetJSValPreserveColor();
+-
+-    NS_ASSERTION(JSVAL_IS_GCTHING(val), "Must be traceable or unlinked");
+-
+-    // If val is JSVAL_STRING, we don't need to clean anything up; simply
+-    // removing the string from the root set is good.
+-    if (!JSVAL_IS_STRING(val))
+-        nsVariant::Cleanup(&mData);
+-
+-    if (!JSVAL_IS_NULL(val))
+-        RemoveFromRootSet(nsXPConnect::GetRuntimeInstance()->GetMapLock());
+-}
+-
+-void XPCTraceableVariant::TraceJS(JSTracer* trc)
+-{
+-    jsval val = GetJSValPreserveColor();
+-
+-    NS_ASSERTION(JSVAL_IS_TRACEABLE(val), "Must be traceable");
+-    JS_SET_TRACING_DETAILS(trc, PrintTraceName, this, 0);
+-    JS_CallTracer(trc, JSVAL_TO_TRACEABLE(val), JSVAL_TRACE_KIND(val));
+-}
+-
+-#ifdef DEBUG
+-// static
+-void
+-XPCTraceableVariant::PrintTraceName(JSTracer* trc, char *buf, size_t bufsize)
+-{
+-    JS_snprintf(buf, bufsize, "XPCVariant[0x%p].mJSVal", trc->debugPrintArg);
+-}
+-#endif
+-
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(XPCVariant)
+     jsval val = tmp->GetJSValPreserveColor();
+     if (JSVAL_IS_OBJECT(val))
+         cb.NoteScriptChild(nsIProgrammingLanguage::JAVASCRIPT,
+                            JSVAL_TO_OBJECT(val));
+ 
+     nsVariant::Traverse(tmp->mData, cb);
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+diff --git a/js/xpconnect/src/XPCVariant.h b/js/xpconnect/src/XPCVariant.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/XPCVariant.h
+@@ -0,0 +1,133 @@
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is __________________________________________.
++ *
++ * The Initial Developer of the Original Code is
++ * ____________________________________________.
++ * Portions created by the Initial Developer are Copyright (C) 2___
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#ifndef XPCVariant_h
++#define XPCVariant_h
++
++#include "nsIVariant.h"
++
++#include "xpcpublic.h"
++
++#include "nsCycleCollectionParticipant.h"
++#include "nsVariant.h"
++
++#include "jsapi.h"
++
++class XPCCallContext;
++class XPCLazyCallContext;
++
++// {1809FD50-91E8-11d5-90F9-0010A4E73D9A}
++#define XPCVARIANT_IID                                                        \
++    {0x1809fd50, 0x91e8, 0x11d5,                                              \
++      { 0x90, 0xf9, 0x0, 0x10, 0xa4, 0xe7, 0x3d, 0x9a } }
++
++// {DC524540-487E-4501-9AC7-AAA784B17C1C}
++#define XPCVARIANT_CID                                                        \
++    {0xdc524540, 0x487e, 0x4501,                                              \
++      { 0x9a, 0xc7, 0xaa, 0xa7, 0x84, 0xb1, 0x7c, 0x1c } }
++
++class XPCVariant : public nsIVariant
++{
++public:
++    NS_DECL_CYCLE_COLLECTING_ISUPPORTS
++    NS_DECL_NSIVARIANT
++    NS_DECL_CYCLE_COLLECTION_CLASS(XPCVariant)
++
++    // If this class ever implements nsIWritableVariant, take special care with
++    // the case when mJSVal is JSVAL_STRING, since we don't own the data in
++    // that case.
++
++    // We #define and iid so that out module local code can use QI to detect
++    // if a given nsIVariant is in fact an XPCVariant.
++    NS_DECLARE_STATIC_IID_ACCESSOR(XPCVARIANT_IID)
++
++    static XPCVariant* newVariant(XPCCallContext& ccx, jsval aJSVal);
++
++    /**
++     * This getter clears the gray bit before handing out the jsval if the jsval
++     * represents a JSObject. That means that the object is guaranteed to be
++     * kept alive past the next CC.
++     */
++    jsval GetJSVal() const
++    {
++        if (!JSVAL_IS_PRIMITIVE(mJSVal))
++            xpc_UnmarkGrayObject(JSVAL_TO_OBJECT(mJSVal));
++        return mJSVal;
++    }
++
++    /**
++     * This getter does not change the color of the jsval (if it represents a
++     * JSObject) meaning that the value returned is not guaranteed to be kept
++     * alive past the next CC.
++     *
++     * This should only be called if you are certain that the return value won't
++     * be passed into a JS API function and that it won't be stored without
++     * being rooted (or otherwise signaling the stored value to the CC).
++     */
++    jsval GetJSValPreserveColor() const
++    {
++        return mJSVal;
++    }
++
++    XPCVariant(XPCCallContext& ccx, jsval aJSVal);
++
++    /**
++     * Convert a variant into a jsval.
++     *
++     * @param ccx the context for the whole procedure
++     * @param variant the variant to convert
++     * @param scope the default scope to put on the new JSObject's parent chain
++     * @param pErr [out] relevant error code, if any.
++     * @param pJSVal [out] the resulting jsval.
++     */
++    static JSBool VariantDataToJS(XPCLazyCallContext& lccx,
++                                  nsIVariant* variant,
++                                  nsresult* pErr, jsval* pJSVal);
++
++protected:
++    virtual ~XPCVariant() { }
++
++    JSBool InitializeData(XPCCallContext& ccx);
++
++protected:
++    nsDiscriminatedUnion mData;
++    jsval                mJSVal;
++    JSBool               mReturnRawObject;
++};
++
++NS_DEFINE_STATIC_IID_ACCESSOR(XPCVariant, XPCVARIANT_IID)
++
++#endif // XPCVariant_h
+diff --git a/js/xpconnect/src/XPCWrappedJS.cpp b/js/xpconnect/src/XPCWrappedJS.cpp
+--- a/js/xpconnect/src/XPCWrappedJS.cpp
++++ b/js/xpconnect/src/XPCWrappedJS.cpp
+@@ -1,11 +1,10 @@
+-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+- *
+- * ***** BEGIN LICENSE BLOCK *****
++/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
++/* ***** BEGIN LICENSE BLOCK *****
+  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+  *
+  * The contents of this file are subject to the Mozilla Public License Version
+  * 1.1 (the "License"); you may not use this file except in compliance with
+  * the License. You may obtain a copy of the License at
+  * http://www.mozilla.org/MPL/
+  *
+  * Software distributed under the License is distributed on an "AS IS" basis,
+@@ -36,16 +35,18 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* Class that wraps JS objects to appear as XPCOM objects. */
+ 
++#include "nsXPCWrappedJS.h"
++
+ #include "xpcprivate.h"
+ #include "nsAtomicRefcnt.h"
+ #include "nsProxyRelease.h"
+ #include "nsThreadUtils.h"
+ #include "nsTextFormatter.h"
+ 
+ // NOTE: much of the fancy footwork is done in xpcstubs.cpp
+ 
+@@ -615,16 +616,22 @@ NS_IMETHODIMP
+ nsXPCWrappedJS::GetInterfaceIID(nsIID** iid)
+ {
+     NS_PRECONDITION(iid, "bad param");
+ 
+     *iid = (nsIID*) nsMemory::Clone(&(GetIID()), sizeof(nsIID));
+     return *iid ? NS_OK : NS_ERROR_UNEXPECTED;
+ }
+ 
++REFNSIID
++nsXPCWrappedJS::GetIID() const
++{
++    return GetClass()->GetIID();
++}
++
+ void
+ nsXPCWrappedJS::SystemIsBeingShutDown(JSRuntime* rt)
+ {
+     // XXX It turns out that it is better to leak here then to do any Releases
+     // and have them propagate into all sorts of mischief as the system is being
+     // shutdown. This was learned the hard way :(
+ 
+     // mJSObj == nsnull is used to indicate that the wrapper is no longer valid
+diff --git a/js/xpconnect/src/XPCWrappedJSClass.cpp b/js/xpconnect/src/XPCWrappedJSClass.cpp
+--- a/js/xpconnect/src/XPCWrappedJSClass.cpp
++++ b/js/xpconnect/src/XPCWrappedJSClass.cpp
+@@ -38,20 +38,22 @@
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ /* Sharable code and data for wrapper around JSObjects. */
+ 
+ #include "xpcprivate.h"
+-#include "nsArrayEnumerator.h"
+ #include "nsWrapperCache.h"
+ #include "XPCWrapper.h"
+ #include "AccessCheck.h"
++#include "nsXPCWrappedJS.h"
++
++#include "nsArrayEnumerator.h"
+ #include "nsJSUtils.h"
+ 
+ NS_IMPL_THREADSAFE_ISUPPORTS1(nsXPCWrappedJSClass, nsIXPCWrappedJSClass)
+ 
+ // the value of this variable is never used - we use its address as a sentinel
+ static uint32 zero_methods_descriptor;
+ 
+ bool AutoScriptEvaluate::StartEvaluating(JSObject *scope, JSErrorReporter errorReporter)
+diff --git a/js/xpconnect/src/XPCWrappedNative.cpp b/js/xpconnect/src/XPCWrappedNative.cpp
+--- a/js/xpconnect/src/XPCWrappedNative.cpp
++++ b/js/xpconnect/src/XPCWrappedNative.cpp
+@@ -3581,66 +3581,16 @@ void DEBUG_CheckWrapperThreadSafety(cons
+         DEBUG_ReportWrapperThreadSafetyError(ccx,
+                                              "XPConnect WrappedNative is being accessed on multiple threads but "
+                                              "the underlying native xpcom object does not have a "
+                                              "nsIClassInfo with the 'THREADSAFE' flag set", wrapper);
+     }
+ }
+ #endif
+ 
+-NS_IMPL_THREADSAFE_ISUPPORTS1(XPCJSObjectHolder, nsIXPConnectJSObjectHolder)
+-
+-NS_IMETHODIMP
+-XPCJSObjectHolder::GetJSObject(JSObject** aJSObj)
+-{
+-    NS_PRECONDITION(aJSObj, "bad param");
+-    NS_PRECONDITION(mJSObj, "bad object state");
+-    *aJSObj = mJSObj;
+-    return NS_OK;
+-}
+-
+-XPCJSObjectHolder::XPCJSObjectHolder(XPCCallContext& ccx, JSObject* obj)
+-    : mJSObj(obj)
+-{
+-    ccx.GetRuntime()->AddObjectHolderRoot(this);
+-}
+-
+-XPCJSObjectHolder::~XPCJSObjectHolder()
+-{
+-    RemoveFromRootSet(nsXPConnect::GetRuntimeInstance()->GetMapLock());
+-}
+-
+-void
+-XPCJSObjectHolder::TraceJS(JSTracer *trc)
+-{
+-    JS_SET_TRACING_DETAILS(trc, PrintTraceName, this, 0);
+-    JS_CallTracer(trc, mJSObj, JSTRACE_OBJECT);
+-}
+-
+-#ifdef DEBUG
+-// static
+-void
+-XPCJSObjectHolder::PrintTraceName(JSTracer* trc, char *buf, size_t bufsize)
+-{
+-    JS_snprintf(buf, bufsize, "XPCJSObjectHolder[0x%p].mJSObj",
+-                trc->debugPrintArg);
+-}
+-#endif
+-
+-// static
+-XPCJSObjectHolder*
+-XPCJSObjectHolder::newHolder(XPCCallContext& ccx, JSObject* obj)
+-{
+-    if (!obj) {
+-        NS_ERROR("bad param");
+-        return nsnull;
+-    }
+-    return new XPCJSObjectHolder(ccx, obj);
+-}
+-
+ JSBool
+ MorphSlimWrapper(JSContext *cx, JSObject *obj)
+ {
+     SLIM_LOG(("***** morphing from MorphSlimToWrapper (%p, %p)\n",
+               obj, static_cast<nsISupports*>(xpc_GetJSPrivate(obj))));
+ 
+     XPCCallContext ccx(JS_CALLER, cx);
+ 
+diff --git a/js/xpconnect/src/nsXPCWrappedJS.h b/js/xpconnect/src/nsXPCWrappedJS.h
+new file mode 100644
+--- /dev/null
++++ b/js/xpconnect/src/nsXPCWrappedJS.h
+@@ -0,0 +1,161 @@
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is __________________________________________.
++ *
++ * The Initial Developer of the Original Code is
++ * ____________________________________________.
++ * Portions created by the Initial Developer are Copyright (C) 2___
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#ifndef nsXPCWrappedJS_h
++#define nsXPCWrappedJS_h
++
++#include "nsXPTCUtils.h" // nsAutoXPTCStub
++#include "nsIXPConnect.h"
++#include "nsWeakReference.h"
++#include "nsIPropertyBag.h"
++#include "XPCRootSetElem.h"
++
++#include "xpcpublic.h"
++
++#include "nsCycleCollectionParticipant.h"
++
++class nsXPCWrappedJSClass;
++class XPCCallContext;
++
++/**
++ * nsXPCWrappedJS is a wrapper for a single JSObject for use from native code.
++ * nsXPCWrappedJS objects are chained together to represent the various
++ * interface on the single underlying (possibly aggregate) JSObject.
++ */
++class nsXPCWrappedJS : protected nsAutoXPTCStub,
++                       public nsIXPConnectWrappedJS,
++                       public nsSupportsWeakReference,
++                       public nsIPropertyBag,
++                       public XPCRootSetElem
++{
++public:
++    NS_DECL_ISUPPORTS
++    NS_DECL_NSIXPCONNECTJSOBJECTHOLDER
++    NS_DECL_NSIXPCONNECTWRAPPEDJS
++    NS_DECL_NSISUPPORTSWEAKREFERENCE
++    NS_DECL_NSIPROPERTYBAG
++
++    NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(nsXPCWrappedJS, nsIXPConnectWrappedJS)
++    NS_DECL_CYCLE_COLLECTION_UNMARK_PURPLE_STUB(nsXPCWrappedJS)
++
++    NS_IMETHOD CallMethod(uint16_t methodIndex,
++                          const XPTMethodDescriptor *info,
++                          nsXPTCMiniVariant* params);
++
++    /*
++    * This is rarely called directly. Instead one usually calls
++    * XPCConvert::JSObject2NativeInterface which will handles cases where the
++    * JS object is already a wrapped native or a DOM object.
++    */
++
++    static nsresult
++    GetNewOrUsed(XPCCallContext& ccx,
++                 JSObject* aJSObj,
++                 REFNSIID aIID,
++                 nsISupports* aOuter,
++                 nsXPCWrappedJS** wrapper);
++
++    nsISomeInterface* GetXPTCStub() { return mXPTCStub; }
++
++    /**
++     * This getter clears the gray bit before handing out the JSObject which
++     * means that the object is guaranteed to be kept alive past the next CC.
++     */
++    JSObject* GetJSObject() const {xpc_UnmarkGrayObject(mJSObj);
++                                   return mJSObj;}
++
++    /**
++     * This getter does not change the color of the JSObject meaning that the
++     * object returned is not guaranteed to be kept alive past the next CC.
++     *
++     * This should only be called if you are certain that the return value won't
++     * be passed into a JS API function and that it won't be stored without
++     * being rooted (or otherwise signaling the stored value to the CC).
++     */
++    JSObject* GetJSObjectPreserveColor() const {return mJSObj;}
++
++    nsXPCWrappedJSClass*  GetClass() const {return mClass;}
++    REFNSIID GetIID() const;
++    nsXPCWrappedJS* GetRootWrapper() const {return mRoot;}
++    nsXPCWrappedJS* GetNextWrapper() const {return mNext;}
++
++    nsXPCWrappedJS* Find(REFNSIID aIID);
++    nsXPCWrappedJS* FindInherited(REFNSIID aIID);
++
++    JSBool IsValid() const {return mJSObj != nsnull;}
++    void SystemIsBeingShutDown(JSRuntime* rt);
++
++    // This is used by XPCJSRuntime::GCCallback to find wrappers that no
++    // longer root their JSObject and are only still alive because they
++    // were being used via nsSupportsWeakReference at the time when their
++    // last (outside) reference was released. Wrappers that fit into that
++    // category are only deleted when we see that their corresponding JSObject
++    // is to be finalized.
++    JSBool IsSubjectToFinalization() const {return IsValid() && mRefCnt == 1;}
++
++    JSBool IsAggregatedToNative() const {return mRoot->mOuter != nsnull;}
++    nsISupports* GetAggregatedNativeObject() const {return mRoot->mOuter;}
++
++    void SetIsMainThreadOnly() {JS_ASSERT(mMainThread); mMainThreadOnly = true;}
++    bool IsMainThreadOnly() const {return mMainThreadOnly;}
++
++    void TraceJS(JSTracer* trc);
++#ifdef DEBUG
++    static void PrintTraceName(JSTracer* trc, char *buf, size_t bufsize);
++#endif
++
++    virtual ~nsXPCWrappedJS();
++protected:
++    nsXPCWrappedJS();   // not implemented
++    nsXPCWrappedJS(XPCCallContext& ccx,
++                   JSObject* aJSObj,
++                   nsXPCWrappedJSClass* aClass,
++                   nsXPCWrappedJS* root,
++                   nsISupports* aOuter);
++
++   void Unlink();
++
++private:
++    JSObject* mJSObj;
++    nsXPCWrappedJSClass* mClass;
++    nsXPCWrappedJS* mRoot;
++    nsXPCWrappedJS* mNext;
++    nsISupports* mOuter;    // only set in root
++    bool mMainThread;
++    bool mMainThreadOnly;
++};
++
++#endif // nsXPCWrappedJS_h
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -138,16 +138,18 @@
+ #endif
+ #ifdef GetClassName
+ #undef GetClassName
+ #endif
+ #endif /* XP_WIN */
+ 
+ #include "nsINode.h"
+ 
++class XPCRootSetElem;
++
+ /***************************************************************************/
+ // Compile time switches for instrumentation and stuff....
+ 
+ // Note that one would not normally turn *any* of these on in a non-DEBUG build.
+ 
+ #if defined(DEBUG_jband) || defined(DEBUG_jst) || defined(DEBUG_dbradley) || defined(DEBUG_shaver_no) || defined(DEBUG_timeless)
+ #define DEBUG_xpc_hacker
+ #endif
+@@ -625,43 +627,16 @@ private:
+     static JSBool gDebugMode;
+     static JSBool gDesiredDebugMode;
+     static inline void CheckForDebugMode(JSRuntime *rt);
+ 
+ public:
+     static nsIScriptSecurityManager *gScriptSecurityManager;
+ };
+ 
+-/***************************************************************************/
+-
+-class XPCRootSetElem
+-{
+-public:
+-    XPCRootSetElem()
+-    {
+-#ifdef DEBUG
+-        mNext = nsnull;
+-        mSelfp = nsnull;
+-#endif
+-    }
+-
+-    ~XPCRootSetElem()
+-    {
+-        NS_ASSERTION(!mNext, "Must be unlinked");
+-        NS_ASSERTION(!mSelfp, "Must be unlinked");
+-    }
+-
+-    inline XPCRootSetElem* GetNextRoot() { return mNext; }
+-    void AddToRootSet(XPCLock *lock, XPCRootSetElem **listHead);
+-    void RemoveFromRootSet(XPCLock *lock);
+-
+-private:
+-    XPCRootSetElem *mNext;
+-    XPCRootSetElem **mSelfp;
+-};
+ 
+ /***************************************************************************/
+ 
+ // In the current xpconnect system there can only be one XPCJSRuntime.
+ // So, xpconnect can only be used on one JSRuntime within the process.
+ 
+ // no virtuals. no refcounting.
+ class XPCJSRuntime
+@@ -2962,153 +2937,16 @@ private:
+ private:
+     XPCJSRuntime* mRuntime;
+     nsIInterfaceInfo* mInfo;
+     char* mName;
+     nsIID mIID;
+     uint32* mDescriptors;
+ };
+ 
+-/*************************/
+-// nsXPCWrappedJS is a wrapper for a single JSObject for use from native code.
+-// nsXPCWrappedJS objects are chained together to represent the various
+-// interface on the single underlying (possibly aggregate) JSObject.
+-
+-class nsXPCWrappedJS : protected nsAutoXPTCStub,
+-                       public nsIXPConnectWrappedJS,
+-                       public nsSupportsWeakReference,
+-                       public nsIPropertyBag,
+-                       public XPCRootSetElem
+-{
+-public:
+-    NS_DECL_ISUPPORTS
+-    NS_DECL_NSIXPCONNECTJSOBJECTHOLDER
+-    NS_DECL_NSIXPCONNECTWRAPPEDJS
+-    NS_DECL_NSISUPPORTSWEAKREFERENCE
+-    NS_DECL_NSIPROPERTYBAG
+-
+-    NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(nsXPCWrappedJS, nsIXPConnectWrappedJS)
+-    NS_DECL_CYCLE_COLLECTION_UNMARK_PURPLE_STUB(nsXPCWrappedJS)
+-
+-    NS_IMETHOD CallMethod(uint16_t methodIndex,
+-                          const XPTMethodDescriptor *info,
+-                          nsXPTCMiniVariant* params);
+-
+-    /*
+-    * This is rarely called directly. Instead one usually calls
+-    * XPCConvert::JSObject2NativeInterface which will handles cases where the
+-    * JS object is already a wrapped native or a DOM object.
+-    */
+-
+-    static nsresult
+-    GetNewOrUsed(XPCCallContext& ccx,
+-                 JSObject* aJSObj,
+-                 REFNSIID aIID,
+-                 nsISupports* aOuter,
+-                 nsXPCWrappedJS** wrapper);
+-
+-    nsISomeInterface* GetXPTCStub() { return mXPTCStub; }
+-
+-    /**
+-     * This getter clears the gray bit before handing out the JSObject which
+-     * means that the object is guaranteed to be kept alive past the next CC.
+-     */
+-    JSObject* GetJSObject() const {xpc_UnmarkGrayObject(mJSObj);
+-                                   return mJSObj;}
+-
+-    /**
+-     * This getter does not change the color of the JSObject meaning that the
+-     * object returned is not guaranteed to be kept alive past the next CC.
+-     *
+-     * This should only be called if you are certain that the return value won't
+-     * be passed into a JS API function and that it won't be stored without
+-     * being rooted (or otherwise signaling the stored value to the CC).
+-     */
+-    JSObject* GetJSObjectPreserveColor() const {return mJSObj;}
+-
+-    nsXPCWrappedJSClass*  GetClass() const {return mClass;}
+-    REFNSIID GetIID() const {return GetClass()->GetIID();}
+-    nsXPCWrappedJS* GetRootWrapper() const {return mRoot;}
+-    nsXPCWrappedJS* GetNextWrapper() const {return mNext;}
+-
+-    nsXPCWrappedJS* Find(REFNSIID aIID);
+-    nsXPCWrappedJS* FindInherited(REFNSIID aIID);
+-
+-    JSBool IsValid() const {return mJSObj != nsnull;}
+-    void SystemIsBeingShutDown(JSRuntime* rt);
+-
+-    // This is used by XPCJSRuntime::GCCallback to find wrappers that no
+-    // longer root their JSObject and are only still alive because they
+-    // were being used via nsSupportsWeakReference at the time when their
+-    // last (outside) reference was released. Wrappers that fit into that
+-    // category are only deleted when we see that their corresponding JSObject
+-    // is to be finalized.
+-    JSBool IsSubjectToFinalization() const {return IsValid() && mRefCnt == 1;}
+-
+-    JSBool IsAggregatedToNative() const {return mRoot->mOuter != nsnull;}
+-    nsISupports* GetAggregatedNativeObject() const {return mRoot->mOuter;}
+-
+-    void SetIsMainThreadOnly() {JS_ASSERT(mMainThread); mMainThreadOnly = true;}
+-    bool IsMainThreadOnly() const {return mMainThreadOnly;}
+-
+-    void TraceJS(JSTracer* trc);
+-#ifdef DEBUG
+-    static void PrintTraceName(JSTracer* trc, char *buf, size_t bufsize);
+-#endif
+-
+-    virtual ~nsXPCWrappedJS();
+-protected:
+-    nsXPCWrappedJS();   // not implemented
+-    nsXPCWrappedJS(XPCCallContext& ccx,
+-                   JSObject* aJSObj,
+-                   nsXPCWrappedJSClass* aClass,
+-                   nsXPCWrappedJS* root,
+-                   nsISupports* aOuter);
+-
+-   void Unlink();
+-
+-private:
+-    JSObject* mJSObj;
+-    nsXPCWrappedJSClass* mClass;
+-    nsXPCWrappedJS* mRoot;
+-    nsXPCWrappedJS* mNext;
+-    nsISupports* mOuter;    // only set in root
+-    bool mMainThread;
+-    bool mMainThreadOnly;
+-};
+-
+-/***************************************************************************/
+-
+-class XPCJSObjectHolder : public nsIXPConnectJSObjectHolder,
+-                          public XPCRootSetElem
+-{
+-public:
+-    // all the interface method declarations...
+-    NS_DECL_ISUPPORTS
+-    NS_DECL_NSIXPCONNECTJSOBJECTHOLDER
+-
+-    // non-interface implementation
+-
+-public:
+-    static XPCJSObjectHolder* newHolder(XPCCallContext& ccx, JSObject* obj);
+-
+-    virtual ~XPCJSObjectHolder();
+-
+-    void TraceJS(JSTracer *trc);
+-#ifdef DEBUG
+-    static void PrintTraceName(JSTracer* trc, char *buf, size_t bufsize);
+-#endif
+-
+-private:
+-    XPCJSObjectHolder(XPCCallContext& ccx, JSObject* obj);
+-    XPCJSObjectHolder(); // not implemented
+-
+-    JSObject* mJSObj;
+-};
+-
+ /***************************************************************************
+ ****************************************************************************
+ *
+ * All manner of utility classes follow...
+ *
+ ****************************************************************************
+ ***************************************************************************/
+ 
+@@ -4229,113 +4067,16 @@ DEFINE_AUTO_MARKING_ARRAY_PTR_TYPE(AutoM
+ 
+ extern char* xpc_CloneAllAccess();
+ /***************************************************************************/
+ // Returns access if wideName is in list
+ 
+ extern char * xpc_CheckAccessList(const PRUnichar* wideName, const char* list[]);
+ 
+ /***************************************************************************/
+-// in xpcvariant.cpp...
+-
+-// {1809FD50-91E8-11d5-90F9-0010A4E73D9A}
+-#define XPCVARIANT_IID                                                        \
+-    {0x1809fd50, 0x91e8, 0x11d5,                                              \
+-      { 0x90, 0xf9, 0x0, 0x10, 0xa4, 0xe7, 0x3d, 0x9a } }
+-
+-// {DC524540-487E-4501-9AC7-AAA784B17C1C}
+-#define XPCVARIANT_CID                                                        \
+-    {0xdc524540, 0x487e, 0x4501,                                              \
+-      { 0x9a, 0xc7, 0xaa, 0xa7, 0x84, 0xb1, 0x7c, 0x1c } }
+-
+-class XPCVariant : public nsIVariant
+-{
+-public:
+-    NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+-    NS_DECL_NSIVARIANT
+-    NS_DECL_CYCLE_COLLECTION_CLASS(XPCVariant)
+-
+-    // If this class ever implements nsIWritableVariant, take special care with
+-    // the case when mJSVal is JSVAL_STRING, since we don't own the data in
+-    // that case.
+-
+-    // We #define and iid so that out module local code can use QI to detect
+-    // if a given nsIVariant is in fact an XPCVariant.
+-    NS_DECLARE_STATIC_IID_ACCESSOR(XPCVARIANT_IID)
+-
+-    static XPCVariant* newVariant(XPCCallContext& ccx, jsval aJSVal);
+-
+-    /**
+-     * This getter clears the gray bit before handing out the jsval if the jsval
+-     * represents a JSObject. That means that the object is guaranteed to be
+-     * kept alive past the next CC.
+-     */
+-    jsval GetJSVal() const
+-        {if (!JSVAL_IS_PRIMITIVE(mJSVal))
+-             xpc_UnmarkGrayObject(JSVAL_TO_OBJECT(mJSVal));
+-         return mJSVal;}
+-
+-    /**
+-     * This getter does not change the color of the jsval (if it represents a
+-     * JSObject) meaning that the value returned is not guaranteed to be kept
+-     * alive past the next CC.
+-     *
+-     * This should only be called if you are certain that the return value won't
+-     * be passed into a JS API function and that it won't be stored without
+-     * being rooted (or otherwise signaling the stored value to the CC).
+-     */
+-    jsval GetJSValPreserveColor() const {return mJSVal;}
+-
+-    XPCVariant(XPCCallContext& ccx, jsval aJSVal);
+-
+-    /**
+-     * Convert a variant into a jsval.
+-     *
+-     * @param ccx the context for the whole procedure
+-     * @param variant the variant to convert
+-     * @param scope the default scope to put on the new JSObject's parent chain
+-     * @param pErr [out] relevant error code, if any.
+-     * @param pJSVal [out] the resulting jsval.
+-     */
+-    static JSBool VariantDataToJS(XPCLazyCallContext& lccx,
+-                                  nsIVariant* variant,
+-                                  nsresult* pErr, jsval* pJSVal);
+-
+-protected:
+-    virtual ~XPCVariant() { }
+-
+-    JSBool InitializeData(XPCCallContext& ccx);
+-
+-protected:
+-    nsDiscriminatedUnion mData;
+-    jsval                mJSVal;
+-    JSBool               mReturnRawObject;
+-};
+-
+-NS_DEFINE_STATIC_IID_ACCESSOR(XPCVariant, XPCVARIANT_IID)
+-
+-class XPCTraceableVariant: public XPCVariant,
+-                           public XPCRootSetElem
+-{
+-public:
+-    XPCTraceableVariant(XPCCallContext& ccx, jsval aJSVal)
+-        : XPCVariant(ccx, aJSVal)
+-    {
+-        ccx.GetRuntime()->AddVariantRoot(this);
+-    }
+-
+-    virtual ~XPCTraceableVariant();
+-
+-    void TraceJS(JSTracer* trc);
+-#ifdef DEBUG
+-    static void PrintTraceName(JSTracer* trc, char *buf, size_t bufsize);
+-#endif
+-};
+-
+-/***************************************************************************/
+ 
+ #define PRINCIPALHOLDER_IID \
+ {0xbf109f49, 0xf94a, 0x43d8, {0x93, 0xdb, 0xe4, 0x66, 0x49, 0xc5, 0xd9, 0x7d}}
+ 
+ class PrincipalHolder : public nsIScriptObjectPrincipal
+ {
+ public:
+     NS_DECLARE_STATIC_IID_ACCESSOR(PRINCIPALHOLDER_IID)
+diff --git a/xpcom/ds/nsVariant.h b/xpcom/ds/nsVariant.h
+--- a/xpcom/ds/nsVariant.h
++++ b/xpcom/ds/nsVariant.h
+@@ -1,11 +1,10 @@
+-/* -*- Mode: IDL; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+- *
+- * ***** BEGIN LICENSE BLOCK *****
++/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
++/* ***** BEGIN LICENSE BLOCK *****
+  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+  *
+  * The contents of this file are subject to the Mozilla Public License Version
+  * 1.1 (the "License"); you may not use this file except in compliance with
+  * the License. You may obtain a copy of the License at
+  * http://www.mozilla.org/MPL/
+  *
+  * Software distributed under the License is distributed on an "AS IS" basis,
+@@ -32,16 +31,19 @@
+  * use your version of this file under the terms of the MPL, indicate your
+  * decision by deleting the provisions above and replace them with the notice
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
++#ifndef nsVariant_h
++#define nsVariant_h
++
+ /* The long avoided variant support for xpcom. */
+ 
+ #include "nsIVariant.h"
+ #include "nsStringFwd.h"
+ #include "xpt_struct.h"
+ 
+ class nsCycleCollectionTraversalCallback;
+ 
+@@ -201,8 +203,9 @@ protected:
+ { /* 0D6EA1D0-879C-11d5-90EF-0010A4E73D9A */ \
+     0xd6ea1d0,                               \
+     0x879c,                                  \
+     0x11d5,                                  \
+     {0x90, 0xef, 0x0, 0x10, 0xa4, 0xe7, 0x3d, 0x9a}}
+ 
+ #define NS_VARIANT_CLASSNAME "Variant"
+ 
++#endif // nsVariant_h

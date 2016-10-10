@@ -1,0 +1,89 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/html/document/src/HTMLAllCollection.cpp b/content/html/document/src/HTMLAllCollection.cpp
+--- a/content/html/document/src/HTMLAllCollection.cpp
++++ b/content/html/document/src/HTMLAllCollection.cpp
+@@ -122,16 +122,24 @@ HTMLAllCollection::Collection()
+   if (!mCollection) {
+     nsIDocument* document = mDocument;
+     mCollection = document->GetElementsByTagName(NS_LITERAL_STRING("*"));
+     MOZ_ASSERT(mCollection);
+   }
+   return mCollection;
+ }
+ 
++nsISupports*
++HTMLAllCollection::GetNamedItem(const nsAString& aID,
++                                nsWrapperCache** aCache,
++                                nsresult* aResult)
++{
++  return mDocument->GetDocumentAllResult(aID, aCache, aResult);
++}
++
+ } // namespace dom
+ } // namespace mozilla
+ 
+ static nsHTMLDocument*
+ GetDocument(JSObject *obj)
+ {
+   MOZ_ASSERT(js::GetObjectJSClass(obj) == &sHTMLDocumentAllClass);
+   return static_cast<nsHTMLDocument*>(
+@@ -210,17 +218,17 @@ nsHTMLDocumentSH::DocumentAllGetProperty
+     if (nsDOMClassInfo::sLength_id == id) {
+       // Make sure <div id="length"> doesn't shadow document.all.length.
+       vp.setNumber(doc->All()->Length());
+       return true;
+     }
+ 
+     // For all other strings, look for an element by id or name.
+     nsDependentJSString str(id);
+-    result = doc->GetDocumentAllResult(str, &cache, &rv);
++    result = doc->All()->GetNamedItem(str, &cache, &rv);
+ 
+     if (NS_FAILED(rv)) {
+       xpc::Throw(cx, rv);
+       return false;
+     }
+   } else if (JSID_IS_INT(id) && JSID_TO_INT(id) >= 0) {
+     // Map document.all[n] (where n is a number) to the n:th item in
+     // the document.all node list.
+diff --git a/content/html/document/src/HTMLAllCollection.h b/content/html/document/src/HTMLAllCollection.h
+--- a/content/html/document/src/HTMLAllCollection.h
++++ b/content/html/document/src/HTMLAllCollection.h
+@@ -12,16 +12,17 @@
+ #include "nsCycleCollectionParticipant.h"
+ #include "nsISupportsImpl.h"
+ 
+ #include <stdint.h>
+ 
+ class nsContentList;
+ class nsHTMLDocument;
+ class nsIContent;
++class nsWrapperCache;
+ 
+ namespace mozilla {
+ class ErrorResult;
+ 
+ namespace dom {
+ 
+ class HTMLAllCollection
+ {
+@@ -33,16 +34,18 @@ public:
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(HTMLAllCollection)
+ 
+   uint32_t Length();
+   nsIContent* Item(uint32_t aIndex);
+ 
+   JSObject* GetObject(JSContext* aCx, ErrorResult& aRv);
+ 
+   nsContentList* Collection();
++  nsISupports* GetNamedItem(const nsAString& aID, nsWrapperCache** aCache,
++                            nsresult* aResult);
+ 
+ private:
+   JS::Heap<JSObject*> mObject;
+   nsRefPtr<nsHTMLDocument> mDocument;
+   nsRefPtr<nsContentList> mCollection;
+ };
+ 
+ } // namespace dom

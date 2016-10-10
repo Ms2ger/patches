@@ -1,0 +1,680 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/Navigator.cpp b/dom/base/Navigator.cpp
+--- a/dom/base/Navigator.cpp
++++ b/dom/base/Navigator.cpp
+@@ -53,17 +53,16 @@
+ #endif
+ #ifdef MOZ_B2G_RIL
+ #include "TelephonyFactory.h"
+ #endif
+ #ifdef MOZ_B2G_BT
+ #include "nsIDOMBluetoothManager.h"
+ #include "BluetoothManager.h"
+ #endif
+-#include "nsIDOMCameraManager.h"
+ #include "DOMCameraManager.h"
+ 
+ #ifdef MOZ_AUDIO_CHANNEL_MANAGER
+ #include "AudioChannelManager.h"
+ #endif
+ 
+ #include "nsIDOMGlobalPropertyInitializer.h"
+ 
+@@ -1479,17 +1478,17 @@ Navigator::GetMozTime(nsIDOMMozTimeManag
+ }
+ #endif
+ 
+ //*****************************************************************************
+ //    nsNavigator::nsIDOMNavigatorCamera
+ //*****************************************************************************
+ 
+ NS_IMETHODIMP
+-Navigator::GetMozCameras(nsIDOMCameraManager** aCameraManager)
++Navigator::GetMozCameras(nsISupports** aCameraManager)
+ {
+   if (!mCameraManager) {
+     nsCOMPtr<nsPIDOMWindow> win = do_QueryReferent(mWindow);
+     NS_ENSURE_TRUE(win, NS_ERROR_FAILURE);
+ 
+     if (!win->GetOuterWindow() || win->GetOuterWindow()->GetCurrentInnerWindow() != win) {
+       return NS_ERROR_NOT_AVAILABLE;
+     }
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -307,17 +307,16 @@ using mozilla::dom::workers::ResolveWork
+ 
+ #ifdef MOZ_B2G_BT
+ #include "BluetoothManager.h"
+ #include "BluetoothAdapter.h"
+ #include "BluetoothDevice.h"
+ #endif
+ 
+ #include "nsIDOMNavigatorSystemMessages.h"
+-#include "DOMCameraManager.h"
+ #include "DOMCameraControl.h"
+ #include "DOMCameraCapabilities.h"
+ #include "DOMError.h"
+ #include "nsIOpenWindowEventDetail.h"
+ #include "nsIAsyncScrollEventDetail.h"
+ #include "nsIDOMGlobalObjectConstructor.h"
+ #include "nsIDOMCanvasRenderingContext2D.h"
+ #include "LockedFile.h"
+@@ -884,18 +883,16 @@ static nsDOMClassInfoData sClassInfoData
+   NS_DEFINE_CLASSINFO_DATA(BluetoothManager, nsEventTargetSH,
+                            EVENTTARGET_SCRIPTABLE_FLAGS)
+   NS_DEFINE_CLASSINFO_DATA(BluetoothAdapter, nsEventTargetSH,
+                            EVENTTARGET_SCRIPTABLE_FLAGS)
+   NS_DEFINE_CLASSINFO_DATA(BluetoothDevice, nsEventTargetSH,
+                            EVENTTARGET_SCRIPTABLE_FLAGS)
+ #endif
+ 
+-  NS_DEFINE_CLASSINFO_DATA(CameraManager, nsDOMGenericSH,
+-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
+   NS_DEFINE_CLASSINFO_DATA(CameraControl, nsDOMGenericSH,
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+   NS_DEFINE_CLASSINFO_DATA(CameraCapabilities, nsDOMGenericSH,
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+ 
+   NS_DEFINE_CLASSINFO_DATA(DOMError, nsDOMGenericSH,
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+ 
+@@ -2257,20 +2254,16 @@ nsDOMClassInfo::Init()
+     DOM_CLASSINFO_MAP_ENTRY(nsIDOMBluetoothAdapter)
+   DOM_CLASSINFO_MAP_END
+ 
+   DOM_CLASSINFO_MAP_BEGIN(BluetoothDevice, nsIDOMBluetoothDevice)
+     DOM_CLASSINFO_MAP_ENTRY(nsIDOMBluetoothDevice)
+   DOM_CLASSINFO_MAP_END
+ #endif
+ 
+-  DOM_CLASSINFO_MAP_BEGIN(CameraManager, nsIDOMCameraManager)
+-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMCameraManager)
+-  DOM_CLASSINFO_MAP_END
+-
+   DOM_CLASSINFO_MAP_BEGIN(CameraControl, nsICameraControl)
+     DOM_CLASSINFO_MAP_ENTRY(nsICameraControl)
+   DOM_CLASSINFO_MAP_END
+ 
+   DOM_CLASSINFO_MAP_BEGIN(CameraCapabilities, nsICameraCapabilities)
+     DOM_CLASSINFO_MAP_ENTRY(nsICameraCapabilities)
+   DOM_CLASSINFO_MAP_END
+ 
+diff --git a/dom/base/nsDOMClassInfoClasses.h b/dom/base/nsDOMClassInfoClasses.h
+--- a/dom/base/nsDOMClassInfoClasses.h
++++ b/dom/base/nsDOMClassInfoClasses.h
+@@ -220,17 +220,16 @@ DOMCI_CLASS(FMRadio)
+ #endif
+ 
+ #ifdef MOZ_B2G_BT
+ DOMCI_CLASS(BluetoothManager)
+ DOMCI_CLASS(BluetoothAdapter)
+ DOMCI_CLASS(BluetoothDevice)
+ #endif
+ 
+-DOMCI_CLASS(CameraManager)
+ DOMCI_CLASS(CameraControl)
+ DOMCI_CLASS(CameraCapabilities)
+ 
+ DOMCI_CLASS(DOMError)
+ DOMCI_CLASS(OpenWindowEventDetail)
+ DOMCI_CLASS(AsyncScrollEventDetail)
+ 
+ DOMCI_CLASS(LockedFile)
+diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
+--- a/dom/bindings/Bindings.conf
++++ b/dom/bindings/Bindings.conf
+@@ -149,16 +149,21 @@ DOMInterfaces = {
+     'workers': True,
+ }],
+ 
+ 'BatteryManager': {
+     'nativeType': 'mozilla::dom::battery::BatteryManager',
+     'headerFile': 'BatteryManager.h'
+ },
+ 
++'CameraManager': {
++    'nativeType': 'nsDOMCameraManager',
++    'headerFile': 'DOMCameraManager.h',
++},
++
+ 'CanvasRenderingContext2D': {
+     'implicitJSContext': [
+         'createImageData', 'getImageData', 'strokeStyle',
+         'fillStyle', 'mozDash'
+     ],
+     'resultNotAddRefed': [ 'canvas', 'measureText' ],
+     'binaryNames': {
+         'mozImageSmoothingEnabled': 'imageSmoothingEnabled',
+@@ -1530,22 +1535,25 @@ def addExternalIface(iface, nativeType=N
+ def addExternalHTMLElement(element):
+    nativeElement = 'ns' + element
+    addExternalIface(element, nativeType=nativeElement,
+                     headerFile=nativeElement + '.h')
+ 
+ addExternalHTMLElement('HTMLFormElement')
+ addExternalIface('ActivityOptions', nativeType='nsIDOMMozActivityOptions',
+                  headerFile='nsIDOMActivityOptions.h')
++addExternalIface('CameraControl', nativeType='nsICameraControl',
++                 headerFile='nsIDOMCameraManager.h')
+ addExternalIface('Counter')
+ addExternalIface('CSSRule')
++addExternalIface('CSSRuleList')
++addExternalIface('DataTransfer', notflattened=True)
+ addExternalIface('DeviceAcceleration', headerFile='nsIDOMDeviceMotionEvent.h', notflattened=True)
+ addExternalIface('DeviceRotationRate', headerFile='nsIDOMDeviceMotionEvent.h', notflattened=True)
+ addExternalIface('DOMError')
+-addExternalIface('CSSRuleList')
+ addExternalIface('DOMStringList')
+ addExternalIface('File')
+ addExternalIface('FileCallback', nativeType='nsIFileCallback',
+                  headerFile='nsIDOMHTMLCanvasElement.h')
+ addExternalIface('HitRegionOptions', nativeType='nsISupports')
+ addExternalIface('IDBOpenDBRequest', nativeType='nsIIDBOpenDBRequest')
+ addExternalIface('imgINotificationObserver', nativeType='imgINotificationObserver')
+ addExternalIface('imgIRequest', nativeType='imgIRequest', notflattened=True)
+@@ -1589,9 +1597,8 @@ addExternalIface('URI', nativeType='nsIU
+                  notflattened=True)
+ addExternalIface('UserDataHandler')
+ addExternalIface('Window')
+ addExternalIface('WindowProxy', nativeType='nsIDOMWindow')
+ addExternalIface('XPathResult', nativeType='nsISupports')
+ addExternalIface('XPathExpression')
+ addExternalIface('XPathNSResolver')
+ addExternalIface('XULCommandDispatcher')
+-addExternalIface('DataTransfer', notflattened=True)
+diff --git a/dom/camera/CameraCommon.h b/dom/camera/CameraCommon.h
+--- a/dom/camera/CameraCommon.h
++++ b/dom/camera/CameraCommon.h
+@@ -15,17 +15,16 @@
+ #endif
+ #endif
+ 
+ #ifndef NAN
+ #define NAN std::numeric_limits<double>::quiet_NaN()
+ #endif
+ 
+ #include "nsThreadUtils.h"
+-#include "nsIDOMCameraManager.h"
+ #include "prlog.h"
+ 
+ #ifdef PR_LOGGING
+ extern PRLogModuleInfo* GetCameraLog();
+ #define DOM_CAMERA_LOG( type, ... ) PR_LOG(GetCameraLog(), (PRLogModuleLevel)type, ( __VA_ARGS__ ))
+ #else
+ #define DOM_CAMERA_LOG( type, ... )
+ #endif
+diff --git a/dom/camera/DOMCameraManager.cpp b/dom/camera/DOMCameraManager.cpp
+--- a/dom/camera/DOMCameraManager.cpp
++++ b/dom/camera/DOMCameraManager.cpp
+@@ -11,26 +11,23 @@
+ #include "DOMCameraManager.h"
+ #include "nsDOMClassInfo.h"
+ #include "DictionaryHelpers.h"
+ #include "CameraCommon.h"
+ 
+ using namespace mozilla;
+ using namespace dom;
+ 
+-DOMCI_DATA(CameraManager, nsIDOMCameraManager)
+-
+ NS_IMPL_CYCLE_COLLECTION_1(nsDOMCameraManager,
+                            mCameraThread)
+ 
+ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDOMCameraManager)
++  // Keep in sync with the cast in ToSupports.
+   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIObserver)
+-  NS_INTERFACE_MAP_ENTRY(nsIDOMCameraManager)
+   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
+-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(CameraManager)
+ NS_INTERFACE_MAP_END
+ 
+ NS_IMPL_CYCLE_COLLECTING_ADDREF(nsDOMCameraManager)
+ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsDOMCameraManager)
+ 
+ /**
+  * Global camera logging object
+  *
+@@ -96,45 +93,43 @@ nsDOMCameraManager::CheckPermissionAndCr
+     new nsDOMCameraManager(aWindow->WindowID());
+ 
+   nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
+   obs->AddObserver(cameraManager, "xpcom-shutdown", true);
+ 
+   return cameraManager.forget();
+ }
+ 
+-/* [implicit_jscontext] void getCamera ([optional] in jsval aOptions, in nsICameraGetCameraCallback onSuccess, [optional] in nsICameraErrorCallback onError); */
+-NS_IMETHODIMP
+-nsDOMCameraManager::GetCamera(const JS::Value& aOptions, nsICameraGetCameraCallback* onSuccess, nsICameraErrorCallback* onError, JSContext* cx)
++void
++nsDOMCameraManager::GetCamera(const CameraSelector& aSelector,
++                              CameraGetCameraCallback& aOnSuccess,
++                              CameraErrorCallback& aOnError,
++                              ErrorResult& aRv)
+ {
+-  NS_ENSURE_TRUE(onSuccess, NS_ERROR_INVALID_ARG);
++  uint32_t cameraId = 0;  // back (or forward-facing) camera by default
+ 
+-  uint32_t cameraId = 0;  // back (or forward-facing) camera by default
+-  mozilla::idl::CameraSelector selector;
+-
+-  nsresult rv = selector.Init(cx, &aOptions);
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  if (selector.camera.EqualsASCII("front")) {
++  if (aSelector.camera.EqualsLiteral("front")) {
+     cameraId = 1;
+   }
+ 
+   // reuse the same camera thread to conserve resources
+   if (!mCameraThread) {
+-    rv = NS_NewThread(getter_AddRefs(mCameraThread));
+-    NS_ENSURE_SUCCESS(rv, rv);
++    aRv = NS_NewThread(getter_AddRefs(mCameraThread));
++    if (aRv.Failed()) {
++      return;
++    }
+   }
+ 
+   DOM_CAMERA_LOGT("%s:%d\n", __func__, __LINE__);
+ 
+   // Creating this object will trigger the onSuccess handler
+-  nsCOMPtr<nsDOMCameraControl> cameraControl = new nsDOMCameraControl(cameraId, mCameraThread, onSuccess, onError, mWindowId);
++  nsCOMPtr<nsDOMCameraControl> cameraControl =
++    new nsDOMCameraControl(cameraId, mCameraThread, aOnSuccess, aOnError, mWindowId);
+ 
+   Register(cameraControl);
+-  return NS_OK;
+ }
+ 
+ void
+ nsDOMCameraManager::Register(nsDOMCameraControl* aDOMCameraControl)
+ {
+   DOM_CAMERA_LOGI(">>> Register( aDOMCameraControl = %p ) mWindowId = 0x%llx\n", aDOMCameraControl, mWindowId);
+   MOZ_ASSERT(NS_IsMainThread());
+ 
+diff --git a/dom/camera/DOMCameraManager.h b/dom/camera/DOMCameraManager.h
+--- a/dom/camera/DOMCameraManager.h
++++ b/dom/camera/DOMCameraManager.h
+@@ -1,10 +1,10 @@
+ /* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
+-/* vim: set ts=2 et sw=2 tw=40: */
++/* vim: set ts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef DOM_CAMERA_DOMCAMERAMANAGER_H
+ #define DOM_CAMERA_DOMCAMERAMANAGER_H
+ 
+ #include "nsCOMPtr.h"
+@@ -24,35 +24,56 @@ class nsPIDOMWindow;
+ namespace mozilla {
+ class nsDOMCameraControl;
+ }
+ 
+ typedef nsTArray<nsRefPtr<mozilla::nsDOMCameraControl> > CameraControls;
+ typedef nsClassHashtable<nsUint64HashKey, CameraControls> WindowTable;
+ 
+ class nsDOMCameraManager MOZ_FINAL
+-  : public nsIDOMCameraManager
+-  , public nsIObserver
++  : public nsIObserver
+   , public nsSupportsWeakReference
++  , public nsWrapperCache
+ {
+ public:
++  nsISupports* ToSupports()
++  {
++    // Keep in sync with the cast in QueryInterface.
++    return static_cast<nsIObserver*>(this);
++  }
++
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+   NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(nsDOMCameraManager, nsIObserver)
+-  NS_DECL_NSIDOMCAMERAMANAGER
+   NS_DECL_NSIOBSERVER
+ 
+   static already_AddRefed<nsDOMCameraManager>
+     CheckPermissionAndCreateInstance(nsPIDOMWindow* aWindow);
+   static bool IsWindowStillActive(uint64_t aWindowId);
+ 
+   void Register(mozilla::nsDOMCameraControl* aDOMCameraControl);
+   void OnNavigation(uint64_t aWindowId);
+ 
+   nsresult GetNumberOfCameras(int32_t& aDeviceCount);
+-  nsresult GetCameraName(uint32_t aDeviceNum, nsCString& aDeviceName);
++  nsresult GetCameraName(uint32_t aDeviceNum, nsString& aDeviceName);
++
++  // WebIDL
++  nsISupports* GetParentObject()
++  {
++    return nullptr;
++  }
++  virtual JSObject*
++  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
++
++  void
++  GetCamera(const CameraSelector& aSelector,
++            CameraGetCameraCallback& aOnSuccess,
++            CameraErrorCallback& aOnError,
++            ErrorResult& aRv);
++  void
++  GetListOfCameras(Sequence<nsString>& aList, ErrorResult& aRv)
+ 
+ protected:
+   void XpComShutdown();
+   void Shutdown(uint64_t aWindowId);
+   ~nsDOMCameraManager();
+ 
+ private:
+   nsDOMCameraManager() MOZ_DELETE;
+diff --git a/dom/camera/FallbackCameraManager.cpp b/dom/camera/FallbackCameraManager.cpp
+--- a/dom/camera/FallbackCameraManager.cpp
++++ b/dom/camera/FallbackCameraManager.cpp
+@@ -7,19 +7,19 @@
+ // From nsDOMCameraManager.
+ nsresult
+ nsDOMCameraManager::GetNumberOfCameras(int32_t& aDeviceCount)
+ {
+   return NS_ERROR_NOT_IMPLEMENTED;
+ };
+ 
+ nsresult
+-nsDOMCameraManager::GetCameraName(uint32_t aDeviceNum, nsCString& aDeviceName)
++nsDOMCameraManager::GetCameraName(uint32_t aDeviceNum, nsString& aDeviceName)
+ {
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 
+-/* [implicit_jscontext] jsval getListOfCameras (); */
+-NS_IMETHODIMP
+-nsDOMCameraManager::GetListOfCameras(JSContext* cx, JS::Value* _retval)
++void
++nsDOMCameraManager::GetListOfCameras(Sequence<nsString>& aList,
++                                     ErrorResult& aRv)
+ {
+-  return NS_ERROR_NOT_IMPLEMENTED;
++  aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
+ }
+diff --git a/dom/camera/GonkCameraControl.h b/dom/camera/GonkCameraControl.h
+--- a/dom/camera/GonkCameraControl.h
++++ b/dom/camera/GonkCameraControl.h
+@@ -16,17 +16,16 @@
+ 
+ #ifndef DOM_CAMERA_GONKCAMERACONTROL_H
+ #define DOM_CAMERA_GONKCAMERACONTROL_H
+ 
+ #include "base/basictypes.h"
+ #include "prrwlock.h"
+ #include <media/MediaProfiles.h>
+ #include "DeviceStorage.h"
+-#include "nsIDOMCameraManager.h"
+ #include "DOMCameraControl.h"
+ #include "CameraControlImpl.h"
+ #include "CameraCommon.h"
+ #include "GonkRecorder.h"
+ #include "GonkCameraHwMgr.h"
+ 
+ namespace android {
+ class GonkCameraHardware;
+diff --git a/dom/camera/GonkCameraManager.cpp b/dom/camera/GonkCameraManager.cpp
+--- a/dom/camera/GonkCameraManager.cpp
++++ b/dom/camera/GonkCameraManager.cpp
+@@ -25,17 +25,17 @@
+ nsresult
+ nsDOMCameraManager::GetNumberOfCameras(int32_t& aDeviceCount)
+ {
+   aDeviceCount = android::Camera::getNumberOfCameras();
+   return NS_OK;
+ }
+ 
+ nsresult
+-nsDOMCameraManager::GetCameraName(uint32_t aDeviceNum, nsCString& aDeviceName)
++nsDOMCameraManager::GetCameraName(uint32_t aDeviceNum, nsString& aDeviceName)
+ {
+   int32_t count = android::Camera::getNumberOfCameras();
+   DOM_CAMERA_LOGI("getListOfCameras : getNumberOfCameras() returned %d\n", count);
+   if (aDeviceNum > count) {
+     DOM_CAMERA_LOGE("GetCameraName : invalid device number");
+     return NS_ERROR_NOT_AVAILABLE;
+   }
+ 
+@@ -58,58 +58,47 @@ nsDOMCameraManager::GetCameraName(uint32
+     default:
+       aDeviceName.Assign("extra-camera-");
+       aDeviceName.AppendInt(aDeviceNum);
+       break;
+   }
+   return NS_OK;
+ }
+ 
+-/* [implicit_jscontext] jsval getListOfCameras (); */
+-NS_IMETHODIMP
+-nsDOMCameraManager::GetListOfCameras(JSContext* cx, JS::Value* _retval)
++void
++nsDOMCameraManager::GetListOfCameras(Sequence<nsString>& aList,
++                                     ErrorResult& aRv)
+ {
+-  JSObject* a = JS_NewArrayObject(cx, 0, nullptr);
+-  uint32_t index = 0;
+-  int32_t count;
+-
+-  if (!a) {
+-    DOM_CAMERA_LOGE("getListOfCameras : Could not create array object");
+-    return NS_ERROR_OUT_OF_MEMORY;
+-  }
+-  count = android::Camera::getNumberOfCameras();
++  int32_t count = android::Camera::getNumberOfCameras();
+   if (count <= 0) {
+     return NS_ERROR_NOT_AVAILABLE;
+   }
+ 
++  // Reserve space for "back" and "front".
++  if (!aList.AppendElements(2, NullString())) {
++    return NS_ERROR_OUT_OF_MEMORY;
++  }
++
+   DOM_CAMERA_LOGI("getListOfCameras : getNumberOfCameras() returned %d\n", count);
+   while (count--) {
+-    nsCString cameraName;
+-    nsresult result = GetCameraName(count, cameraName);
+-    if (result != NS_OK) {
++    nsString cameraName;
++    nsresult rv = GetCameraName(count, cameraName);
++    if (NS_FAILED(rv)) {
+       continue;
+     }
+ 
+-    JSString* v = JS_NewStringCopyZ(cx, cameraName.get());
+-    JS::Value jv;
+-    if (!cameraName.Compare("back")) {
+-      index = 0;
+-    } else if (!cameraName.Compare("front")) {
+-      index = 1;
+-    } else {
+-      static uint32_t extraIndex = 2;
+-      index = extraIndex++;
++    if (cameraName.EqualsLiteral("back")) {
++      aList[0] = cameraName;
++      continue;
++    }
++    if (cameraName.EqualsLiteral("front")) {
++      aList[1] = cameraName;
++      continue;
+     }
+ 
+-    if (!v) {
+-      DOM_CAMERA_LOGE("getListOfCameras : out of memory populating camera list");
+-      return NS_ERROR_NOT_AVAILABLE;
+-    }
+-    jv = STRING_TO_JSVAL(v);
+-    if (!JS_SetElement(cx, a, index, &jv)) {
++    if (!aList.AppendElement(cameraName)) {
+       DOM_CAMERA_LOGE("getListOfCameras : failed building list of cameras");
+-      return NS_ERROR_NOT_AVAILABLE;
++      return NS_ERROR_OUT_OF_MEMORY;
+     }
+   }
+ 
+-  *_retval = OBJECT_TO_JSVAL(a);
+   return NS_OK;
+ }
+diff --git a/dom/camera/ICameraControl.h b/dom/camera/ICameraControl.h
+--- a/dom/camera/ICameraControl.h
++++ b/dom/camera/ICameraControl.h
+@@ -2,17 +2,16 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef DOM_CAMERA_ICAMERACONTROL_H
+ #define DOM_CAMERA_ICAMERACONTROL_H
+ 
+ #include "jsapi.h"
+ #include "nsIFile.h"
+-#include "nsIDOMCameraManager.h"
+ #include "DictionaryHelpers.h"
+ #include "CameraCommon.h"
+ 
+ namespace mozilla {
+ 
+ 
+ class DOMCameraPreview;
+ class RecorderProfileManager;
+diff --git a/dom/camera/nsIDOMCameraManager.idl b/dom/camera/nsIDOMCameraManager.idl
+--- a/dom/camera/nsIDOMCameraManager.idl
++++ b/dom/camera/nsIDOMCameraManager.idl
+@@ -31,21 +31,16 @@ dictionary CameraRegion {
+    'NaN' indicates the information is not available. */
+ dictionary CameraPosition {
+     double latitude;
+     double longitude;
+     double altitude;
+     double timestamp;
+ };
+ 
+-/* Select a camera to use. */
+-dictionary CameraSelector {
+-    DOMString camera = "back";
+-};
+-
+ [scriptable, uuid(177472c9-f83d-48b5-8782-03b43b27f25d)]
+ interface nsICameraCapabilities : nsISupports
+ {
+     /* an array of objects with 'height' and 'width' properties
+        supported for the preview stream */
+     [implicit_jscontext]
+     readonly attribute jsval        previewSizes;
+ 
+@@ -408,33 +403,8 @@ interface nsICameraControl : nsISupports
+ 
+        the callbacks are optional, unless you really need to know when
+        the hardware is ultimately released.
+ 
+        once this is called, the camera control object is to be considered
+        defunct; a new instance will need to be created to access the camera. */
+     [binaryname(ReleaseHardware)] void release([optional] in nsICameraReleaseCallback onSuccess, [optional] in nsICameraErrorCallback onError);
+ };
+-
+-[scriptable, function, uuid(a267afbc-d91c-413a-8de5-0b94aecffa3e)]
+-interface nsICameraGetCameraCallback : nsISupports
+-{
+-    void handleEvent(in nsICameraControl camera);
+-};
+-
+-[scriptable, uuid(671ee624-0336-441a-a24e-26b5319f14fe)]
+-interface nsIDOMCameraManager : nsISupports
+-{
+-    /* get a camera instance; options will be used to specify which
+-       camera to get from the list returned by getListOfCameras(), e.g.:
+-        {
+-            camera: front
+-        }
+-    */
+-    [implicit_jscontext]
+-    void getCamera([optional] in jsval aOptions, in nsICameraGetCameraCallback onSuccess, [optional] in nsICameraErrorCallback onError);
+-
+-    /* return a JSON array of camera   identifiers, e.g.
+-        [ "front", "back" ]
+-    */
+-    [implicit_jscontext]
+-    jsval getListOfCameras();
+-};
+diff --git a/dom/camera/nsIDOMNavigatorCamera.idl b/dom/camera/nsIDOMNavigatorCamera.idl
+--- a/dom/camera/nsIDOMNavigatorCamera.idl
++++ b/dom/camera/nsIDOMNavigatorCamera.idl
+@@ -1,15 +1,15 @@
+ /* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
+-/* vim: set ts=2 et sw=2 tw=40: */
++/* vim: set ts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "nsISupports.idl"
+ 
+ interface nsIDOMCameraManager;
+ 
+ [scriptable, uuid(bbb2456a-a6c8-42c8-8f52-6de071097e4b)]
+ interface nsIDOMNavigatorCamera : nsISupports
+ {
+-  readonly attribute nsIDOMCameraManager mozCameras;
++  readonly attribute /* CameraManager */ nsISupports mozCameras;
+ };
+diff --git a/dom/webidl/CameraManager.webidl b/dom/webidl/CameraManager.webidl
+new file mode 100644
+--- /dev/null
++++ b/dom/webidl/CameraManager.webidl
+@@ -0,0 +1,29 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++interface CameraControl;
++
++/* Select a camera to use. */
++dictionary CameraSelector {
++  DOMString camera = "back";
++};
++
++callback interface CameraGetCameraCallback {
++  void handleEvent(CameraControl? camera);
++};
++
++callback interface CameraErrorCallback {
++  void handleEvent(DOMString error);
++};
++
++interface CameraManager {
++  // Get a camera instance; options will be used to specify which camera to get
++  // from the list returned by getListOfCameras(), e.g.: { camera: "front" }
++  [Throws]
++  void getCamera(CameraSelector options, CameraGetCameraCallback onSuccess, optional CameraErrorCallback onError);
++
++  // Returns a sequence of camera identifiers, e.g. ["front", "back"].
++  [Throws]
++  sequence<DOMString> getListOfCameras();
++};
+diff --git a/dom/webidl/WebIDL.mk b/dom/webidl/WebIDL.mk
+--- a/dom/webidl/WebIDL.mk
++++ b/dom/webidl/WebIDL.mk
+@@ -22,16 +22,17 @@ webidl_files = \
+   AudioNode.webidl \
+   AudioParam.webidl \
+   AudioStreamTrack.webidl \
+   AudioProcessingEvent.webidl \
+   BatteryManager.webidl \
+   BeforeUnloadEvent.webidl \
+   BiquadFilterNode.webidl \
+   Blob.webidl \
++  CameraManager.webidl \
+   CanvasRenderingContext2D.webidl \
+   CaretPosition.webidl \
+   CDATASection.webidl \
+   CFStateChangeEvent.webidl \
+   ChannelMergerNode.webidl \
+   ChannelSplitterNode.webidl \
+   CharacterData.webidl \
+   ChildNode.webidl \

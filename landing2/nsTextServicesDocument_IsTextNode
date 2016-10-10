@@ -1,0 +1,366 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/editor/txtsvc/src/nsTextServicesDocument.cpp b/editor/txtsvc/src/nsTextServicesDocument.cpp
+--- a/editor/txtsvc/src/nsTextServicesDocument.cpp
++++ b/editor/txtsvc/src/nsTextServicesDocument.cpp
+@@ -566,31 +566,22 @@ nsTextServicesDocument::LastSelectedBloc
+     result = range->GetStartOffset(&offset);
+ 
+     if (NS_FAILED(result))
+     {
+       UNLOCK_DOC(this);
+       return result;
+     }
+ 
+-    if (IsTextNode(parent))
+-    {
++    nsCOMPtr<nsIContent> contentParent = do_QueryInterface(parent);
++    if (contentParent && contentParent->NodeType() == nsIDOMNode::TEXT_NODE) {
+       // The caret is in a text node. Find the beginning
+       // of the text block containing this text node and
+       // return.
+-
+-      nsCOMPtr<nsIContent> content(do_QueryInterface(parent));
+-
+-      if (!content)
+-      {
+-        UNLOCK_DOC(this);
+-        return NS_ERROR_FAILURE;
+-      }
+-
+-      result = mIterator->PositionAt(content);
++      result = mIterator->PositionAt(contentParent);
+ 
+       if (NS_FAILED(result))
+       {
+         UNLOCK_DOC(this);
+         return result;
+       }
+ 
+       result = FirstTextNodeInCurrentBlock(mIterator);
+@@ -661,24 +652,22 @@ nsTextServicesDocument::LastSelectedBloc
+       {
+         UNLOCK_DOC(this);
+         return result;
+       }
+ 
+       iter->First();
+ 
+       nsCOMPtr<nsIContent> content;
+-      while (!iter->IsDone())
+-      {
+-        content = do_QueryInterface(iter->GetCurrentNode());
+-
+-        if (IsTextNode(content))
++      while (!iter->IsDone()) {
++        nsINode* cur = iter->GetCurrentNode();
++        if (cur->NodeType() == nsIDOMNode::TEXT_NODE) {
++          content = static_cast<nsIContent*>(cur);
+           break;
+-
+-        content = nullptr;
++        }
+ 
+         iter->Next();
+       }
+ 
+       if (!content)
+       {
+         UNLOCK_DOC(this);
+         return NS_OK;
+@@ -2319,29 +2308,21 @@ nsTextServicesDocument::HasSameBlockNode
+   {
+     p2 = p2->GetParent();
+   }
+ 
+   return p1 == p2;
+ }
+ 
+ bool
+-nsTextServicesDocument::IsTextNode(nsIContent *aContent)
+-{
+-  NS_ENSURE_TRUE(aContent, false);
+-  return nsIDOMNode::TEXT_NODE == aContent->NodeType();
+-}
+-
+-bool
+ nsTextServicesDocument::IsTextNode(nsIDOMNode *aNode)
+ {
+-  NS_ENSURE_TRUE(aNode, false);
+-
+   nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
+-  return IsTextNode(content);
++  NS_ENSURE_TRUE(content, false);
++  return content->NodeType() == nsIDOMNode::TEXT_NODE;
+ }
+ 
+ nsresult
+ nsTextServicesDocument::SetSelectionInternal(int32_t aOffset, int32_t aLength, bool aDoUpdate)
+ {
+   nsresult result = NS_OK;
+ 
+   NS_ENSURE_TRUE(mSelCon && aOffset >= 0 && aLength >= 0, NS_ERROR_FAILURE);
+@@ -2901,73 +2882,50 @@ nsTextServicesDocument::GetUncollapsedSe
+ 
+   result = CreateContentIterator(range, getter_AddRefs(iter));
+ 
+   NS_ENSURE_SUCCESS(result, result);
+ 
+   // Find the first text node in the range.
+   
+   bool found;
+-  nsCOMPtr<nsIContent> content;
+ 
+   iter->First();
+ 
+-  if (!IsTextNode(p1))
+-  {
++  if (!IsTextNode(p1)) {
+     found = false;
+ 
+-    while (!iter->IsDone())
+-    {
+-      content = do_QueryInterface(iter->GetCurrentNode());
+-
+-      if (IsTextNode(content))
+-      {
+-        p1 = do_QueryInterface(content);
+-
+-        NS_ENSURE_TRUE(p1, NS_ERROR_FAILURE);
+-
++    while (!iter->IsDone()) {
++      nsINode* cur = iter->GetCurrentNode();
++      if (cur->NodeType() == nsIDOMNode::TEXT_NODE) {
++        p1 = cur->AsDOMNode();
+         o1 = 0;
+         found = true;
+-
+         break;
+       }
+ 
+       iter->Next();
+     }
+ 
+     NS_ENSURE_TRUE(found, NS_ERROR_FAILURE);
+   }
+ 
+   // Find the last text node in the range.
+ 
+   iter->Last();
+ 
+-  if (! IsTextNode(p2))
+-  {
++  if (!IsTextNode(p2)) {
+     found = false;
+ 
+-    while (!iter->IsDone())
+-    {
+-      content = do_QueryInterface(iter->GetCurrentNode());
+-
+-      if (IsTextNode(content))
+-      {
+-        p2 = do_QueryInterface(content);
+-
+-        NS_ENSURE_TRUE(p2, NS_ERROR_FAILURE);
+-
+-        nsString str;
+-
+-        result = p2->GetNodeValue(str);
+-
+-        NS_ENSURE_SUCCESS(result, result);
+-
+-        o2 = str.Length();
++    while (!iter->IsDone()) {
++      nsINode* cur = iter->GetCurrentNode();
++      if (cur->NodeType() == nsIDOMNode::TEXT_NODE) {
++        p2 = cur->AsDOMNode();
++        o2 = static_cast<nsIContent*>(cur)->TextLength();
+         found = true;
+-
+         break;
+       }
+ 
+       iter->Prev();
+     }
+ 
+     NS_ENSURE_TRUE(found, NS_ERROR_FAILURE);
+   }
+@@ -3140,18 +3098,17 @@ nsTextServicesDocument::FirstTextNodeInC
+   // we hit a block boundary:
+ 
+   while (!iter->IsDone())
+   {
+     nsCOMPtr<nsIContent> content = iter->GetCurrentNode()->IsContent()
+                                    ? iter->GetCurrentNode()->AsContent()
+                                    : nullptr;
+ 
+-    if (IsTextNode(content))
+-    {
++    if (content && content->NodeType() == nsIDOMNode::TEXT_NODE) {
+       if (!last || HasSameBlockNodeParent(content, last))
+         last = content;
+       else
+       {
+         // We're done, the current text node is in a
+         // different block.
+         break;
+       }
+@@ -3212,19 +3169,17 @@ nsTextServicesDocument::FirstTextNodeInN
+ 
+   ClearDidSkip(aIterator);
+ 
+   while (!aIterator->IsDone())
+   {
+     nsCOMPtr<nsIContent> content = aIterator->GetCurrentNode()->IsContent()
+                                    ? aIterator->GetCurrentNode()->AsContent()
+                                    : nullptr;
+-
+-    if (IsTextNode(content))
+-    {
++    if (content && content->NodeType() == nsIDOMNode::TEXT_NODE) {
+       if (!crossedBlockBoundary && (!prev || HasSameBlockNodeParent(prev, content)))
+         prev = content;
+       else
+         break;
+     }
+     else if (!crossedBlockBoundary && IsBlockNode(content))
+       crossedBlockBoundary = true;
+ 
+@@ -3358,73 +3313,59 @@ nsTextServicesDocument::CreateOffsetTabl
+ 
+   ClearDidSkip(aIterator);
+ 
+   while (!aIterator->IsDone())
+   {
+     nsCOMPtr<nsIContent> content = aIterator->GetCurrentNode()->IsContent()
+                                    ? aIterator->GetCurrentNode()->AsContent()
+                                    : nullptr;
+-
+-    if (IsTextNode(content))
+-    {
+-      if (!prev || HasSameBlockNodeParent(prev, content))
+-      {
+-        nsCOMPtr<nsIDOMNode> node = do_QueryInterface(content);
+-
+-        if (node)
+-        {
+-          nsString str;
+-
+-          result = node->GetNodeValue(str);
+-
+-          NS_ENSURE_SUCCESS(result, result);
+-
+-          // Add an entry for this text node into the offset table:
+-
+-          OffsetEntry *entry = new OffsetEntry(node, offset, str.Length());
+-          aOffsetTable->AppendElement(entry);
+-
+-          // If one or both of the endpoints of the iteration range
+-          // are in the text node for this entry, make sure the entry
+-          // only accounts for the portion of the text node that is
+-          // in the range.
+-
+-          int32_t startOffset = 0;
+-          int32_t endOffset   = str.Length();
+-          bool adjustStr    = false;
+-
+-          if (entry->mNode == rngStartNode)
+-          {
+-            entry->mNodeOffset = startOffset = rngStartOffset;
+-            adjustStr = true;
+-          }
+-
+-          if (entry->mNode == rngEndNode)
+-          {
+-            endOffset = rngEndOffset;
+-            adjustStr = true;
+-          }
+-
+-          if (adjustStr)
+-          {
+-            entry->mLength = endOffset - startOffset;
+-            str = Substring(str, startOffset, entry->mLength);
+-          }
+-
+-          offset += str.Length();
+-
+-          if (aStr)
+-          {
+-            // Append the text node's string to the output string:
+-
+-            if (!first)
+-              *aStr = str;
+-            else
+-              *aStr += str;
++    if (content && content->NodeType() == nsIDOMNode::TEXT_NODE) {
++      if (!prev || HasSameBlockNodeParent(prev, content)) {
++        nsCOMPtr<nsIDOMNode> node = content->AsDOMNode();
++
++        nsString str;
++        result = node->GetNodeValue(str);
++        NS_ENSURE_SUCCESS(result, result);
++
++        // Add an entry for this text node into the offset table:
++        OffsetEntry *entry = new OffsetEntry(node, offset, str.Length());
++        aOffsetTable->AppendElement(entry);
++
++        // If one or both of the endpoints of the iteration range
++        // are in the text node for this entry, make sure the entry
++        // only accounts for the portion of the text node that is
++        // in the range.
++        int32_t startOffset = 0;
++        int32_t endOffset   = str.Length();
++        bool adjustStr    = false;
++
++        if (entry->mNode == rngStartNode) {
++          entry->mNodeOffset = startOffset = rngStartOffset;
++          adjustStr = true;
++        }
++
++        if (entry->mNode == rngEndNode) {
++          endOffset = rngEndOffset;
++          adjustStr = true;
++        }
++
++        if (adjustStr) {
++          entry->mLength = endOffset - startOffset;
++          str = Substring(str, startOffset, entry->mLength);
++        }
++
++        offset += str.Length();
++
++        if (aStr) {
++          // Append the text node's string to the output string:
++          if (!first) {
++            *aStr = str;
++          } else {
++            *aStr += str;
+           }
+         }
+ 
+         prev = content;
+ 
+         if (!first)
+           first = content;
+       }
+diff --git a/editor/txtsvc/src/nsTextServicesDocument.h b/editor/txtsvc/src/nsTextServicesDocument.h
+--- a/editor/txtsvc/src/nsTextServicesDocument.h
++++ b/editor/txtsvc/src/nsTextServicesDocument.h
+@@ -174,17 +174,16 @@ private:
+   static nsresult FirstTextNodeInCurrentBlock(nsIContentIterator *aIterator);
+   static nsresult FirstTextNodeInPrevBlock(nsIContentIterator *aIterator);
+   static nsresult FirstTextNodeInNextBlock(nsIContentIterator *aIterator);
+ 
+   nsresult GetFirstTextNodeInPrevBlock(nsIContent **aContent);
+   nsresult GetFirstTextNodeInNextBlock(nsIContent **aContent);
+ 
+   static bool IsBlockNode(nsIContent *aContent);
+-  static bool IsTextNode(nsIContent *aContent);
+   static bool IsTextNode(nsIDOMNode *aNode);
+ 
+   static bool DidSkip(nsIContentIterator* aFilteredIter);
+   static void   ClearDidSkip(nsIContentIterator* aFilteredIter);
+ 
+   static bool HasSameBlockNodeParent(nsIContent *aContent1, nsIContent *aContent2);
+ 
+   nsresult SetSelectionInternal(int32_t aOffset, int32_t aLength, bool aDoUpdate);

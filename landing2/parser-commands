@@ -1,0 +1,288 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsDocument.cpp b/content/base/src/nsDocument.cpp
+--- a/content/base/src/nsDocument.cpp
++++ b/content/base/src/nsDocument.cpp
+@@ -978,17 +978,17 @@ nsExternalResourceMap::PendingLoad::Setu
+                                          getter_Copies(contractId));
+   NS_ENSURE_SUCCESS(rv, rv);
+   nsCOMPtr<nsIDocumentLoaderFactory> docLoaderFactory =
+     do_GetService(contractId);
+   NS_ENSURE_TRUE(docLoaderFactory, NS_ERROR_NOT_AVAILABLE);
+ 
+   nsCOMPtr<nsIContentViewer> viewer;
+   nsCOMPtr<nsIStreamListener> listener;
+-  rv = docLoaderFactory->CreateInstance("external-resource", chan, newLoadGroup,
++  rv = docLoaderFactory->CreateInstance(eExternalResource, chan, newLoadGroup,
+                                         type.get(), nsnull, nsnull,
+                                         getter_AddRefs(listener),
+                                         getter_AddRefs(viewer));
+   NS_ENSURE_SUCCESS(rv, rv);
+   NS_ENSURE_TRUE(viewer, NS_ERROR_UNEXPECTED);
+ 
+   nsCOMPtr<nsIParser> parser = do_QueryInterface(listener);
+   if (!parser) {
+diff --git a/docshell/base/nsDocShell.cpp b/docshell/base/nsDocShell.cpp
+--- a/docshell/base/nsDocShell.cpp
++++ b/docshell/base/nsDocShell.cpp
+@@ -7618,17 +7618,17 @@ nsDocShell::NewContentViewerObj(const ch
+     nsCOMPtr<nsIDocumentLoaderFactory> docLoaderFactory =
+         nsContentUtils::FindInternalContentViewer(aContentType);
+     if (!docLoaderFactory) {
+         return NS_ERROR_FAILURE;
+     }
+ 
+     // Now create an instance of the content viewer
+     // nsLayoutDLF makes the determination if it should be a "view-source" instead of "view"
+-    nsresult rv = docLoaderFactory->CreateInstance("view", aOpenedChannel,
++    nsresult rv = docLoaderFactory->CreateInstance(eViewNormal, aOpenedChannel,
+                                                    aLoadGroup, aContentType,
+                                                    this, nsnull,
+                                                    aContentHandler, aViewer);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     (*aViewer)->SetContainer(static_cast<nsIContentViewerContainer *>(this));
+     return NS_OK;
+ }
+diff --git a/docshell/base/nsIDocumentLoaderFactory.idl b/docshell/base/nsIDocumentLoaderFactory.idl
+--- a/docshell/base/nsIDocumentLoaderFactory.idl
++++ b/docshell/base/nsIDocumentLoaderFactory.idl
+@@ -9,27 +9,33 @@
+ interface nsIChannel;
+ interface nsIContentViewer;
+ interface nsIStreamListener;
+ interface nsIDocument;
+ interface nsILoadGroup;
+ interface nsIPrincipal;
+ interface nsIDocShell;
+ 
++%{C++
++#include "nsIParser.h"
++%}
++
++native eParserCommands(eParserCommands);
++
+ /**
+  * To get a component that implements nsIDocumentLoaderFactory
+  * for a given mimetype, use nsICategoryManager to find an entry
+  * with the mimetype as its name in the category "Gecko-Content-Viewers".
+  * The value of the entry is the contractid of the component.
+  * The component is a service, so use GetService, not CreateInstance to get it.
+  */
+ 
+ [scriptable, uuid(5e7d2967-5a07-444f-95d5-25b533252d38)]
+ interface nsIDocumentLoaderFactory : nsISupports {
+-    nsIContentViewer createInstance(in string aCommand,
++    nsIContentViewer createInstance(in eParserCommands aCommand,
+                               in nsIChannel aChannel,
+                               in nsILoadGroup aLoadGroup,
+                               in string aContentType, 
+                               in nsIDocShell aContainer,
+                               in nsISupports aExtraInfo,
+                               out nsIStreamListener aDocListenerResult);
+ 
+     nsIContentViewer createInstanceForDocument(in nsIDocument aDocument);
+diff --git a/image/src/SVGDocumentWrapper.cpp b/image/src/SVGDocumentWrapper.cpp
+--- a/image/src/SVGDocumentWrapper.cpp
++++ b/image/src/SVGDocumentWrapper.cpp
+@@ -337,17 +337,17 @@ SVGDocumentWrapper::SetupViewer(nsIReque
+                                          getter_Copies(contractId));
+   NS_ENSURE_SUCCESS(rv, rv);
+   nsCOMPtr<nsIDocumentLoaderFactory> docLoaderFactory =
+     do_GetService(contractId);
+   NS_ENSURE_TRUE(docLoaderFactory, NS_ERROR_NOT_AVAILABLE);
+ 
+   nsCOMPtr<nsIContentViewer> viewer;
+   nsCOMPtr<nsIStreamListener> listener;
+-  rv = docLoaderFactory->CreateInstance("external-resource", chan,
++  rv = docLoaderFactory->CreateInstance(eExternalResource, chan,
+                                         newLoadGroup,
+                                         SVG_MIMETYPE, nsnull, nsnull,
+                                         getter_AddRefs(listener),
+                                         getter_AddRefs(viewer));
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   NS_ENSURE_TRUE(viewer, NS_ERROR_UNEXPECTED);
+ 
+diff --git a/layout/build/nsContentDLF.cpp b/layout/build/nsContentDLF.cpp
+--- a/layout/build/nsContentDLF.cpp
++++ b/layout/build/nsContentDLF.cpp
+@@ -131,17 +131,17 @@ MayUseXULXBL(nsIChannel* aChannel)
+   nsCOMPtr<nsIPrincipal> principal;
+   securityManager->GetChannelPrincipal(aChannel, getter_AddRefs(principal));
+   NS_ENSURE_TRUE(principal, false);
+ 
+   return nsContentUtils::AllowXULXBLForPrincipal(principal);
+ }
+ 
+ NS_IMETHODIMP
+-nsContentDLF::CreateInstance(const char* aCommand,
++nsContentDLF::CreateInstance(eParserCommands aCommand,
+                              nsIChannel* aChannel,
+                              nsILoadGroup* aLoadGroup,
+                              const char* aContentType, 
+                              nsIDocShell* aContainer,
+                              nsISupports* aExtraInfo,
+                              nsIStreamListener** aDocListener,
+                              nsIContentViewer** aDocViewer)
+ {
+@@ -159,17 +159,17 @@ nsContentDLF::CreateInstance(const char*
+   // needs limited scope, we need to use the raw string memory -- as returned
+   // by "type.get()" farther down in the function.
+   nsCAutoString type;
+ 
+   // Are we viewing source?
+   nsCOMPtr<nsIViewSourceChannel> viewSourceChannel = do_QueryInterface(aChannel);
+   if (viewSourceChannel)
+   {
+-    aCommand = "view-source";
++    aCommand = eViewSource;
+ 
+     // The parser freaks out when it sees the content-type that a
+     // view-source channel normally returns.  Get the actual content
+     // type of the data.  If it's known, use it; otherwise use
+     // text/plain.
+     viewSourceChannel->GetOriginalContentType(type);
+     bool knownType = false;
+     int32_t typeIndex;
+@@ -381,17 +381,17 @@ nsContentDLF::CreateBlankDocument(nsILoa
+     *aDocument = blankDoc;
+     NS_ADDREF(*aDocument);
+   }
+   return rv;
+ }
+ 
+ 
+ nsresult
+-nsContentDLF::CreateDocument(const char* aCommand,
++nsContentDLF::CreateDocument(eParserCommands aCommand,
+                              nsIChannel* aChannel,
+                              nsILoadGroup* aLoadGroup,
+                              nsIDocShell* aContainer,
+                              const nsCID& aDocumentCID,
+                              nsIStreamListener** aDocListener,
+                              nsIContentViewer** aContentViewer)
+ {
+   NS_TIME_FUNCTION;
+@@ -420,27 +420,27 @@ nsContentDLF::CreateDocument(const char*
+   rv = NS_NewContentViewer(getter_AddRefs(contentViewer));
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   doc->SetContainer(aContainer);
+ 
+   // Initialize the document to begin loading the data.  An
+   // nsIStreamListener connected to the parser is returned in
+   // aDocListener.
+-  rv = doc->StartDocumentLoad(aCommand, aChannel, aLoadGroup, aContainer, aDocListener, true);
++  rv = doc->StartDocumentLoad(NULL, aChannel, aLoadGroup, aContainer, aDocListener, true);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   // Bind the document to the Content Viewer
+   rv = contentViewer->LoadStart(doc);
+   contentViewer.forget(aContentViewer);
+   return rv;
+ }
+ 
+ nsresult
+-nsContentDLF::CreateXULDocument(const char* aCommand,
++nsContentDLF::CreateXULDocument(eParserCommands aCommand,
+                                 nsIChannel* aChannel,
+                                 nsILoadGroup* aLoadGroup,
+                                 const char* aContentType,
+                                 nsIDocShell* aContainer,
+                                 nsISupports* aExtraInfo,
+                                 nsIStreamListener** aDocListener,
+                                 nsIContentViewer** aContentViewer)
+ {
+@@ -462,17 +462,17 @@ nsContentDLF::CreateXULDocument(const ch
+    * Initialize the document to begin loading the data...
+    *
+    * An nsIStreamListener connected to the parser is returned in
+    * aDocListener.
+    */
+ 
+   doc->SetContainer(aContainer);
+ 
+-  rv = doc->StartDocumentLoad(aCommand, aChannel, aLoadGroup, aContainer, aDocListener, true);
++  rv = doc->StartDocumentLoad(NULL, aChannel, aLoadGroup, aContainer, aDocListener, true);
+   if (NS_FAILED(rv)) return rv;
+ 
+   /*
+    * Bind the document to the Content Viewer...
+    */
+   rv = contentViewer->LoadStart(doc);
+   contentViewer.forget(aContentViewer);
+   return rv;
+diff --git a/layout/build/nsContentDLF.h b/layout/build/nsContentDLF.h
+--- a/layout/build/nsContentDLF.h
++++ b/layout/build/nsContentDLF.h
+@@ -3,16 +3,17 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef nsContentDLF_h__
+ #define nsContentDLF_h__
+ 
+ #include "nsIDocumentLoaderFactory.h"
+ #include "nsIDocument.h"
++#include "nsIParser.h"
+ #include "nsMimeTypes.h"
+ 
+ class nsIChannel;
+ class nsIContentViewer;
+ class nsIFile;
+ class nsIInputStream;
+ class nsILoadGroup;
+ class nsIStreamListener;
+@@ -26,25 +27,25 @@ public:
+   nsContentDLF();
+   virtual ~nsContentDLF();
+ 
+   NS_DECL_ISUPPORTS
+   NS_DECL_NSIDOCUMENTLOADERFACTORY
+ 
+   nsresult InitUAStyleSheet();
+ 
+-  nsresult CreateDocument(const char* aCommand,
++  nsresult CreateDocument(eParserCommands aCommand,
+                           nsIChannel* aChannel,
+                           nsILoadGroup* aLoadGroup,
+                           nsIDocShell* aContainer,
+                           const nsCID& aDocumentCID,
+                           nsIStreamListener** aDocListener,
+                           nsIContentViewer** aContentViewer);
+ 
+-  nsresult CreateXULDocument(const char* aCommand,
++  nsresult CreateXULDocument(eParserCommands aCommand,
+                              nsIChannel* aChannel,
+                              nsILoadGroup* aLoadGroup,
+                              const char* aContentType,
+                              nsIDocShell* aContainer,
+                              nsISupports* aExtraInfo,
+                              nsIStreamListener** aDocListener,
+                              nsIContentViewer** aContentViewer);
+ 
+diff --git a/parser/htmlparser/public/nsIParser.h b/parser/htmlparser/public/nsIParser.h
+--- a/parser/htmlparser/public/nsIParser.h
++++ b/parser/htmlparser/public/nsIParser.h
+@@ -41,17 +41,19 @@ class nsString;
+ class nsIURI;
+ class nsIChannel;
+ class nsIContent;
+ 
+ enum eParserCommands {
+   eViewNormal,
+   eViewSource,
+   eViewFragment,
+-  eViewErrors
++  eExternalResource,
++  eLoadAsData,
++  eLoadAsInteractiveData
+ };
+ 
+ enum eParserDocType {
+   ePlainText = 0,
+   eXML,
+   eHTML_Quirks,
+   eHTML_Strict
+ };

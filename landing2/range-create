@@ -1,0 +1,220 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsRange.cpp b/content/base/src/nsRange.cpp
+--- a/content/base/src/nsRange.cpp
++++ b/content/base/src/nsRange.cpp
+@@ -279,16 +279,36 @@ nsRange::CreateRange(nsIDOMNode* aStartP
+ {
+   nsRefPtr<nsRange> range;
+   nsresult rv = nsRange::CreateRange(aStartParent, aStartOffset, aEndParent,
+                                      aEndOffset, getter_AddRefs(range));
+   range.forget(aRange);
+   return rv;
+ }
+ 
++/* static */
++nsresult
++nsRange::CreateRange(nsIDOMNode* aParent, int32_t aOffset,
++                     nsRange** aRange)
++{
++  MOZ_ASSERT(aRange);
++  *aRange = NULL;
++
++  nsRefPtr<nsRange> range = new nsRange();
++
++  nsresult rv = range->SetStart(aParent, aOffset);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  MOZ_ASSERT(range->GetStartParent() == range->GetEndParent());
++  MOZ_ASSERT(range->StartOffset() == range->EndOffset());
++
++  range.forget(aRange);
++  return NS_OK;
++}
++
+ /******************************************************
+  * nsISupports
+  ******************************************************/
+ 
+ NS_IMPL_CYCLE_COLLECTION_CLASS(nsRange)
+ 
+ NS_IMPL_CYCLE_COLLECTING_ADDREF(nsRange)
+ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsRange)
+diff --git a/content/base/src/nsRange.h b/content/base/src/nsRange.h
+--- a/content/base/src/nsRange.h
++++ b/content/base/src/nsRange.h
+@@ -67,16 +67,22 @@ public:
+ 
+   static nsresult CreateRange(nsIDOMNode* aStartParent, int32_t aStartOffset,
+                               nsIDOMNode* aEndParent, int32_t aEndOffset,
+                               nsRange** aRange);
+   static nsresult CreateRange(nsIDOMNode* aStartParent, int32_t aStartOffset,
+                               nsIDOMNode* aEndParent, int32_t aEndOffset,
+                               nsIDOMRange** aRange);
+ 
++  /**
++   * Sets both start and end to {aParent, aOffset}.
++   */
++  static nsresult CreateRange(nsIDOMNode* aParent, int32_t aOffset,
++                              nsRange** aRange);
++
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+   NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(nsRange, nsIDOMRange)
+ 
+   // nsIDOMRange interface
+   NS_DECL_NSIDOMRANGE
+   
+   nsINode* GetRoot() const
+   {
+diff --git a/editor/libeditor/base/IMETextTxn.cpp b/editor/libeditor/base/IMETextTxn.cpp
+--- a/editor/libeditor/base/IMETextTxn.cpp
++++ b/editor/libeditor/base/IMETextTxn.cpp
+@@ -333,24 +333,21 @@ NS_IMETHODIMP IMETextTxn::CollapseTextSe
+                 continue;
+ 
+              result= selCon->GetSelection(TextRangeToSelection(textRangeType),
+                      getter_AddRefs(imeSel));
+              NS_ASSERTION(NS_SUCCEEDED(result), "Cannot get selction");
+              if(NS_FAILED(result))
+                 break;
+ 
+-             nsRefPtr<nsRange> newRange = new nsRange();
+-             result = newRange->SetStart(mElement,mOffset+selectionStart);
+-             NS_ASSERTION(NS_SUCCEEDED(result), "Cannot SetStart");
+-             if(NS_FAILED(result))
+-                break;
+-
+-             result = newRange->SetEnd(mElement,mOffset+selectionEnd);
+-             NS_ASSERTION(NS_SUCCEEDED(result), "Cannot SetEnd");
++             nsRefPtr<nsRange> newRange;
++             result = nsRange::CreateRange(mElement, mOffset + selectionStart,
++                                           mElement, mOffset + selectionEnd,
++                                           getter_AddRefs(newRange));
++             NS_ASSERTION(NS_SUCCEEDED(result), "Cannot CreateRange");
+              if(NS_FAILED(result))
+                 break;
+ 
+              result = imeSel->AddRange(newRange);
+              NS_ASSERTION(NS_SUCCEEDED(result), "Cannot AddRange");
+              if(NS_FAILED(result))
+                 break;
+ 
+diff --git a/editor/libeditor/html/nsHTMLEditRules.cpp b/editor/libeditor/html/nsHTMLEditRules.cpp
+--- a/editor/libeditor/html/nsHTMLEditRules.cpp
++++ b/editor/libeditor/html/nsHTMLEditRules.cpp
+@@ -5185,20 +5185,20 @@ nsHTMLEditRules::ExpandSelectionForDelet
+   {
+     // find block node containing br
+     nsCOMPtr<nsIDOMNode> brBlock = firstBRParent;
+     if (!IsBlockNode(brBlock))
+       brBlock = nsHTMLEditor::GetBlockNodeParent(brBlock);
+     bool nodeBefore=false, nodeAfter=false;
+     
+     // create a range that represents expanded selection
+-    nsRefPtr<nsRange> range = new nsRange();
+-    res = range->SetStart(selStartNode, selStartOffset);
+-    NS_ENSURE_SUCCESS(res, res);
+-    res = range->SetEnd(selEndNode, selEndOffset);
++    nsRefPtr<nsRange> range;
++    res = nsRange::CreateRange(selStartNode, selStartOffset,
++                               selEndNode, selEndOffset,
++                               getter_AddRefs(range));
+     NS_ENSURE_SUCCESS(res, res);
+     
+     // check if block is entirely inside range
+     nsCOMPtr<nsIContent> brContentBlock = do_QueryInterface(brBlock);
+     res = nsRange::CompareNodeToRange(brContentBlock, range, &nodeBefore, &nodeAfter);
+     
+     // if block isn't contained, forgo grabbing the br in the expanded selection
+     if (nodeBefore || nodeAfter)
+@@ -6337,30 +6337,25 @@ nsHTMLEditRules::GetHighestInlineParent(
+ //                     of nodes from a point that will be operated on. 
+ //                       
+ nsresult 
+ nsHTMLEditRules::GetNodesFromPoint(DOMPoint point,
+                                    nsEditor::OperationID operation,
+                                    nsCOMArray<nsIDOMNode> &arrayOfNodes,
+                                    bool dontTouchContent)
+ {
+-  nsresult res;
+-
+   // get our point
+   nsCOMPtr<nsIDOMNode> node;
+   int32_t offset;
+   point.GetPoint(node, offset);
+   
+   // use it to make a range
+-  nsRefPtr<nsRange> range = new nsRange();
+-  res = range->SetStart(node, offset);
+-  NS_ENSURE_SUCCESS(res, res);
+-  /* SetStart() will also set the end for this new range
+-  res = range->SetEnd(node, offset);
+-  NS_ENSURE_SUCCESS(res, res); */
++  nsRefPtr<nsRange> range;
++  nsresult res = nsRange::CreateRange(node, offset, getter_AddRefs(range));
++  NS_ENSURE_SUCCESS(res, res);
+   
+   // expand the range to include adjacent inlines
+   res = PromoteRange(range, operation);
+   NS_ENSURE_SUCCESS(res, res);
+       
+   // make array of ranges
+   nsCOMArray<nsIDOMRange> arrayOfRanges;
+   
+@@ -7549,20 +7544,19 @@ nsHTMLEditRules::PinSelectionToNewBlock(
+   // get the (collapsed) selection location
+   nsCOMPtr<nsIDOMNode> selNode, temp;
+   int32_t selOffset;
+   nsresult res = mHTMLEditor->GetStartNodeAndOffset(aSelection, getter_AddRefs(selNode), &selOffset);
+   NS_ENSURE_SUCCESS(res, res);
+   temp = selNode;
+   
+   // use ranges and sRangeHelper to compare sel point to new block
+-  nsRefPtr<nsRange> range = new nsRange();
+-  res = range->SetStart(selNode, selOffset);
+-  NS_ENSURE_SUCCESS(res, res);
+-  res = range->SetEnd(selNode, selOffset);
++  nsRefPtr<nsRange> range;
++  res = nsRange::CreateRange(selNode, selOffset, selNode, selOffset,
++                             getter_AddRefs(range));
+   NS_ENSURE_SUCCESS(res, res);
+   nsCOMPtr<nsIContent> block (do_QueryInterface(mNewBlock));
+   NS_ENSURE_TRUE(block, NS_ERROR_NO_INTERFACE);
+   bool nodeBefore, nodeAfter;
+   res = nsRange::CompareNodeToRange(block, range, &nodeBefore, &nodeAfter);
+   NS_ENSURE_SUCCESS(res, res);
+   
+   if (nodeBefore && nodeAfter)
+diff --git a/editor/libeditor/html/nsWSRunObject.cpp b/editor/libeditor/html/nsWSRunObject.cpp
+--- a/editor/libeditor/html/nsWSRunObject.cpp
++++ b/editor/libeditor/html/nsWSRunObject.cpp
+@@ -1587,24 +1587,23 @@ nsWSRunObject::DeleteChars(nsIDOMNode *a
+         textnode = do_QueryInterface(node);
+         res = mHTMLEditor->DeleteText(textnode, 0, (uint32_t)aEndOffset);
+         NS_ENSURE_SUCCESS(res, res);
+       }
+       break;
+     }
+     else
+     {
+-      if (!range)
+-      {
+-        range = new nsRange();
+-        res = range->SetStart(aStartNode, aStartOffset);
+-        NS_ENSURE_SUCCESS(res, res);
+-        res = range->SetEnd(aEndNode, aEndOffset);
++      if (!range) {
++        res = nsRange::CreateRange(aStartNode, aStartOffset,
++                                   aEndNode, aEndOffset,
++                                   getter_AddRefs(range));
+         NS_ENSURE_SUCCESS(res, res);
+       }
++
+       bool nodeBefore, nodeAfter;
+       nsCOMPtr<nsIContent> content (do_QueryInterface(node));
+       res = nsRange::CompareNodeToRange(content, range, &nodeBefore, &nodeAfter);
+       NS_ENSURE_SUCCESS(res, res);
+       if (nodeAfter)
+       {
+         break;
+       }
