@@ -1,0 +1,189 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/ipc/chromium/src/base/command_line.cc b/ipc/chromium/src/base/command_line.cc
+--- a/ipc/chromium/src/base/command_line.cc
++++ b/ipc/chromium/src/base/command_line.cc
+@@ -39,33 +39,33 @@ const char kSwitchValueSeparator[] = "="
+ static void Lowercase(std::wstring* parameter) {
+   transform(parameter->begin(), parameter->end(), parameter->begin(),
+             tolower);
+ }
+ #endif
+ 
+ #if defined(OS_WIN)
+ void CommandLine::ParseFromString(const std::wstring& command_line) {
+-  TrimWhitespace(command_line, TRIM_ALL, &command_line_string_);
++  TrimWhitespace(command_line, &command_line_string_);
+ 
+   if (command_line_string_.empty())
+     return;
+ 
+   int num_args = 0;
+   wchar_t** args = NULL;
+ 
+   args = CommandLineToArgvW(command_line_string_.c_str(), &num_args);
+ 
+   // Populate program_ with the trimmed version of the first arg.
+-  TrimWhitespace(args[0], TRIM_ALL, &program_);
++  TrimWhitespace(args[0], &program_);
+ 
+   bool parse_switches = true;
+   for (int i = 1; i < num_args; ++i) {
+     std::wstring arg;
+-    TrimWhitespace(args[i], TRIM_ALL, &arg);
++    TrimWhitespace(args[i], &arg);
+ 
+     if (!parse_switches) {
+       loose_values_.push_back(arg);
+       continue;
+     }
+ 
+     if (arg == kSwitchTerminator) {
+       parse_switches = false;
+diff --git a/ipc/chromium/src/base/string_util.cc b/ipc/chromium/src/base/string_util.cc
+--- a/ipc/chromium/src/base/string_util.cc
++++ b/ipc/chromium/src/base/string_util.cc
+@@ -266,65 +266,43 @@ static const char kWhitespaceASCII[] = {
+   0x0B,
+   0x0C,
+   0x0D,
+   0x20,    // Space
+   0
+ };
+ 
+ template<typename STR>
+-TrimPositions TrimStringT(const STR& input,
+-                          const typename STR::value_type trim_chars[],
+-                          TrimPositions positions,
+-                          STR* output) {
++static void TrimStringT(const STR& input,
++                                 const typename STR::value_type trim_chars[],
++                                 STR* output) {
+   // Find the edges of leading/trailing whitespace as desired.
+-  const typename STR::size_type last_char = input.length() - 1;
+-  const typename STR::size_type first_good_char = (positions & TRIM_LEADING) ?
+-      input.find_first_not_of(trim_chars) : 0;
+-  const typename STR::size_type last_good_char = (positions & TRIM_TRAILING) ?
+-      input.find_last_not_of(trim_chars) : last_char;
++  const typename STR::size_type first_good_char = input.find_first_not_of(trim_chars);
++  const typename STR::size_type last_good_char = input.find_last_not_of(trim_chars);
+ 
+   // When the string was all whitespace, report that we stripped off whitespace
+   // from whichever position the caller was interested in.  For empty input, we
+   // stripped no whitespace, but we still need to clear |output|.
+   if (input.empty() ||
+       (first_good_char == STR::npos) || (last_good_char == STR::npos)) {
+-    bool input_was_empty = input.empty();  // in case output == &input
+     output->clear();
+-    return input_was_empty ? TRIM_NONE : positions;
++    return;
+   }
+ 
+   // Trim the whitespace.
+   *output =
+       input.substr(first_good_char, last_good_char - first_good_char + 1);
+-
+-  // Return where we trimmed from.
+-  return static_cast<TrimPositions>(
+-      ((first_good_char == 0) ? TRIM_NONE : TRIM_LEADING) |
+-      ((last_good_char == last_char) ? TRIM_NONE : TRIM_TRAILING));
+ }
+ 
+-TrimPositions TrimWhitespace(const std::wstring& input,
+-                             TrimPositions positions,
+-                             std::wstring* output) {
+-  return TrimStringT(input, kWhitespaceWide, positions, output);
++void TrimWhitespace(const std::wstring& input, std::wstring* output) {
++  TrimStringT(input, kWhitespaceWide, output);
+ }
+ 
+-TrimPositions TrimWhitespaceASCII(const std::string& input,
+-                                  TrimPositions positions,
+-                                  std::string* output) {
+-  return TrimStringT(input, kWhitespaceASCII, positions, output);
+-}
+-
+-// This function is only for backward-compatibility.
+-// To be removed when all callers are updated.
+-TrimPositions TrimWhitespace(const std::string& input,
+-                             TrimPositions positions,
+-                             std::string* output) {
+-  return TrimWhitespaceASCII(input, positions, output);
++static void TrimWhitespace(const std::string& input, std::string* output) {
++  TrimStringT(input, kWhitespaceASCII, output);
+ }
+ 
+ std::string WideToASCII(const std::wstring& wide) {
+   DCHECK(IsStringASCII(wide));
+   return std::string(wide.begin(), wide.end());
+ }
+ 
+ std::wstring ASCIIToWide(const std::string& ascii) {
+@@ -645,17 +623,17 @@ static void SplitStringT(const STR& str,
+   size_t i;
+   size_t c = str.size();
+   for (i = 0; i <= c; ++i) {
+     if (i == c || str[i] == s) {
+       size_t len = i - last;
+       STR tmp = str.substr(last, len);
+       if (trim_whitespace) {
+         STR t_tmp;
+-        TrimWhitespace(tmp, TRIM_ALL, &t_tmp);
++        TrimWhitespace(tmp, &t_tmp);
+         r->push_back(t_tmp);
+       } else {
+         r->push_back(tmp);
+       }
+       last = i + 1;
+     }
+   }
+ }
+diff --git a/ipc/chromium/src/base/string_util.h b/ipc/chromium/src/base/string_util.h
+--- a/ipc/chromium/src/base/string_util.h
++++ b/ipc/chromium/src/base/string_util.h
+@@ -103,43 +103,19 @@ bool IsWprintfFormatPortable(const wchar
+ #if defined(OS_WIN)
+ #include "base/string_util_win.h"
+ #elif defined(OS_POSIX)
+ #include "base/string_util_posix.h"
+ #else
+ #error Define string operations appropriately for your platform
+ #endif
+ 
+-// Trims any whitespace from either end of the input string.  Returns where
+-// whitespace was found.
+-// The non-wide version has two functions:
+-// * TrimWhitespaceASCII()
+-//   This function is for ASCII strings and only looks for ASCII whitespace;
+-// * TrimWhitespaceUTF8()
+-//   This function is for UTF-8 strings and looks for Unicode whitespace.
+-// Please choose the best one according to your usage.
++// Trims any whitespace from either end of the input string.
+ // NOTE: Safe to use the same variable for both input and output.
+-enum TrimPositions {
+-  TRIM_NONE     = 0,
+-  TRIM_LEADING  = 1 << 0,
+-  TRIM_TRAILING = 1 << 1,
+-  TRIM_ALL      = TRIM_LEADING | TRIM_TRAILING
+-};
+-TrimPositions TrimWhitespace(const std::wstring& input,
+-                             TrimPositions positions,
+-                             std::wstring* output);
+-TrimPositions TrimWhitespaceASCII(const std::string& input,
+-                                  TrimPositions positions,
+-                                  std::string* output);
+-
+-// Deprecated. This function is only for backward compatibility and calls
+-// TrimWhitespaceASCII().
+-TrimPositions TrimWhitespace(const std::string& input,
+-                             TrimPositions positions,
+-                             std::string* output);
++void TrimWhitespace(const std::wstring& input, std::wstring* output);
+ 
+ // Searches  for CR or LF characters.  Removes all contiguous whitespace
+ // strings that contain them.  This is useful when trying to deal with text
+ // copied from terminals.
+ // Returns |text, with the following three transformations:
+ // (1) Leading and trailing whitespace is trimmed.
+ // (2) If |trim_sequences_with_line_breaks| is true, any other whitespace
+ //     sequences containing a CR or LF are trimmed.

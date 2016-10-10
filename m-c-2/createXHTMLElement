@@ -1,0 +1,86 @@
+From: Ms2ger <ms2ger@gmail.com>
+Remove txMozillaTextOutput::createXHTMLElement; r=peterv
+
+diff --git a/dom/xslt/xslt/txMozillaTextOutput.cpp b/dom/xslt/xslt/txMozillaTextOutput.cpp
+--- a/dom/xslt/xslt/txMozillaTextOutput.cpp
++++ b/dom/xslt/xslt/txMozillaTextOutput.cpp
+@@ -181,35 +181,27 @@ txMozillaTextOutput::createResultDocumen
+                                    getter_AddRefs(mTextParent));
+         NS_ENSURE_SUCCESS(rv, rv);
+ 
+ 
+         rv = mDocument->AppendChildTo(mTextParent, true);
+         NS_ENSURE_SUCCESS(rv, rv);
+     }
+     else {
+-        nsCOMPtr<nsIContent> html, head, body;
+-        rv = createXHTMLElement(nsGkAtoms::html, getter_AddRefs(html));
+-        NS_ENSURE_SUCCESS(rv, rv);
++        nsCOMPtr<Element> html = mDocument->CreateHTMLElement(nsGkAtoms::html);
+ 
+-        rv = createXHTMLElement(nsGkAtoms::head, getter_AddRefs(head));
+-        NS_ENSURE_SUCCESS(rv, rv);
+-
++        nsCOMPtr<Element> head = mDocument->CreateHTMLElement(nsGkAtoms::head);
+         rv = html->AppendChildTo(head, false);
+         NS_ENSURE_SUCCESS(rv, rv);
+ 
+-        rv = createXHTMLElement(nsGkAtoms::body, getter_AddRefs(body));
+-        NS_ENSURE_SUCCESS(rv, rv);
+-
++        nsCOMPtr<Element> body = mDocument->CreateHTMLElement(nsGkAtoms::body);
+         rv = html->AppendChildTo(body, false);
+         NS_ENSURE_SUCCESS(rv, rv);
+ 
+-        rv = createXHTMLElement(nsGkAtoms::pre, getter_AddRefs(mTextParent));
+-        NS_ENSURE_SUCCESS(rv, rv);
+-
++        mTextParent = mDocument->CreateHTMLElement(nsGkAtoms::pre);
+         rv = mTextParent->SetAttr(kNameSpaceID_None, nsGkAtoms::id,
+                                   NS_LITERAL_STRING("transformiixResult"),
+                                   false);
+         NS_ENSURE_SUCCESS(rv, rv);
+ 
+         rv = body->AppendChildTo(mTextParent, false);
+         NS_ENSURE_SUCCESS(rv, rv);
+ 
+@@ -233,17 +225,8 @@ txMozillaTextOutput::startElement(nsIAto
+ {
+     return NS_OK;
+ }
+ 
+ void txMozillaTextOutput::getOutputDocument(nsIDOMDocument** aDocument)
+ {
+     CallQueryInterface(mDocument, aDocument);
+ }
+-
+-nsresult
+-txMozillaTextOutput::createXHTMLElement(nsIAtom* aName,
+-                                        nsIContent** aResult)
+-{
+-    nsCOMPtr<Element> element = mDocument->CreateHTMLElement(aName);
+-    element.forget(aResult);
+-    return NS_OK;
+-}
+diff --git a/dom/xslt/xslt/txMozillaTextOutput.h b/dom/xslt/xslt/txMozillaTextOutput.h
+--- a/dom/xslt/xslt/txMozillaTextOutput.h
++++ b/dom/xslt/xslt/txMozillaTextOutput.h
+@@ -27,18 +27,16 @@ public:
+ 
+     TX_DECL_TXAXMLEVENTHANDLER
+     TX_DECL_TXAOUTPUTXMLEVENTHANDLER
+ 
+     nsresult createResultDocument(nsIDOMDocument* aSourceDocument,
+                                   bool aLoadedAsData);
+ 
+ private:
+-    nsresult createXHTMLElement(nsIAtom* aName, nsIContent** aResult);
+-
+     nsCOMPtr<nsIContent> mTextParent;
+     nsWeakPtr mObserver;
+     nsCOMPtr<nsIDocument> mDocument;
+     txOutputFormat mOutputFormat;
+     nsString mText;
+ };
+ 
+ #endif

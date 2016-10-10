@@ -1,0 +1,31 @@
+From: Ms2ger <ms2ger@gmail.com>
+Add a non-null assertion to the TokenBuf constructor.
+
+We set the ptr member to null to poison the TokenBuf, so setting it to null in
+the constructor leads to surprising assertion failures. It is more helpful to
+assert up-front that this doesn't happen.
+
+diff --git a/js/src/frontend/TokenStream.h b/js/src/frontend/TokenStream.h
+--- a/js/src/frontend/TokenStream.h
++++ b/js/src/frontend/TokenStream.h
+@@ -755,17 +755,19 @@ class MOZ_STACK_CLASS TokenStream
+     // gets raw chars, basically.  TokenStreams functions are layered on top
+     // and do some extra stuff like converting all EOL sequences to '\n',
+     // tracking the line number, and setting |flags.isEOF|.  (The "raw" in "raw
+     // chars" refers to the lack of EOL sequence normalization.)
+     class TokenBuf {
+       public:
+         TokenBuf(ExclusiveContext *cx, const jschar *buf, size_t length)
+           : base_(buf), limit_(buf + length), ptr(buf)
+-        { }
++        {
++            MOZ_ASSERT(buf);
++        }
+ 
+         bool hasRawChars() const {
+             return ptr < limit_;
+         }
+ 
+         bool atStart() const {
+             return ptr == base_;
+         }

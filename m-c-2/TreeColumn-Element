@@ -1,0 +1,349 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/layout/xul/tree/nsTreeBodyFrame.cpp b/layout/xul/tree/nsTreeBodyFrame.cpp
+--- a/layout/xul/tree/nsTreeBodyFrame.cpp
++++ b/layout/xul/tree/nsTreeBodyFrame.cpp
+@@ -2036,21 +2036,21 @@ nsTreeBodyFrame::PrefillPropertyArray(in
+         if (state == nsITreeView::PROGRESS_NORMAL)
+           mScratchArray.AppendElement(nsGkAtoms::progressNormal);
+         else if (state == nsITreeView::PROGRESS_UNDETERMINED)
+           mScratchArray.AppendElement(nsGkAtoms::progressUndetermined);
+       }
+     }
+ 
+     // Read special properties from attributes on the column content node
+-    if (aCol->mContent->AttrValueIs(kNameSpaceID_None,
++    if (aCol->mElement->AttrValueIs(kNameSpaceID_None,
+                                     nsGkAtoms::insertbefore,
+                                     nsGkAtoms::_true, eCaseMatters))
+       mScratchArray.AppendElement(nsGkAtoms::insertbefore);
+-    if (aCol->mContent->AttrValueIs(kNameSpaceID_None,
++    if (aCol->mElement->AttrValueIs(kNameSpaceID_None,
+                                     nsGkAtoms::insertafter,
+                                     nsGkAtoms::_true, eCaseMatters))
+       mScratchArray.AppendElement(nsGkAtoms::insertafter);
+   }
+ }
+ 
+ nsITheme*
+ nsTreeBodyFrame::GetTwistyRect(int32_t aRowIndex,
+diff --git a/layout/xul/tree/nsTreeColumns.cpp b/layout/xul/tree/nsTreeColumns.cpp
+--- a/layout/xul/tree/nsTreeColumns.cpp
++++ b/layout/xul/tree/nsTreeColumns.cpp
+@@ -14,47 +14,47 @@
+ #include "nsContentUtils.h"
+ #include "nsTreeBodyFrame.h"
+ #include "mozilla/dom/Element.h"
+ #include "mozilla/dom/TreeColumnsBinding.h"
+ 
+ using namespace mozilla;
+ 
+ // Column class that caches all the info about our column.
+-nsTreeColumn::nsTreeColumn(nsTreeColumns* aColumns, nsIContent* aContent)
+-  : mContent(aContent),
++nsTreeColumn::nsTreeColumn(nsTreeColumns* aColumns, dom::Element* aElement)
++  : mElement(aElement),
+     mColumns(aColumns),
+     mPrevious(nullptr)
+ {
+-  NS_ASSERTION(aContent &&
+-               aContent->NodeInfo()->Equals(nsGkAtoms::treecol,
++  NS_ASSERTION(aElement &&
++               aElement->NodeInfo()->Equals(nsGkAtoms::treecol,
+                                             kNameSpaceID_XUL),
+                "nsTreeColumn's content must be a <xul:treecol>");
+ 
+   Invalidate();
+ }
+ 
+ nsTreeColumn::~nsTreeColumn()
+ {
+   if (mNext) {
+     mNext->SetPrevious(nullptr);
+   }
+ }
+ 
+ NS_IMPL_CYCLE_COLLECTION_CLASS(nsTreeColumn)
+ 
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsTreeColumn)
+-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mContent)
++  NS_IMPL_CYCLE_COLLECTION_UNLINK(mElement)
+   if (tmp->mNext) {
+     tmp->mNext->SetPrevious(nullptr);
+     NS_IMPL_CYCLE_COLLECTION_UNLINK(mNext)
+   }
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsTreeColumn)
+-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mContent)
++  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mElement)
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mNext)
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+ 
+ NS_IMPL_CYCLE_COLLECTING_ADDREF(nsTreeColumn)
+ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsTreeColumn)
+ 
+ DOMCI_DATA(TreeColumn, nsTreeColumn)
+ 
+@@ -69,19 +69,19 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(
+     return NS_OK;
+   }
+   else
+ NS_INTERFACE_MAP_END
+ 
+ nsIFrame*
+ nsTreeColumn::GetFrame()
+ {
+-  NS_ENSURE_TRUE(mContent, nullptr);
++  NS_ENSURE_TRUE(mElement, nullptr);
+ 
+-  return mContent->GetPrimaryFrame();
++  return mElement->GetPrimaryFrame();
+ }
+ 
+ bool
+ nsTreeColumn::IsLastVisible(nsTreeBodyFrame* aBodyFrame)
+ {
+   NS_ASSERTION(GetFrame(), "should have checked for this already");
+ 
+   // cyclers are fixed width, don't adjust them
+@@ -146,18 +146,18 @@ nsTreeColumn::GetWidthInTwips(nsTreeBody
+     *aResult += aBodyFrame->mAdjustWidth;
+   return NS_OK;
+ }
+ 
+ 
+ NS_IMETHODIMP
+ nsTreeColumn::GetElement(nsIDOMElement** aElement)
+ {
+-  if (mContent) {
+-    return CallQueryInterface(mContent, aElement);
++  if (mElement) {
++    return CallQueryInterface(mElement, aElement);
+   }
+   *aElement = nullptr;
+   return NS_ERROR_FAILURE;
+ }
+ 
+ NS_IMETHODIMP
+ nsTreeColumn::GetColumns(nsITreeColumns** aColumns)
+ {
+@@ -264,25 +264,25 @@ nsTreeColumn::GetPrevious(nsITreeColumn*
+ 
+ NS_IMETHODIMP
+ nsTreeColumn::Invalidate()
+ {
+   nsIFrame* frame = GetFrame();
+   NS_ENSURE_TRUE(frame, NS_ERROR_FAILURE);
+ 
+   // Fetch the Id.
+-  mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::id, mId);
++  mElement->GetAttr(kNameSpaceID_None, nsGkAtoms::id, mId);
+ 
+   // If we have an Id, cache the Id as an atom.
+   if (!mId.IsEmpty()) {
+     mAtom = do_GetAtom(mId);
+   }
+ 
+   // Cache our index.
+-  nsTreeUtils::GetColumnIndex(mContent, &mIndex);
++  nsTreeUtils::GetColumnIndex(mElement, &mIndex);
+ 
+   const nsStyleVisibility* vis = frame->StyleVisibility();
+ 
+   // Cache our text alignment policy.
+   const nsStyleText* textStyle = frame->StyleText();
+ 
+   mTextAlignment = textStyle->mTextAlign;
+   // DEFAULT or END alignment sometimes means RIGHT
+@@ -293,48 +293,48 @@ nsTreeColumn::Invalidate()
+     mTextAlignment = NS_STYLE_TEXT_ALIGN_RIGHT;
+   } else if (mTextAlignment == NS_STYLE_TEXT_ALIGN_DEFAULT ||
+              mTextAlignment == NS_STYLE_TEXT_ALIGN_END) {
+     mTextAlignment = NS_STYLE_TEXT_ALIGN_LEFT;
+   }
+ 
+   // Figure out if we're the primary column (that has to have indentation
+   // and twisties drawn.
+-  mIsPrimary = mContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::primary,
++  mIsPrimary = mElement->AttrValueIs(kNameSpaceID_None, nsGkAtoms::primary,
+                                      nsGkAtoms::_true, eCaseMatters);
+ 
+   // Figure out if we're a cycling column (one that doesn't cause a selection
+   // to happen).
+-  mIsCycler = mContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::cycler,
++  mIsCycler = mElement->AttrValueIs(kNameSpaceID_None, nsGkAtoms::cycler,
+                                     nsGkAtoms::_true, eCaseMatters);
+ 
+-  mIsEditable = mContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::editable,
++  mIsEditable = mElement->AttrValueIs(kNameSpaceID_None, nsGkAtoms::editable,
+                                      nsGkAtoms::_true, eCaseMatters);
+ 
+-  mIsSelectable = !mContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::selectable,
++  mIsSelectable = !mElement->AttrValueIs(kNameSpaceID_None, nsGkAtoms::selectable,
+                                          nsGkAtoms::_false, eCaseMatters);
+ 
+-  mOverflow = mContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::overflow,
++  mOverflow = mElement->AttrValueIs(kNameSpaceID_None, nsGkAtoms::overflow,
+                                     nsGkAtoms::_true, eCaseMatters);
+ 
+   // Figure out our column type. Default type is text.
+   mType = nsITreeColumn::TYPE_TEXT;
+   static nsIContent::AttrValuesArray typestrings[] =
+     {&nsGkAtoms::checkbox, &nsGkAtoms::progressmeter, nullptr};
+-  switch (mContent->FindAttrValueIn(kNameSpaceID_None, nsGkAtoms::type,
++  switch (mElement->FindAttrValueIn(kNameSpaceID_None, nsGkAtoms::type,
+                                     typestrings, eCaseMatters)) {
+     case 0: mType = nsITreeColumn::TYPE_CHECKBOX; break;
+     case 1: mType = nsITreeColumn::TYPE_PROGRESSMETER; break;
+   }
+ 
+   // Fetch the crop style.
+   mCropStyle = 0;
+   static nsIContent::AttrValuesArray cropstrings[] =
+     {&nsGkAtoms::center, &nsGkAtoms::left, &nsGkAtoms::start, nullptr};
+-  switch (mContent->FindAttrValueIn(kNameSpaceID_None, nsGkAtoms::crop,
++  switch (mElement->FindAttrValueIn(kNameSpaceID_None, nsGkAtoms::crop,
+                                     cropstrings, eCaseMatters)) {
+     case 0:
+       mCropStyle = 1;
+       break;
+     case 1:
+     case 2:
+       mCropStyle = 2;
+       break;
+@@ -454,18 +454,18 @@ nsTreeColumns::GetPrimaryColumn(nsITreeC
+   return NS_OK;
+ }
+ 
+ nsTreeColumn*
+ nsTreeColumns::GetSortedColumn()
+ {
+   EnsureColumns();
+   for (nsTreeColumn* currCol = mFirstColumn; currCol; currCol = currCol->GetNext()) {
+-    if (currCol->mContent &&
+-        nsContentUtils::HasNonEmptyAttr(currCol->mContent, kNameSpaceID_None,
++    if (currCol->mElement &&
++        nsContentUtils::HasNonEmptyAttr(currCol->mElement, kNameSpaceID_None,
+                                         nsGkAtoms::sortDirection)) {
+       return currCol;
+     }
+   }
+   return nullptr;
+ }
+ 
+ NS_IMETHODIMP
+@@ -481,29 +481,29 @@ nsTreeColumns::GetKeyColumn()
+   EnsureColumns();
+ 
+   nsTreeColumn* first = nullptr;
+   nsTreeColumn* primary = nullptr;
+   nsTreeColumn* sorted = nullptr;
+ 
+   for (nsTreeColumn* currCol = mFirstColumn; currCol; currCol = currCol->GetNext()) {
+     // Skip hidden columns.
+-    if (!currCol->mContent ||
+-        currCol->mContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::hidden,
++    if (!currCol->mElement ||
++        currCol->mElement->AttrValueIs(kNameSpaceID_None, nsGkAtoms::hidden,
+                                        nsGkAtoms::_true, eCaseMatters))
+       continue;
+ 
+     // Skip non-text column
+     if (currCol->GetType() != nsITreeColumn::TYPE_TEXT)
+       continue;
+ 
+     if (!first)
+       first = currCol;
+     
+-    if (nsContentUtils::HasNonEmptyAttr(currCol->mContent, kNameSpaceID_None,
++    if (nsContentUtils::HasNonEmptyAttr(currCol->mElement, kNameSpaceID_None,
+                                         nsGkAtoms::sortDirection)) {
+       // Use sorted column as the key.
+       sorted = currCol;
+       break;
+     }
+ 
+     if (currCol->IsPrimary())
+       if (!primary)
+@@ -524,17 +524,17 @@ nsTreeColumns::GetKeyColumn(nsITreeColum
+   return NS_OK;
+ }
+ 
+ nsTreeColumn*
+ nsTreeColumns::GetColumnFor(dom::Element* aElement)
+ {
+   EnsureColumns();
+   for (nsTreeColumn* currCol = mFirstColumn; currCol; currCol = currCol->GetNext()) {
+-    if (currCol->mContent == aElement) {
++    if (currCol->mElement == aElement) {
+       return currCol;
+     }
+   }
+   return nullptr;
+ }
+ 
+ NS_IMETHODIMP
+ nsTreeColumns::GetColumnFor(nsIDOMElement* aElement, nsITreeColumn** _retval)
+@@ -698,17 +698,17 @@ nsTreeColumns::EnsureColumns()
+     // we can enumerate the columns in visible order
+     nsTreeColumn* currCol = nullptr;
+     while (colFrame) {
+       nsIContent* colContent = colFrame->GetContent();
+ 
+       if (colContent->NodeInfo()->Equals(nsGkAtoms::treecol,
+                                          kNameSpaceID_XUL)) {
+         // Create a new column structure.
+-        nsTreeColumn* col = new nsTreeColumn(this, colContent);
++        nsTreeColumn* col = new nsTreeColumn(this, colContent->AsElement());
+         if (!col)
+           return;
+ 
+         if (currCol) {
+           currCol->SetNext(col);
+           col->SetPrevious(currCol);
+         }
+         else {
+diff --git a/layout/xul/tree/nsTreeColumns.h b/layout/xul/tree/nsTreeColumns.h
+--- a/layout/xul/tree/nsTreeColumns.h
++++ b/layout/xul/tree/nsTreeColumns.h
+@@ -34,17 +34,17 @@ class Element;
+     0x4a6c,                                          \
+     {0x92, 0x23, 0x81, 0x4d, 0x3a, 0xde, 0x93, 0xa3} \
+ }
+ 
+ // This class is our column info.  We use it to iterate our columns and to obtain
+ // information about each column.
+ class nsTreeColumn MOZ_FINAL : public nsITreeColumn {
+ public:
+-  nsTreeColumn(nsTreeColumns* aColumns, nsIContent* aContent);
++  nsTreeColumn(nsTreeColumns* aColumns, mozilla::dom::Element* aElement);
+ 
+   NS_DECLARE_STATIC_IID_ACCESSOR(NS_TREECOLUMN_IMPL_CID)
+ 
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+   NS_DECL_CYCLE_COLLECTION_CLASS(nsTreeColumn)
+   NS_DECL_NSITREECOLUMN
+ 
+   friend class nsTreeBodyFrame;
+@@ -90,19 +90,19 @@ protected:
+   void SetNext(nsTreeColumn* aNext) {
+     NS_ASSERTION(!mNext, "already have a next sibling");
+     mNext = aNext;
+   }
+   void SetPrevious(nsTreeColumn* aPrevious) { mPrevious = aPrevious; }
+ 
+ private:
+   /**
+-   * Non-null nsIContent for the associated <treecol> element.
++   * Non-null Element for the associated <treecol> element.
+    */
+-  nsCOMPtr<nsIContent> mContent;
++  nsCOMPtr<mozilla::dom::Element> mElement;
+ 
+   nsTreeColumns* mColumns;
+ 
+   nsString mId;
+   nsCOMPtr<nsIAtom> mAtom;
+ 
+   int32_t mIndex;
+ 

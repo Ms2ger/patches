@@ -1,0 +1,278 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -382,26 +382,25 @@ nsGlobalWindow::DOMMinTimeoutValue() con
+       return err_rval;                                                        \
+     }                                                                         \
+     return ((nsGlobalChromeWindow *)mInnerWindow)->method args;               \
+   }                                                                           \
+   PR_END_MACRO
+ 
+ #define FORWARD_TO_OUTER_MODAL_CONTENT_WINDOW(method, args, err_rval)         \
+   PR_BEGIN_MACRO                                                              \
+-  if (IsInnerWindow()) {                                                      \
+-    nsGlobalWindow *outer = GetOuterWindowInternal();                         \
+-    if (!HasActiveDocument()) {                                               \
+-      NS_WARNING(outer ?                                                      \
+-                 "Inner window does not have active document." :              \
+-                 "No outer window available!");                               \
+-      return err_rval;                                                        \
+-    }                                                                         \
+-    return ((nsGlobalModalWindow *)outer)->method args;                       \
++  MOZ_ASSERT(IsInnerWindow());                                                \
++  nsGlobalWindow* outer = GetOuterWindowInternal();                           \
++  if (!HasActiveDocument()) {                                                 \
++    NS_WARNING(outer                                                          \
++               ? "Inner window does not have active document."                \
++               : "No outer window available!");                               \
++    return err_rval;                                                          \
+   }                                                                           \
++  return static_cast<OuterModalWindow*>(outer)->method args;                  \
+   PR_END_MACRO
+ 
+ #define FORWARD_TO_INNER(method, args, err_rval)                              \
+   PR_BEGIN_MACRO                                                              \
+   if (IsOuterWindow()) {                                                      \
+     if (!mInnerWindow) {                                                      \
+       NS_WARNING("No inner window available!");                               \
+       return err_rval;                                                        \
+@@ -417,27 +416,16 @@ nsGlobalWindow::DOMMinTimeoutValue() con
+       NS_WARNING("No inner window available!");                               \
+       errorresult.Throw(NS_ERROR_NOT_INITIALIZED);                            \
+       return err_rval;                                                        \
+     }                                                                         \
+     return GetCurrentInnerWindowInternal()->method args;                      \
+   }                                                                           \
+   PR_END_MACRO
+ 
+-#define FORWARD_TO_INNER_MODAL_CONTENT_WINDOW(method, args, err_rval)         \
+-  PR_BEGIN_MACRO                                                              \
+-  if (IsOuterWindow()) {                                                      \
+-    if (!mInnerWindow) {                                                      \
+-      NS_WARNING("No inner window available!");                               \
+-      return err_rval;                                                        \
+-    }                                                                         \
+-    return ((nsGlobalModalWindow*)GetCurrentInnerWindowInternal())->method args; \
+-  }                                                                           \
+-  PR_END_MACRO
+-
+ #define FORWARD_TO_INNER_VOID(method, args)                                   \
+   PR_BEGIN_MACRO                                                              \
+   if (IsOuterWindow()) {                                                      \
+     if (!mInnerWindow) {                                                      \
+       NS_WARNING("No inner window available!");                               \
+       return;                                                                 \
+     }                                                                         \
+     GetCurrentInnerWindowInternal()->method args;                             \
+@@ -2392,17 +2380,17 @@ nsGlobalWindow::SetNewDocument(nsIDocume
+   } else {
+     if (aState) {
+       newInnerWindow = wsh->GetInnerWindow();
+       newInnerGlobal = newInnerWindow->GetWrapperPreserveColor();
+     } else {
+       if (thisChrome) {
+         newInnerWindow = new nsGlobalChromeWindow(this);
+       } else if (mIsModalContentWindow) {
+-        newInnerWindow = new nsGlobalModalWindow(this);
++        newInnerWindow = new InnerModalWindow(this);
+       } else {
+         newInnerWindow = new nsGlobalWindow(this);
+       }
+ 
+       // Freeze the outer window and null out the inner window so
+       // that initializing classes on the new inner doesn't end up
+       // reaching into the old inner window for classes etc.
+       //
+@@ -13446,27 +13434,39 @@ nsGlobalWindow::GetDialogArguments(JSCon
+   JS::Rooted<JSObject*> wrapper(aCx, GetWrapper());
+   JSAutoCompartment ac(aCx, wrapper);
+   JS::Rooted<JS::Value> args(aCx);
+   mDialogArguments->Get(aCx, wrapper, nsContentUtils::GetSubjectPrincipal(),
+                         &args, aError);
+   return args;
+ }
+ 
+-NS_IMETHODIMP
+-nsGlobalModalWindow::GetDialogArguments(nsIVariant **aArguments)
++namespace mozilla {
++namespace dom {
++
++NS_IMETHODIMP
++InnerModalWindow::GetDialogArguments(nsIVariant** aArguments)
+ {
+   FORWARD_TO_OUTER_MODAL_CONTENT_WINDOW(GetDialogArguments, (aArguments),
+                                         NS_ERROR_NOT_INITIALIZED);
++}
++
++NS_IMETHODIMP
++OuterModalWindow::GetDialogArguments(nsIVariant** aArguments)
++{
++  MOZ_ASSERT(IsOuterWindow());
+ 
+   // This does an internal origin check, and returns undefined if the subject
+   // does not subsumes the origin of the arguments.
+   return mDialogArguments->Get(nsContentUtils::GetSubjectPrincipal(), aArguments);
+ }
+ 
++} // namespace dom
++} // namespace mozilla
++
+ JS::Value
+ nsGlobalWindow::GetReturnValue(JSContext* aCx, ErrorResult& aError)
+ {
+   FORWARD_TO_OUTER_OR_THROW(GetReturnValue, (aCx, aError), aError,
+                             JS::UndefinedValue());
+ 
+   MOZ_ASSERT(IsModalContentWindow(),
+              "This should only be called on modal windows!");
+@@ -13476,30 +13476,42 @@ nsGlobalWindow::GetReturnValue(JSContext
+     JS::Rooted<JSObject*> wrapper(aCx, GetWrapper());
+     JSAutoCompartment ac(aCx, wrapper);
+     mReturnValue->Get(aCx, wrapper, nsContentUtils::GetSubjectPrincipal(),
+                       &returnValue, aError);
+   }
+   return returnValue;
+ }
+ 
+-NS_IMETHODIMP
+-nsGlobalModalWindow::GetReturnValue(nsIVariant **aRetVal)
++namespace mozilla {
++namespace dom {
++
++NS_IMETHODIMP
++InnerModalWindow::GetReturnValue(nsIVariant** aRetVal)
+ {
+   FORWARD_TO_OUTER_MODAL_CONTENT_WINDOW(GetReturnValue, (aRetVal), NS_OK);
++}
++
++NS_IMETHODIMP
++OuterModalWindow::GetReturnValue(nsIVariant** aRetVal)
++{
++  MOZ_ASSERT(IsOuterWindow());
+ 
+   nsCOMPtr<nsIVariant> result;
+   if (!mReturnValue) {
+     nsCOMPtr<nsIVariant> variant = CreateVoidVariant();
+     variant.forget(aRetVal);
+     return NS_OK;
+   }
+   return mReturnValue->Get(nsContentUtils::GetSubjectPrincipal(), aRetVal);
+ }
+ 
++} // namespace dom
++} // namespace mozilla
++
+ void
+ nsGlobalWindow::SetReturnValue(JSContext* aCx,
+                                JS::Handle<JS::Value> aReturnValue,
+                                ErrorResult& aError)
+ {
+   FORWARD_TO_OUTER_OR_THROW(SetReturnValue, (aCx, aReturnValue, aError),
+                             aError, );
+ 
+@@ -13511,26 +13523,38 @@ nsGlobalWindow::SetReturnValue(JSContext
+     nsContentUtils::XPConnect()->JSToVariant(aCx, aReturnValue,
+                                              getter_AddRefs(returnValue));
+   if (!aError.Failed()) {
+     mReturnValue = new DialogValueHolder(nsContentUtils::GetSubjectPrincipal(),
+                                          returnValue);
+   }
+ }
+ 
+-NS_IMETHODIMP
+-nsGlobalModalWindow::SetReturnValue(nsIVariant *aRetVal)
++namespace mozilla {
++namespace dom {
++
++NS_IMETHODIMP
++InnerModalWindow::SetReturnValue(nsIVariant* aRetVal)
+ {
+   FORWARD_TO_OUTER_MODAL_CONTENT_WINDOW(SetReturnValue, (aRetVal), NS_OK);
++}
++
++NS_IMETHODIMP
++OuterModalWindow::SetReturnValue(nsIVariant* aRetVal)
++{
++  MOZ_ASSERT(IsOuterWindow());
+ 
+   mReturnValue = new DialogValueHolder(nsContentUtils::GetSubjectPrincipal(),
+                                        aRetVal);
+   return NS_OK;
+ }
+ 
++} // namespace dom
++} // namespace mozilla
++
+ /* static */
+ bool
+ nsGlobalWindow::IsModalContentWindow(JSContext* aCx, JSObject* aGlobal)
+ {
+   // For now, have to deal with XPConnect objects here.
+   nsGlobalWindow* win;
+   nsresult rv = UNWRAP_OBJECT(Window, aGlobal, win);
+   if (NS_FAILED(rv)) {
+diff --git a/dom/base/nsGlobalWindow.h b/dom/base/nsGlobalWindow.h
+--- a/dom/base/nsGlobalWindow.h
++++ b/dom/base/nsGlobalWindow.h
+@@ -1655,29 +1655,58 @@ class nsGlobalModalWindow : public nsGlo
+ public:
+   nsGlobalModalWindow(nsGlobalWindow *aOuterWindow)
+     : nsGlobalWindow(aOuterWindow)
+   {
+     mIsModalContentWindow = true;
+   }
+ 
+   NS_DECL_ISUPPORTS_INHERITED
++};
++
++namespace mozilla {
++namespace dom {
++
++class InnerModalWindow : public nsGlobalModalWindow
++{
++public:
++  explicit InnerModalWindow(nsGlobalWindow* aOuterWindow)
++    : nsGlobalModalWindow(aOuterWindow)
++  {
++    MOZ_ASSERT(aOuterWindow);
++  }
++
++  NS_DECL_NSIDOMMODALCONTENTWINDOW
++
++};
++
++class OuterModalWindow : public nsGlobalModalWindow
++{
++public:
++  OuterModalWindow()
++    : nsGlobalModalWindow(nullptr)
++  {
++  }
++
+   NS_DECL_NSIDOMMODALCONTENTWINDOW
+ };
+ 
++} // namespace dom
++} // namespace mozilla
++
+ /* factory function */
+ inline already_AddRefed<nsGlobalWindow>
+ NS_NewScriptGlobalObject(bool aIsChrome, bool aIsModalContentWindow)
+ {
+   nsRefPtr<nsGlobalWindow> global;
+ 
+   if (aIsChrome) {
+     global = new nsGlobalChromeWindow(nullptr);
+   } else if (aIsModalContentWindow) {
+-    global = new nsGlobalModalWindow(nullptr);
++    global = new mozilla::dom::OuterModalWindow();
+   } else {
+     global = new nsGlobalWindow(nullptr);
+   }
+ 
+   return global.forget();
+ }
+ 
+ #endif /* nsGlobalWindow_h___ */

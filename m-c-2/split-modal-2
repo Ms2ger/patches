@@ -1,0 +1,140 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -13401,29 +13401,39 @@ nsGlobalWindow::GetMessageManager(ErrorR
+     myself->mMessageManager =
+       new nsFrameMessageManager(nullptr,
+                                 static_cast<nsFrameMessageManager*>(globalMM.get()),
+                                 MM_CHROME | MM_BROADCASTER);
+   }
+   return myself->mMessageManager;
+ }
+ 
+-// nsGlobalModalWindow implementation
+-
+-// QueryInterface implementation for nsGlobalModalWindow
+-DOMCI_DATA(ModalContentWindow, nsGlobalModalWindow)
+-
+-NS_INTERFACE_MAP_BEGIN(nsGlobalModalWindow)
++DOMCI_DATA(ModalContentWindow, InnerModalWindow)
++
++namespace mozilla {
++namespace dom {
++
++NS_INTERFACE_MAP_BEGIN(InnerModalWindow)
+   NS_INTERFACE_MAP_ENTRY(nsIDOMModalContentWindow)
+   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(ModalContentWindow)
+ NS_INTERFACE_MAP_END_INHERITING(nsGlobalWindow)
+ 
+-NS_IMPL_ADDREF_INHERITED(nsGlobalModalWindow, nsGlobalWindow)
+-NS_IMPL_RELEASE_INHERITED(nsGlobalModalWindow, nsGlobalWindow)
+-
++NS_IMPL_ADDREF_INHERITED(InnerModalWindow, nsGlobalWindow)
++NS_IMPL_RELEASE_INHERITED(InnerModalWindow, nsGlobalWindow)
++
++NS_INTERFACE_MAP_BEGIN(OuterModalWindow)
++  NS_INTERFACE_MAP_ENTRY(nsIDOMModalContentWindow)
++  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(ModalContentWindow)
++NS_INTERFACE_MAP_END_INHERITING(nsGlobalWindow)
++
++NS_IMPL_ADDREF_INHERITED(OuterModalWindow, nsGlobalWindow)
++NS_IMPL_RELEASE_INHERITED(OuterModalWindow, nsGlobalWindow)
++
++} // namespace dom
++} // namespace mozilla
+ 
+ JS::Value
+ nsGlobalWindow::GetDialogArguments(JSContext* aCx, ErrorResult& aError)
+ {
+   FORWARD_TO_OUTER_OR_THROW(GetDialogArguments, (aCx, aError), aError,
+                             JS::UndefinedValue());
+ 
+   MOZ_ASSERT(IsModalContentWindow(),
+diff --git a/dom/base/nsGlobalWindow.h b/dom/base/nsGlobalWindow.h
+--- a/dom/base/nsGlobalWindow.h
++++ b/dom/base/nsGlobalWindow.h
+@@ -1639,58 +1639,51 @@ public:
+   using nsGlobalWindow::NotifyDefaultButtonLoaded;
+   using nsGlobalWindow::GetMessageManager;
+   using nsGlobalWindow::BeginWindowMove;
+ 
+   nsCOMPtr<nsIBrowserDOMWindow> mBrowserDOMWindow;
+   nsCOMPtr<nsIMessageBroadcaster> mMessageManager;
+ };
+ 
++namespace mozilla {
++namespace dom {
++
+ /*
+- * nsGlobalModalWindow inherits from nsGlobalWindow. It is the global
+- * object created for a modal content windows only (i.e. not modal
++ * InnerModalWindow and OuterModalWindow inherit from nsGlobalWindow. It is
++ * the global object created for a modal content windows only (i.e. not modal
+  * chrome dialogs).
+  */
+-class nsGlobalModalWindow : public nsGlobalWindow,
+-                            public nsIDOMModalContentWindow
++
++class InnerModalWindow : public nsGlobalWindow
++                       , public nsIDOMModalContentWindow
+ {
+ public:
+-  nsGlobalModalWindow(nsGlobalWindow *aOuterWindow)
++  explicit InnerModalWindow(nsGlobalWindow* aOuterWindow)
+     : nsGlobalWindow(aOuterWindow)
+   {
++    MOZ_ASSERT(aOuterWindow);
++    mIsModalContentWindow = true;
++  }
++
++  NS_DECL_ISUPPORTS_INHERITED
++  NS_DECL_NSIDOMMODALCONTENTWINDOW
++};
++
++class OuterModalWindow : public nsGlobalWindow
++                       , public nsIDOMModalContentWindow
++{
++public:
++  OuterModalWindow()
++    : nsGlobalWindow(nullptr)
++  {
+     mIsModalContentWindow = true;
+   }
+ 
+   NS_DECL_ISUPPORTS_INHERITED
+-};
+-
+-namespace mozilla {
+-namespace dom {
+-
+-class InnerModalWindow : public nsGlobalModalWindow
+-{
+-public:
+-  explicit InnerModalWindow(nsGlobalWindow* aOuterWindow)
+-    : nsGlobalModalWindow(aOuterWindow)
+-  {
+-    MOZ_ASSERT(aOuterWindow);
+-  }
+-
+-  NS_DECL_NSIDOMMODALCONTENTWINDOW
+-
+-};
+-
+-class OuterModalWindow : public nsGlobalModalWindow
+-{
+-public:
+-  OuterModalWindow()
+-    : nsGlobalModalWindow(nullptr)
+-  {
+-  }
+-
+   NS_DECL_NSIDOMMODALCONTENTWINDOW
+ };
+ 
+ } // namespace dom
+ } // namespace mozilla
+ 
+ /* factory function */
+ inline already_AddRefed<nsGlobalWindow>

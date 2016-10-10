@@ -1,0 +1,332 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/src/ctypes/CTypes.cpp b/js/src/ctypes/CTypes.cpp
+--- a/js/src/ctypes/CTypes.cpp
++++ b/js/src/ctypes/CTypes.cpp
+@@ -5136,17 +5136,17 @@ StructType::BuildFieldsArray(JSContext* 
+   for (FieldInfoHash::Range r = fields->all(); !r.empty(); r.popFront()) {
+     const FieldInfoHash::Entry& entry = r.front();
+     // Add the field descriptor to the array.
+     if (!AddFieldToArray(cx, &fieldsVec[entry.value().mIndex],
+                          entry.key(), entry.value().mType))
+       return nullptr;
+   }
+ 
+-  RootedObject fieldsProp(cx, JS_NewArrayObject(cx, len, fieldsVec.begin()));
++  RootedObject fieldsProp(cx, JS_NewArrayObject(cx, fieldsVec));
+   if (!fieldsProp)
+     return nullptr;
+ 
+   // Seal the fields array.
+   if (!JS_FreezeObject(cx, fieldsProp))
+     return nullptr;
+ 
+   return fieldsProp;
+@@ -5944,17 +5944,17 @@ FunctionType::ArgTypesGetter(JSContext* 
+   {
+       JS::AutoValueVector vec(cx);
+       if (!vec.resize(len))
+         return false;
+ 
+       for (size_t i = 0; i < len; ++i)
+         vec[i] = JS::ObjectValue(*fninfo->mArgTypes[i]);
+ 
+-      argTypes = JS_NewArrayObject(cx, len, vec.begin());
++      argTypes = JS_NewArrayObject(cx, vec);
+       if (!argTypes)
+         return false;
+   }
+ 
+   // Seal and cache it.
+   if (!JS_FreezeObject(cx, argTypes))
+     return false;
+   JS_SetReservedSlot(obj, SLOT_ARGS_T, JS::ObjectValue(*argTypes));
+diff --git a/js/src/gdb/tests/test-Root.cpp b/js/src/gdb/tests/test-Root.cpp
+--- a/js/src/gdb/tests/test-Root.cpp
++++ b/js/src/gdb/tests/test-Root.cpp
+@@ -20,15 +20,15 @@ void callee(JS::Handle<JSObject *> obj, 
+ FRAGMENT(Root, handle) {
+   JS::Rooted<JSObject *> global(cx, JS::CurrentGlobalOrNull(cx));
+   callee(global, &global);
+   (void) global;
+ }
+ 
+ FRAGMENT(Root, HeapSlot) {
+   JS::Rooted<jsval> plinth(cx, STRING_TO_JSVAL(JS_NewStringCopyZ(cx, "plinth")));
+-  JS::Rooted<JSObject *> array(cx, JS_NewArrayObject(cx, 1, plinth.address()));
++  JS::Rooted<JSObject *> array(cx, JS_NewArrayObject(cx, JS::HandleValueVector(&plinth)));
+ 
+   breakpoint();
+ 
+   (void) plinth;
+   (void) array;
+ }
+diff --git a/js/src/jsapi-tests/testAddPropertyPropcache.cpp b/js/src/jsapi-tests/testAddPropertyPropcache.cpp
+--- a/js/src/jsapi-tests/testAddPropertyPropcache.cpp
++++ b/js/src/jsapi-tests/testAddPropertyPropcache.cpp
+@@ -37,17 +37,17 @@ BEGIN_TEST(testAddPropertyHook)
+     static const int ExpectedCount = 100;
+ 
+     JS::RootedObject obj(cx, JS_NewObject(cx, nullptr, JS::NullPtr(), JS::NullPtr()));
+     CHECK(obj);
+     JS::RootedValue proto(cx, OBJECT_TO_JSVAL(obj));
+     JS_InitClass(cx, global, obj, &AddPropertyClass, nullptr, 0, nullptr, nullptr, nullptr,
+                  nullptr);
+ 
+-    obj = JS_NewArrayObject(cx, 0, nullptr);
++    obj = JS_NewArrayObject(cx, JS::HandleValueVector());
+     CHECK(obj);
+     JS::RootedValue arr(cx, OBJECT_TO_JSVAL(obj));
+ 
+     CHECK(JS_DefineProperty(cx, global, "arr", arr,
+                             JS_PropertyStub, JS_StrictPropertyStub,
+                             JSPROP_ENUMERATE));
+ 
+     for (int i = 0; i < ExpectedCount; ++i) {
+diff --git a/js/src/jsapi.cpp b/js/src/jsapi.cpp
+--- a/js/src/jsapi.cpp
++++ b/js/src/jsapi.cpp
+@@ -3755,26 +3755,24 @@ JS_GetReservedSlot(JSObject *obj, uint32
+ 
+ JS_PUBLIC_API(void)
+ JS_SetReservedSlot(JSObject *obj, uint32_t index, Value value)
+ {
+     obj->setReservedSlot(index, value);
+ }
+ 
+ JS_PUBLIC_API(JSObject *)
+-JS_NewArrayObject(JSContext *cx, int length, jsval *vector)
+-{
+-    AutoArrayRooter tvr(cx, length, vector);
+-
++JS_NewArrayObject(JSContext *cx, JS::HandleValueVector vector)
++{
+     JS_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+     AssertHeapIsIdle(cx);
+     CHECK_REQUEST(cx);
+ 
+-    assertSameCompartment(cx, JSValueArray(vector, vector ? (uint32_t)length : 0));
+-    return NewDenseCopiedArray(cx, (uint32_t)length, vector);
++    assertSameCompartment(cx, JSValueArray(vector.vector(), vector.length()));
++    return NewDenseCopiedArray(cx, (uint32_t)vector.length(), vector.vector());
+ }
+ 
+ JS_PUBLIC_API(bool)
+ JS_IsArrayObject(JSContext *cx, JSObject *objArg)
+ {
+     RootedObject obj(cx, objArg);
+     assertSameCompartment(cx, obj);
+     return ObjectClassIs(obj, ESClass_Array, cx);
+diff --git a/js/src/jsapi.h b/js/src/jsapi.h
+--- a/js/src/jsapi.h
++++ b/js/src/jsapi.h
+@@ -49,16 +49,17 @@ class StableCharPtr : public CharPtr {
+     StableCharPtr(const jschar *s, size_t len) : CharPtr(s, len) {}
+     StableCharPtr(const jschar *pos, const jschar *start, size_t len)
+       : CharPtr(pos, start, len)
+     {}
+ 
+     using CharPtr::operator=;
+ };
+ 
++
+ #if defined JS_THREADSAFE && defined JS_DEBUG
+ 
+ class JS_PUBLIC_API(AutoCheckRequestDepth)
+ {
+     JSContext *cx;
+   public:
+     AutoCheckRequestDepth(JSContext *cx);
+     AutoCheckRequestDepth(js::ContextFriendFields *cx);
+@@ -200,24 +201,29 @@ class AutoArrayRooter : private AutoGCRo
+ 
+     void changeArray(Value *newArray, size_t newLength) {
+         changeLength(newLength);
+         array = newArray;
+     }
+ 
+     Value *array;
+ 
++    size_t length() const
++    {
++        return size_t(tag_);
++    }
++
+     MutableHandleValue handleAt(size_t i)
+     {
+-        JS_ASSERT(i < size_t(tag_));
++        JS_ASSERT(i < length());
+         return MutableHandleValue::fromMarkedLocation(&array[i]);
+     }
+     HandleValue handleAt(size_t i) const
+     {
+-        JS_ASSERT(i < size_t(tag_));
++        JS_ASSERT(i < length());
+         return HandleValue::fromMarkedLocation(&array[i]);
+     }
+ 
+     friend void AutoGCRooter::trace(JSTracer *trc);
+ 
+   private:
+     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+ 
+@@ -648,16 +654,54 @@ class JS_PUBLIC_API(CustomAutoRooter) : 
+   protected:
+     /* Supplied by derived class to trace roots. */
+     virtual void trace(JSTracer *trc) = 0;
+ 
+   private:
+     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+ };
+ 
++class JS_PUBLIC_API(HandleValueVector)
++{
++  public:
++    HandleValueVector()
++      : values(nullptr, 0)
++      , length_(0)
++    {}
++
++    HandleValueVector(AutoArrayRooter &router)
++      : values(router.array, router.length())
++      , length_(router.length())
++    {}
++
++    HandleValueVector(AutoValueVector &router)
++      : values(router.begin(), router.length())
++      , length_(router.length())
++    {}
++
++    HandleValueVector(MutableHandle<Value> value)
++      : values(value.address(), 1)
++      , length_(1)
++    {}
++
++    size_t length() const
++    {
++        return length_;
++    }
++
++    Value* vector() const
++    {
++        return values.get();
++    }
++
++  private:
++    const mozilla::RangedPtr<Value> values;
++    const size_t length_;
++};
++
+ }  /* namespace JS */
+ 
+ /************************************************************************/
+ 
+ struct JSFreeOp {
+   private:
+     JSRuntime   *runtime_;
+ 
+@@ -3078,17 +3122,17 @@ JS_SetUCProperty(JSContext *cx, JSObject
+                  const jschar *name, size_t namelen,
+                  JS::HandleValue v);
+ 
+ extern JS_PUBLIC_API(bool)
+ JS_DeleteUCProperty2(JSContext *cx, JSObject *obj, const jschar *name, size_t namelen,
+                      bool *succeeded);
+ 
+ extern JS_PUBLIC_API(JSObject *)
+-JS_NewArrayObject(JSContext *cx, int length, jsval *vector);
++JS_NewArrayObject(JSContext *cx, const JS::HandleValueVector& vector);
+ 
+ extern JS_PUBLIC_API(bool)
+ JS_IsArrayObject(JSContext *cx, JSObject *obj);
+ 
+ extern JS_PUBLIC_API(bool)
+ JS_GetArrayLength(JSContext *cx, JS::Handle<JSObject*> obj, uint32_t *lengthp);
+ 
+ extern JS_PUBLIC_API(bool)
+diff --git a/js/src/shell/js.cpp b/js/src/shell/js.cpp
+--- a/js/src/shell/js.cpp
++++ b/js/src/shell/js.cpp
+@@ -2329,17 +2329,17 @@ GetPDA(JSContext *cx, unsigned argc, jsv
+     CallArgs args = CallArgsFromVp(argc, vp);
+     if (!JS_ValueToObject(cx, args.get(0), &vobj))
+         return false;
+     if (!vobj) {
+         args.rval().setUndefined();
+         return true;
+     }
+ 
+-    RootedObject aobj(cx, JS_NewArrayObject(cx, 0, nullptr));
++    RootedObject aobj(cx, JS_NewArrayObject(cx, JS::HandleValueVector()));
+     if (!aobj)
+         return false;
+     args.rval().setObject(*aobj);
+ 
+     ok = !!JS_GetPropertyDescArray(cx, vobj, &pda);
+     if (!ok)
+         return false;
+     pd = pda.array;
+@@ -5405,18 +5405,17 @@ NewGlobalObject(JSContext *cx, JS::Compa
+ }
+ 
+ static bool
+ BindScriptArgs(JSContext *cx, JSObject *obj_, OptionParser *op)
+ {
+     RootedObject obj(cx, obj_);
+ 
+     MultiStringRange msr = op->getMultiStringArg("scriptArgs");
+-    RootedObject scriptArgs(cx);
+-    scriptArgs = JS_NewArrayObject(cx, 0, nullptr);
++    RootedObject scriptArgs(cx, JS_NewArrayObject(cx, JS::HandleValueVector()));
+     if (!scriptArgs)
+         return false;
+ 
+     if (!JS_DefineProperty(cx, obj, "scriptArgs", OBJECT_TO_JSVAL(scriptArgs),
+                            nullptr, nullptr, 0))
+         return false;
+ 
+     for (size_t i = 0; !msr.empty(); msr.popFront(), ++i) {
+diff --git a/js/src/shell/jsheaptools.cpp b/js/src/shell/jsheaptools.cpp
+--- a/js/src/shell/jsheaptools.cpp
++++ b/js/src/shell/jsheaptools.cpp
+@@ -504,17 +504,17 @@ ReferenceFinder::addReferrer(jsval refer
+ 
+     /* Find the property of the results object named |pathName|. */
+     RootedValue v(context);
+ 
+     if (!JS_GetProperty(context, result, pathName, &v))
+         return false;
+     if (v.isUndefined()) {
+         /* Create an array to accumulate referents under this path. */
+-        JSObject *array = JS_NewArrayObject(context, 1, referrer.address());
++        JSObject *array = JS_NewArrayObject(context, JS::HandleValueVector(&referrer));
+         if (!array)
+             return false;
+         v.setObject(*array);
+         return !!JS_SetProperty(context, result, pathName, v);
+     }
+ 
+     /* The property's value had better be an array. */
+     RootedObject array(context, &v.toObject());
+diff --git a/js/xpconnect/src/XPCComponents.cpp b/js/xpconnect/src/XPCComponents.cpp
+--- a/js/xpconnect/src/XPCComponents.cpp
++++ b/js/xpconnect/src/XPCComponents.cpp
+@@ -3030,17 +3030,17 @@ nsXPCComponents_Utils::CreateArrayIn(Han
+     // first argument must be an object
+     if (vobj.isPrimitive())
+         return NS_ERROR_XPC_BAD_CONVERT_JS;
+ 
+     RootedObject scope(cx, js::UncheckedUnwrap(&vobj.toObject()));
+     RootedObject obj(cx);
+     {
+         JSAutoCompartment ac(cx, scope);
+-        obj =  JS_NewArrayObject(cx, 0, nullptr);
++        obj = JS_NewArrayObject(cx, HandleValueVector());
+         if (!obj)
+             return NS_ERROR_FAILURE;
+     }
+ 
+     if (!JS_WrapObject(cx, &obj))
+         return NS_ERROR_FAILURE;
+ 
+     rval.setObject(*obj);

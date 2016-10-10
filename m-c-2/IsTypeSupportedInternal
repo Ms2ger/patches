@@ -1,0 +1,125 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/docshell/base/nsWebNavigationInfo.cpp b/docshell/base/nsWebNavigationInfo.cpp
+--- a/docshell/base/nsWebNavigationInfo.cpp
++++ b/docshell/base/nsWebNavigationInfo.cpp
+@@ -39,82 +39,71 @@ nsWebNavigationInfo::IsTypeSupported(con
+   // an nsSHistory, but not much we can do with that).  So if we start using
+   // it here, we need to be careful to get to the docshell correctly.
+   
+   // For now just report what the Gecko-Content-Viewers category has
+   // to say for itself.
+   *aIsTypeSupported = nsIWebNavigationInfo::UNSUPPORTED;
+ 
+   const nsCString& flatType = PromiseFlatCString(aType);
+-  nsresult rv = IsTypeSupportedInternal(flatType, aIsTypeSupported);
+-  NS_ENSURE_SUCCESS(rv, rv);
++  *aIsTypeSupported = IsTypeSupportedInternal(flatType);
+ 
+   if (*aIsTypeSupported) {
+-    return rv;
++    return NS_OK;
+   }
+ 
+   // If this request is for a docShell that isn't going to allow plugins,
+   // there's no need to try and find a plugin to handle it.
+   nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(aWebNav));
+   bool allowed;
+   if (docShell && NS_SUCCEEDED(docShell->GetAllowPlugins(&allowed)) && !allowed) {
+     return NS_OK;
+   }
+ 
+   // Try reloading plugins in case they've changed.
+   nsCOMPtr<nsIPluginHost> pluginHost =
+     do_GetService(MOZ_PLUGIN_HOST_CONTRACTID);
+   if (pluginHost) {
+     // false will ensure that currently running plugins will not
+     // be shut down
+-    rv = pluginHost->ReloadPlugins();
++    nsresult rv = pluginHost->ReloadPlugins();
+     if (NS_SUCCEEDED(rv)) {
+       // OK, we reloaded plugins and there were new ones
+       // (otherwise NS_ERROR_PLUGINS_PLUGINSNOTCHANGED would have
+       // been returned).  Try checking whether we can handle the
+       // content now.
+-      return IsTypeSupportedInternal(flatType, aIsTypeSupported);
++      *aIsTypeSupported = IsTypeSupportedInternal(flatType);
++      return NS_OK;
+     }
+   }
+ 
+   return NS_OK;
+ }
+ 
+-nsresult
+-nsWebNavigationInfo::IsTypeSupportedInternal(const nsCString& aType,
+-                                             uint32_t* aIsSupported)
++uint32_t
++nsWebNavigationInfo::IsTypeSupportedInternal(const nsCString& aType)
+ {
+-  NS_PRECONDITION(aIsSupported, "Null out param?");
+-
+-
+   nsContentUtils::ContentViewerType vtype = nsContentUtils::TYPE_UNSUPPORTED;
+ 
+   nsCOMPtr<nsIDocumentLoaderFactory> docLoaderFactory =
+     nsContentUtils::FindInternalContentViewer(aType.get(), &vtype);
+ 
+   switch (vtype) {
+   case nsContentUtils::TYPE_UNSUPPORTED:
+-    *aIsSupported = nsIWebNavigationInfo::UNSUPPORTED;
+-    break;
++    return nsIWebNavigationInfo::UNSUPPORTED;
+ 
+   case nsContentUtils::TYPE_PLUGIN:
+-    *aIsSupported = nsIWebNavigationInfo::PLUGIN;
+-    break;
++    return nsIWebNavigationInfo::PLUGIN;
+ 
+   case nsContentUtils::TYPE_UNKNOWN:
+-    *aIsSupported = nsIWebNavigationInfo::OTHER;
+-    break;
++    return nsIWebNavigationInfo::OTHER;
+ 
+   case nsContentUtils::TYPE_CONTENT:
+     // XXXbz we only need this because images register for the same
+     // contractid as documents, so we can't tell them apart based on
+     // contractid.
+-    if (imgLoader::SupportImageWithMimeType(aType.get())) {
+-      *aIsSupported = nsIWebNavigationInfo::IMAGE;
+-    }
+-    else {
+-      *aIsSupported = nsIWebNavigationInfo::OTHER;
+-    }
+-    break;
++    return imgLoader::SupportImageWithMimeType(aType.get())
++           ? nsIWebNavigationInfo::IMAGE
++           : nsIWebNavigationInfo::OTHER;
+   }
+ 
+-  return NS_OK;
++  MOZ_CRASH();
+ }
+diff --git a/docshell/base/nsWebNavigationInfo.h b/docshell/base/nsWebNavigationInfo.h
+--- a/docshell/base/nsWebNavigationInfo.h
++++ b/docshell/base/nsWebNavigationInfo.h
+@@ -26,17 +26,15 @@ public:
+ 
+   NS_DECL_NSIWEBNAVIGATIONINFO
+ 
+   nsresult Init();
+ 
+ private:
+   ~nsWebNavigationInfo() {}
+   
+-  // Check whether aType is supported.  If this method throws, the
+-  // value of aIsSupported is not changed.
+-  nsresult IsTypeSupportedInternal(const nsCString& aType,
+-                                   uint32_t* aIsSupported);
++  // Check whether aType is supported.
++  uint32_t IsTypeSupportedInternal(const nsCString& aType);
+   
+   nsCOMPtr<nsICategoryManager> mCategoryManager;
+ };
+ 
+ #endif  // nsWebNavigationInfo_h__

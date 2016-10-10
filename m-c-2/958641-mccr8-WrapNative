@@ -1,0 +1,644 @@
+From: Andrew McCreight <continuation@gmail.com>
+Bug 958641, part 2 - de-holder nsXPConnect::WrapNative
+
+diff --git a/dom/plugins/base/nsNPAPIPlugin.cpp b/dom/plugins/base/nsNPAPIPlugin.cpp
+--- a/dom/plugins/base/nsNPAPIPlugin.cpp
++++ b/dom/plugins/base/nsNPAPIPlugin.cpp
+@@ -1227,23 +1227,20 @@ NPObject*
+   if (NS_WARN_IF(!jsapi.Init(doc->GetInnerWindow()))) {
+     return nullptr;
+   }
+   JSContext* cx = jsapi.cx();
+ 
+   nsCOMPtr<nsIXPConnect> xpc(do_GetService(nsIXPConnect::GetCID()));
+   NS_ENSURE_TRUE(xpc, nullptr);
+ 
+-  nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
++  JS::Rooted<JSObject*> obj(cx);
+   xpc->WrapNative(cx, ::JS::CurrentGlobalOrNull(cx), element,
+                   NS_GET_IID(nsIDOMElement),
+-                  getter_AddRefs(holder));
+-  NS_ENSURE_TRUE(holder, nullptr);
+-
+-  JS::Rooted<JSObject*> obj(cx, holder->GetJSObject());
++                  obj.address());
+   NS_ENSURE_TRUE(obj, nullptr);
+ 
+   return nsJSObjWrapper::GetNewOrUsed(npp, cx, obj);
+ }
+ 
+ NPIdentifier
+ _getstringidentifier(const NPUTF8* name)
+ {
+diff --git a/js/xpconnect/idl/nsIXPConnect.idl b/js/xpconnect/idl/nsIXPConnect.idl
+--- a/js/xpconnect/idl/nsIXPConnect.idl
++++ b/js/xpconnect/idl/nsIXPConnect.idl
+@@ -306,22 +306,17 @@ interface nsIXPConnect : nsISupports
+ 
+     const uint32_t INIT_JS_STANDARD_CLASSES  = 1 << 0;
+     const uint32_t DONT_FIRE_ONNEWGLOBALHOOK = 1 << 1;
+     const uint32_t OMIT_COMPONENTS_OBJECT    = 1 << 2;
+ 
+     /**
+     * wrapNative will create a new JSObject or return an existing one.
+     *
+-    * The JSObject is returned inside a refcounted nsIXPConnectJSObjectHolder.
+-    * As long as this holder is held the JSObject will be protected from
+-    * collection by JavaScript's garbage collector. It is a good idea to
+-    * transfer the JSObject to some equally protected place before releasing
+-    * the holder (i.e. use JS_SetProperty to make this object a property of
+-    * some other JSObject).
++    * C++ callers must ensure that the returned JSObject is rooted.
+     *
+     * This method now correctly deals with cases where the passed in xpcom
+     * object already has an associated JSObject for the cases:
+     *  1) The xpcom object has already been wrapped for use in the same scope
+     *     as an nsIXPConnectWrappedNative.
+     *  2) The xpcom object is in fact a nsIXPConnectWrappedJS and thus already
+     *     has an underlying JSObject.
+     *
+@@ -335,17 +330,17 @@ interface nsIXPConnect : nsISupports
+     * Returns:
+     *    success:
+     *       NS_OK
+     *    failure:
+     *       NS_ERROR_XPC_BAD_CONVERT_NATIVE
+     *       NS_ERROR_XPC_CANT_GET_JSOBJECT_OF_DOM_OBJECT
+     *       NS_ERROR_FAILURE
+     */
+-    nsIXPConnectJSObjectHolder
++    JSObjectPtr
+     wrapNative(in JSContextPtr aJSContext,
+                in JSObjectPtr  aScope,
+                in nsISupports  aCOMObj,
+                in nsIIDRef     aIID);
+ 
+     /**
+      * Same as wrapNative, but it returns the JSObject in aVal. C++ callers
+      * must ensure that aVal is rooted.
+diff --git a/js/xpconnect/loader/mozJSComponentLoader.cpp b/js/xpconnect/loader/mozJSComponentLoader.cpp
+--- a/js/xpconnect/loader/mozJSComponentLoader.cpp
++++ b/js/xpconnect/loader/mozJSComponentLoader.cpp
+@@ -452,42 +452,32 @@ mozJSComponentLoader::LoadModule(FileLoc
+ 
+     nsCOMPtr<nsIComponentManager> cm;
+     rv = NS_GetComponentManager(getter_AddRefs(cm));
+     if (NS_FAILED(rv))
+         return nullptr;
+ 
+     JSAutoCompartment ac(cx, entry->obj);
+ 
+-    nsCOMPtr<nsIXPConnectJSObjectHolder> cm_holder;
++    RootedObject cm_jsobj(cx);
+     rv = xpc->WrapNative(cx, entry->obj, cm,
+                          NS_GET_IID(nsIComponentManager),
+-                         getter_AddRefs(cm_holder));
++                         cm_jsobj.address());
+ 
+-    if (NS_FAILED(rv)) {
++    if (NS_FAILED(rv) || !cm_jsobj) {
+         return nullptr;
+     }
+ 
+-    JSObject* cm_jsobj = cm_holder->GetJSObject();
+-    if (!cm_jsobj) {
+-        return nullptr;
+-    }
+-
+-    nsCOMPtr<nsIXPConnectJSObjectHolder> file_holder;
++    RootedObject file_jsobj(cx);
+     RootedObject entryObj(cx, entry->obj);
+     rv = xpc->WrapNative(cx, entryObj, file,
+                          NS_GET_IID(nsIFile),
+-                         getter_AddRefs(file_holder));
++                         file_jsobj.address());
+ 
+-    if (NS_FAILED(rv)) {
+-        return nullptr;
+-    }
+-
+-    JSObject* file_jsobj = file_holder->GetJSObject();
+-    if (!file_jsobj) {
++    if (NS_FAILED(rv) || !file_jsobj) {
+         return nullptr;
+     }
+ 
+     RootedValue NSGetFactory_val(cx);
+     if (!JS_GetProperty(cx, entryObj, "NSGetFactory", &NSGetFactory_val) ||
+         NSGetFactory_val.isUndefined()) {
+         return nullptr;
+     }
+@@ -693,23 +683,21 @@ mozJSComponentLoader::PrepareObjectForLo
+     nsCOMPtr<nsIFile> testFile;
+     if (NS_SUCCEEDED(rv)) {
+         fileURL->GetFile(getter_AddRefs(testFile));
+     }
+ 
+     if (testFile) {
+         *aRealFile = true;
+ 
+-        nsCOMPtr<nsIXPConnectJSObjectHolder> locationHolder;
++        RootedObject locationObj(aCx);
+         rv = xpc->WrapNative(aCx, obj, aComponentFile,
+                              NS_GET_IID(nsIFile),
+-                             getter_AddRefs(locationHolder));
++                             locationObj.address());
+         NS_ENSURE_SUCCESS(rv, nullptr);
+-
+-        RootedObject locationObj(aCx, locationHolder->GetJSObject());
+         NS_ENSURE_TRUE(locationObj, nullptr);
+ 
+         if (!JS_DefineProperty(aCx, obj, "__LOCATION__", locationObj, 0))
+             return nullptr;
+     }
+ 
+     nsAutoCString nativePath;
+     rv = aURI->GetSpec(nativePath);
+diff --git a/js/xpconnect/src/XPCComponents.cpp b/js/xpconnect/src/XPCComponents.cpp
+--- a/js/xpconnect/src/XPCComponents.cpp
++++ b/js/xpconnect/src/XPCComponents.cpp
+@@ -316,27 +316,24 @@ nsXPCComponents_Interfaces::NewResolve(n
+         }
+         if (!info)
+             return NS_OK;
+ 
+         nsCOMPtr<nsIJSIID> nsid = nsJSIID::NewID(info);
+ 
+         if (nsid) {
+             nsXPConnect* xpc = nsXPConnect::XPConnect();
+-            nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
++            RootedObject idObj(cx);
+             if (NS_SUCCEEDED(xpc->WrapNative(cx, obj,
+                                              static_cast<nsIJSIID*>(nsid),
+                                              NS_GET_IID(nsIJSIID),
+-                                             getter_AddRefs(holder)))) {
+-                RootedObject idobj(cx);
+-                if (holder &&
+-                    // Assign, not compare
+-                    (idobj = holder->GetJSObject())) {
++                                             idObj.address()))) {
++                if (idObj) {
+                     *objp = obj;
+-                    *_retval = JS_DefinePropertyById(cx, obj, id, idobj,
++                    *_retval = JS_DefinePropertyById(cx, obj, id, idObj,
+                                                      JSPROP_ENUMERATE |
+                                                      JSPROP_READONLY |
+                                                      JSPROP_PERMANENT);
+                 }
+             }
+         }
+     }
+     return NS_OK;
+@@ -571,28 +568,26 @@ nsXPCComponents_InterfacesByID::NewResol
+             return NS_OK;
+ 
+         nsCOMPtr<nsIJSIID> nsid = nsJSIID::NewID(info);
+ 
+         if (!nsid)
+             return NS_ERROR_OUT_OF_MEMORY;
+ 
+         nsXPConnect* xpc = nsXPConnect::XPConnect();
+-        nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
++        RootedObject idObj(cx);
+         if (NS_SUCCEEDED(xpc->WrapNative(cx, obj,
+                                          static_cast<nsIJSIID*>(nsid),
+-                                            NS_GET_IID(nsIJSIID),
+-                                            getter_AddRefs(holder)))) {
+-            RootedObject idobj(cx);
+-            if (holder &&
+-                // Assign, not compare
+-                (idobj = holder->GetJSObject())) {
++                                         NS_GET_IID(nsIJSIID),
++                                         idObj.address()))) {
++
++            if (idObj) {
+                 *objp = obj;
+                 *_retval =
+-                    JS_DefinePropertyById(cx, obj, id, idobj,
++                    JS_DefinePropertyById(cx, obj, id, idObj,
+                                           JSPROP_ENUMERATE |
+                                           JSPROP_READONLY |
+                                           JSPROP_PERMANENT);
+             }
+         }
+     }
+     return NS_OK;
+ }
+@@ -814,27 +809,24 @@ nsXPCComponents_Classes::NewResolve(nsIX
+ 
+     JSAutoByteString name;
+     if (JSID_IS_STRING(id) &&
+         name.encodeLatin1(cx, JSID_TO_STRING(id)) &&
+         name.ptr()[0] != '{') { // we only allow contractids here
+         nsCOMPtr<nsIJSCID> nsid = nsJSCID::NewID(name.ptr());
+         if (nsid) {
+             nsXPConnect* xpc = nsXPConnect::XPConnect();
+-            nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
++            RootedObject idObj(cx);
+             if (NS_SUCCEEDED(xpc->WrapNative(cx, obj,
+                                              static_cast<nsIJSCID*>(nsid),
+                                              NS_GET_IID(nsIJSCID),
+-                                             getter_AddRefs(holder)))) {
+-                RootedObject idobj(cx);
+-                if (holder &&
+-                    // Assign, not compare
+-                        (idobj = holder->GetJSObject())) {
++                                             idObj.address()))) {
++                if (idObj) {
+                     *objp = obj;
+-                    *_retval = JS_DefinePropertyById(cx, obj, id, idobj,
++                    *_retval = JS_DefinePropertyById(cx, obj, id, idObj,
+                                                      JSPROP_ENUMERATE |
+                                                      JSPROP_READONLY |
+                                                      JSPROP_PERMANENT);
+                 }
+             }
+         }
+     }
+     return NS_OK;
+@@ -1075,27 +1067,24 @@ nsXPCComponents_ClassesByID::NewResolve(
+     JSAutoByteString name;
+     RootedString str(cx, JSID_TO_STRING(id));
+     if (name.encodeLatin1(cx, str) && name.ptr()[0] == '{' &&
+         IsRegisteredCLSID(name.ptr())) // we only allow canonical CLSIDs here
+     {
+         nsCOMPtr<nsIJSCID> nsid = nsJSCID::NewID(name.ptr());
+         if (nsid) {
+             nsXPConnect* xpc = nsXPConnect::XPConnect();
+-            nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
++            RootedObject idObj(cx);
+             if (NS_SUCCEEDED(xpc->WrapNative(cx, obj,
+                                              static_cast<nsIJSCID*>(nsid),
+                                              NS_GET_IID(nsIJSCID),
+-                                             getter_AddRefs(holder)))) {
+-                RootedObject idobj(cx);
+-                if (holder &&
+-                    // Assign, not compare
+-                    (idobj = holder->GetJSObject())) {
++                                             idObj.address()))) {
++                if (idObj) {
+                     *objp = obj;
+-                    *_retval = JS_DefinePropertyById(cx, obj, id, idobj,
++                    *_retval = JS_DefinePropertyById(cx, obj, id, idObj,
+                                                      JSPROP_ENUMERATE |
+                                                      JSPROP_READONLY |
+                                                      JSPROP_PERMANENT);
+                 }
+             }
+         }
+     }
+     return NS_OK;
+@@ -1877,23 +1866,20 @@ nsXPCComponents_Exception::CallOrConstru
+         return ThrowAndFail(NS_ERROR_XPC_BAD_CONVERT_JS, cx, _retval);
+ 
+     nsCOMPtr<nsIException> e = new Exception(nsCString(parser.eMsg),
+                                              parser.eResult,
+                                              EmptyCString(),
+                                              parser.eStack,
+                                              parser.eData);
+ 
+-    nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
+     RootedObject newObj(cx);
+ 
+     if (NS_FAILED(xpc->WrapNative(cx, obj, e, NS_GET_IID(nsIXPCException),
+-                                  getter_AddRefs(holder))) || !holder ||
+-        // Assign, not compare
+-        !(newObj = holder->GetJSObject())) {
++                                  newObj.address())) || !newObj) {
+         return ThrowAndFail(NS_ERROR_XPC_CANT_CREATE_WN, cx, _retval);
+     }
+ 
+     args.rval().setObject(*newObj);
+     return NS_OK;
+ }
+ 
+ /* bool hasInstance (in nsIXPConnectWrappedNative wrapper, in JSContextPtr cx, in JSObjectPtr obj, in jsval val, out bool bp); */
+@@ -2134,29 +2120,23 @@ nsresult
+ nsXPCConstructor::CallOrConstruct(nsIXPConnectWrappedNative *wrapper,JSContext *cx,
+                                   HandleObject obj, const CallArgs &args, bool *_retval)
+ {
+     nsXPConnect* xpc = nsXPConnect::XPConnect();
+ 
+     // security check not required because we are going to call through the
+     // code which is reflected into JS which will do that for us later.
+ 
+-    nsCOMPtr<nsIXPConnectJSObjectHolder> cidHolder;
+-    nsCOMPtr<nsIXPConnectJSObjectHolder> iidHolder;
+     RootedObject cidObj(cx);
+     RootedObject iidObj(cx);
+ 
+     if (NS_FAILED(xpc->WrapNative(cx, obj, mClassID, NS_GET_IID(nsIJSCID),
+-                                  getter_AddRefs(cidHolder))) || !cidHolder ||
+-        // Assign, not compare
+-        !(cidObj = cidHolder->GetJSObject()) ||
++                                  cidObj.address())) || !cidObj ||
+         NS_FAILED(xpc->WrapNative(cx, obj, mInterfaceID, NS_GET_IID(nsIJSIID),
+-                                  getter_AddRefs(iidHolder))) || !iidHolder ||
+-        // Assign, not compare
+-        !(iidObj = iidHolder->GetJSObject())) {
++                                  iidObj.address())) || !iidObj) {
+         return ThrowAndFail(NS_ERROR_XPC_CANT_CREATE_WN, cx, _retval);
+     }
+ 
+     JS::Rooted<JS::Value> arg(cx, ObjectValue(*iidObj));
+     RootedValue rval(cx);
+     if (!JS_CallFunctionName(cx, cidObj, "createInstance", JS::HandleValueArray(arg), &rval) ||
+         rval.isPrimitive()) {
+         // createInstance will have thrown an exception
+@@ -2392,29 +2372,28 @@ nsXPCComponents_Constructor::CallOrConst
+             return ThrowAndFail(NS_ERROR_XPC_BAD_CONVERT_JS, cx, _retval);
+     }
+ 
+     if (args.length() >= 2) {
+         // args[1] is an iid name string
+         // XXXjband support passing "Components.interfaces.foo"?
+ 
+         nsCOMPtr<nsIXPCComponents_Interfaces> ifaces;
+-        nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
+         RootedObject ifacesObj(cx);
+ 
+         // we do the lookup by asking the Components.interfaces object
+         // for the property with this name - i.e. we let its caching of these
+         // nsIJSIID objects work for us.
+ 
+         if (NS_FAILED(comp->GetInterfaces(getter_AddRefs(ifaces))) ||
+             NS_FAILED(xpc->WrapNative(cx, obj, ifaces,
+                                       NS_GET_IID(nsIXPCComponents_Interfaces),
+-                                      getter_AddRefs(holder))) || !holder ||
+-            // Assign, not compare
+-            !(ifacesObj = holder->GetJSObject())) {
++                                      ifacesObj.address())) ||
++            !ifacesObj)
++        {
+             return ThrowAndFail(NS_ERROR_XPC_UNEXPECTED, cx, _retval);
+         }
+ 
+         RootedString str(cx, ToString(cx, args[1]));
+         RootedId id(cx);
+         if (!str || !JS_StringToId(cx, str, &id))
+             return ThrowAndFail(NS_ERROR_XPC_BAD_CONVERT_JS, cx, _retval);
+ 
+@@ -2444,25 +2423,24 @@ nsXPCComponents_Constructor::CallOrConst
+         // argv[0] is a contractid name string
+         // XXXjband support passing "Components.classes.foo"?
+ 
+         // we do the lookup by asking the Components.classes object
+         // for the property with this name - i.e. we let its caching of these
+         // nsIJSCID objects work for us.
+ 
+         nsCOMPtr<nsIXPCComponents_Classes> classes;
+-        nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
+         RootedObject classesObj(cx);
+ 
+         if (NS_FAILED(comp->GetClasses(getter_AddRefs(classes))) ||
+             NS_FAILED(xpc->WrapNative(cx, obj, classes,
+                                       NS_GET_IID(nsIXPCComponents_Classes),
+-                                      getter_AddRefs(holder))) || !holder ||
+-            // Assign, not compare
+-            !(classesObj = holder->GetJSObject())) {
++                                      classesObj.address())) ||
++            !classesObj)
++        {
+             return ThrowAndFail(NS_ERROR_XPC_UNEXPECTED, cx, _retval);
+         }
+ 
+         RootedString str(cx, ToString(cx, args[0]));
+         RootedId id(cx);
+         if (!str || !JS_StringToId(cx, str, &id))
+             return ThrowAndFail(NS_ERROR_XPC_BAD_CONVERT_JS, cx, _retval);
+ 
+@@ -2474,23 +2452,22 @@ nsXPCComponents_Constructor::CallOrConst
+         if (NS_FAILED(xpc->GetWrappedNativeOfJSObject(cx, val.toObjectOrNull(),
+                                                       getter_AddRefs(wn))) || !wn ||
+             !(cClassID = do_QueryWrappedNative(wn))) {
+             return ThrowAndFail(NS_ERROR_XPC_UNEXPECTED, cx, _retval);
+         }
+     }
+ 
+     nsCOMPtr<nsIXPCConstructor> ctor = new nsXPCConstructor(cClassID, cInterfaceID, cInitializer);
+-    nsCOMPtr<nsIXPConnectJSObjectHolder> holder2;
+     RootedObject newObj(cx);
+ 
+     if (NS_FAILED(xpc->WrapNative(cx, obj, ctor, NS_GET_IID(nsIXPCConstructor),
+-                                  getter_AddRefs(holder2))) || !holder2 ||
+-        // Assign, not compare
+-        !(newObj = holder2->GetJSObject())) {
++                                  newObj.address())) ||
++        !newObj)
++    {
+         return ThrowAndFail(NS_ERROR_XPC_CANT_CREATE_WN, cx, _retval);
+     }
+ 
+     args.rval().setObject(*newObj);
+     return NS_OK;
+ }
+ 
+ /* bool hasInstance (in nsIXPConnectWrappedNative wrapper, in JSContextPtr cx, in JSObjectPtr obj, in jsval val, out bool bp); */
+diff --git a/js/xpconnect/src/XPCJSID.cpp b/js/xpconnect/src/XPCJSID.cpp
+--- a/js/xpconnect/src/XPCJSID.cpp
++++ b/js/xpconnect/src/XPCJSID.cpp
+@@ -768,24 +768,22 @@ JSObject *
+ xpc_NewIDObject(JSContext *cx, HandleObject jsobj, const nsID& aID)
+ {
+     RootedObject obj(cx);
+ 
+     nsCOMPtr<nsIJSID> iid = nsJSID::NewID(aID);
+     if (iid) {
+         nsXPConnect *xpc = nsXPConnect::XPConnect();
+         if (xpc) {
+-            nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
+             nsresult rv = xpc->WrapNative(cx, jsobj,
+                                           static_cast<nsISupports*>(iid),
+                                           NS_GET_IID(nsIJSID),
+-                                          getter_AddRefs(holder));
+-            if (NS_SUCCEEDED(rv) && holder) {
+-                obj = holder->GetJSObject();
+-            }
++                                          obj.address());
++            if (NS_FAILED(rv))
++                return nullptr;
+         }
+     }
+     return obj;
+ }
+ 
+ // note: returned pointer is only valid while |obj| remains alive!
+ const nsID*
+ xpc_JSObjectToID(JSContext *cx, JSObject *obj)
+diff --git a/js/xpconnect/src/XPCShellImpl.cpp b/js/xpconnect/src/XPCShellImpl.cpp
+--- a/js/xpconnect/src/XPCShellImpl.cpp
++++ b/js/xpconnect/src/XPCShellImpl.cpp
+@@ -159,30 +159,29 @@ GetLocationProperty(JSContext *cx, Handl
+             nsAutoString absolutePath(*gWorkingDirectory);
+             absolutePath.Append(filenameString);
+ 
+             rv = NS_NewLocalFile(absolutePath,
+                                  false, getter_AddRefs(location));
+         }
+ 
+         if (location) {
+-            nsCOMPtr<nsIXPConnectJSObjectHolder> locationHolder;
++            RootedObject locationObj(cx);
+ 
+             bool symlink;
+             // don't normalize symlinks, because that's kind of confusing
+-            if (NS_SUCCEEDED(location->IsSymlink(&symlink)) &&
+-                !symlink)
++            if (NS_SUCCEEDED(location->IsSymlink(&symlink)) && !symlink)
+                 location->Normalize();
+             rv = xpc->WrapNative(cx, obj, location,
+                                  NS_GET_IID(nsIFile),
+-                                 getter_AddRefs(locationHolder));
++                                 locationObj.address());
+ 
+             if (NS_SUCCEEDED(rv) &&
+-                locationHolder->GetJSObject()) {
+-                vp.set(OBJECT_TO_JSVAL(locationHolder->GetJSObject()));
++                locationObj) {
++                vp.set(OBJECT_TO_JSVAL(locationObj));
+             }
+         }
+     }
+ 
+     return true;
+ #endif
+ }
+ 
+diff --git a/js/xpconnect/src/nsXPConnect.cpp b/js/xpconnect/src/nsXPConnect.cpp
+--- a/js/xpconnect/src/nsXPConnect.cpp
++++ b/js/xpconnect/src/nsXPConnect.cpp
+@@ -476,33 +476,39 @@ NativeInterface2JSObject(HandleObject aS
+         return rv;
+ 
+     MOZ_ASSERT(aAllowWrapping || !xpc::WrapperFactory::IsXrayWrapper(&aVal.toObject()),
+                "Shouldn't be returning a xray wrapper here");
+ 
+     return NS_OK;
+ }
+ 
+-/* nsIXPConnectJSObjectHolder wrapNative (in JSContextPtr aJSContext, in JSObjectPtr aScope, in nsISupports aCOMObj, in nsIIDRef aIID); */
++/* JSObjectPtr wrapNative (in JSContextPtr aJSContext, in JSObjectPtr aScope, in nsISupports aCOMObj, in nsIIDRef aIID); */
+ NS_IMETHODIMP
+ nsXPConnect::WrapNative(JSContext * aJSContext,
+                         JSObject * aScopeArg,
+                         nsISupports *aCOMObj,
+                         const nsIID & aIID,
+-                        nsIXPConnectJSObjectHolder **aHolder)
++                        JSObject **aObj)
+ {
+-    MOZ_ASSERT(aHolder, "bad param");
+     MOZ_ASSERT(aJSContext, "bad param");
+     MOZ_ASSERT(aScopeArg, "bad param");
+     MOZ_ASSERT(aCOMObj, "bad param");
+ 
+     RootedObject aScope(aJSContext, aScopeArg);
+     RootedValue v(aJSContext);
+-    return NativeInterface2JSObject(aScope, aCOMObj, nullptr, &aIID,
+-                                    true, &v, aHolder);
++    nsresult rv = NativeInterface2JSObject(aScope, aCOMObj, nullptr, &aIID,
++                                           false, &v, nullptr);
++    if (NS_FAILED(rv))
++        return rv;
++    if (!v.isObjectOrNull())
++        return NS_ERROR_FAILURE;
++
++    *aObj = v.toObjectOrNull();
++    return NS_OK;
+ }
+ 
+ /* void wrapNativeToJSVal (in JSContextPtr aJSContext, in JSObjectPtr aScope, in nsISupports aCOMObj, in nsIIDPtr aIID, out jsval aVal, out nsIXPConnectJSObjectHolder aHolder); */
+ NS_IMETHODIMP
+ nsXPConnect::WrapNativeToJSVal(JSContext *aJSContext,
+                                JSObject *aScopeArg,
+                                nsISupports *aCOMObj,
+                                nsWrapperCache *aCache,
+diff --git a/toolkit/components/places/PlaceInfo.cpp b/toolkit/components/places/PlaceInfo.cpp
+--- a/toolkit/components/places/PlaceInfo.cpp
++++ b/toolkit/components/places/PlaceInfo.cpp
+@@ -105,23 +105,22 @@ PlaceInfo::GetVisits(JSContext* aContext
+   NS_ENSURE_TRUE(visits, NS_ERROR_OUT_OF_MEMORY);
+ 
+   JS::Rooted<JSObject*> global(aContext, JS::CurrentGlobalOrNull(aContext));
+   NS_ENSURE_TRUE(global, NS_ERROR_UNEXPECTED);
+ 
+   nsCOMPtr<nsIXPConnect> xpc = mozilla::services::GetXPConnect();
+ 
+   for (VisitsArray::size_type idx = 0; idx < mVisits.Length(); idx++) {
+-    nsCOMPtr<nsIXPConnectJSObjectHolder> wrapper;
++    JS::Rooted<JSObject*> jsobj(aContext);
+     nsresult rv = xpc->WrapNative(aContext, global, mVisits[idx],
+                                   NS_GET_IID(mozIVisitInfo),
+-                                  getter_AddRefs(wrapper));
++				  jsobj.address());
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+-    JS::Rooted<JSObject*> jsobj(aContext, wrapper->GetJSObject());
+     NS_ENSURE_STATE(jsobj);
+ 
+     bool rc = JS_SetElement(aContext, visits, idx, jsobj);
+     NS_ENSURE_TRUE(rc, NS_ERROR_UNEXPECTED);
+   }
+ 
+   _visits.setObject(*visits);
+   return NS_OK;
+diff --git a/widget/cocoa/nsMenuX.mm b/widget/cocoa/nsMenuX.mm
+--- a/widget/cocoa/nsMenuX.mm
++++ b/widget/cocoa/nsMenuX.mm
+@@ -413,21 +413,21 @@ void nsMenuX::MenuConstruct()
+     nsresult rv;
+     nsCOMPtr<nsIXPConnect> xpconnect =
+       do_GetService(nsIXPConnect::GetCID(), &rv);
+     if (NS_SUCCEEDED(rv)) {
+       nsIDocument* ownerDoc = menuPopup->OwnerDoc();
+       dom::AutoJSAPI jsapi;
+       if (ownerDoc && jsapi.Init(ownerDoc->GetInnerWindow())) {
+         JSContext* cx = jsapi.cx();
+-        nsCOMPtr<nsIXPConnectJSObjectHolder> wrapper;
++        JS::RootedObject menuObj(cx);
+         xpconnect->WrapNative(cx, JS::CurrentGlobalOrNull(cx), menuPopup,
+-                              NS_GET_IID(nsISupports), getter_AddRefs(wrapper));
++                              NS_GET_IID(nsISupports), menuObj.address());
+         mXBLAttached = true;
+-      } 
++      }
+     }
+   }
+ 
+   // Iterate over the kids
+   uint32_t count = menuPopup->GetChildCount();
+   for (uint32_t i = 0; i < count; i++) {
+     nsIContent *child = menuPopup->GetChildAt(i);
+     if (child) {
+diff --git a/xpfe/components/directory/nsDirectoryViewer.cpp b/xpfe/components/directory/nsDirectoryViewer.cpp
+--- a/xpfe/components/directory/nsDirectoryViewer.cpp
++++ b/xpfe/components/directory/nsDirectoryViewer.cpp
+@@ -231,27 +231,26 @@ nsHTTPIndex::OnStartRequest(nsIRequest *
+ 
+     JS::Rooted<JSObject*> global(cx, JS::CurrentGlobalOrNull(cx));
+ 
+     // Using XPConnect, wrap the HTTP index object...
+     static NS_DEFINE_CID(kXPConnectCID, NS_XPCONNECT_CID);
+     nsCOMPtr<nsIXPConnect> xpc(do_GetService(kXPConnectCID, &rv));
+     if (NS_FAILED(rv)) return rv;
+ 
+-    nsCOMPtr<nsIXPConnectJSObjectHolder> wrapper;
++    JS::Rooted<JSObject*> jsobj(cx);
+     rv = xpc->WrapNative(cx,
+                          global,
+                          static_cast<nsIHTTPIndex*>(this),
+                          NS_GET_IID(nsIHTTPIndex),
+-                         getter_AddRefs(wrapper));
++                         jsobj.address());
+ 
+     NS_ASSERTION(NS_SUCCEEDED(rv), "unable to xpconnect-wrap http-index");
+     if (NS_FAILED(rv)) return rv;
+ 
+-    JS::Rooted<JSObject*> jsobj(cx, wrapper->GetJSObject());
+     NS_ASSERTION(jsobj,
+                  "unable to get jsobj from xpconnect wrapper");
+     if (!jsobj) return NS_ERROR_UNEXPECTED;
+ 
+     JS::Rooted<JS::Value> jslistener(cx, OBJECT_TO_JSVAL(jsobj));
+ 
+     // ...and stuff it into the global context
+     bool ok = JS_SetProperty(cx, global, "HTTPIndex", jslistener);

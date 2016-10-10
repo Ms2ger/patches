@@ -1,0 +1,196 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/layout/xul/tree/nsTreeSelection.cpp b/layout/xul/tree/nsTreeSelection.cpp
+--- a/layout/xul/tree/nsTreeSelection.cpp
++++ b/layout/xul/tree/nsTreeSelection.cpp
+@@ -46,36 +46,33 @@ struct nsTreeRange
+ 
+     if (aNext)
+       aNext->mPrev = this;
+ 
+     mPrev = aPrev;
+     mNext = aNext;
+   }
+ 
+-  nsresult RemoveRange(int32_t aStart, int32_t aEnd) {
++  void RemoveRange(int32_t aStart, int32_t aEnd) {
+     // This should so be a loop... sigh...
+     // We start past the range to remove, so no more to remove
+     if (aEnd < mMin)
+-      return NS_OK;
++      return;
+     // We are the last range to be affected
+     if (aEnd < mMax) {
+       if (aStart <= mMin) {
+         // Just chop the start of the range off
+         mMin = aEnd + 1;
+       } else {
+         // We need to split the range
+         nsTreeRange* range = new nsTreeRange(mSelection, aEnd + 1, mMax);
+-        if (!range)
+-          return NS_ERROR_OUT_OF_MEMORY;
+-
+         mMax = aStart - 1;
+         range->Connect(this, mNext);
+       }
+-      return NS_OK;
++      return;
+     }
+     nsTreeRange* next = mNext;
+     if (aStart <= mMin) {
+       // The remove includes us, remove ourselves from the list
+       if (mPrev)
+         mPrev->mNext = next;
+       else
+         mSelection->mFirstRange = next;
+@@ -83,20 +80,22 @@ struct nsTreeRange
+       if (next)
+         next->mPrev = mPrev;
+       mPrev = mNext = nullptr;
+       delete this;
+     } else if (aStart <= mMax) {
+       // Just chop the end of the range off
+       mMax = aStart - 1;
+     }
+-    return next ? next->RemoveRange(aStart, aEnd) : NS_OK;
++    if (next) {
++      next->RemoveRange(aStart, aEnd);
++    }
+   }
+ 
+-  nsresult Remove(int32_t aIndex) {
++  void Remove(int32_t aIndex) {
+     if (aIndex >= mMin && aIndex <= mMax) {
+       // We have found the range that contains us.
+       if (mMin == mMax) {
+         // Delete the whole range.
+         if (mPrev)
+           mPrev->mNext = mNext;
+         if (mNext)
+           mNext->mPrev = mPrev;
+@@ -108,61 +107,52 @@ struct nsTreeRange
+       }
+       else if (aIndex == mMin)
+         mMin++;
+       else if (aIndex == mMax)
+         mMax--;
+       else {
+         // We have to break this range.
+         nsTreeRange* newRange = new nsTreeRange(mSelection, aIndex + 1, mMax);
+-        if (!newRange)
+-          return NS_ERROR_OUT_OF_MEMORY;
+-
+         newRange->Connect(this, mNext);
+         mMax = aIndex - 1;
+       }
++      return;
+     }
+-    else if (mNext)
+-      return mNext->Remove(aIndex);
+ 
+-    return NS_OK;
++    if (mNext) {
++      mNext->Remove(aIndex);
++    }
+   }
+ 
+-  nsresult Add(int32_t aIndex) {
++  void Add(int32_t aIndex) {
+     if (aIndex < mMin) {
+       // We have found a spot to insert.
+       if (aIndex + 1 == mMin)
+         mMin = aIndex;
+       else if (mPrev && mPrev->mMax+1 == aIndex)
+         mPrev->mMax = aIndex;
+       else {
+         // We have to create a new range.
+         nsTreeRange* newRange = new nsTreeRange(mSelection, aIndex);
+-        if (!newRange)
+-          return NS_ERROR_OUT_OF_MEMORY;
+-
+         newRange->Connect(mPrev, this);
+       }
+     }
+     else if (mNext)
+       mNext->Add(aIndex);
+     else {
+       // Insert on to the end.
+       if (mMax+1 == aIndex)
+         mMax = aIndex;
+       else {
+         // We have to create a new range.
+         nsTreeRange* newRange = new nsTreeRange(mSelection, aIndex);
+-        if (!newRange)
+-          return NS_ERROR_OUT_OF_MEMORY;
+-
+         newRange->Connect(this, nullptr);
+       }
+     }
+-    return NS_OK;
+   }
+ 
+   bool Contains(int32_t aIndex) {
+     if (aIndex >= mMin && aIndex <= mMax)
+       return true;
+ 
+     if (mNext)
+       return mNext->Contains(aIndex);
+@@ -405,27 +395,29 @@ NS_IMETHODIMP nsTreeSelection::ToggleSel
+     return rv;
+ 
+   if (!mFirstRange)
+     Select(aIndex);
+   else {
+     if (!mFirstRange->Contains(aIndex)) {
+       bool single;
+       rv = GetSingle(&single);
+-      if (NS_SUCCEEDED(rv) && !single)
+-        rv = mFirstRange->Add(aIndex);
++      NS_ENSURE_SUCCESS(rv, rv);
++      if (!single) {
++        mFirstRange->Add(aIndex);
++      }
++    } else {
++      mFirstRange->Remove(aIndex);
+     }
+-    else
+-      rv = mFirstRange->Remove(aIndex);
+-    if (NS_SUCCEEDED(rv)) {
+-      if (mTree)
+-        mTree->InvalidateRow(aIndex);
+ 
+-      FireOnSelectHandler();
++    if (mTree) {
++      mTree->InvalidateRow(aIndex);
+     }
++
++    FireOnSelectHandler();
+   }
+ 
+   return rv;
+ }
+ 
+ NS_IMETHODIMP nsTreeSelection::RangedSelect(int32_t aStartIndex, int32_t aEndIndex, bool aAugment)
+ {
+   bool single;
+@@ -460,19 +452,17 @@ NS_IMETHODIMP nsTreeSelection::RangedSel
+     return rv;
+   
+   int32_t start = aStartIndex < aEndIndex ? aStartIndex : aEndIndex;
+   int32_t end = aStartIndex < aEndIndex ? aEndIndex : aStartIndex;
+ 
+   if (aAugment && mFirstRange) {
+     // We need to remove all the items within our selected range from the selection,
+     // and then we insert our new range into the list.
+-    nsresult rv = mFirstRange->RemoveRange(start, end);
+-    if (NS_FAILED(rv))
+-      return rv;
++    mFirstRange->RemoveRange(start, end);
+   }
+ 
+   nsTreeRange* range = new nsTreeRange(this, start, end);
+   if (!range)
+     return NS_ERROR_OUT_OF_MEMORY;
+ 
+   range->Invalidate();
+ 

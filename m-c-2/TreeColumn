@@ -1,0 +1,377 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -104,17 +104,16 @@
+ #include "nsIDOMXULCommandDispatcher.h"
+ #include "nsIControllers.h"
+ #include "nsIBoxObject.h"
+ #ifdef MOZ_XUL
+ #include "nsITreeSelection.h"
+ #include "nsITreeContentView.h"
+ #include "nsITreeView.h"
+ #include "nsIXULTemplateBuilder.h"
+-#include "nsITreeColumns.h"
+ #endif
+ #include "nsIDOMXPathExpression.h"
+ #include "nsIDOMNSXPathExpression.h"
+ #include "nsIDOMXPathNSResolver.h"
+ 
+ // Storage includes
+ #include "nsIDOMStorage.h"
+ #include "nsPIDOMStorage.h"
+@@ -325,21 +324,16 @@ static nsDOMClassInfoData sClassInfoData
+ #ifdef MOZ_XUL
+   NS_DEFINE_CHROME_XBL_CLASSINFO_DATA(XULTemplateBuilder, nsDOMGenericSH,
+                                       DEFAULT_SCRIPTABLE_FLAGS)
+ 
+   NS_DEFINE_CHROME_XBL_CLASSINFO_DATA(XULTreeBuilder, nsDOMGenericSH,
+                                       DEFAULT_SCRIPTABLE_FLAGS)
+ #endif
+ 
+-#ifdef MOZ_XUL
+-  NS_DEFINE_CHROME_XBL_CLASSINFO_DATA(TreeColumn, nsDOMGenericSH,
+-                                      DEFAULT_SCRIPTABLE_FLAGS)
+-#endif
+-
+   NS_DEFINE_CLASSINFO_DATA(CSSMozDocumentRule, nsDOMGenericSH,
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+ 
+   NS_DEFINE_CLASSINFO_DATA(CSSSupportsRule, nsDOMGenericSH,
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+ 
+   NS_DEFINE_CLASSINFO_DATA(XSLTProcessor, nsDOMGenericSH,
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+@@ -918,22 +912,16 @@ nsDOMClassInfo::Init()
+ 
+   DOM_CLASSINFO_MAP_BEGIN(XULTreeBuilder, nsIXULTreeBuilder)
+     DOM_CLASSINFO_MAP_ENTRY(nsIXULTreeBuilder)
+     DOM_CLASSINFO_MAP_ENTRY(nsIXULTemplateBuilder)
+     DOM_CLASSINFO_MAP_ENTRY(nsITreeView)
+   DOM_CLASSINFO_MAP_END
+ #endif
+ 
+-#ifdef MOZ_XUL
+-  DOM_CLASSINFO_MAP_BEGIN(TreeColumn, nsITreeColumn)
+-    DOM_CLASSINFO_MAP_ENTRY(nsITreeColumn)
+-  DOM_CLASSINFO_MAP_END
+-#endif
+-
+   DOM_CLASSINFO_MAP_BEGIN(CSSMozDocumentRule, nsIDOMCSSMozDocumentRule)
+     DOM_CLASSINFO_MAP_ENTRY(nsIDOMCSSMozDocumentRule)
+   DOM_CLASSINFO_MAP_END
+ 
+   DOM_CLASSINFO_MAP_BEGIN(CSSSupportsRule, nsIDOMCSSSupportsRule)
+     DOM_CLASSINFO_MAP_ENTRY(nsIDOMCSSSupportsRule)
+   DOM_CLASSINFO_MAP_END
+ 
+diff --git a/dom/base/nsDOMClassInfoClasses.h b/dom/base/nsDOMClassInfoClasses.h
+--- a/dom/base/nsDOMClassInfoClasses.h
++++ b/dom/base/nsDOMClassInfoClasses.h
+@@ -30,20 +30,16 @@ DOMCI_CLASS(TreeContentView)
+ // DOM Chrome Window class, almost identical to Window
+ DOMCI_CLASS(ChromeWindow)
+ 
+ #ifdef MOZ_XUL
+ DOMCI_CLASS(XULTemplateBuilder)
+ DOMCI_CLASS(XULTreeBuilder)
+ #endif
+ 
+-#ifdef MOZ_XUL
+-DOMCI_CLASS(TreeColumn)
+-#endif
+-
+ DOMCI_CLASS(CSSMozDocumentRule)
+ DOMCI_CLASS(CSSSupportsRule)
+ 
+ // XSLTProcessor
+ DOMCI_CLASS(XSLTProcessor)
+ 
+ // DOM Level 3 XPath objects
+ DOMCI_CLASS(XPathExpression)
+diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
+--- a/dom/bindings/Bindings.conf
++++ b/dom/bindings/Bindings.conf
+@@ -1343,16 +1343,21 @@ DOMInterfaces = {
+ 'TimeRanges': {
+     'wrapperCache': False
+ },
+ 
+ 'TouchList': {
+     'headerFile': 'mozilla/dom/TouchEvent.h',
+ },
+ 
++'TreeColumn': {
++    'nativeType': 'nsTreeColumn',
++    'headerFile': 'nsTreeColumns.h',
++},
++
+ 'TreeColumns': {
+     'nativeType': 'nsTreeColumns',
+ },
+ 
+ 'TreeWalker': {
+     'wrapperCache': False,
+     'resultNotAddRefed': [ 'root', 'currentNode' ],
+ },
+@@ -1977,18 +1982,16 @@ addExternalIface('MozMmsMessage')
+ addExternalIface('MozObserver', nativeType='nsIObserver', notflattened=True)
+ addExternalIface('MozRDFCompositeDataSource', nativeType='nsIRDFCompositeDataSource',
+                  notflattened=True)
+ addExternalIface('MozRDFResource', nativeType='nsIRDFResource', notflattened=True)
+ addExternalIface('MozSmsFilter', headerFile='nsIDOMSmsFilter.h')
+ addExternalIface('MozSmsMessage')
+ addExternalIface('MozTreeBoxObject', nativeType='nsITreeBoxObject',
+                  notflattened=True)
+-addExternalIface('MozTreeColumn', nativeType='nsITreeColumn',
+-                 headerFile='nsITreeColumns.h')
+ addExternalIface('MozVoicemailStatus')
+ addExternalIface('MozWakeLockListener', headerFile='nsIDOMWakeLockListener.h')
+ addExternalIface('MozXULTemplateBuilder', nativeType='nsIXULTemplateBuilder')
+ addExternalIface('nsIBrowserDOMWindow', nativeType='nsIBrowserDOMWindow',
+                  notflattened=True)
+ addExternalIface('nsIControllers', nativeType='nsIControllers')
+ addExternalIface('nsIDOMCrypto', nativeType='nsIDOMCrypto',
+                  headerFile='Crypto.h')
+diff --git a/dom/webidl/TreeColumn.webidl b/dom/webidl/TreeColumn.webidl
+new file mode 100644
+--- /dev/null
++++ b/dom/webidl/TreeColumn.webidl
+@@ -0,0 +1,35 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++[Func="IsChromeOrXBL"]
++interface TreeColumn {
++  [Throws]
++  readonly attribute Element element;
++
++  readonly attribute TreeColumns? columns;
++
++  [Throws]
++  readonly attribute long x;
++  [Throws]
++  readonly attribute long width;
++
++  readonly attribute DOMString id;
++
++  readonly attribute long index;
++
++  readonly attribute boolean primary;
++  readonly attribute boolean cycler;
++  readonly attribute boolean editable;
++  readonly attribute boolean selectable;
++
++  const short TYPE_TEXT                = 1;
++  const short TYPE_CHECKBOX            = 2;
++  const short TYPE_PROGRESSMETER       = 3;
++  readonly attribute short type;
++
++  TreeColumn? getNext();
++  TreeColumn? getPrevious();
++
++  void invalidate();
++};
+diff --git a/dom/webidl/TreeColumns.webidl b/dom/webidl/TreeColumns.webidl
+--- a/dom/webidl/TreeColumns.webidl
++++ b/dom/webidl/TreeColumns.webidl
+@@ -1,14 +1,13 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ interface MozTreeBoxObject;
+-interface MozTreeColumn;
+ 
+ [Func="IsChromeOrXBL"]
+ interface TreeColumns {
+   /**
+    * The tree widget for these columns.
+    */
+   readonly attribute MozTreeBoxObject? tree;
+ 
+@@ -21,36 +20,36 @@ interface TreeColumns {
+    * An alias for count (for the benefit of scripts which treat this as an
+    * array).
+    */
+   readonly attribute unsigned long length;
+ 
+   /**
+    * Get the first/last column.
+    */
+-  MozTreeColumn? getFirstColumn();
+-  MozTreeColumn? getLastColumn();
++  TreeColumn? getFirstColumn();
++  TreeColumn? getLastColumn();
+ 
+   /**
+    * Attribute based column getters.
+    */
+-  MozTreeColumn? getPrimaryColumn();
+-  MozTreeColumn? getSortedColumn();
+-  MozTreeColumn? getKeyColumn();
++  TreeColumn? getPrimaryColumn();
++  TreeColumn? getSortedColumn();
++  TreeColumn? getKeyColumn();
+ 
+   /**
+    * Get the column for the given element.
+    */
+-  MozTreeColumn? getColumnFor(Element? element);
++  TreeColumn? getColumnFor(Element? element);
+ 
+   /**
+    * Parametric column getters.
+    */
+-  getter MozTreeColumn? getNamedColumn(DOMString name);
+-  getter MozTreeColumn? getColumnAt(unsigned long index);
++  getter TreeColumn? getNamedColumn(DOMString name);
++  getter TreeColumn? getColumnAt(unsigned long index);
+ 
+   /**
+    * This method is called whenever a treecol is added or removed and
+    * the column cache needs to be rebuilt.
+    */
+   void invalidateColumns();
+ 
+   void restoreNaturalOrder();
+diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
+--- a/dom/webidl/moz.build
++++ b/dom/webidl/moz.build
+@@ -447,16 +447,17 @@ WEBIDL_FILES = [
+     'TextTrackCueList.webidl',
+     'TextTrackList.webidl',
+     'TimeEvent.webidl',
+     'TimeRanges.webidl',
+     'Touch.webidl',
+     'TouchEvent.webidl',
+     'TouchList.webidl',
+     'TransitionEvent.webidl',
++    'TreeColumn.webidl',
+     'TreeColumns.webidl',
+     'TreeWalker.webidl',
+     'UIEvent.webidl',
+     'UndoManager.webidl',
+     'URL.webidl',
+     'URLSearchParams.webidl',
+     'URLUtils.webidl',
+     'URLUtilsReadOnly.webidl',
+diff --git a/layout/xul/tree/nsTreeColumns.cpp b/layout/xul/tree/nsTreeColumns.cpp
+--- a/layout/xul/tree/nsTreeColumns.cpp
++++ b/layout/xul/tree/nsTreeColumns.cpp
+@@ -19,21 +19,23 @@
+ using namespace mozilla;
+ 
+ // Column class that caches all the info about our column.
+ nsTreeColumn::nsTreeColumn(nsTreeColumns* aColumns, dom::Element* aElement)
+   : mElement(aElement),
+     mColumns(aColumns),
+     mPrevious(nullptr)
+ {
+-  NS_ASSERTION(aElement &&
+-               aElement->NodeInfo()->Equals(nsGkAtoms::treecol,
++  MOZ_ASSERT(aElement);
++  NS_ASSERTION(aElement->NodeInfo()->Equals(nsGkAtoms::treecol,
+                                             kNameSpaceID_XUL),
+                "nsTreeColumn's content must be a <xul:treecol>");
+ 
++  SetIsDOMBinding();
++
+   Invalidate();
+ }
+ 
+ nsTreeColumn::~nsTreeColumn()
+ {
+   if (mNext) {
+     mNext->SetPrevious(nullptr);
+   }
+@@ -66,16 +68,26 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(
+   if (aIID.Equals(NS_GET_IID(nsTreeColumn))) {
+     AddRef();
+     *aInstancePtr = this;
+     return NS_OK;
+   }
+   else
+ NS_INTERFACE_MAP_END
+ 
++dom::Element*
++nsTreeColumn::GetElement(ErrorResult& aRv) const
++{
++  if (!mElement) {
++    aRv.Throw(NS_ERROR_FAILURE);
++  }
++  return mElement;
++}
++
++
+ nsIFrame*
+ nsTreeColumn::GetFrame()
+ {
+   NS_ENSURE_TRUE(mElement, nullptr);
+ 
+   return mElement->GetPrimaryFrame();
+ }
+ 
+diff --git a/layout/xul/tree/nsTreeColumns.h b/layout/xul/tree/nsTreeColumns.h
+--- a/layout/xul/tree/nsTreeColumns.h
++++ b/layout/xul/tree/nsTreeColumns.h
+@@ -45,16 +45,38 @@ public:
+ 
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+   NS_DECL_CYCLE_COLLECTION_CLASS(nsTreeColumn)
+   NS_DECL_NSITREECOLUMN
+ 
+   friend class nsTreeBodyFrame;
+   friend class nsTreeColumns;
+ 
++  // WebIDL
++  mozilla::dom::Element* GetElement(mozilla::ErrorResult& aRv) const;
++  nsTreeColumns* GetColumns() const
++  {
++    return mColumns;
++  }
++  int32_t GetX(mozilla::ErrorResult& aRv);
++  int32_t GetWidth(mozilla::ErrorResult& aRv);
++  void GetId(nsString& aId)
++  {
++    aId = mId;
++  }
++  int32_t Index() { return mIndex; }
++  bool Primary() { return mIsPrimary; }
++  bool Cycler() { return mIsCycler; }
++  bool Editable() { return mIsEditable; }
++  bool Selectable() { return mIsSelectable; }
++  int16_t Type() { return mType; }
++  nsTreeColumn* GetNext() { return mNext; }
++  nsTreeColumn* GetPrevious() { return mPrevious; }
++  void Invalidate(mozilla::ErrorResult& aRv);
++
+ protected:
+   ~nsTreeColumn();
+   nsIFrame* GetFrame();
+   nsIFrame* GetFrame(nsTreeBodyFrame* aBodyFrame);
+   // Don't call this if GetWidthInTwips or GetRect fails
+   bool IsLastVisible(nsTreeBodyFrame* aBodyFrame);
+ 
+   /**
+@@ -80,18 +102,16 @@ protected:
+   bool IsSelectable() { return mIsSelectable; }
+   bool Overflow() { return mOverflow; }
+ 
+   int16_t GetType() { return mType; }
+ 
+   int8_t GetCropStyle() { return mCropStyle; }
+   int32_t GetTextAlignment() { return mTextAlignment; }
+ 
+-  nsTreeColumn* GetNext() { return mNext; }
+-  nsTreeColumn* GetPrevious() { return mPrevious; }
+   void SetNext(nsTreeColumn* aNext) {
+     NS_ASSERTION(!mNext, "already have a next sibling");
+     mNext = aNext;
+   }
+   void SetPrevious(nsTreeColumn* aPrevious) { mPrevious = aPrevious; }
+ 
+ private:
+   /**

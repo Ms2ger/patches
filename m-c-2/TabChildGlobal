@@ -1,0 +1,248 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/ipc/TabChild.cpp b/dom/ipc/TabChild.cpp
+--- a/dom/ipc/TabChild.cpp
++++ b/dom/ipc/TabChild.cpp
+@@ -11,16 +11,17 @@
+ #include "Layers.h"
+ #include "ContentChild.h"
+ #include "IndexedDBChild.h"
+ #include "mozilla/Preferences.h"
+ #include "mozilla/ClearOnShutdown.h"
+ #include "mozilla/EventListenerManager.h"
+ #include "mozilla/IntentionalCrash.h"
+ #include "mozilla/docshell/OfflineCacheUpdateChild.h"
++#include "mozilla/dom/TabChildGlobalBinding.h"
+ #include "mozilla/ipc/DocumentRendererChild.h"
+ #include "mozilla/ipc/FileDescriptorUtils.h"
+ #include "mozilla/layers/ActiveElementManager.h"
+ #include "mozilla/layers/APZCCallbackHelper.h"
+ #include "mozilla/layers/AsyncPanZoomController.h"
+ #include "mozilla/layers/CompositorChild.h"
+ #include "mozilla/layers/ImageBridgeChild.h"
+ #include "mozilla/layers/ShadowLayers.h"
+@@ -2731,16 +2732,17 @@ TabChild::OnHideTooltip()
+ {
+     SendHideTooltip();
+     return NS_OK;
+ }
+ 
+ TabChildGlobal::TabChildGlobal(TabChildBase* aTabChild)
+ : mTabChild(aTabChild)
+ {
++  SetIsDOMBinding();
+ }
+ 
+ void
+ TabChildGlobal::Init()
+ {
+   NS_ASSERTION(!mMessageManager, "Re-initializing?!?");
+   mMessageManager = new nsFrameMessageManager(mTabChild,
+                                               nullptr,
+@@ -2767,43 +2769,63 @@ NS_IMPL_RELEASE_INHERITED(TabChildGlobal
+ // This method isn't automatically forwarded safely because it's notxpcom, so
+ // the IDL binding doesn't know what value to return.
+ NS_IMETHODIMP_(bool)
+ TabChildGlobal::MarkForCC()
+ {
+   return mMessageManager ? mMessageManager->MarkForCC() : false;
+ }
+ 
++already_AddRefed<nsIDOMWindow>
++TabChildGlobal::GetContent(ErrorResult& aRv)
++{
++  if (!mTabChild) {
++    aRv.Throw(NS_ERROR_NULL_POINTER);
++    return nullptr;
++  }
++
++  nsCOMPtr<nsIDOMWindow> window = do_GetInterface(mTabChild->WebNavigation());
++  return window.forget();
++}
++
+ NS_IMETHODIMP
+ TabChildGlobal::GetContent(nsIDOMWindow** aContent)
+ {
+-  *aContent = nullptr;
+-  if (!mTabChild)
+-    return NS_ERROR_NULL_POINTER;
+-  nsCOMPtr<nsIDOMWindow> window = do_GetInterface(mTabChild->WebNavigation());
+-  window.swap(*aContent);
+-  return NS_OK;
++  ErrorResult rv;
++  nsCOMPtr<nsIDOMWindow> content = GetContent(rv);
++  content.forget(aContent);
++  return rv.ErrorCode();
+ }
+ 
+ NS_IMETHODIMP
+ TabChildGlobal::PrivateNoteIntentionalCrash()
+ {
+     mozilla::NoteIntentionalCrash("tab");
+     return NS_OK;
+ }
+ 
++already_AddRefed<nsIDocShell>
++TabChildGlobal::GetDocShell(ErrorResult& aRv)
++{
++  if (!mTabChild) {
++    aRv.Throw(NS_ERROR_NULL_POINTER);
++    return nullptr;
++  }
++
++  nsCOMPtr<nsIDocShell> docShell = do_GetInterface(mTabChild->WebNavigation());
++  return docShell.forget();
++}
++
+ NS_IMETHODIMP
+ TabChildGlobal::GetDocShell(nsIDocShell** aDocShell)
+ {
+-  *aDocShell = nullptr;
+-  if (!mTabChild)
+-    return NS_ERROR_NULL_POINTER;
+-  nsCOMPtr<nsIDocShell> docShell = do_GetInterface(mTabChild->WebNavigation());
+-  docShell.swap(*aDocShell);
+-  return NS_OK;
++  ErrorResult rv;
++  nsCOMPtr<nsIDocShell> docShell = GetDocShell(rv);
++  docShell.forget(aDocShell);
++  return rv.ErrorCode();
+ }
+ 
+ NS_IMETHODIMP
+ TabChildGlobal::Btoa(const nsAString& aBinaryData,
+                      nsAString& aAsciiBase64String)
+ {
+   return nsContentUtils::Btoa(aBinaryData, aAsciiBase64String);
+ }
+@@ -2833,8 +2855,13 @@ JSObject*
+ TabChildGlobal::GetGlobalJSObject()
+ {
+   NS_ENSURE_TRUE(mTabChild, nullptr);
+   nsCOMPtr<nsIXPConnectJSObjectHolder> ref = mTabChild->GetGlobal();
+   NS_ENSURE_TRUE(ref, nullptr);
+   return ref->GetJSObject();
+ }
+ 
++JSObject*
++TabChildGlobal::WrapObject(JSContext* aCx)
++{
++  return TabChildGlobalBinding::Wrap(aCx, this);
++}
+diff --git a/dom/ipc/TabChild.h b/dom/ipc/TabChild.h
+--- a/dom/ipc/TabChild.h
++++ b/dom/ipc/TabChild.h
+@@ -1,10 +1,10 @@
+-/* -*- Mode: C++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 2; -*- */
+-/* vim: set sw=4 ts=8 et tw=80 : */
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_TabChild_h
+ #define mozilla_dom_TabChild_h
+ 
+ #include "mozilla/dom/PBrowserChild.h"
+@@ -132,16 +132,33 @@ public:
+     aVisitor.mForceContentDispatch = true;
+     return NS_OK;
+   }
+ 
+   virtual JSContext* GetJSContextForEventHandlers() MOZ_OVERRIDE;
+   virtual nsIPrincipal* GetPrincipal() MOZ_OVERRIDE;
+   virtual JSObject* GetGlobalJSObject() MOZ_OVERRIDE;
+ 
++  // WebIDL.
++  already_AddRefed<nsIDOMWindow> GetContent(ErrorResult& aRv);
++  already_AddRefed<nsIDocShell> GetDocShell(ErrorResult& aRv);
++  void Dump(const nsAString& aMessage, ErrorResult& aRv);
++  // Uses XPCOM PrivateNoteIntentionalCrash.
++  void Atob(const nsAString& aAsciiBase64String, nsAString& aBinaryData,
++            ErrorResult& aRv)
++  {
++    aRv = Atob(aAsciiBase64String, aBinaryData);
++  }
++  void Btoa(const nsAString& aBinaryData, nsAString& aAsciiBase64String,
++            ErrorResult& aRv)
++  {
++    aRv = Btoa(aBinaryData, aAsciiBase64String);
++  }
++
++private:
+   nsCOMPtr<nsIContentFrameMessageManager> mMessageManager;
+   nsRefPtr<TabChildBase> mTabChild;
+ };
+ 
+ class ContentListener MOZ_FINAL : public nsIDOMEventListener
+ {
+ public:
+   ContentListener(TabChild* aTabChild) : mTabChild(aTabChild) {}
+diff --git a/dom/webidl/TabChildGlobal.webidl b/dom/webidl/TabChildGlobal.webidl
+new file mode 100644
+--- /dev/null
++++ b/dom/webidl/TabChildGlobal.webidl
+@@ -0,0 +1,41 @@
++/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtaone at http://mozilla.org/MPL/2.0/. */
++
++[Global, NoInterfaceObject]
++interface TabChildGlobal : EventTarget {
++// DOM_CLASSINFO_MAP_ENTRY(nsIMessageListenerManager)
++// DOM_CLASSINFO_MAP_ENTRY(nsIMessageSender)
++// DOM_CLASSINFO_MAP_ENTRY(nsISyncMessageSender)
++// DOM_CLASSINFO_MAP_ENTRY(nsIContentFrameMessageManager)
++  /**
++   * The current top level window in the frame or null.
++   */
++  [GetterThrows]
++  readonly attribute WindowProxy? content;
++
++  /**
++   * The top level docshell or null.
++   */
++  [GetterThrows]
++  readonly attribute nsIDocShell? docShell;
++
++  /**
++   * Print a string to stdout.
++   */
++  [Throws]
++  void dump(DOMString aStr);
++
++  /**
++   * If leak detection is enabled, print a note to the leak log that this
++   * process will intentionally crash.
++   */
++  void privateNoteIntentionalCrash();
++
++  /**
++   * Ascii base64 data to binary data and vice versa
++   */
++  [Throws] DOMString atob(DOMString aAsciiString);
++  [Throws] DOMString btoa(DOMString aBase64Data);
++};
+diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
+--- a/dom/webidl/moz.build
++++ b/dom/webidl/moz.build
+@@ -422,16 +422,17 @@ WEBIDL_FILES = [
+     'SVGTransformList.webidl',
+     'SVGTSpanElement.webidl',
+     'SVGUnitTypes.webidl',
+     'SVGURIReference.webidl',
+     'SVGUseElement.webidl',
+     'SVGViewElement.webidl',
+     'SVGZoomAndPan.webidl',
+     'SVGZoomEvent.webidl',
++    'TabChildGlobal.webidl',
+     'Telephony.webidl',
+     'TelephonyCall.webidl',
+     'TelephonyCallGroup.webidl',
+     'Text.webidl',
+     'TextDecoder.webidl',
+     'TextEncoder.webidl',
+     'TextTrack.webidl',
+     'TextTrackCueList.webidl',

@@ -1,0 +1,75 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/xpconnect/src/XPCJSRuntime.cpp b/js/xpconnect/src/XPCJSRuntime.cpp
+--- a/js/xpconnect/src/XPCJSRuntime.cpp
++++ b/js/xpconnect/src/XPCJSRuntime.cpp
+@@ -587,17 +587,19 @@ WindowOrNull(JSObject *aObj)
+     // This will always return null until we have Window on WebIDL bindings,
+     // at which point it will do the right thing.
+     if (!IS_WN_CLASS(js::GetObjectClass(aObj))) {
+         nsGlobalWindow* win = nullptr;
+         UNWRAP_OBJECT(Window, aObj, win);
+         return win;
+     }
+ 
+-    nsISupports* supports = XPCWrappedNative::Get(aObj)->GetIdentityObject();
++    auto wn = XPCWrappedNative::Get(aObj);
++    NS_ENSURE_TRUE(wn, nullptr);
++    nsISupports* supports = wn->GetIdentityObject();
+     nsCOMPtr<nsPIDOMWindow> piWin = do_QueryInterface(supports);
+     if (!piWin)
+         return nullptr;
+     return static_cast<nsGlobalWindow*>(piWin.get());
+ }
+ 
+ nsGlobalWindow*
+ WindowGlobalOrNull(JSObject *aObj)
+diff --git a/js/xpconnect/src/XPCWrappedJSClass.cpp b/js/xpconnect/src/XPCWrappedJSClass.cpp
+--- a/js/xpconnect/src/XPCWrappedJSClass.cpp
++++ b/js/xpconnect/src/XPCWrappedJSClass.cpp
+@@ -151,18 +151,21 @@ nsXPCWrappedJSClass::nsXPCWrappedJSClass
+         }
+     }
+ }
+ 
+ nsXPCWrappedJSClass::~nsXPCWrappedJSClass()
+ {
+     if (mDescriptors && mDescriptors != &zero_methods_descriptor)
+         delete [] mDescriptors;
+-    if (mRuntime)
+-        mRuntime->GetWrappedJSClassMap()->Remove(this);
++    if (mRuntime) {
++        if (IID2WrappedJSClassMap* map = mRuntime->GetWrappedJSClassMap()) {
++            map->Remove(this);
++        }
++    }
+ 
+     if (mName)
+         nsMemory::Free(mName);
+ }
+ 
+ JSObject*
+ nsXPCWrappedJSClass::CallQueryInterfaceOnJSObject(JSContext* cx,
+                                                   JSObject* jsobjArg,
+diff --git a/js/xpconnect/src/xpcprivate.h b/js/xpconnect/src/xpcprivate.h
+--- a/js/xpconnect/src/xpcprivate.h
++++ b/js/xpconnect/src/xpcprivate.h
+@@ -361,17 +361,17 @@ public:
+         mNext = nullptr;
+         mSelfp = nullptr;
+ #endif
+     }
+ 
+     ~XPCRootSetElem()
+     {
+         MOZ_ASSERT(!mNext, "Must be unlinked");
+-        MOZ_ASSERT(!mSelfp, "Must be unlinked");
++        NS_WARN_IF_FALSE(!mSelfp, "Must be unlinked");
+     }
+ 
+     inline XPCRootSetElem* GetNextRoot() { return mNext; }
+     void AddToRootSet(XPCRootSetElem **listHead);
+     void RemoveFromRootSet();
+ 
+ private:
+     XPCRootSetElem *mNext;

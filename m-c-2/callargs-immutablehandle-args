@@ -1,0 +1,144 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/js/public/CallArgs.h b/js/public/CallArgs.h
+--- a/js/public/CallArgs.h
++++ b/js/public/CallArgs.h
+@@ -309,19 +309,19 @@ class MOZ_STACK_CLASS CallArgsBase :
+   protected:
+     unsigned argc_;
+ 
+   public:
+     /* Returns the number of arguments. */
+     unsigned length() const { return argc_; }
+ 
+     /* Returns the i-th zero-indexed argument. */
+-    MutableHandleValue operator[](unsigned i) const {
++    HandleValue operator[](unsigned i) const {
+         MOZ_ASSERT(i < argc_);
+-        return MutableHandleValue::fromMarkedLocation(&this->argv_[i]);
++        return HandleValue::fromMarkedLocation(&this->argv_[i]);
+     }
+ 
+     /*
+      * Returns the i-th zero-indexed argument, or |undefined| if there's no
+      * such argument.
+      */
+     HandleValue get(unsigned i) const {
+         return i < length()
+diff --git a/js/src/builtin/RegExp.cpp b/js/src/builtin/RegExp.cpp
+--- a/js/src/builtin/RegExp.cpp
++++ b/js/src/builtin/RegExp.cpp
+@@ -264,17 +264,16 @@ CompileRegExpObject(JSContext *cx, RegEx
+             return false;
+     }
+ 
+     RegExpFlag flags = RegExpFlag(0);
+     if (args.hasDefined(1)) {
+         RootedString flagStr(cx, ToString<CanGC>(cx, args[1]));
+         if (!flagStr)
+             return false;
+-        args[1].setString(flagStr);
+         if (!ParseRegExpFlags(cx, flagStr, &flags))
+             return false;
+     }
+ 
+     RootedAtom escapedSourceStr(cx, EscapeNakedForwardSlashes(cx, source));
+     if (!escapedSourceStr)
+         return false;
+ 
+diff --git a/js/src/jsfriendapi.h b/js/src/jsfriendapi.h
+--- a/js/src/jsfriendapi.h
++++ b/js/src/jsfriendapi.h
+@@ -1650,24 +1650,24 @@ class JSJitGetterCallArgs : protected JS
+         return *this;
+     }
+ };
+ 
+ /*
+  * A class, expected to be passed by value, which represents the CallArgs for a
+  * JSJitSetterOp.
+  */
+-class JSJitSetterCallArgs : protected JS::MutableHandleValue
++class JSJitSetterCallArgs : protected JS::HandleValue
+ {
+   public:
+     explicit JSJitSetterCallArgs(const JS::CallArgs& args)
+-      : JS::MutableHandleValue(args[0])
++      : JS::HandleValue(args[0])
+     {}
+ 
+-    JS::MutableHandleValue operator[](unsigned i) {
++    JS::HandleValue operator[](unsigned i) {
+         MOZ_ASSERT(i == 0);
+         return *this;
+     }
+ 
+     unsigned length() const { return 1; }
+ 
+     // Add get() or maybe hasDefined() as needed
+ };
+@@ -1691,17 +1691,17 @@ class JSJitMethodCallArgs : protected JS
+     }
+ 
+     JS::MutableHandleValue rval() const {
+         return Base::rval();
+     }
+ 
+     unsigned length() const { return Base::length(); }
+ 
+-    JS::MutableHandleValue operator[](unsigned i) const {
++    JS::HandleValue operator[](unsigned i) const {
+         return Base::operator[](i);
+     }
+ 
+     bool hasDefined(unsigned i) const {
+         return Base::hasDefined(i);
+     }
+ 
+     JSObject &callee() const {
+diff --git a/js/src/jsnum.cpp b/js/src/jsnum.cpp
+--- a/js/src/jsnum.cpp
++++ b/js/src/jsnum.cpp
+@@ -442,17 +442,16 @@ js::num_parseInt(JSContext *cx, unsigned
+             }
+         }
+     }
+ 
+     /* Step 1. */
+     RootedString inputString(cx, ToString<CanGC>(cx, args[0]));
+     if (!inputString)
+         return false;
+-    args[0].setString(inputString);
+ 
+     /* Steps 6-9. */
+     bool stripPrefix = true;
+     int32_t radix;
+     if (!args.hasDefined(1)) {
+         radix = 10;
+     } else {
+         if (!ToInt32(cx, args[1], &radix))
+diff --git a/js/src/vm/Stack.h b/js/src/vm/Stack.h
+--- a/js/src/vm/Stack.h
++++ b/js/src/vm/Stack.h
+@@ -1105,16 +1105,21 @@ class InvokeArgs : public JS::CallArgs
+     explicit InvokeArgs(JSContext *cx) : v_(cx) {}
+ 
+     bool init(unsigned argc) {
+         if (!v_.resize(2 + argc))
+             return false;
+         ImplicitCast<CallArgs>(*this) = CallArgsFromVp(argc, v_.begin());
+         return true;
+     }
++
++    MutableHandleValue operator[](unsigned i) const {
++        MOZ_ASSERT(i < argc_);
++        return MutableHandleValue::fromMarkedLocation(&this->argv_[i]);
++    }
+ };
+ 
+ template <>
+ struct DefaultHasher<AbstractFramePtr> {
+     typedef AbstractFramePtr Lookup;
+ 
+     static js::HashNumber hash(const Lookup &key) {
+         return size_t(key.raw());

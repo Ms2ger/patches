@@ -1,0 +1,372 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/layout/xul/tree/nsTreeBodyFrame.cpp b/layout/xul/tree/nsTreeBodyFrame.cpp
+--- a/layout/xul/tree/nsTreeBodyFrame.cpp
++++ b/layout/xul/tree/nsTreeBodyFrame.cpp
+@@ -1150,17 +1150,17 @@ nsTreeBodyFrame::GetCoordsForCellItem(in
+     // We don't want to consider any of the decorations that may be present
+     // on the current row, so we have to deflate the rect by the border and 
+     // padding and offset its left and top coordinates appropriately. 
+     AdjustForBorderPadding(rowContext, cellRect);
+ 
+     nsStyleContext* cellContext = GetPseudoStyleContext(nsCSSAnonBoxes::moztreecell);
+ 
+     NS_NAMED_LITERAL_CSTRING(cell, "cell");
+-    if (currCol->IsCycler() || cell.Equals(aElement)) {
++    if (currCol->Cycler() || cell.Equals(aElement)) {
+       // If the current Column is a Cycler, then the Rect is just the cell - the margins. 
+       // Similarly, if we're just being asked for the cell rect, provide it. 
+ 
+       theRect = cellRect;
+       nsMargin cellMargin;
+       cellContext->StyleMargin()->GetMargin(cellMargin);
+       theRect.Deflate(cellMargin);
+       break;
+@@ -1176,17 +1176,17 @@ nsTreeBodyFrame::GetCoordsForCellItem(in
+       presContext->PresShell()->CreateReferenceRenderingContext();
+ 
+     // Now we'll start making our way across the cell, starting at the edge of 
+     // the cell and proceeding until we hit the right edge. |cellX| is the 
+     // working X value that we will increment as we crawl from left to right.
+     nscoord cellX = cellRect.x;
+     nscoord remainWidth = cellRect.width;
+ 
+-    if (currCol->IsPrimary()) {
++    if (currCol->Primary()) {
+       // If the current Column is a Primary, then we need to take into account the indentation
+       // and possibly a twisty. 
+ 
+       // The amount of indentation is the indentation width (|mIndentation|) by the level. 
+       int32_t level;
+       mView->GetLevel(aRow, &level);
+       if (!isRTL)
+         cellX += mIndentation * level;
+@@ -1511,17 +1511,17 @@ nsTreeBodyFrame::GetItemWithinCellAt(nsc
+ 
+   // Handle right alignment hit testing.
+   bool isRTL = StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL;
+ 
+   nsPresContext* presContext = PresContext();
+   nsRefPtr<nsRenderingContext> rc =
+     presContext->PresShell()->CreateReferenceRenderingContext();
+ 
+-  if (aColumn->IsPrimary()) {
++  if (aColumn->Primary()) {
+     // If we're the primary column, we have indentation and a twisty.
+     int32_t level;
+     mView->GetLevel(aRowIndex, &level);
+ 
+     if (!isRTL)
+       currX += mIndentation*level;
+     remainingWidth -= mIndentation*level;
+ 
+@@ -1653,17 +1653,17 @@ nsTreeBodyFrame::GetCellAt(nscoord aX, n
+ 
+     if (!OffsetForHorzScroll(cellRect, false))
+       continue;
+ 
+     if (aX >= cellRect.x && aX < cellRect.x + cellRect.width) {
+       // We know the column hit now.
+       *aCol = currCol;
+ 
+-      if (currCol->IsCycler())
++      if (currCol->Cycler())
+         // Cyclers contain only images.  Fill this in immediately and return.
+         *aChildElt = nsCSSAnonBoxes::moztreeimage;
+       else
+         *aChildElt = GetItemWithinCellAt(aX, cellRect, *aRow, currCol);
+       break;
+     }
+   }
+ }
+@@ -1690,17 +1690,17 @@ nsTreeBodyFrame::GetCellWidth(int32_t aR
+   // Adjust borders and padding for the cell.
+   nsStyleContext* cellContext = GetPseudoStyleContext(nsCSSAnonBoxes::moztreecell);
+   nsMargin bp(0,0,0,0);
+   GetBorderPadding(cellContext, bp);
+ 
+   aCurrentSize = cellRect.width;
+   aDesiredSize = bp.left + bp.right;
+ 
+-  if (aCol->IsPrimary()) {
++  if (aCol->Primary()) {
+     // If the current Column is a Primary, then we need to take into account 
+     // the indentation and possibly a twisty. 
+ 
+     // The amount of indentation is the indentation width (|mIndentation|) by the level.
+     int32_t level;
+     mView->GetLevel(aRow, &level);
+     aDesiredSize += mIndentation * level;
+     
+@@ -2009,30 +2009,30 @@ nsTreeBodyFrame::PrefillPropertyArray(in
+     // multiple columns
+     if (mColumns->GetColumnAt(1))
+       mScratchArray.AppendElement(nsGkAtoms::multicol);
+   }
+ 
+   if (aCol) {
+     mScratchArray.AppendElement(aCol->GetAtom());
+ 
+-    if (aCol->IsPrimary())
++    if (aCol->Primary())
+       mScratchArray.AppendElement(nsGkAtoms::primary);
+ 
+-    if (aCol->GetType() == nsITreeColumn::TYPE_CHECKBOX) {
++    if (aCol->Type() == nsITreeColumn::TYPE_CHECKBOX) {
+       mScratchArray.AppendElement(nsGkAtoms::checkbox);
+ 
+       if (aRowIndex != -1) {
+         nsAutoString value;
+         mView->GetCellValue(aRowIndex, aCol, value);
+         if (value.EqualsLiteral("true"))
+           mScratchArray.AppendElement(nsGkAtoms::checked);
+       }
+     }
+-    else if (aCol->GetType() == nsITreeColumn::TYPE_PROGRESSMETER) {
++    else if (aCol->Type() == nsITreeColumn::TYPE_PROGRESSMETER) {
+       mScratchArray.AppendElement(nsGkAtoms::progressmeter);
+ 
+       if (aRowIndex != -1) {
+         int32_t state;
+         mView->GetProgressMode(aRowIndex, aCol, &state);
+         if (state == nsITreeView::PROGRESS_NORMAL)
+           mScratchArray.AppendElement(nsGkAtoms::progressNormal);
+         else if (state == nsITreeView::PROGRESS_UNDETERMINED)
+@@ -3048,17 +3048,17 @@ nsTreeBodyFrame::PaintRow(int32_t       
+         continue;
+ 
+       if (OffsetForHorzScroll(cellRect, false)) {
+         cellRect.x += aPt.x;
+ 
+         // for primary columns, use the row's vertical size so that the
+         // lines get drawn properly
+         nsRect checkRect = cellRect;
+-        if (currCol->IsPrimary())
++        if (currCol->Primary())
+           checkRect = nsRect(cellRect.x, originalRowRect.y,
+                              cellRect.width, originalRowRect.height);
+ 
+         nsRect dirtyRect;
+         nscoord dummy;
+         if (dirtyRect.IntersectRect(aDirtyRect, checkRect))
+           PaintCell(aRowIndex, currCol, cellRect, aPresContext,
+                     aRenderingContext, aDirtyRect, dummy, aPt);
+@@ -3159,17 +3159,17 @@ nsTreeBodyFrame::PaintCell(int32_t      
+   nscoord currX = cellRect.x;
+   nscoord remainingWidth = cellRect.width;
+ 
+   // Now we paint the contents of the cells.
+   // Directionality of the tree determines the order in which we paint.  
+   // NS_STYLE_DIRECTION_LTR means paint from left to right.
+   // NS_STYLE_DIRECTION_RTL means paint from right to left.
+ 
+-  if (aColumn->IsPrimary()) {
++  if (aColumn->Primary()) {
+     // If we're the primary column, we need to indent and paint the twisty and any connecting lines
+     // between siblings.
+ 
+     int32_t level;
+     mView->GetLevel(aRowIndex, &level);
+ 
+     if (!isRTL)
+       currX += mIndentation * level;
+@@ -3259,21 +3259,21 @@ nsTreeBodyFrame::PaintCell(int32_t      
+   nsRect dirtyRect;
+   if (dirtyRect.IntersectRect(aDirtyRect, iconRect))
+     PaintImage(aRowIndex, aColumn, iconRect, aPresContext, aRenderingContext, aDirtyRect,
+                remainingWidth, currX);
+ 
+   // Now paint our element, but only if we aren't a cycler column.
+   // XXX until we have the ability to load images, allow the view to 
+   // insert text into cycler columns...
+-  if (!aColumn->IsCycler()) {
++  if (!aColumn->Cycler()) {
+     nsRect elementRect(currX, cellRect.y, remainingWidth, cellRect.height);
+     nsRect dirtyRect;
+     if (dirtyRect.IntersectRect(aDirtyRect, elementRect)) {
+-      switch (aColumn->GetType()) {
++      switch (aColumn->Type()) {
+         case nsITreeColumn::TYPE_TEXT:
+           PaintText(aRowIndex, aColumn, elementRect, aPresContext, aRenderingContext, aDirtyRect, currX);
+           break;
+         case nsITreeColumn::TYPE_CHECKBOX:
+           PaintCheckbox(aRowIndex, aColumn, elementRect, aPresContext, aRenderingContext, aDirtyRect);
+           break;
+         case nsITreeColumn::TYPE_PROGRESSMETER:
+           int32_t state;
+@@ -3448,17 +3448,17 @@ nsTreeBodyFrame::PaintImage(int32_t     
+   if (destRect.width > imageRect.width) {
+     // The destRect is too wide to fit within the cell width.
+     // Adjust destRect width to fit within the cell width.
+     destRect.width = imageRect.width;
+   }
+   else {
+     // The cell is wider than the destRect.
+     // In a cycler column, the image is centered horizontally.
+-    if (!aColumn->IsCycler()) {
++    if (!aColumn->Cycler()) {
+       // If this column is not a cycler, we won't center the image horizontally.
+       // We adjust the imageRect width so that the image is placed at the start
+       // of the cell.
+       imageRect.width = destRect.width;
+     }
+   }
+ 
+   if (image) {
+diff --git a/layout/xul/tree/nsTreeColumns.cpp b/layout/xul/tree/nsTreeColumns.cpp
+--- a/layout/xul/tree/nsTreeColumns.cpp
++++ b/layout/xul/tree/nsTreeColumns.cpp
+@@ -80,17 +80,17 @@ nsTreeColumn::GetFrame()
+ }
+ 
+ bool
+ nsTreeColumn::IsLastVisible(nsTreeBodyFrame* aBodyFrame)
+ {
+   NS_ASSERTION(GetFrame(), "should have checked for this already");
+ 
+   // cyclers are fixed width, don't adjust them
+-  if (IsCycler())
++  if (Cycler())
+     return false;
+ 
+   // we're certainly not the last visible if we're not visible
+   if (GetFrame()->GetRect().width == 0)
+     return false;
+ 
+   // try to find a visible successor
+   for (nsTreeColumn *next = GetNext(); next; next = next->GetNext()) {
+@@ -211,45 +211,45 @@ nsTreeColumn::GetIndex(int32_t* aIndex)
+ {
+   *aIndex = GetIndex();
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsTreeColumn::GetPrimary(bool* aPrimary)
+ {
+-  *aPrimary = IsPrimary();
++  *aPrimary = Primary();
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsTreeColumn::GetCycler(bool* aCycler)
+ {
+-  *aCycler = IsCycler();
++  *aCycler = Cycler();
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsTreeColumn::GetEditable(bool* aEditable)
+ {
+-  *aEditable = IsEditable();
++  *aEditable = Editable();
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsTreeColumn::GetSelectable(bool* aSelectable)
+ {
+-  *aSelectable = IsSelectable();
++  *aSelectable = Selectable();
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsTreeColumn::GetType(int16_t* aType)
+ {
+-  *aType = GetType();
++  *aType = Type();
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsTreeColumn::GetNext(nsITreeColumn** _retval)
+ {
+   NS_IF_ADDREF(*_retval = GetNext());
+   return NS_OK;
+@@ -486,30 +486,30 @@ nsTreeColumns::GetKeyColumn()
+   for (nsTreeColumn* currCol = mFirstColumn; currCol; currCol = currCol->GetNext()) {
+     // Skip hidden columns.
+     if (!currCol->mElement ||
+         currCol->mElement->AttrValueIs(kNameSpaceID_None, nsGkAtoms::hidden,
+                                        nsGkAtoms::_true, eCaseMatters))
+       continue;
+ 
+     // Skip non-text column
+-    if (currCol->GetType() != nsITreeColumn::TYPE_TEXT)
++    if (currCol->Type() != nsITreeColumn::TYPE_TEXT)
+       continue;
+ 
+     if (!first)
+       first = currCol;
+     
+     if (nsContentUtils::HasNonEmptyAttr(currCol->mElement, kNameSpaceID_None,
+                                         nsGkAtoms::sortDirection)) {
+       // Use sorted column as the key.
+       sorted = currCol;
+       break;
+     }
+ 
+-    if (currCol->IsPrimary())
++    if (currCol->Primary())
+       if (!primary)
+         primary = currCol;
+   }
+ 
+   if (sorted)
+     return sorted;
+   if (primary)
+     return primary;
+@@ -654,17 +654,17 @@ nsTreeColumns::RestoreNaturalOrder()
+   return NS_OK;
+ }
+ 
+ nsTreeColumn*
+ nsTreeColumns::GetPrimaryColumn()
+ {
+   EnsureColumns();
+   for (nsTreeColumn* currCol = mFirstColumn; currCol; currCol = currCol->GetNext()) {
+-    if (currCol->IsPrimary()) {
++    if (currCol->Primary()) {
+       return currCol;
+     }
+   }
+   return nullptr;
+ }
+ 
+ void
+ nsTreeColumns::EnsureColumns()
+diff --git a/layout/xul/tree/nsTreeColumns.h b/layout/xul/tree/nsTreeColumns.h
+--- a/layout/xul/tree/nsTreeColumns.h
++++ b/layout/xul/tree/nsTreeColumns.h
+@@ -69,23 +69,23 @@ protected:
+ 
+   void SetColumns(nsTreeColumns* aColumns) { mColumns = aColumns; }
+ 
+   const nsAString& GetId() { return mId; }
+   nsIAtom* GetAtom() { return mAtom; }
+ 
+   int32_t GetIndex() { return mIndex; }
+ 
+-  bool IsPrimary() { return mIsPrimary; }
+-  bool IsCycler() { return mIsCycler; }
+-  bool IsEditable() { return mIsEditable; }
+-  bool IsSelectable() { return mIsSelectable; }
++  bool Primary() { return mIsPrimary; }
++  bool Cycler() { return mIsCycler; }
++  bool Editable() { return mIsEditable; }
++  bool Selectable() { return mIsSelectable; }
+   bool Overflow() { return mOverflow; }
+ 
+-  int16_t GetType() { return mType; }
++  int16_t Type() { return mType; }
+ 
+   int8_t GetCropStyle() { return mCropStyle; }
+   int32_t GetTextAlignment() { return mTextAlignment; }
+ 
+   nsTreeColumn* GetNext() { return mNext; }
+   nsTreeColumn* GetPrevious() { return mPrevious; }
+   void SetNext(nsTreeColumn* aNext) {
+     NS_ASSERTION(!mNext, "already have a next sibling");

@@ -1,0 +1,147 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/xpfe/appshell/nsAppShellService.cpp b/xpfe/appshell/nsAppShellService.cpp
+--- a/xpfe/appshell/nsAppShellService.cpp
++++ b/xpfe/appshell/nsAppShellService.cpp
+@@ -22,20 +22,16 @@
+ 
+ #include "prprf.h"
+ 
+ #include "nsWidgetInitData.h"
+ #include "nsWidgetsCID.h"
+ #include "nsIWidget.h"
+ #include "nsIRequestObserver.h"
+ 
+-/* For implementing GetHiddenWindowAndJSContext */
+-#include "nsIScriptGlobalObject.h"
+-#include "nsIScriptContext.h"
+-
+ #include "nsAppShellService.h"
+ #include "nsISupportsPrimitives.h"
+ #include "nsIChromeRegistry.h"
+ #include "nsILoadContext.h"
+ #include "nsIWebNavigation.h"
+ 
+ #include "mozilla/Attributes.h"
+ #include "mozilla/Preferences.h"
+@@ -713,66 +709,16 @@ nsAppShellService::GetHasHiddenPrivateWi
+ {
+   NS_ENSURE_ARG_POINTER(aHasPrivateWindow);
+ 
+   *aHasPrivateWindow = !!mHiddenPrivateWindow;
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+-nsAppShellService::GetHiddenWindowAndJSContext(nsIDOMWindow **aWindow,
+-                                               JSContext    **aJSContext)
+-{
+-    nsresult rv = NS_OK;
+-    if ( aWindow && aJSContext ) {
+-        *aWindow    = nullptr;
+-        *aJSContext = nullptr;
+-
+-        if ( mHiddenWindow ) {
+-            // Convert hidden window to nsIDOMWindow and extract its JSContext.
+-            do {
+-                // 1. Get doc for hidden window.
+-                nsCOMPtr<nsIDocShell> docShell;
+-                rv = mHiddenWindow->GetDocShell(getter_AddRefs(docShell));
+-                if (NS_FAILED(rv)) break;
+-                if (!docShell) {
+-                  break;
+-                }
+-
+-                // 2. Convert that to an nsIDOMWindow.
+-                nsCOMPtr<nsIDOMWindow> hiddenDOMWindow(docShell->GetWindow());
+-                if(!hiddenDOMWindow) break;
+-
+-                // 3. Get script global object for the window.
+-                nsCOMPtr<nsIScriptGlobalObject> sgo = docShell->GetScriptGlobalObject();
+-                if (!sgo) { rv = NS_ERROR_FAILURE; break; }
+-
+-                // 4. Get script context from that.
+-                nsIScriptContext *scriptContext = sgo->GetContext();
+-                if (!scriptContext) { rv = NS_ERROR_FAILURE; break; }
+-
+-                // 5. Get JSContext from the script context.
+-                JSContext *jsContext = scriptContext->GetNativeContext();
+-                if (!jsContext) { rv = NS_ERROR_FAILURE; break; }
+-
+-                // Now, give results to caller.
+-                *aWindow    = hiddenDOMWindow.get();
+-                NS_IF_ADDREF( *aWindow );
+-                *aJSContext = jsContext;
+-            } while (0);
+-        } else {
+-            rv = NS_ERROR_FAILURE;
+-        }
+-    } else {
+-        rv = NS_ERROR_NULL_POINTER;
+-    }
+-    return rv;
+-}
+-
+-NS_IMETHODIMP
+ nsAppShellService::GetApplicationProvidedHiddenWindow(bool* aAPHW)
+ {
+     *aAPHW = mApplicationProvidedHiddenWindow;
+     return NS_OK;
+ }
+ 
+ /*
+  * Register a new top level window (created elsewhere)
+diff --git a/xpfe/appshell/nsIAppShellService.idl b/xpfe/appshell/nsIAppShellService.idl
+--- a/xpfe/appshell/nsIAppShellService.idl
++++ b/xpfe/appshell/nsIAppShellService.idl
+@@ -7,22 +7,16 @@
+ 
+ interface nsIXULWindow;
+ interface nsIWebNavigation;
+ interface nsIURI;
+ interface nsIDOMWindow;
+ interface nsIAppShell;
+ interface nsITabParent;
+ 
+-[ptr] native JSContext(JSContext);
+-
+-%{C++
+-#include "js/TypeDecls.h"
+-%}
+-
+ [scriptable, uuid(41a2f0c6-3ca1-44f9-8efa-744a43aa399d)]
+ interface nsIAppShellService : nsISupports
+ {
+   /**
+    * Create a window, which will be initially invisible.
+    * @param aParent the parent window.  Can be null.
+    * @param aUrl the contents of the new window.
+    * @param aChromeMask chrome flags affecting the kind of OS border
+@@ -90,27 +84,16 @@ interface nsIAppShellService : nsISuppor
+    * created and maintained by this AppShellService.  This window is created
+    * in private browsing mode.
+    * @param aResult the hidden private window.  Do not unhide hidden window.
+    *                Do not taunt hidden window.
+    */
+   readonly attribute nsIDOMWindow hiddenPrivateDOMWindow;
+ 
+   /**
+-   * Return the (singleton) application hidden window as an nsIDOMWindow,
+-   * and, the corresponding JavaScript context pointer.  This is useful
+-   * if you'd like to subsequently call OpenDialog on the hidden window.
+-   * @aHiddenDOMWindow the hidden window QI'd to type nsIDOMWindow
+-   * @aJSContext       the corresponding JavaScript context
+-   */
+-  [noscript]
+-  void getHiddenWindowAndJSContext(out nsIDOMWindow aHiddenDOMWindow,
+-                                   out JSContext aJSContext);
+-
+-  /**
+    * Return true if the application hidden window was provided by the
+    * application. If it wasn't, the default hidden window was used. This will
+    * usually be false on all non-mac platforms.
+    */
+   readonly attribute boolean applicationProvidedHiddenWindow;
+ 
+   /**
+    * Add a window to the application's registry of windows.  These windows

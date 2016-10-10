@@ -1,0 +1,201 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsContentSink.cpp b/content/base/src/nsContentSink.cpp
+--- a/content/base/src/nsContentSink.cpp
++++ b/content/base/src/nsContentSink.cpp
+@@ -797,20 +797,19 @@ nsContentSink::PrefetchHref(const nsAStr
+   //
+   if (!mDocShell)
+     return;
+ 
+   nsCOMPtr<nsIDocShell> docshell = mDocShell;
+ 
+   nsCOMPtr<nsIDocShellTreeItem> parentItem;
+   do {
+-    uint32_t appType = 0;
+-    nsresult rv = docshell->GetAppType(&appType);
+-    if (NS_FAILED(rv) || appType == nsIDocShell::APP_TYPE_MAIL)
++    if (docshell->AppType() == nsIDocShell::APP_TYPE_MAIL) {
+       return; // do not prefetch from mailnews
++    }
+     docshell->GetParent(getter_AddRefs(parentItem));
+     if (parentItem) {
+       docshell = do_QueryInterface(parentItem);
+       if (!docshell) {
+         NS_ERROR("cannot get a docshell from a treeItem!");
+         return;
+       }
+     }
+diff --git a/content/base/src/nsContentUtils.cpp b/content/base/src/nsContentUtils.cpp
+--- a/content/base/src/nsContentUtils.cpp
++++ b/content/base/src/nsContentUtils.cpp
+@@ -2883,19 +2883,18 @@ nsContentUtils::CanLoadImage(nsIURI* aUR
+ 
+   {
+     nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem = aLoadingDocument->GetDocShell();
+     if (docShellTreeItem) {
+       nsCOMPtr<nsIDocShellTreeItem> root;
+       docShellTreeItem->GetRootTreeItem(getter_AddRefs(root));
+ 
+       nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(root));
+-
+-      if (!docShell || NS_FAILED(docShell->GetAppType(&appType))) {
+-        appType = nsIDocShell::APP_TYPE_UNKNOWN;
++      if (docShell) {
++        appType = docShell->AppType();
+       }
+     }
+   }
+ 
+   if (appType != nsIDocShell::APP_TYPE_EDITOR) {
+     // Editor apps get special treatment here, editors can load images
+     // from anywhere.  This allows editor to insert images from file://
+     // into documents that are being edited.
+diff --git a/docshell/base/nsDocShell.cpp b/docshell/base/nsDocShell.cpp
+--- a/docshell/base/nsDocShell.cpp
++++ b/docshell/base/nsDocShell.cpp
+@@ -2581,20 +2581,26 @@ nsDocShell::GetDocShellEnumerator(int32_
+     rv = docShellEnum->First();
+     if (NS_FAILED(rv)) return rv;
+ 
+     rv = docShellEnum->QueryInterface(NS_GET_IID(nsISimpleEnumerator), (void **)outEnum);
+ 
+     return rv;
+ }
+ 
++/* virtual */ uint32_t
++nsDocShell::AppType()
++{
++    return mAppType;
++}
++
+ NS_IMETHODIMP
+ nsDocShell::GetAppType(uint32_t * aAppType)
+ {
+-    *aAppType = mAppType;
++    *aAppType = AppType();
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsDocShell::SetAppType(uint32_t aAppType)
+ {
+     mAppType = aAppType;
+     return NS_OK;
+@@ -12411,19 +12417,17 @@ nsDocShell::GetNestedFrameId(uint64_t* a
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsDocShell::IsAppOfType(uint32_t aAppType, bool *aIsOfType)
+ {
+     nsRefPtr<nsDocShell> shell = this;
+     while (shell) {
+-        uint32_t type;
+-        shell->GetAppType(&type);
+-        if (type == aAppType) {
++        if (shell->AppType() == aAppType) {
+             *aIsOfType = true;
+             return NS_OK;
+         }
+         shell = shell->GetParentDocshell();
+     }
+ 
+     *aIsOfType = false;
+     return NS_OK;
+diff --git a/docshell/base/nsIDocShell.idl b/docshell/base/nsIDocShell.idl
+--- a/docshell/base/nsIDocShell.idl
++++ b/docshell/base/nsIDocShell.idl
+@@ -1,9 +1,9 @@
+-/* -*- Mode: IDL; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*-
++/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+  *
+  * This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "domstubs.idl"
+ #include "nsIDocShellTreeItem.idl"
+ 
+@@ -305,16 +305,17 @@ interface nsIDocShell : nsIDocShellTreeI
+   /**
+    * The type of application that created this window
+    */
+   const unsigned long APP_TYPE_UNKNOWN  = 0;
+   const unsigned long APP_TYPE_MAIL     = 1;
+   const unsigned long APP_TYPE_EDITOR   = 2;
+ 
+   attribute unsigned long appType;
++  [noscript,notxpcom,nostdcall] unsigned long AppType();
+ 
+   /**
+    * certain dochshells (like the message pane)
+    * should not throw up auth dialogs
+    * because it can act as a password trojan
+    */
+   attribute boolean allowAuth;
+ 
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -4519,22 +4519,19 @@ nsGlobalWindow::GetOpenerWindow(ErrorRes
+   // because opener can be used to spoof the contents of a message (bug 105050).
+   // So, we look in the opener's root docshell to see if it's a mail window.
+   nsCOMPtr<nsIDocShell> openerDocShell = opener->GetDocShell();
+ 
+   if (openerDocShell) {
+     nsCOMPtr<nsIDocShellTreeItem> openerRootItem;
+     openerDocShell->GetRootTreeItem(getter_AddRefs(openerRootItem));
+     nsCOMPtr<nsIDocShell> openerRootDocShell(do_QueryInterface(openerRootItem));
+-    if (openerRootDocShell) {
+-      uint32_t appType;
+-      nsresult rv = openerRootDocShell->GetAppType(&appType);
+-      if (NS_SUCCEEDED(rv) && appType != nsIDocShell::APP_TYPE_MAIL) {
+-        return opener;
+-      }
++    if (openerRootDocShell &&
++        openerRootDocShell->AppType() != nsIDocShell::APP_TYPE_MAIL) {
++      return opener;
+     }
+   }
+ 
+   return nullptr;
+ }
+ 
+ void
+ nsGlobalWindow::GetOpener(JSContext* aCx, JS::MutableHandle<JS::Value> aRetval,
+diff --git a/editor/libeditor/nsPlaintextDataTransfer.cpp b/editor/libeditor/nsPlaintextDataTransfer.cpp
+--- a/editor/libeditor/nsPlaintextDataTransfer.cpp
++++ b/editor/libeditor/nsPlaintextDataTransfer.cpp
+@@ -425,28 +425,26 @@ NS_IMETHODIMP nsPlaintextEditor::CanPast
+     *aCanPaste = false;
+   
+   return NS_OK;
+ }
+ 
+ bool nsPlaintextEditor::IsSafeToInsertData(nsIDOMDocument* aSourceDoc)
+ {
+   // Try to determine whether we should use a sanitizing fragment sink
+-  bool isSafe = false;
+-
+   nsCOMPtr<nsIDocument> destdoc = GetDocument();
+   NS_ASSERTION(destdoc, "Where is our destination doc?");
++
+   nsCOMPtr<nsIDocShellTreeItem> dsti = destdoc->GetDocShell();
+   nsCOMPtr<nsIDocShellTreeItem> root;
+   if (dsti)
+     dsti->GetRootTreeItem(getter_AddRefs(root));
++
+   nsCOMPtr<nsIDocShell> docShell = do_QueryInterface(root);
+-  uint32_t appType;
+-  if (docShell && NS_SUCCEEDED(docShell->GetAppType(&appType)))
+-    isSafe = appType == nsIDocShell::APP_TYPE_EDITOR;
++  bool isSafe = docShell && docShell->AppType() == nsIDocShell::APP_TYPE_EDITOR;
+   if (!isSafe && aSourceDoc) {
+     nsCOMPtr<nsIDocument> srcdoc = do_QueryInterface(aSourceDoc);
+     NS_ASSERTION(srcdoc, "Where is our source doc?");
+ 
+     nsIPrincipal* srcPrincipal = srcdoc->NodePrincipal();
+     nsIPrincipal* destPrincipal = destdoc->NodePrincipal();
+     NS_ASSERTION(srcPrincipal && destPrincipal, "How come we don't have a principal?");
+     srcPrincipal->Subsumes(destPrincipal, &isSafe);

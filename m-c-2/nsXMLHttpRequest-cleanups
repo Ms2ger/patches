@@ -1,0 +1,64 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/src/nsXMLHttpRequest.cpp b/content/base/src/nsXMLHttpRequest.cpp
+--- a/content/base/src/nsXMLHttpRequest.cpp
++++ b/content/base/src/nsXMLHttpRequest.cpp
+@@ -383,17 +383,17 @@ nsXMLHttpRequest::Init(nsIPrincipal* aPr
+ void
+ nsXMLHttpRequest::InitParameters(bool aAnon, bool aSystem)
+ {
+   if (!aAnon && !aSystem) {
+     return;
+   }
+ 
+   // Check for permissions.
+-  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(GetOwner());
++  nsCOMPtr<nsPIDOMWindow> window = GetOwner();
+   if (!window || !window->GetDocShell()) {
+     return;
+   }
+ 
+   // Chrome is always allowed access, so do the permission check only
+   // for non-chrome pages.
+   if (!IsSystemXHR() && aSystem) {
+     nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
+@@ -1065,18 +1065,17 @@ nsXMLHttpRequest::IsDeniedCrossSiteReque
+ }
+ 
+ /* readonly attribute AString responseURL; */
+ void
+ nsXMLHttpRequest::GetResponseURL(nsAString& aUrl)
+ {
+   aUrl.Truncate();
+ 
+-  uint16_t readyState;
+-  GetReadyState(&readyState);
++  uint16_t readyState = ReadyState();
+   if ((readyState == UNSENT || readyState == OPENED) || !mChannel) {
+     return;
+   }
+ 
+   // Make sure we don't leak responseURL information from denied cross-site
+   // requests.
+   if (IsDeniedCrossSiteRequest()) {
+     return;
+@@ -1106,18 +1105,17 @@ uint32_t
+ nsXMLHttpRequest::Status()
+ {
+   // Make sure we don't leak status information from denied cross-site
+   // requests.
+   if (IsDeniedCrossSiteRequest()) {
+     return 0;
+   }
+ 
+-  uint16_t readyState;
+-  GetReadyState(&readyState);
++  uint16_t readyState = ReadyState();
+   if (readyState == UNSENT || readyState == OPENED) {
+     return 0;
+   }
+ 
+   if (mErrorLoad) {
+     // Let's simulate the http protocol for jar/app requests:
+     nsCOMPtr<nsIJARChannel> jarChannel = GetCurrentJARChannel();
+     if (jarChannel) {

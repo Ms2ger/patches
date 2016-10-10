@@ -1,0 +1,155 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -475,17 +475,23 @@ static const char sPopStatePrefStr[] = "
+ /**
+  * An indirect observer object that means we don't have to implement nsIObserver
+  * on nsGlobalWindow, where any script could see it.
+  */
+ class nsGlobalWindowObserver MOZ_FINAL : public nsIObserver,
+                                          public nsIInterfaceRequestor
+ {
+ public:
+-  nsGlobalWindowObserver(nsGlobalWindow* aWindow) : mWindow(aWindow) {}
++  nsGlobalWindowObserver(nsGlobalWindow* aWindow)
++    : mWindow(aWindow)
++  {
++    MOZ_ASSERT(aWindow);
++    MOZ_ASSERT(aWindow->IsInnerWindow());
++  }
++
+   NS_DECL_ISUPPORTS
+   NS_IMETHOD Observe(nsISupports* aSubject, const char* aTopic, const char16_t* aData)
+   {
+     if (!mWindow)
+       return NS_OK;
+     return mWindow->Observe(aSubject, aTopic, aData);
+   }
+   void Forget() { mWindow = nullptr; }
+@@ -495,16 +501,17 @@ public:
+       return mWindow->QueryInterface(aIID, aResult);
+     }
+     return NS_NOINTERFACE;
+   }
+ 
+ private:
+   ~nsGlobalWindowObserver() {}
+ 
++  // Will be explicitly cleared when the window goes away.
+   nsGlobalWindow* mWindow;
+ };
+ 
+ NS_IMPL_ISUPPORTS(nsGlobalWindowObserver, nsIObserver, nsIInterfaceRequestor)
+ 
+ nsTimeout::nsTimeout()
+   : mCleared(false),
+     mRunning(false),
+@@ -1130,32 +1137,29 @@ nsGlobalWindow::nsGlobalWindow(nsGlobalW
+   }
+ 
+   if (aOuterWindow) {
+     // |this| is an inner window, add this inner window to the outer
+     // window list of inners.
+     PR_INSERT_AFTER(this, aOuterWindow);
+ 
+     mObserver = new nsGlobalWindowObserver(this);
+-    if (mObserver) {
+-      NS_ADDREF(mObserver);
+-      nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
+-      if (os) {
+-        // Watch for online/offline status changes so we can fire events. Use
+-        // a strong reference.
+-        os->AddObserver(mObserver, NS_IOSERVICE_OFFLINE_STATUS_TOPIC,
+-                        false);
+-
+-        // Watch for dom-storage2-changed so we can fire storage
+-        // events. Use a strong reference.
+-        os->AddObserver(mObserver, "dom-storage2-changed", false);
+-      }
+-
+-      Preferences::AddStrongObserver(mObserver, "intl.accept_languages");
+-    }
++    nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
++    if (os) {
++      // Watch for online/offline status changes so we can fire events. Use
++      // a strong reference.
++      os->AddObserver(mObserver, NS_IOSERVICE_OFFLINE_STATUS_TOPIC,
++                      false);
++
++      // Watch for dom-storage2-changed so we can fire storage
++      // events. Use a strong reference.
++      os->AddObserver(mObserver, "dom-storage2-changed", false);
++    }
++
++    Preferences::AddStrongObserver(mObserver, "intl.accept_languages");
+   } else {
+     // |this| is an outer window. Outer windows start out frozen and
+     // remain frozen until they get an inner window, so freeze this
+     // outer window here.
+     Freeze();
+ 
+     mObserver = nullptr;
+   }
+@@ -1415,17 +1419,18 @@ nsGlobalWindow::CleanUp()
+   // Guarantee idempotence.
+   if (mCleanedUp)
+     return;
+   mCleanedUp = true;
+ 
+   mEventTargetObjects.EnumerateEntries(DisconnectEventTargetObjects, nullptr);
+   mEventTargetObjects.Clear();
+ 
+-  if (mObserver) {
++  if (IsInnerWindow()) {
++    MOZ_ASSERT(mObserver);
+     nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
+     if (os) {
+       os->RemoveObserver(mObserver, NS_IOSERVICE_OFFLINE_STATUS_TOPIC);
+       os->RemoveObserver(mObserver, "dom-storage2-changed");
+     }
+ 
+ #ifdef MOZ_B2G
+     DisableNetworkEvent(NS_NETWORK_UPLOAD_EVENT);
+@@ -1436,17 +1441,17 @@ nsGlobalWindow::CleanUp()
+       mIdleService->RemoveIdleObserver(mObserver, MIN_IDLE_NOTIFICATION_TIME_S);
+     }
+ 
+     Preferences::RemoveObserver(mObserver, "intl.accept_languages");
+ 
+     // Drop its reference to this dying window, in case for some bogus reason
+     // the object stays around.
+     mObserver->Forget();
+-    NS_RELEASE(mObserver);
++    mObserver = nullptr;
+   }
+ 
+   if (mNavigator) {
+     mNavigator->Invalidate();
+     mNavigator = nullptr;
+   }
+ 
+   mScreen = nullptr;
+diff --git a/dom/base/nsGlobalWindow.h b/dom/base/nsGlobalWindow.h
+--- a/dom/base/nsGlobalWindow.h
++++ b/dom/base/nsGlobalWindow.h
+@@ -1539,17 +1539,17 @@ protected:
+   nsRefPtr<mozilla::dom::BarProp> mToolbar;
+   nsRefPtr<mozilla::dom::BarProp> mLocationbar;
+   nsRefPtr<mozilla::dom::BarProp> mPersonalbar;
+   nsRefPtr<mozilla::dom::BarProp> mStatusbar;
+   nsRefPtr<mozilla::dom::BarProp> mScrollbars;
+   nsRefPtr<nsDOMWindowUtils>    mWindowUtils;
+   nsString                      mStatus;
+   nsString                      mDefaultStatus;
+-  nsGlobalWindowObserver*       mObserver; // Inner windows only.
++  nsRefPtr<nsGlobalWindowObserver> mObserver; // Inner windows only.
+   nsCOMPtr<nsIDOMCrypto>        mCrypto;
+   nsRefPtr<mozilla::dom::Console> mConsole;
+   // We need to store an nsISupports pointer to this object because the
+   // mozilla::dom::External class doesn't exist on b2g and using the type
+   // forward declared here means that ~nsGlobalWindow wouldn't compile because
+   // it wouldn't see the ~External function's declaration.
+   nsCOMPtr<nsISupports>         mExternal;
+ 

@@ -1,0 +1,80 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/layout/xul/tree/nsTreeColumns.cpp b/layout/xul/tree/nsTreeColumns.cpp
+--- a/layout/xul/tree/nsTreeColumns.cpp
++++ b/layout/xul/tree/nsTreeColumns.cpp
+@@ -340,18 +340,17 @@ nsTreeColumn::Invalidate()
+       break;
+   }
+ 
+   return NS_OK;
+ }
+ 
+ 
+ nsTreeColumns::nsTreeColumns(nsTreeBodyFrame* aTree)
+-  : mTree(aTree),
+-    mFirstColumn(nullptr)
++  : mTree(aTree)
+ {
+   SetIsDOMBinding();
+ }
+ 
+ nsTreeColumns::~nsTreeColumns()
+ {
+   nsTreeColumns::InvalidateColumns();
+ }
+@@ -617,17 +616,17 @@ nsTreeColumns::GetColumnAt(int32_t aInde
+ 
+ NS_IMETHODIMP
+ nsTreeColumns::InvalidateColumns()
+ {
+   for (nsTreeColumn* currCol = mFirstColumn; currCol;
+        currCol = currCol->GetNext()) {
+     currCol->SetColumns(nullptr);
+   }
+-  NS_IF_RELEASE(mFirstColumn);
++  mFirstColumn = nullptr;
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsTreeColumns::RestoreNaturalOrder()
+ {
+   if (!mTree)
+     return NS_OK;
+@@ -707,17 +706,17 @@ nsTreeColumns::EnsureColumns()
+         if (!col)
+           return;
+ 
+         if (currCol) {
+           currCol->SetNext(col);
+           col->SetPrevious(currCol);
+         }
+         else {
+-          NS_ADDREF(mFirstColumn = col);
++          mFirstColumn = col;
+         }
+         currCol = col;
+       }
+ 
+       colFrame = colFrame->GetNextSibling();
+     }
+   }
+ }
+diff --git a/layout/xul/tree/nsTreeColumns.h b/layout/xul/tree/nsTreeColumns.h
+--- a/layout/xul/tree/nsTreeColumns.h
++++ b/layout/xul/tree/nsTreeColumns.h
+@@ -179,12 +179,12 @@ private:
+   /**
+    * The first column in the list of columns. All of the columns are supposed
+    * to be "alive", i.e. have a frame. This is achieved by clearing the columns
+    * list each time an nsTreeColFrame is destroyed.
+    *
+    * XXX this means that new nsTreeColumn objects are unnecessarily created
+    *     for untouched columns.
+    */
+-  nsTreeColumn* mFirstColumn;
++  nsRefPtr<nsTreeColumn> mFirstColumn;
+ };
+ 
+ #endif // nsTreeColumns_h__

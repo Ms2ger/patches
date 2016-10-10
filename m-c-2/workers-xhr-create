@@ -1,0 +1,82 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/workers/XMLHttpRequest.cpp b/dom/workers/XMLHttpRequest.cpp
+--- a/dom/workers/XMLHttpRequest.cpp
++++ b/dom/workers/XMLHttpRequest.cpp
+@@ -2039,22 +2039,17 @@ XMLHttpRequest::GetUpload(ErrorResult& a
+   mWorkerPrivate->AssertIsOnWorkerThread();
+ 
+   if (mCanceled) {
+     aRv.Throw(UNCATCHABLE_EXCEPTION);
+     return nullptr;
+   }
+ 
+   if (!mUpload) {
+-    mUpload = XMLHttpRequestUpload::Create(this);
+-
+-    if (!mUpload) {
+-      aRv.Throw(NS_ERROR_FAILURE);
+-      return nullptr;
+-    }
++    mUpload = new XMLHttpRequestUpload(this);
+   }
+ 
+   return mUpload;
+ }
+ 
+ void
+ XMLHttpRequest::Send(ErrorResult& aRv)
+ {
+diff --git a/dom/workers/XMLHttpRequestUpload.cpp b/dom/workers/XMLHttpRequestUpload.cpp
+--- a/dom/workers/XMLHttpRequestUpload.cpp
++++ b/dom/workers/XMLHttpRequestUpload.cpp
+@@ -30,16 +30,8 @@ NS_INTERFACE_MAP_END_INHERITING(nsXHREve
+ NS_IMPL_CYCLE_COLLECTION_INHERITED(XMLHttpRequestUpload, nsXHREventTarget,
+                                    mXHR)
+ 
+ JSObject*
+ XMLHttpRequestUpload::WrapObject(JSContext* aCx)
+ {
+   return XMLHttpRequestUploadBinding_workers::Wrap(aCx, this);
+ }
+-
+-// static
+-already_AddRefed<XMLHttpRequestUpload>
+-XMLHttpRequestUpload::Create(XMLHttpRequest* aXHR)
+-{
+-  nsRefPtr<XMLHttpRequestUpload> upload = new XMLHttpRequestUpload(aXHR);
+-  return upload.forget();
+-}
+diff --git a/dom/workers/XMLHttpRequestUpload.h b/dom/workers/XMLHttpRequestUpload.h
+--- a/dom/workers/XMLHttpRequestUpload.h
++++ b/dom/workers/XMLHttpRequestUpload.h
+@@ -11,27 +11,24 @@
+ BEGIN_WORKERS_NAMESPACE
+ 
+ class XMLHttpRequest;
+ 
+ class XMLHttpRequestUpload MOZ_FINAL : public nsXHREventTarget
+ {
+   nsRefPtr<XMLHttpRequest> mXHR;
+ 
+-  XMLHttpRequestUpload(XMLHttpRequest* aXHR);
+-
+   ~XMLHttpRequestUpload();
+ 
+ public:
++  XMLHttpRequestUpload(XMLHttpRequest* aXHR);
++
+   virtual JSObject*
+   WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+ 
+-  static already_AddRefed<XMLHttpRequestUpload>
+-  Create(XMLHttpRequest* aXHR);
+-
+   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(XMLHttpRequestUpload, nsXHREventTarget)
+ 
+   NS_DECL_ISUPPORTS_INHERITED
+ 
+   nsISupports*
+   GetParentObject() const
+   {
+     // There's only one global on a worker, so we don't need to specify.

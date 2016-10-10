@@ -1,0 +1,324 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/content/base/public/nsDeprecatedOperationList.h b/content/base/public/nsDeprecatedOperationList.h
+--- a/content/base/public/nsDeprecatedOperationList.h
++++ b/content/base/public/nsDeprecatedOperationList.h
+@@ -9,17 +9,16 @@
+  */
+ 
+ DEPRECATED_OPERATION(GetAttributeNode)
+ DEPRECATED_OPERATION(SetAttributeNode)
+ DEPRECATED_OPERATION(GetAttributeNodeNS)
+ DEPRECATED_OPERATION(SetAttributeNodeNS)
+ DEPRECATED_OPERATION(RemoveAttributeNode)
+ DEPRECATED_OPERATION(CreateAttribute)
+-DEPRECATED_OPERATION(CreateAttributeNS)
+ DEPRECATED_OPERATION(Specified)
+ DEPRECATED_OPERATION(NodeValue)
+ DEPRECATED_OPERATION(TextContent)
+ DEPRECATED_OPERATION(EnablePrivilege)
+ DEPRECATED_OPERATION(InputEncoding)
+ DEPRECATED_OPERATION(MozBeforePaint)
+ DEPRECATED_OPERATION(DOMExceptionCode)
+ DEPRECATED_OPERATION(NoExposedProps)
+diff --git a/content/base/public/nsIDocument.h b/content/base/public/nsIDocument.h
+--- a/content/base/public/nsIDocument.h
++++ b/content/base/public/nsIDocument.h
+@@ -2085,20 +2085,16 @@ public:
+                      const mozilla::dom::NodeFilterHolder& aFilter,
+                      mozilla::ErrorResult& rv) const;
+ 
+   // Deprecated WebIDL bits
+   already_AddRefed<mozilla::dom::CDATASection>
+     CreateCDATASection(const nsAString& aData, mozilla::ErrorResult& rv);
+   already_AddRefed<mozilla::dom::Attr>
+     CreateAttribute(const nsAString& aName, mozilla::ErrorResult& rv);
+-  already_AddRefed<mozilla::dom::Attr>
+-    CreateAttributeNS(const nsAString& aNamespaceURI,
+-                      const nsAString& aQualifiedName,
+-                      mozilla::ErrorResult& rv);
+   void GetInputEncoding(nsAString& aInputEncoding);
+   already_AddRefed<nsIDOMLocation> GetLocation() const;
+   void GetReferrer(nsAString& aReferrer) const;
+   void GetLastModified(nsAString& aLastModified) const;
+   void GetReadyState(nsAString& aReadyState) const;
+   // Not const because otherwise the compiler can't figure out whether to call
+   // this GetTitle or the nsAString version from non-const methods, since
+   // neither is an exact match.
+diff --git a/content/base/src/nsDocument.cpp b/content/base/src/nsDocument.cpp
+--- a/content/base/src/nsDocument.cpp
++++ b/content/base/src/nsDocument.cpp
+@@ -5381,49 +5381,16 @@ nsIDocument::CreateAttribute(const nsASt
+     return nullptr;
+   }
+ 
+   nsRefPtr<Attr> attribute = new Attr(nullptr, nodeInfo.forget(),
+                                       EmptyString(), false);
+   return attribute.forget();
+ }
+ 
+-NS_IMETHODIMP
+-nsDocument::CreateAttributeNS(const nsAString & aNamespaceURI,
+-                              const nsAString & aQualifiedName,
+-                              nsIDOMAttr **aResult)
+-{
+-  ErrorResult rv;
+-  *aResult =
+-    nsIDocument::CreateAttributeNS(aNamespaceURI, aQualifiedName, rv).get();
+-  return rv.ErrorCode();
+-}
+-
+-already_AddRefed<Attr>
+-nsIDocument::CreateAttributeNS(const nsAString& aNamespaceURI,
+-                               const nsAString& aQualifiedName,
+-                               ErrorResult& rv)
+-{
+-  WarnOnceAbout(eCreateAttributeNS);
+-
+-  nsCOMPtr<nsINodeInfo> nodeInfo;
+-  rv = nsContentUtils::GetNodeInfoFromQName(aNamespaceURI,
+-                                            aQualifiedName,
+-                                            mNodeInfoManager,
+-                                            nsIDOMNode::ATTRIBUTE_NODE,
+-                                            getter_AddRefs(nodeInfo));
+-  if (rv.Failed()) {
+-    return nullptr;
+-  }
+-
+-  nsRefPtr<Attr> attribute = new Attr(nullptr, nodeInfo.forget(),
+-                                      EmptyString(), true);
+-  return attribute.forget();
+-}
+-
+ bool
+ nsDocument::CustomElementConstructor(JSContext* aCx, unsigned aArgc, JS::Value* aVp)
+ {
+   JS::CallArgs args = JS::CallArgsFromVp(aArgc, aVp);
+ 
+   JS::Rooted<JSObject*> global(aCx,
+     JS_GetGlobalForObject(aCx, &args.callee()));
+   nsCOMPtr<nsPIDOMWindow> window = do_QueryWrapper(aCx, global);
+diff --git a/content/test/unit/test_isequalnode.js b/content/test/unit/test_isequalnode.js
+--- a/content/test/unit/test_isequalnode.js
++++ b/content/test/unit/test_isequalnode.js
+@@ -97,16 +97,17 @@ function test_isEqualNode_clones()
+   var elm = doc.createElement("foo");
+   check_eq_nodes(elm, elm.cloneNode(true));
+   check_eq_nodes(elm, elm.cloneNode(false));
+ 
+   elm.setAttribute("fiz", "eit");
+   check_eq_nodes(elm, elm.cloneNode(true));
+   check_eq_nodes(elm, elm.cloneNode(false));
+ 
++  // XXX
+   elm.setAttributeNS("http://example.com/", "trendoid", "arthroscope");
+   check_eq_nodes(elm, elm.cloneNode(true));
+   check_eq_nodes(elm, elm.cloneNode(false));
+ 
+   var elm2 = elm.cloneNode(true);
+   check_eq_nodes(elm, elm2);
+ 
+   const TEXT = "fetishist";
+diff --git a/dom/base/crashtests/609560-1.xhtml b/dom/base/crashtests/609560-1.xhtml
+--- a/dom/base/crashtests/609560-1.xhtml
++++ b/dom/base/crashtests/609560-1.xhtml
+@@ -11,16 +11,17 @@ function x()
+  frame.src = "data:text/html,1";
+  document.body.appendChild(frame);
+  var frameRoot = frame.contentDocument.documentElement;
+ 
+   function y()
+   {
+     var frameDoc = frameRoot.ownerDocument;
+     frameRoot.appendChild(p);
++    // XXX
+     var attr = frameDoc.createAttributeNS("http://www.w3.org/1999/xhtml", "u");
+     attr.w = {};
+     p.setAttributeNode(attr);
+     document.documentElement.removeAttribute("class");
+   }
+ }
+ 
+ ]]>
+diff --git a/dom/imptests/failures/html/dom/test_historical.html.json b/dom/imptests/failures/html/dom/test_historical.html.json
+--- a/dom/imptests/failures/html/dom/test_historical.html.json
++++ b/dom/imptests/failures/html/dom/test_historical.html.json
+@@ -1,13 +1,12 @@
+ {
+   "Historical DOM features must be removed: CDATASection": true,
+   "Historical DOM features must be removed: createCDATASection": true,
+   "Historical DOM features must be removed: createAttribute": true,
+-  "Historical DOM features must be removed: createAttributeNS": true,
+   "Historical DOM features must be removed: inputEncoding": true,
+   "Historical DOM features must be removed: getAttributeNode": true,
+   "Historical DOM features must be removed: getAttributeNodeNS": true,
+   "Historical DOM features must be removed: setAttributeNode": true,
+   "Historical DOM features must be removed: removeAttributeNode": true,
+   "DocumentType member must be nuked: internalSubset": true,
+   "Node member must be nuked: hasAttributes": true
+ }
+diff --git a/dom/interfaces/core/nsIDOMDocument.idl b/dom/interfaces/core/nsIDOMDocument.idl
+--- a/dom/interfaces/core/nsIDOMDocument.idl
++++ b/dom/interfaces/core/nsIDOMDocument.idl
+@@ -56,20 +56,16 @@ interface nsIDOMDocument : nsIDOMNode
+   [optional_argc] nsIDOMNode    importNode(in nsIDOMNode importedNode,
+                                            [optional] in boolean deep)
+                                   raises(DOMException);
+   // Introduced in DOM Level 2:
+   nsIDOMElement                 createElementNS(in DOMString namespaceURI,
+                                                 [Null(Stringify)] in DOMString qualifiedName)
+                                   raises(DOMException);
+   // Introduced in DOM Level 2:
+-  nsIDOMAttr                    createAttributeNS(in DOMString namespaceURI,
+-                                                  in DOMString qualifiedName)
+-                                  raises(DOMException);
+-  // Introduced in DOM Level 2:
+   nsIDOMNodeList                getElementsByTagNameNS(in DOMString namespaceURI,
+                                                        in DOMString localName);
+   // Introduced in DOM Level 2:
+   nsIDOMElement                 getElementById(in DOMString elementId);
+   // Introduced in DOM Level 3:
+   readonly attribute DOMString       inputEncoding;
+   // Introduced in DOM Level 3:
+   readonly attribute DOMString       documentURI;
+diff --git a/dom/locales/en-US/chrome/dom/dom.properties b/dom/locales/en-US/chrome/dom/dom.properties
+--- a/dom/locales/en-US/chrome/dom/dom.properties
++++ b/dom/locales/en-US/chrome/dom/dom.properties
+@@ -43,17 +43,16 @@ FormValidationStepMismatch=Please select
+ FormValidationStepMismatchOneValue=Please select a valid value. The nearest valid value is %S.
+ FormValidationBadInputNumber=Please enter a number.
+ GetAttributeNodeWarning=Use of getAttributeNode() is deprecated. Use getAttribute() instead.
+ SetAttributeNodeWarning=Use of setAttributeNode() is deprecated. Use setAttribute() instead.
+ GetAttributeNodeNSWarning=Use of getAttributeNodeNS() is deprecated. Use getAttributeNS() instead.
+ SetAttributeNodeNSWarning=Use of setAttributeNodeNS() is deprecated. Use setAttributeNS() instead.
+ RemoveAttributeNodeWarning=Use of removeAttributeNode() is deprecated. Use removeAttribute() instead.
+ CreateAttributeWarning=Use of document.createAttribute() is deprecated. Use element.setAttribute() instead.
+-CreateAttributeNSWarning=Use of document.createAttributeNS() is deprecated. Use element.setAttributeNS() instead.
+ SpecifiedWarning=Use of attributes' specified attribute is deprecated. It always returns true.
+ NodeValueWarning=Use of attributes' nodeValue attribute is deprecated. Use value instead.
+ TextContentWarning=Use of attributes' textContent attribute is deprecated. Use value instead.
+ EnablePrivilegeWarning=Use of enablePrivilege is deprecated.  Please use code that runs with the system principal (e.g. an extension) instead.
+ nsIJSONDecodeDeprecatedWarning=nsIJSON.decode is deprecated.  Please use JSON.parse instead.
+ nsIJSONEncodeDeprecatedWarning=nsIJSON.encode is deprecated.  Please use JSON.stringify instead.
+ nsIDOMWindowInternalWarning=Use of nsIDOMWindowInternal is deprecated. Use nsIDOMWindow instead.
+ InputEncodingWarning=Use of inputEncoding is deprecated.
+diff --git a/dom/tests/mochitest/dom-level2-core/exclusions.js b/dom/tests/mochitest/dom-level2-core/exclusions.js
+--- a/dom/tests/mochitest/dom-level2-core/exclusions.js
++++ b/dom/tests/mochitest/dom-level2-core/exclusions.js
+@@ -25,26 +25,72 @@ dtdTests = ["attrgetownerelement01", "do
+ 
+ bug371552 = ["elementhasattributens02"];
+ wrongDocError = ["elementsetattributenodens05", "namednodemapsetnameditemns03",
+                  "setAttributeNodeNS05", "setNamedItemNS02"];
+ attrExodus = ["elementsetattributenodens06", "importNode01",
+               "hc_namednodemapinvalidtype1"];
+ bogusPrefix = ["nodesetprefix05", "nodesetprefix09", "prefix06", "prefix07"];
+ prefixReplacement = ["setAttributeNodeNS04"];
++var createAttributeNS = [
++  "createAttributeNS01",
++  "createAttributeNS02",
++  "createAttributeNS03",
++  "createAttributeNS04",
++  "createAttributeNS05",
++  "createAttributeNS06",
++  "documentcreateattributeNS01",
++  "documentcreateattributeNS02",
++  "documentcreateattributeNS03",
++  "documentcreateattributeNS04",
++  "documentcreateattributeNS05",
++  "documentcreateattributeNS06",
++  "documentcreateattributeNS07",
++  "documentimportnode05",
++  "elementgetattributenodens01",
++  "elementgetattributenodens02",
++  "elementhasattributens02",
++  "elementhasattributens03",
++  "elementremoveattributens01",
++  "elementsetattributenodens01",
++  "elementsetattributenodens04",
++  "elementsetattributenodens05",
++  "elementsetattributenodens06",
++  "getAttributeNS02",
++  "getAttributeNS04",
++  "namednodemapgetnameditemns03",
++  "namednodemapgetnameditemns04",
++  "namednodemapgetnameditemns06",
++  "namednodemapremovenameditemns03",
++  "namednodemapsetnameditemns01",
++  "namednodemapsetnameditemns02",
++  "namednodemapsetnameditemns04",
++  "namednodemapsetnameditemns09",
++  "nodegetlocalname03",
++  "nodegetnamespaceuri03",
++  "nodegetprefix03",
++  "setAttributeNodeNS01",
++  "setAttributeNodeNS02",
++  "setAttributeNodeNS03",
++  "setAttributeNodeNS04",
++  "setAttributeNodeNS05",
++  "setNamedItemNS02",
++  "setNamedItemNS03",
++  "setNamedItemNS05"
++]
+ 
+ function concat(lst/*...*/) {
+   var f = [];
+   if (arguments !== null) {
+     f = arguments[0];
+   }
+   for (var i = 1; i < arguments.length; i++) {
+     f = f.concat(arguments[i]);
+   }
+   return f;
+ }
+ 
+ var todoTests = {};
+ var exclusions = concat(dtdTests, bug371552, wrongDocError, attrExodus,
+-                        bogusPrefix, prefixReplacement);
++                        bogusPrefix, prefixReplacement, createAttributeNS);
+ for (var excludedTestName in exclusions) { 
+   todoTests[exclusions[excludedTestName]] = true; 
+ }
+diff --git a/dom/webidl/Document.webidl b/dom/webidl/Document.webidl
+--- a/dom/webidl/Document.webidl
++++ b/dom/webidl/Document.webidl
+@@ -88,18 +88,16 @@ interface Document : Node {
+   // void append((Node or DOMString)... nodes);
+ 
+   // These are not in the spec, but leave them for now for backwards compat.
+   // So sort of like Gecko extensions
+   [NewObject, Throws]
+   CDATASection createCDATASection(DOMString data);
+   [NewObject, Throws]
+   Attr createAttribute(DOMString name);
+-  [NewObject, Throws]
+-  Attr createAttributeNS(DOMString? namespace, DOMString name);
+   [Pure]
+   readonly attribute DOMString? inputEncoding;
+ };
+ 
+ // http://www.whatwg.org/specs/web-apps/current-work/#the-document-object
+ partial interface Document {
+   [PutForwards=href, Unforgeable] readonly attribute Location? location;
+   //(HTML only)         attribute DOMString domain;
+diff --git a/webapprt/locales/en-US/webapprt/overrides/dom.properties b/webapprt/locales/en-US/webapprt/overrides/dom.properties
+--- a/webapprt/locales/en-US/webapprt/overrides/dom.properties
++++ b/webapprt/locales/en-US/webapprt/overrides/dom.properties
+@@ -43,17 +43,16 @@ FormValidationStepMismatch=Please select
+ FormValidationStepMismatchOneValue=Please select a valid value. The nearest valid value is %S.
+ FormValidationBadInputNumber=Please enter a number.
+ GetAttributeNodeWarning=Use of getAttributeNode() is deprecated. Use getAttribute() instead.
+ SetAttributeNodeWarning=Use of setAttributeNode() is deprecated. Use setAttribute() instead.
+ GetAttributeNodeNSWarning=Use of getAttributeNodeNS() is deprecated. Use getAttributeNS() instead.
+ SetAttributeNodeNSWarning=Use of setAttributeNodeNS() is deprecated. Use setAttributeNS() instead.
+ RemoveAttributeNodeWarning=Use of removeAttributeNode() is deprecated. Use removeAttribute() instead.
+ CreateAttributeWarning=Use of document.createAttribute() is deprecated. Use element.setAttribute() instead.
+-CreateAttributeNSWarning=Use of document.createAttributeNS() is deprecated. Use element.setAttributeNS() instead.
+ SpecifiedWarning=Use of attributes' specified attribute is deprecated. It always returns true.
+ NodeValueWarning=Use of attributes' nodeValue attribute is deprecated. Use value instead.
+ TextContentWarning=Use of attributes' textContent attribute is deprecated. Use value instead.
+ EnablePrivilegeWarning=Use of enablePrivilege is deprecated. Please use code that runs with the system principal (e.g. an extension) instead.
+ nsIJSONDecodeDeprecatedWarning=nsIJSON.decode is deprecated. Please use JSON.parse instead.
+ nsIJSONEncodeDeprecatedWarning=nsIJSON.encode is deprecated. Please use JSON.stringify instead.
+ nsIDOMWindowInternalWarning=Use of nsIDOMWindowInternal is deprecated. Use nsIDOMWindow instead.
+ InputEncodingWarning=Use of inputEncoding is deprecated.

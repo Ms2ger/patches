@@ -1,0 +1,854 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/Navigator.cpp b/dom/base/Navigator.cpp
+--- a/dom/base/Navigator.cpp
++++ b/dom/base/Navigator.cpp
+@@ -1554,17 +1554,17 @@ Navigator::RequestWakeLock(const nsAStri
+   if (!pmService) {
+     aRv.Throw(NS_ERROR_UNEXPECTED);
+     return nullptr;
+   }
+ 
+   return pmService->NewWakeLock(aTopic, mWindow, aRv);
+ }
+ 
+-nsIDOMMozMobileMessageManager*
++MobileMessageManager*
+ Navigator::GetMozMobileMessage()
+ {
+   if (!mMobileMessageManager) {
+     // Check that our window has not gone away
+     NS_ENSURE_TRUE(mWindow, nullptr);
+     NS_ENSURE_TRUE(mWindow->GetDocShell(), nullptr);
+ 
+     mMobileMessageManager = new MobileMessageManager();
+diff --git a/dom/base/Navigator.h b/dom/base/Navigator.h
+--- a/dom/base/Navigator.h
++++ b/dom/base/Navigator.h
+@@ -17,17 +17,16 @@
+ #include "nsHashKeys.h"
+ #include "nsInterfaceHashtable.h"
+ #include "nsString.h"
+ #include "nsTArray.h"
+ 
+ class nsPluginArray;
+ class nsMimeTypeArray;
+ class nsPIDOMWindow;
+-class nsIDOMMozMobileMessageManager;
+ class nsIDOMNavigatorSystemMessages;
+ class nsDOMCameraManager;
+ class nsDOMDeviceStorage;
+ class nsIDOMBlob;
+ class nsIPrincipal;
+ 
+ namespace mozilla {
+ namespace dom {
+@@ -204,17 +203,17 @@ public:
+   nsDOMDeviceStorage* GetDeviceStorage(const nsAString& aType,
+                                        ErrorResult& aRv);
+   void GetDeviceStorages(const nsAString& aType,
+                          nsTArray<nsRefPtr<nsDOMDeviceStorage> >& aStores,
+                          ErrorResult& aRv);
+   DesktopNotificationCenter* GetMozNotification(ErrorResult& aRv);
+   bool MozIsLocallyAvailable(const nsAString& aURI, bool aWhenOffline,
+                              ErrorResult& aRv);
+-  nsIDOMMozMobileMessageManager* GetMozMobileMessage();
++  MobileMessageManager* GetMozMobileMessage();
+   Telephony* GetMozTelephony(ErrorResult& aRv);
+   network::Connection* GetConnection(ErrorResult& aRv);
+   nsDOMCameraManager* GetMozCameras(ErrorResult& aRv);
+   void MozSetMessageHandler(const nsAString& aType,
+                             systemMessageCallback* aCallback,
+                             ErrorResult& aRv);
+   bool MozHasPendingMessage(const nsAString& aType, ErrorResult& aRv);
+ #ifdef MOZ_B2G_RIL
+diff --git a/dom/base/nsDOMClassInfo.cpp b/dom/base/nsDOMClassInfo.cpp
+--- a/dom/base/nsDOMClassInfo.cpp
++++ b/dom/base/nsDOMClassInfo.cpp
+@@ -128,17 +128,16 @@
+ #include "nsIEventListenerService.h"
+ #include "nsIMessageManager.h"
+ 
+ #include "mozilla/dom/TouchEvent.h"
+ 
+ #include "nsWrapperCacheInlines.h"
+ #include "mozilla/dom/HTMLCollectionBinding.h"
+ 
+-#include "nsIDOMMobileMessageManager.h"
+ #include "nsIDOMMozSmsMessage.h"
+ #include "nsIDOMMozMmsMessage.h"
+ #include "nsIDOMSmsFilter.h"
+ #include "nsIDOMSmsSegmentInfo.h"
+ #include "nsIDOMMozMobileMessageThread.h"
+ 
+ #ifdef MOZ_B2G_FM
+ #include "FMRadio.h"
+@@ -376,19 +375,16 @@ static nsDOMClassInfoData sClassInfoData
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+   NS_DEFINE_CLASSINFO_DATA(File, nsDOMGenericSH,
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+ 
+   NS_DEFINE_CLASSINFO_DATA(ModalContentWindow, nsWindowSH,
+                            DEFAULT_SCRIPTABLE_FLAGS |
+                            WINDOW_SCRIPTABLE_FLAGS)
+ 
+-  NS_DEFINE_CLASSINFO_DATA(MozMobileMessageManager, nsDOMGenericSH,
+-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
+-
+   NS_DEFINE_CLASSINFO_DATA(MozSmsMessage, nsDOMGenericSH,
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+ 
+   NS_DEFINE_CLASSINFO_DATA(MozMmsMessage, nsDOMGenericSH,
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+ 
+   NS_DEFINE_CLASSINFO_DATA(MozSmsFilter, nsDOMGenericSH,
+                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
+@@ -983,20 +979,16 @@ nsDOMClassInfo::Init()
+   DOM_CLASSINFO_MAP_BEGIN_NO_CLASS_IF(ModalContentWindow, nsIDOMWindow)
+     DOM_CLASSINFO_WINDOW_MAP_ENTRIES
+     DOM_CLASSINFO_MAP_ENTRY(nsIDOMModalContentWindow)
+ #ifdef MOZ_WEBSPEECH
+     DOM_CLASSINFO_MAP_ENTRY(nsISpeechSynthesisGetter)
+ #endif
+   DOM_CLASSINFO_MAP_END
+ 
+-  DOM_CLASSINFO_MAP_BEGIN(MozMobileMessageManager, nsIDOMMozMobileMessageManager)
+-     DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozMobileMessageManager)
+-  DOM_CLASSINFO_MAP_END
+-
+   DOM_CLASSINFO_MAP_BEGIN(MozSmsMessage, nsIDOMMozSmsMessage)
+      DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozSmsMessage)
+   DOM_CLASSINFO_MAP_END
+ 
+   DOM_CLASSINFO_MAP_BEGIN(MozMmsMessage, nsIDOMMozMmsMessage)
+      DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozMmsMessage)
+   DOM_CLASSINFO_MAP_END
+ 
+diff --git a/dom/base/nsDOMClassInfoClasses.h b/dom/base/nsDOMClassInfoClasses.h
+--- a/dom/base/nsDOMClassInfoClasses.h
++++ b/dom/base/nsDOMClassInfoClasses.h
+@@ -57,17 +57,16 @@ DOMCI_CLASS(XPathResult)
+ DOMCI_CLASS(Storage)
+ 
+ DOMCI_CLASS(Blob)
+ DOMCI_CLASS(File)
+ 
+ // DOM modal content window class, almost identical to Window
+ DOMCI_CLASS(ModalContentWindow)
+ 
+-DOMCI_CLASS(MozMobileMessageManager)
+ DOMCI_CLASS(MozSmsMessage)
+ DOMCI_CLASS(MozMmsMessage)
+ DOMCI_CLASS(MozSmsFilter)
+ DOMCI_CLASS(MozSmsSegmentInfo)
+ DOMCI_CLASS(MozMobileMessageThread)
+ 
+ // @font-face in CSS
+ DOMCI_CLASS(CSSFontFaceRule)
+diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
+--- a/dom/bindings/Bindings.conf
++++ b/dom/bindings/Bindings.conf
+@@ -841,16 +841,20 @@ DOMInterfaces = {
+     'nativeType': 'mozilla::dom::MobileConnectionArray',
+     'resultNotAddRefed': [ 'item' ]
+ },
+ 
+ 'MozMobileConnectionInfo': {
+     'nativeType': 'mozilla::dom::MobileConnectionInfo',
+ },
+ 
++'MozMobileMessageManager': {
++    'nativeType': 'mozilla::dom::MobileMessageManager',
++},
++
+ 'MozMobileNetworkInfo': {
+     'nativeType': 'mozilla::dom::MobileNetworkInfo',
+ },
+ 
+ 'MozNamedAttrMap': {
+     'nativeType': 'nsDOMAttributeMap',
+ },
+ 
+@@ -1949,21 +1953,21 @@ addExternalIface('imgINotificationObserv
+ addExternalIface('imgIRequest', nativeType='imgIRequest', notflattened=True)
+ addExternalIface('MenuBuilder', nativeType='nsIMenuBuilder', notflattened=True)
+ addExternalIface('MozBoxObject', nativeType='nsIBoxObject')
+ addExternalIface('MozControllers', nativeType='nsIControllers')
+ addExternalIface('MozFrameLoader', nativeType='nsIFrameLoader', notflattened=True)
+ addExternalIface('MozFrameRequestCallback', nativeType='nsIFrameRequestCallback',
+                  notflattened=True)
+ addExternalIface('MozIccInfo', headerFile='nsIDOMIccInfo.h')
+-addExternalIface('MozMobileMessageManager', headerFile='nsIDOMMobileMessageManager.h')
+ addExternalIface('MozObserver', nativeType='nsIObserver', notflattened=True)
+ addExternalIface('MozRDFCompositeDataSource', nativeType='nsIRDFCompositeDataSource',
+                  notflattened=True)
+ addExternalIface('MozRDFResource', nativeType='nsIRDFResource', notflattened=True)
++addExternalIface('MozSmsFilter', headerFile='nsIDOMSmsFilter.h')
+ addExternalIface('MozTreeBoxObject', nativeType='nsITreeBoxObject',
+                  notflattened=True)
+ addExternalIface('MozTreeColumn', nativeType='nsITreeColumn',
+                  headerFile='nsITreeColumns.h')
+ addExternalIface('MozVoicemailStatus')
+ addExternalIface('MozWakeLockListener', headerFile='nsIDOMWakeLockListener.h')
+ addExternalIface('MozXULTemplateBuilder', nativeType='nsIXULTemplateBuilder')
+ addExternalIface('nsIBrowserDOMWindow', nativeType='nsIBrowserDOMWindow',
+diff --git a/dom/mobilemessage/interfaces/moz.build b/dom/mobilemessage/interfaces/moz.build
+--- a/dom/mobilemessage/interfaces/moz.build
++++ b/dom/mobilemessage/interfaces/moz.build
+@@ -1,16 +1,15 @@
+ # -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+ # vim: set filetype=python:
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ XPIDL_SOURCES += [
+-    'nsIDOMMobileMessageManager.idl',
+     'nsIDOMMozMmsEvent.idl',
+     'nsIDOMMozMmsMessage.idl',
+     'nsIDOMMozMobileMessageThread.idl',
+     'nsIDOMMozSmsEvent.idl',
+     'nsIDOMMozSmsMessage.idl',
+     'nsIDOMSmsFilter.idl',
+     'nsIDOMSmsSegmentInfo.idl',
+     'nsIMmsService.idl',
+diff --git a/dom/mobilemessage/interfaces/nsIDOMMobileMessageManager.idl b/dom/mobilemessage/interfaces/nsIDOMMobileMessageManager.idl
+deleted file mode 100644
+--- a/dom/mobilemessage/interfaces/nsIDOMMobileMessageManager.idl
++++ /dev/null
+@@ -1,81 +0,0 @@
+-/* This Source Code Form is subject to the terms of the Mozilla Public
+- * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+- * You can obtain one at http://mozilla.org/MPL/2.0/. */
+-
+-#include "nsIDOMEventTarget.idl"
+-
+-interface nsIDOMEventListener;
+-interface nsIDOMMozSmsFilter;
+-interface nsIDOMMozSmsSegmentInfo;
+-interface nsIDOMDOMCursor;
+-interface nsIDOMDOMRequest;
+-interface nsIDOMBlob;
+-
+-[scriptable, builtinclass, uuid(8ec8247d-3f5f-41af-9c72-9dc857e3be81)]
+-interface nsIDOMMozMobileMessageManager : nsIDOMEventTarget
+-{
+-  nsIDOMDOMRequest getSegmentInfoForText(in DOMString text);
+-
+-
+-  /**
+-   * Function to send SMS.
+-   *
+-   * @param number
+-   *        Either a DOMString (only one number) or an array of numbers.
+-   * @param message
+-   *        The text message to be sent.
+-   * @param sendParameters
+-   *        An SmsSendParameters object.
+-   * @param return
+-   *        A DOMRequest object indicating the sending result if one number
+-   *        has been passed; an array of DOMRequest objects otherwise.
+-   */
+-  [implicit_jscontext, optional_argc]
+-  jsval send(in jsval number, in DOMString message,
+-             [optional] in jsval sendParameters);
+-
+-  /**
+-   * Function to send MMS.
+-   *
+-   * @param parameters
+-   *        An MmsParameters object.
+-   * @param sendParameters
+-   *        An MmsSendParameters object.
+-   * @param return
+-   *        A DOMRequest object indicating the sending result.
+-   */
+-  [implicit_jscontext, optional_argc]
+-  nsIDOMDOMRequest sendMMS(in jsval parameters,
+-                           [optional] in jsval sendParameters);
+-
+-  [binaryname(GetMessageMoz)]
+-  nsIDOMDOMRequest getMessage(in long id);
+-
+-  // The parameter can be either a message id or a nsIDOMMoz{Mms,Sms}Message.
+-  [implicit_jscontext]
+-  nsIDOMDOMRequest delete(in jsval param);
+-
+-  // Iterates through nsIDOMMoz{Mms,Sms}Message.
+-  nsIDOMDOMCursor getMessages(in nsIDOMMozSmsFilter filter, in boolean reverse);
+-
+-  nsIDOMDOMRequest markMessageRead(in long id, in boolean value,
+-                                   [optional] in boolean aSendReadReport);
+-
+-  // Iterates through nsIDOMMozMobileMessageThread.
+-  nsIDOMDOMCursor getThreads();
+-
+-  nsIDOMDOMRequest retrieveMMS(in long id);
+-
+-  [optional_argc]
+-  nsIDOMDOMRequest getSmscAddress([optional] in unsigned long serviceId);
+-
+-  [implicit_jscontext] attribute jsval onreceived;
+-  [implicit_jscontext] attribute jsval onretrieving;
+-  [implicit_jscontext] attribute jsval onsending;
+-  [implicit_jscontext] attribute jsval onsent;
+-  [implicit_jscontext] attribute jsval onfailed;
+-  [implicit_jscontext] attribute jsval ondeliverysuccess;
+-  [implicit_jscontext] attribute jsval ondeliveryerror;
+-  [implicit_jscontext] attribute jsval onreadsuccess;
+-  [implicit_jscontext] attribute jsval onreaderror;
+-};
+diff --git a/dom/mobilemessage/src/MobileMessageManager.cpp b/dom/mobilemessage/src/MobileMessageManager.cpp
+--- a/dom/mobilemessage/src/MobileMessageManager.cpp
++++ b/dom/mobilemessage/src/MobileMessageManager.cpp
+@@ -38,40 +38,26 @@
+ #define FAILED_EVENT_NAME           NS_LITERAL_STRING("failed")
+ #define DELIVERY_SUCCESS_EVENT_NAME NS_LITERAL_STRING("deliverysuccess")
+ #define DELIVERY_ERROR_EVENT_NAME   NS_LITERAL_STRING("deliveryerror")
+ #define READ_SUCCESS_EVENT_NAME     NS_LITERAL_STRING("readsuccess")
+ #define READ_ERROR_EVENT_NAME       NS_LITERAL_STRING("readerror")
+ 
+ using namespace mozilla::dom::mobilemessage;
+ 
+-DOMCI_DATA(MozMobileMessageManager, mozilla::dom::MobileMessageManager)
+-
+ namespace mozilla {
+ namespace dom {
+ 
+ NS_INTERFACE_MAP_BEGIN(MobileMessageManager)
+-  NS_INTERFACE_MAP_ENTRY(nsIDOMMozMobileMessageManager)
+   NS_INTERFACE_MAP_ENTRY(nsIObserver)
+-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(MozMobileMessageManager)
+ NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
+ 
+ NS_IMPL_ADDREF_INHERITED(MobileMessageManager, DOMEventTargetHelper)
+ NS_IMPL_RELEASE_INHERITED(MobileMessageManager, DOMEventTargetHelper)
+ 
+-NS_IMPL_EVENT_HANDLER(MobileMessageManager, received)
+-NS_IMPL_EVENT_HANDLER(MobileMessageManager, retrieving)
+-NS_IMPL_EVENT_HANDLER(MobileMessageManager, sending)
+-NS_IMPL_EVENT_HANDLER(MobileMessageManager, sent)
+-NS_IMPL_EVENT_HANDLER(MobileMessageManager, failed)
+-NS_IMPL_EVENT_HANDLER(MobileMessageManager, deliverysuccess)
+-NS_IMPL_EVENT_HANDLER(MobileMessageManager, deliveryerror)
+-NS_IMPL_EVENT_HANDLER(MobileMessageManager, readsuccess)
+-NS_IMPL_EVENT_HANDLER(MobileMessageManager, readerror)
+-
+ void
+ MobileMessageManager::Init(nsPIDOMWindow *aWindow)
+ {
+   BindToOwner(aWindow);
+ 
+   nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
+   // GetObserverService() can return null is some situations like shutdown.
+   if (!obs) {
+@@ -104,188 +90,135 @@ MobileMessageManager::Shutdown()
+   obs->RemoveObserver(this, kSmsSentObserverTopic);
+   obs->RemoveObserver(this, kSmsFailedObserverTopic);
+   obs->RemoveObserver(this, kSmsDeliverySuccessObserverTopic);
+   obs->RemoveObserver(this, kSmsDeliveryErrorObserverTopic);
+   obs->RemoveObserver(this, kSmsReadSuccessObserverTopic);
+   obs->RemoveObserver(this, kSmsReadErrorObserverTopic);
+ }
+ 
+-NS_IMETHODIMP
++already_AddRefed<DOMRequest>
+ MobileMessageManager::GetSegmentInfoForText(const nsAString& aText,
+-                                            nsIDOMDOMRequest** aRequest)
++                                            ErrorResult& aRv)
+ {
+   nsCOMPtr<nsISmsService> smsService = do_GetService(SMS_SERVICE_CONTRACTID);
+-  NS_ENSURE_TRUE(smsService, NS_ERROR_FAILURE);
++  if (!smsService) {
++    aRv.Throw(NS_ERROR_FAILURE);
++    return nullptr;
++  }
+ 
+   nsRefPtr<DOMRequest> request = new DOMRequest(GetOwner());
+   nsCOMPtr<nsIMobileMessageCallback> msgCallback =
+     new MobileMessageCallback(request);
+-  nsresult rv = smsService->GetSegmentInfoForText(aText, msgCallback);
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  request.forget(aRequest);
+-  return NS_OK;
++  aRv = smsService->GetSegmentInfoForText(aText, msgCallback);
++  return request.forget();
+ }
+ 
+-nsresult
+-MobileMessageManager::Send(JSContext* aCx, JS::Handle<JSObject*> aGlobal,
+-                           uint32_t aServiceId,
+-                           JS::Handle<JSString*> aNumber,
++already_AddRefed<nsISmsService>
++MobileMessageManager::GetServiceForSend(ErrorResult& aRv)
++{
++  nsresult rv;
++  nsIScriptContext* sc = GetContextForEventHandlers(&rv);
++  if (NS_FAILED(rv)) {
++    aRv.Throw(rv);
++    return nullptr;
++  }
++  if (!sc) {
++    aRv.Throw(NS_ERROR_FAILURE);
++    return nullptr;
++  }
++
++  nsCOMPtr<nsISmsService> smsService = do_GetService(SMS_SERVICE_CONTRACTID);
++  if (!smsService) {
++    aRv.Throw(NS_ERROR_FAILURE);
++    return nullptr;
++  }
++  return smsService.forget();
++}
++
++static uint32_t
++GetServiceId(const SmsSendParameters& aSendParameters,
++             nsISmsService* smsService,
++             ErrorResult& aRv)
++{
++  if (aSendParameters.mServiceId.WasPassed()) {
++    return aSendParameters.mServiceId.Value();
++  }
++
++  // Use the default one unless |aSendParams.serviceId| is available.
++  uint32_t serviceId = 0;
++  aRv = smsService->GetSmsDefaultServiceId(&serviceId);
++  return serviceId;
++}
++
++already_AddRefed<DOMRequest>
++MobileMessageManager::Send(const nsAString& aNumber,
+                            const nsAString& aMessage,
+-                           JS::MutableHandle<JS::Value> aRequest)
++                           const SmsSendParameters& aSendParameters,
++                           ErrorResult& aRv)
+ {
+-  nsCOMPtr<nsISmsService> smsService = do_GetService(SMS_SERVICE_CONTRACTID);
+-  NS_ENSURE_TRUE(smsService, NS_ERROR_FAILURE);
++  nsCOMPtr<nsISmsService> smsService = GetServiceForSend(aRv);
++  ENSURE_SUCCESS(aRv, nullptr);
+ 
+-  nsDependentJSString number;
+-  number.init(aCx, aNumber);
++  uint32_t serviceId = GetServiceId(aSendParameters, smsService, aRv);
++  ENSURE_SUCCESS(aRv, nullptr);
+ 
+   nsRefPtr<DOMRequest> request = new DOMRequest(GetOwner());
+   nsCOMPtr<nsIMobileMessageCallback> msgCallback =
+     new MobileMessageCallback(request);
+ 
+   // By default, we don't send silent messages via MobileMessageManager.
+-  nsresult rv = smsService->Send(aServiceId, number, aMessage,
+-                                 false, msgCallback);
+-  NS_ENSURE_SUCCESS(rv, rv);
++  aRv = smsService->Send(serviceId, aNumber, aMessage, false, msgCallback);
++  return request.forget();
++}
+ 
+-  js::AssertSameCompartment(aCx, aGlobal);
+-  rv = nsContentUtils::WrapNative(aCx,
+-                                  static_cast<nsIDOMDOMRequest*>(request.get()),
+-                                  aRequest);
+-  if (NS_FAILED(rv)) {
+-    NS_ERROR("Failed to create the js value!");
+-    return rv;
++void
++MobileMessageManager::Send(const Sequence<nsString>& aNumber,
++                           const nsAString& aMessage,
++                           const SmsSendParameters& aSendParameters,
++                           nsTArray<nsRefPtr<DOMRequest>>& aRequests,
++                           ErrorResult& aRv)
++{
++  nsCOMPtr<nsISmsService> smsService = GetServiceForSend(aRv);
++  ENSURE_SUCCESS_VOID(aRv);
++
++  uint32_t serviceId = GetServiceId(aSendParameters, smsService, aRv);
++  ENSURE_SUCCESS_VOID(aRv);
++
++  size_t length = aNumbers.Length();
++  nsTArray<nsRefPtr<DOMRequest>> requests;
++  for (size_t i = 0; i < length; ++i) {
++    *aRequests.AppendElement() = Send(serviceId, aNumbers[i], aMessage, aRv);
++    ENSURE_SUCCESS_VOID(aRv);
++  }
++}
++
++already_AddRefed<DOMRequest>
++MobileMessageManager::SendMMS(const MmsParameters& aParameters,
++                              const MmsSendParameters& aSendParameters,
++                              ErrorResult& aRv);
++{
++  nsCOMPtr<nsIMmsService> mmsService = do_GetService(MMS_SERVICE_CONTRACTID);
++  if (!mmsService) {
++    aRv.Throw(NS_ERROR_FAILURE);
++    return nullptr;
+   }
+ 
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+-MobileMessageManager::Send(JS::Handle<JS::Value> aNumber,
+-                           const nsAString& aMessage,
+-                           JS::Handle<JS::Value> aSendParams,
+-                           JSContext* aCx,
+-                           uint8_t aArgc,
+-                           JS::MutableHandle<JS::Value> aReturn)
+-{
+-  if (!aNumber.isString() && !JS_IsArrayObject(aCx, aNumber)) {
+-    return NS_ERROR_INVALID_ARG;
+-  }
+-
+-  nsresult rv;
+-  nsIScriptContext* sc = GetContextForEventHandlers(&rv);
+-  NS_ENSURE_SUCCESS(rv, rv);
+-  NS_ENSURE_STATE(sc);
+-
+-  JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
+-
+-  mozilla::Maybe<JSAutoCompartment> ac;
+-  if (!global) {
+-    global = sc->GetWindowProxy();
+-    ac.construct(aCx, global);
+-  }
+-
+-  nsCOMPtr<nsISmsService> smsService = do_GetService(SMS_SERVICE_CONTRACTID);
+-  NS_ENSURE_TRUE(smsService, NS_ERROR_FAILURE);
+-
+-  // Use the default one unless |aSendParams.serviceId| is available.
+   uint32_t serviceId;
+-  rv = smsService->GetSmsDefaultServiceId(&serviceId);
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  if (aArgc == 1) {
+-    JS::Rooted<JS::Value> param(aCx, aSendParams);
+-    RootedDictionary<SmsSendParameters> sendParams(aCx);
+-    if (!sendParams.Init(aCx, param)) {
+-      return NS_ERROR_TYPE_ERR;
+-    }
+-    if (sendParams.mServiceId.WasPassed()) {
+-      serviceId = sendParams.mServiceId.Value();
+-    }
+-  }
+-
+-  if (aNumber.isString()) {
+-    JS::Rooted<JSString*> str(aCx, aNumber.toString());
+-    return Send(aCx, global, serviceId, str, aMessage, aReturn);
+-  }
+-
+-  // Must be an array then.
+-  JS::Rooted<JSObject*> numbers(aCx, &aNumber.toObject());
+-
+-  uint32_t size;
+-  if (!JS_GetArrayLength(aCx, numbers, &size)) {
+-    return NS_ERROR_FAILURE;
+-  }
+-
+-  JS::AutoValueVector requests(aCx);
+-  if (!requests.resize(size)) {
+-    return NS_ERROR_FAILURE;
+-  }
+-
+-  JS::Rooted<JS::Value> number(aCx);
+-  JS::Rooted<JSString*> str(aCx);
+-  for (uint32_t i = 0; i < size; ++i) {
+-    if (!JS_GetElement(aCx, numbers, i, &number)) {
+-      return NS_ERROR_INVALID_ARG;
+-    }
+-
+-    str = JS::ToString(aCx, number);
+-    if (!str) {
+-      return NS_ERROR_FAILURE;
+-    }
+-
+-    nsresult rv = Send(aCx, global, serviceId, str, aMessage, requests[i]);
+-    NS_ENSURE_SUCCESS(rv, rv);
+-  }
+-
+-  JS::Rooted<JSObject*> obj(aCx);
+-  obj = JS_NewArrayObject(aCx, requests);
+-  if (!obj) {
+-    return NS_ERROR_FAILURE;
+-  }
+-
+-  aReturn.setObject(*obj);
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+-MobileMessageManager::SendMMS(JS::Handle<JS::Value> aParams,
+-                              JS::Handle<JS::Value> aSendParams,
+-                              JSContext* aCx,
+-                              uint8_t aArgc,
+-                              nsIDOMDOMRequest** aRequest)
+-{
+-  nsCOMPtr<nsIMmsService> mmsService = do_GetService(MMS_SERVICE_CONTRACTID);
+-  NS_ENSURE_TRUE(mmsService, NS_ERROR_FAILURE);
+-
+-  // Use the default one unless |aSendParams.serviceId| is available.
+-  uint32_t serviceId;
+-  nsresult rv = mmsService->GetMmsDefaultServiceId(&serviceId);
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  if (aArgc == 1) {
+-    JS::Rooted<JS::Value> param(aCx, aSendParams);
+-    RootedDictionary<MmsSendParameters> sendParams(aCx);
+-    if (!sendParams.Init(aCx, param)) {
+-      return NS_ERROR_TYPE_ERR;
+-    }
+-    if (sendParams.mServiceId.WasPassed()) {
+-      serviceId = sendParams.mServiceId.Value();
+-    }
++  if (aSendParameters.mServiceId.WasPassed()) {
++    serviceId = aSendParameters.mServiceId.Value();
++  } else {
++    aRv = mmsService->GetMmsDefaultServiceId(&serviceId);
++    ENSURE_SUCCESS_VOID(aRv);
+   }
+ 
+   nsRefPtr<DOMRequest> request = new DOMRequest(GetOwner());
+   nsCOMPtr<nsIMobileMessageCallback> msgCallback = new MobileMessageCallback(request);
+-  rv = mmsService->Send(serviceId, aParams, msgCallback);
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  request.forget(aRequest);
+-  return NS_OK;
++  aRv = mmsService->Send(serviceId, aParams, msgCallback);
++  return request.forget();
+ }
+ 
+ NS_IMETHODIMP
+ MobileMessageManager::GetMessageMoz(int32_t aId, nsIDOMDOMRequest** aRequest)
+ {
+   nsCOMPtr<nsIMobileMessageDatabaseService> mobileMessageDBService =
+     do_GetService(MOBILE_MESSAGE_DATABASE_SERVICE_CONTRACTID);
+   NS_ENSURE_TRUE(mobileMessageDBService, NS_ERROR_FAILURE);
+diff --git a/dom/mobilemessage/src/MobileMessageManager.h b/dom/mobilemessage/src/MobileMessageManager.h
+--- a/dom/mobilemessage/src/MobileMessageManager.h
++++ b/dom/mobilemessage/src/MobileMessageManager.h
+@@ -2,39 +2,75 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_mobilemessage_MobileMessageManager_h
+ #define mozilla_dom_mobilemessage_MobileMessageManager_h
+ 
+ #include "mozilla/DOMEventTargetHelper.h"
+-#include "nsIDOMMobileMessageManager.h"
+ #include "nsIObserver.h"
+ 
+ class nsIDOMMozSmsMessage;
+ class nsIDOMMozMmsMessage;
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ class MobileMessageManager : public DOMEventTargetHelper
+-                           , public nsIDOMMozMobileMessageManager
+                            , public nsIObserver
+ {
+ public:
+   NS_DECL_ISUPPORTS_INHERITED
+   NS_DECL_NSIOBSERVER
+-  NS_DECL_NSIDOMMOZMOBILEMESSAGEMANAGER
+ 
+   NS_REALLY_FORWARD_NSIDOMEVENTTARGET(DOMEventTargetHelper)
+ 
+   void Init(nsPIDOMWindow *aWindow);
+   void Shutdown();
+ 
++  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
++
++  already_AddRefed<DOMRequest> GetSegmentInfoForText(const nsAString& aText,
++                                                     ErrorResult& aRv);
++  already_AddRefed<DOMRequest> Send(const nsAString& aNumber,
++                                    const nsAString& aMessage,
++                                    const SmsSendParameters& aSendParameters,
++                                    ErrorResult& aRv);
++  void Send(const Sequence<nsString>& aNumbers, const nsAString& aMessage,
++            const SmsSendParameters& aSendParameters,
++            nsTArray<nsRefPtr<DOMRequest>>& aRequests,
++            ErrorResult& aRv);
++
++  already_AddRefed<DOMRequest> SendMMS(const MmsParameters& aParameters,
++                                       const MmsSendParameters& aSendParameters,
++                                       ErrorResult& aRv);
++  already_AddRefed<DOMRequest> GetMessage(int32_t aID);
++  already_AddRefed<DOMRequest> Delete(int32_t aID);
++  already_AddRefed<DOMRequest> Delete(nsIDOMMozSmsMessage* aMessage);
++  already_AddRefed<DOMRequest> Delete(nsIDOMMozMmsMessage* aMessage);
++  already_AddRefed<DOMRequest> Delete(const Sequence<OwningLongOrMozSmsMessageOrMozMmsMessage>& aParams);
++  already_AddRefed<DOMCursor> GetMessages(nsIDOMMozSmsFilter* aFilter,
++                                          bool aReverse);
++  already_AddRefed<DOMRequest> MarkMessageRead(int32_t aID, bool aValue,
++                                               bool aSendReadReport);
++  already_AddRefed<DOMCursor> GetThreads();
++  already_AddRefed<DOMRequest> RetrieveMMS(int32_t aID);
++  already_AddRefed<DOMRequest> GetSmscAddress(const Optional<uint32_t>& aServiceId);
++
++  IMPL_EVENT_HANDLER(received)
++  IMPL_EVENT_HANDLER(retrieving)
++  IMPL_EVENT_HANDLER(sending)
++  IMPL_EVENT_HANDLER(sent)
++  IMPL_EVENT_HANDLER(failed)
++  IMPL_EVENT_HANDLER(deliverysuccess)
++  IMPL_EVENT_HANDLER(deliveryerror)
++  IMPL_EVENT_HANDLER(readsuccess)
++  IMPL_EVENT_HANDLER(readerror)
++
+ private:
+   /**
+    * Internal Send() method used to send one message.
+    */
+   nsresult Send(JSContext* aCx, JS::Handle<JSObject*> aGlobal,
+                 uint32_t aServiceId,
+                 JS::Handle<JSString*> aNumber,
+                 const nsAString& aMessage,
+diff --git a/dom/permission/tests/test_sms.html b/dom/permission/tests/test_sms.html
+--- a/dom/permission/tests/test_sms.html
++++ b/dom/permission/tests/test_sms.html
+@@ -16,17 +16,17 @@ https://bugzilla.mozilla.org/show_bug.cg
+ <pre id="test">
+ <script type="application/javascript;version=1.8" src="file_framework.js"></script>
+ <script type="application/javascript;version=1.8">
+ var gData = [
+   {
+     perm: ["sms"],
+     needParentPerm: true,
+     obj: "mozMobileMessage",
+-    idl: "nsIDOMMozMobileMessageManager",
++    webidl: "MozMobileMessageManager",
+     settings: [["dom.sms.enabled", true]],
+   },
+ ]
+ </script>
+ </pre>
+ </body>
+ </html>
+ 
+diff --git a/dom/webidl/MobileMessageManager.webidl b/dom/webidl/MobileMessageManager.webidl
+--- a/dom/webidl/MobileMessageManager.webidl
++++ b/dom/webidl/MobileMessageManager.webidl
+@@ -1,24 +1,97 @@
+ /* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/.
+  */
+ 
++interface MozSmsFilter;
++
+ dictionary MmsParameters {
+   sequence<DOMString> receivers;
+   DOMString? subject = null;
+   DOMString? smil = null;
+   sequence<MmsAttachment> attachments;
+ };
+ 
+-// If we start using MmsParameters here, remove it from DummyBinding.
+-
+ dictionary SmsSendParameters {
+   unsigned long serviceId; // The ID of the RIL service which needs to be
+                            // specified under the multi-sim scenario.
+ };
+ 
+ dictionary MmsSendParameters {
+   unsigned long serviceId; // The ID of the RIL service which needs to be
+                            // specified under the multi-sim scenario.
+ };
++
++interface MozMobileMessageManager : EventTarget
++{
++  [Throws]
++  DOMRequest getSegmentInfoForText(DOMString text);
++
++
++  /**
++   * Function to send SMS.
++   *
++   * @param number
++   *        Either a DOMString (only one number) or an array of numbers.
++   * @param message
++   *        The text message to be sent.
++   * @param sendParameters
++   *        An SmsSendParameters object.
++   * @param return
++   *        A DOMRequest object indicating the sending result if one number
++   *        has been passed; an array of DOMRequest objects otherwise.
++   */
++  [Throws]
++  DOMRequest send(DOMString number, DOMString message,
++                  optional SmsSendParameters sendParameters);
++  [Throws]
++  sequence<DOMRequest> send(sequence<DOMString> numbers, DOMString message,
++                            optional SmsSendParameters sendParameters);
++
++  /**
++   * Function to send MMS.
++   *
++   * @param parameters
++   *        An MmsParameters object.
++   * @param sendParameters
++   *        An MmsSendParameters object.
++   * @param return
++   *        A DOMRequest object indicating the sending result.
++   */
++  [Throws]
++  DOMRequest sendMMS(optional MmsParameters parameters,
++                     optional MmsSendParameters sendParameters);
++
++  //[binaryname(GetMessageMoz)]
++  DOMRequest getMessage(long id);
++
++  // The parameter can be either a message id or a Moz{Mms,Sms}Message.
++  DOMRequest delete(long id);
++  DOMRequest delete(MozSmsMessage message);
++  DOMRequest delete(MozMmsMessage message);
++  DOMRequest delete(sequence<(long or MozSmsMessage or MozMmsMessage)> params);
++
++  // Iterates through Moz{Mms,Sms}Message.
++  DOMCursor getMessages(MozSmsFilter filter, boolean reverse);
++
++  DOMRequest markMessageRead(long id, boolean value,
++                             optional boolean sendReadReport = false);
++
++  // Iterates through MozMobileMessageThread.
++  DOMCursor getThreads();
++
++  DOMRequest retrieveMMS(long id);
++
++  DOMRequest getSmscAddress(optional unsigned long serviceId);
++
++  attribute EventHandler onreceived;
++  attribute EventHandler onretrieving;
++  attribute EventHandler onsending;
++  attribute EventHandler onsent;
++  attribute EventHandler onfailed;
++  attribute EventHandler ondeliverysuccess;
++  attribute EventHandler ondeliveryerror;
++  attribute EventHandler onreadsuccess;
++  attribute EventHandler onreaderror;
++};
+diff --git a/dom/webidl/Navigator.webidl b/dom/webidl/Navigator.webidl
+--- a/dom/webidl/Navigator.webidl
++++ b/dom/webidl/Navigator.webidl
+@@ -232,17 +232,16 @@ partial interface Navigator {
+ 
+ // nsIDOMClientInformation
+ partial interface Navigator {
+   [Throws]
+   boolean mozIsLocallyAvailable(DOMString uri, boolean whenOffline);
+ };
+ 
+ // nsIDOMMozNavigatorMobileMessage
+-interface MozMobileMessageManager;
+ partial interface Navigator {
+   [Func="Navigator::HasMobileMessageSupport"]
+   readonly attribute MozMobileMessageManager? mozMobileMessage;
+ };
+ 
+ // NetworkInformation
+ partial interface Navigator {
+   [Throws, Pref="dom.netinfo.enabled"]

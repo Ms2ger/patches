@@ -1,0 +1,149 @@
+From: Ms2ger <ms2ger@gmail.com>
+Bug 1034701 - Part a: stop using nsIXPConnectJSObjectHolder for Statement::mStatementParamsHolder; r=bholley
+
+diff --git a/storage/src/mozStorageStatement.cpp b/storage/src/mozStorageStatement.cpp
+--- a/storage/src/mozStorageStatement.cpp
++++ b/storage/src/mozStorageStatement.cpp
+@@ -429,22 +429,17 @@ Statement::internalFinalize(bool aDestru
+       destructorAsyncFinalize();
+     else
+       asyncFinalize();
+   }
+ 
+   // We are considered dead at this point, so any wrappers for row or params
+   // need to lose their reference to us.
+   if (mStatementParamsHolder) {
+-    nsCOMPtr<nsIXPConnectWrappedNative> wrapper =
+-        do_QueryInterface(mStatementParamsHolder);
+-    nsCOMPtr<mozIStorageStatementParams> iParams =
+-        do_QueryWrappedNative(wrapper);
+-    StatementParams *params = static_cast<StatementParams *>(iParams.get());
+-    params->mStatement = nullptr;
++    mStatementParamsHolder->mStatement = nullptr;
+     mStatementParamsHolder = nullptr;
+   }
+ 
+   if (mStatementRowHolder) {
+     nsCOMPtr<nsIXPConnectWrappedNative> wrapper =
+         do_QueryInterface(mStatementRowHolder);
+     nsCOMPtr<mozIStorageStatementRow> iRow =
+         do_QueryWrappedNative(wrapper);
+diff --git a/storage/src/mozStorageStatement.h b/storage/src/mozStorageStatement.h
+--- a/storage/src/mozStorageStatement.h
++++ b/storage/src/mozStorageStatement.h
+@@ -19,18 +19,19 @@
+ #include "StorageBaseStatementInternal.h"
+ #include "mozilla/Attributes.h"
+ 
+ class nsIXPConnectJSObjectHolder;
+ struct sqlite3_stmt;
+ 
+ namespace mozilla {
+ namespace storage {
++class Connection;
+ class StatementJSHelper;
+-class Connection;
++class StatementParams;
+ 
+ class Statement MOZ_FINAL : public mozIStorageStatement
+                           , public mozIStorageValueArray
+                           , public StorageBaseStatementInternal
+ {
+ public:
+   NS_DECL_THREADSAFE_ISUPPORTS
+   NS_DECL_MOZISTORAGESTATEMENT
+@@ -91,17 +92,17 @@ private:
+      * it asynchronously.
+      */
+     nsRefPtr<BindingParamsArray> mParamsArray;
+ 
+     /**
+      * The following two members are only used with the JS helper.  They cache
+      * the row and params objects.
+      */
+-    nsCOMPtr<nsIXPConnectJSObjectHolder> mStatementParamsHolder;
++    nsRefPtr<StatementParams> mStatementParamsHolder;
+     nsCOMPtr<nsIXPConnectJSObjectHolder> mStatementRowHolder;
+ 
+   /**
+    * Internal version of finalize that allows us to tell it if it is being
+    * called from the destructor so it can know not to dispatch events that
+    * require a reference to us.
+    *
+    * @param aDestructing
+diff --git a/storage/src/mozStorageStatementJSHelper.cpp b/storage/src/mozStorageStatementJSHelper.cpp
+--- a/storage/src/mozStorageStatementJSHelper.cpp
++++ b/storage/src/mozStorageStatementJSHelper.cpp
+@@ -13,16 +13,17 @@
+ #include "nsServiceManagerUtils.h"
+ 
+ #include "mozStorageStatementJSHelper.h"
+ 
+ #include "mozStorageStatementRow.h"
+ #include "mozStorageStatementParams.h"
+ 
+ #include "jsapi.h"
++#include "nsContentUtils.h"
+ 
+ namespace mozilla {
+ namespace storage {
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ //// Global Functions
+ 
+ static
+@@ -118,47 +119,34 @@ StatementJSHelper::getRow(Statement *aSt
+ }
+ 
+ nsresult
+ StatementJSHelper::getParams(Statement *aStatement,
+                              JSContext *aCtx,
+                              JSObject *aScopeObj,
+                              jsval *_params)
+ {
+-  nsresult rv;
+-
+ #ifdef DEBUG
+   int32_t state;
+   (void)aStatement->GetState(&state);
+   NS_ASSERTION(state == mozIStorageStatement::MOZ_STORAGE_STATEMENT_READY,
+                "Invalid state to get the params object - all calls will fail!");
+ #endif
+ 
+   if (!aStatement->mStatementParamsHolder) {
+-    JS::RootedObject scope(aCtx, aScopeObj);
+-    nsCOMPtr<mozIStorageStatementParams> params =
+-      new StatementParams(aStatement);
+-    NS_ENSURE_TRUE(params, NS_ERROR_OUT_OF_MEMORY);
+-
+-    nsCOMPtr<nsIXPConnect> xpc(Service::getXPConnect());
+-    rv = xpc->WrapNative(
+-      aCtx,
+-      ::JS_GetGlobalForObject(aCtx, scope),
+-      params,
+-      NS_GET_IID(mozIStorageStatementParams),
+-      getter_AddRefs(aStatement->mStatementParamsHolder)
+-    );
+-    NS_ENSURE_SUCCESS(rv, rv);
++    aStatement->mStatementParamsHolder = new StatementParams(aStatement);
+   }
+ 
+-  JS::Rooted<JSObject*> obj(aCtx);
+-  obj = aStatement->mStatementParamsHolder->GetJSObject();
+-  NS_ENSURE_STATE(obj);
++  mozIStorageStatementParams* params = aStatement->mStatementParamsHolder;
++  JS::Rooted<JS::Value> result(aCtx);
++  nsresult rv = nsContentUtils::WrapNative(
++    aCtx, params, &NS_GET_IID(mozIStorageStatementParams), &result);
++  NS_ENSURE_SUCCESS(rv, rv);
+ 
+-  *_params = OBJECT_TO_JSVAL(obj);
++  *_params = result;
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP_(MozExternalRefCountType) StatementJSHelper::AddRef() { return 2; }
+ NS_IMETHODIMP_(MozExternalRefCountType) StatementJSHelper::Release() { return 1; }
+ NS_INTERFACE_MAP_BEGIN(StatementJSHelper)
+   NS_INTERFACE_MAP_ENTRY(nsIXPCScriptable)
+   NS_INTERFACE_MAP_ENTRY(nsISupports)

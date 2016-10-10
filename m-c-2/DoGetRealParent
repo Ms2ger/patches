@@ -1,0 +1,136 @@
+From: Ms2ger <ms2ger@gmail.com>
+
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -3833,33 +3833,30 @@ nsGlobalWindow::GetSpeechSynthesis(nsISu
+     speechSynthesis = GetSpeechSynthesis(rv);
+   }
+   speechSynthesis.forget(aSpeechSynthesis);
+ 
+   return rv.ErrorCode();
+ }
+ #endif
+ 
+-already_AddRefed<nsIDOMWindow>
++nsIDOMWindow*
+ nsGlobalWindow::GetParent(ErrorResult& aError)
+ {
+   FORWARD_TO_OUTER_OR_THROW(GetParent, (aError), aError, nullptr);
+ 
+   if (!mDocShell) {
+     return nullptr;
+   }
+ 
+-  nsCOMPtr<nsIDOMWindow> parent;
+   if (mDocShell->GetIsBrowserOrApp()) {
+-    parent = this;
+-  } else {
+-    aError = GetRealParent(getter_AddRefs(parent));
+-  }
+-
+-  return parent.forget();
++    return this;
++  }
++
++  return DoGetRealParent();
+ }
+ 
+ /**
+  * GetScriptableParent is called when script reads window.parent.
+  *
+  * In contrast to GetRealParent, GetScriptableParent respects <iframe
+  * mozbrowser> boundaries, so if |this| is contained by an <iframe
+  * mozbrowser>, we will return |this| as its own parent.
+@@ -3877,34 +3874,36 @@ nsGlobalWindow::GetScriptableParent(nsID
+ /**
+  * nsIDOMWindow::GetParent (when called from C++) is just a wrapper around
+  * GetRealParent.
+  */
+ NS_IMETHODIMP
+ nsGlobalWindow::GetRealParent(nsIDOMWindow** aParent)
+ {
+   FORWARD_TO_OUTER(GetRealParent, (aParent), NS_ERROR_NOT_INITIALIZED);
+-
+-  *aParent = nullptr;
++  NS_IF_ADDREF(*aParent = DoGetRealParent());
++  return NS_OK;
++}
++
++nsGlobalWindow*
++nsGlobalWindow::DoGetRealParent()
++{
++  MOZ_ASSERT(IsOuterWindow());
++
+   if (!mDocShell) {
+-    return NS_OK;
++    return nullptr;
+   }
+ 
+   nsCOMPtr<nsIDocShell> parent;
+   mDocShell->GetSameTypeParentIgnoreBrowserAndAppBoundaries(getter_AddRefs(parent));
+-
+-  if (parent) {
+-    nsCOMPtr<nsPIDOMWindow> win = parent->GetWindow();
+-    win.forget(aParent);
+-  }
+-  else {
+-    *aParent = static_cast<nsIDOMWindow*>(this);
+-    NS_ADDREF(*aParent);
+-  }
+-  return NS_OK;
++  if (!parent) {
++    return this;
++  }
++
++  return static_cast<nsGlobalWindow*>(parent->GetWindow());
+ }
+ 
+ static nsresult
+ GetTopImpl(nsGlobalWindow* aWin, nsIDOMWindow** aTop, bool aScriptable)
+ {
+   *aTop = nullptr;
+ 
+   // Walk up the parent chain.
+diff --git a/dom/base/nsGlobalWindow.h b/dom/base/nsGlobalWindow.h
+--- a/dom/base/nsGlobalWindow.h
++++ b/dom/base/nsGlobalWindow.h
+@@ -857,17 +857,17 @@ public:
+ protected:
+   nsIDOMWindow* GetOpenerWindow(mozilla::ErrorResult& aError);
+ public:
+   void GetOpener(JSContext* aCx, JS::MutableHandle<JS::Value> aRetval,
+                  mozilla::ErrorResult& aError);
+   void SetOpener(JSContext* aCx, JS::Handle<JS::Value> aOpener,
+                  mozilla::ErrorResult& aError);
+   using nsIDOMWindow::GetParent;
+-  already_AddRefed<nsIDOMWindow> GetParent(mozilla::ErrorResult& aError);
++  nsIDOMWindow* GetParent(mozilla::ErrorResult& aError);
+   mozilla::dom::Element* GetFrameElement(mozilla::ErrorResult& aError);
+   already_AddRefed<nsIDOMWindow> Open(const nsAString& aUrl,
+                                       const nsAString& aName,
+                                       const nsAString& aOptions,
+                                       mozilla::ErrorResult& aError);
+   mozilla::dom::Navigator* GetNavigator(mozilla::ErrorResult& aError);
+   nsIDOMOfflineResourceList* GetApplicationCache(mozilla::ErrorResult& aError);
+ 
+@@ -1112,16 +1112,19 @@ protected:
+   void InnerSetNewDocument(JSContext* aCx, nsIDocument* aDocument);
+ 
+   // Inner windows only.
+   nsresult DefineArgumentsProperty(nsIArray *aArguments);
+ 
+   // Get the parent, returns null if this is a toplevel window
+   nsIDOMWindow* GetParentInternal();
+ 
++  // Outer windows only.
++  nsGlobalWindow* DoGetRealParent();
++
+   // popup tracking
+   bool IsPopupSpamWindow()
+   {
+     if (IsInnerWindow() && !mOuterWindow) {
+       return false;
+     }
+ 
+     return GetOuterWindowInternal()->mIsPopupSpam;
